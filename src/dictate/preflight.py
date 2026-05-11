@@ -95,12 +95,13 @@ def _check_microphone(report: PreflightReport) -> None:
         report.errors.append("No microphone input devices detected.")
 
     default_pair = result.get("default")
-    if isinstance(default_pair, (tuple, list)) and len(default_pair) >= 1:
-        default_input = default_pair[0]
+    try:
+        default_input = default_pair[0]  # type: ignore[index]
+    except Exception:  # noqa: BLE001
+        report.warnings.append("Unable to determine the default input device.")
+    else:
         if default_input is None or default_input < 0:
             report.warnings.append("No default input device configured.")
-    else:
-        report.warnings.append("Unable to determine the default input device.")
 
 
 def _check_stt_backend(

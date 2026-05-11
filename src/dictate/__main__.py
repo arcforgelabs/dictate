@@ -7,6 +7,7 @@ Usage:
     dictate --once            One-shot: record until Enter, print to stdout
     dictate --once --copy     One-shot: record until Enter, copy to clipboard
     dictate benchmark ...     Benchmark STT backends on local WAV files
+    dictate controls          Open Windows-friendly configuration/history controls
     dictate doctor ...        Diagnose environment/runtime setup
     dictate prepare-model ... Prepare/download a model before activation
     dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
@@ -188,6 +189,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_prepare_model(cli_args[1:])
     if cli_args and cli_args[0] == "benchmark":
         return run_benchmark(cli_args[1:])
+    if cli_args and cli_args[0] in {"control", "controls"}:
+        from dictate.windows_control import run_control_panel
+
+        return run_control_panel()
     if cli_args and cli_args[0] == "doctor":
         return run_doctor(cli_args[1:])
 

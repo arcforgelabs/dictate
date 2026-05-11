@@ -8,6 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "faster-whisper>=1.1.0",
     "numpy>=1.26.0",
+    "PyYAML>=6.0.0",
     "sounddevice>=0.5.0",
 ]
 

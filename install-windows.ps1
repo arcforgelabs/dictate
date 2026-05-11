@@ -89,6 +89,7 @@ function Write-LauncherScripts {
 
     $daemonPath = Join-Path $ScriptsDir "dictate-daemon.cmd"
     $oncePath = Join-Path $ScriptsDir "dictate-once.cmd"
+    $controlsPath = Join-Path $ScriptsDir "dictate-controls.cmd"
 
     Set-Content -Path $daemonPath -Encoding ASCII -Value @(
         "@echo off",
@@ -102,9 +103,16 @@ function Write-LauncherScripts {
         '"%SCRIPT_DIR%dictate.exe" --once %*'
     )
 
+    Set-Content -Path $controlsPath -Encoding ASCII -Value @(
+        "@echo off",
+        'set "SCRIPT_DIR=%~dp0"',
+        'start "" "%SCRIPT_DIR%pythonw.exe" "%SCRIPT_DIR%..\..\DictateControls.pyw" %*'
+    )
+
     Write-Host "==> Wrote launchers:"
     Write-Host "    $daemonPath"
     Write-Host "    $oncePath"
+    Write-Host "    $controlsPath"
 }
 
 function Install-StartMenuShortcut {
@@ -134,6 +142,37 @@ function Install-StartMenuShortcut {
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
 }
 
+function Install-ControlsShortcut {
+    param(
+        [string]$TargetPath,
+        [string]$WorkingDirectory
+    )
+
+    if ($NoShortcut) {
+        return
+    }
+
+    $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    if (-not $env:APPDATA) {
+        $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+    }
+    New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
+
+    $shortcutPath = Join-Path $programsDir "Dictate Controls.lnk"
+    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.WorkingDirectory = $WorkingDirectory
+    $shortcut.Description = "Open Dictate configuration and recent history"
+    if (Test-Path $iconPath) {
+        $shortcut.IconLocation = $iconPath
+    }
+    $shortcut.Save()
+
+    Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
+}
+
 $pythonCommand = Resolve-Python
 $venvDir = Join-Path $PSScriptRoot ".venv"
 $scriptsDir = Join-Path $venvDir "Scripts"
@@ -154,6 +193,7 @@ Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "$
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
 Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-daemon.cmd") -WorkingDirectory $PSScriptRoot
+Install-ControlsShortcut -TargetPath (Join-Path $scriptsDir "dictate-controls.cmd") -WorkingDirectory $PSScriptRoot
 
 if (-not $NoPrepareTurbo) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--model", "turbo", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper turbo model"
@@ -167,6 +207,9 @@ Write-Host ""
 Write-Host "Dictate is installed."
 Write-Host "Start push-to-talk from the Start Menu shortcut named 'Dictate', or run:"
 Write-Host "  .\.venv\Scripts\dictate-daemon.cmd"
+Write-Host ""
+Write-Host "Control panel:"
+Write-Host "  .\.venv\Scripts\dictate-controls.cmd"
 Write-Host ""
 Write-Host "One-shot mode:"
 Write-Host "  .\.venv\Scripts\dictate-once.cmd"
