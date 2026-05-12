@@ -14,10 +14,16 @@ from dictate.stt.base import (
 )
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.nemo_canary_backend import NeMoCanarySpeechToText
+from dictate.stt.whisper_cpp_backend import (
+    WhisperCppSpeechToText,
+    resolve_whisper_cpp_server,
+    resolve_whisper_cpp_model,
+)
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "base",
     "nemo-canary": "nvidia/canary-1b-flash",
+    "whisper-cpp": "large-v3-turbo-q5_0",
 }
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "tiny",
@@ -32,6 +38,14 @@ NEMO_CANARY_MODELS: tuple[str, ...] = (
     "nvidia/canary-1b",
     "nvidia/canary-1b-flash",
     "nvidia/canary-1b-v2",
+)
+WHISPER_CPP_MODELS: tuple[str, ...] = (
+    "base",
+    "small",
+    "turbo",
+    "large-v3-turbo",
+    "large-v3-turbo-q5_0",
+    "large-v3-turbo-q8_0",
 )
 
 
@@ -65,6 +79,17 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="NVIDIA NeMo Canary multilingual ASR.",
         capabilities=NeMoCanarySpeechToText.capabilities,
         builder=lambda model, device, _compute_type: NeMoCanarySpeechToText(
+            model_name=model,
+            device=device,
+        ),
+    ),
+    "whisper-cpp": BackendSpec(
+        backend="whisper-cpp",
+        default_model=DEFAULT_MODELS["whisper-cpp"],
+        model_examples=WHISPER_CPP_MODELS,
+        description="Local whisper.cpp CLI inference.",
+        capabilities=WhisperCppSpeechToText.capabilities,
+        builder=lambda model, device, _compute_type: WhisperCppSpeechToText(
             model_name=model,
             device=device,
         ),
@@ -130,12 +155,28 @@ def check_backend_readiness(
         if device in {"cuda", "auto"}:
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
+    if backend == "whisper-cpp":
+        _check_whisper_cpp(report, model_name=model_name)
+
     if device == "cpu" and backend == "nemo-canary":
         report.warnings.append(
             "NeMo Canary on CPU is likely too slow for push-to-talk dictation."
         )
 
     return report
+
+
+def _check_whisper_cpp(report: BackendReadiness, *, model_name: str) -> None:
+    server_path = resolve_whisper_cpp_server()
+    model_path = resolve_whisper_cpp_model(model_name)
+    if server_path.is_file():
+        report.notes.append(f"whisper.cpp server: {server_path}")
+    else:
+        report.errors.append(f"whisper.cpp server executable not found: {server_path}")
+    if model_path.is_file():
+        report.notes.append(f"whisper.cpp model: {model_path}")
+    else:
+        report.errors.append(f"whisper.cpp model not found: {model_path}")
 
 
 def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:

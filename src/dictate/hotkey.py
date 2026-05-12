@@ -10,17 +10,17 @@ _MODIFIER_ORDER = {"ctrl": 0, "ctrl_l": 1, "ctrl_r": 2, "shift": 3, "shift_l": 4
 
 _TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
     "ctrl": ("ctrl", "ctrl_l", "ctrl_r"),
-    "ctrl_l": ("ctrl_l", "ctrl"),
-    "ctrl_r": ("ctrl_r", "ctrl"),
+    "ctrl_l": ("ctrl_l",),
+    "ctrl_r": ("ctrl_r",),
     "shift": ("shift", "shift_l", "shift_r"),
-    "shift_l": ("shift_l", "shift"),
-    "shift_r": ("shift_r", "shift"),
+    "shift_l": ("shift_l",),
+    "shift_r": ("shift_r",),
     "alt": ("alt", "alt_l", "alt_r"),
-    "alt_l": ("alt_l", "alt"),
-    "alt_r": ("alt_r", "alt"),
+    "alt_l": ("alt_l",),
+    "alt_r": ("alt_r",),
     "super": ("super", "super_l", "super_r", "cmd", "windows"),
-    "super_l": ("super_l", "super", "cmd_l", "windows_l"),
-    "super_r": ("super_r", "super", "cmd_r", "windows_r"),
+    "super_l": ("super_l", "cmd_l", "windows_l"),
+    "super_r": ("super_r", "cmd_r", "windows_r"),
     "space": ("space", " "),
     "enter": ("enter", "return"),
     "esc": ("esc", "escape"),
@@ -151,7 +151,9 @@ def key_event_names(key: object) -> set[str]:
             names.add(normalized)
     vk = getattr(key, "vk", None)
     if isinstance(vk, int):
-        if vk == 13:
+        if vk in _VK_TOKEN_NAMES:
+            names.add(_VK_TOKEN_NAMES[vk])
+        elif vk == 13:
             names.add("enter")
         elif vk == 9:
             names.add("tab")
@@ -160,6 +162,18 @@ def key_event_names(key: object) -> set[str]:
         elif vk == 32:
             names.add("space")
     return names
+
+
+_VK_TOKEN_NAMES = {
+    0xA2: "ctrl_l",
+    0xA3: "ctrl_r",
+    0xA0: "shift_l",
+    0xA1: "shift_r",
+    0xA4: "alt_l",
+    0xA5: "alt_r",
+    0x5B: "super_l",
+    0x5C: "super_r",
+}
 
 
 def _normalize_hotkey_token(part: str, *, allow_character: bool = False) -> str:

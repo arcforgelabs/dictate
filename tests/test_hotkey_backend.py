@@ -41,8 +41,12 @@ class HotkeyBackendSelectionTests(unittest.TestCase):
                             detect_hotkey_backend()
 
     def test_portal_trigger_formats_combo(self) -> None:
-        self.assertEqual(_portal_trigger("ctrl+space"), "<Ctrl>space")
-        self.assertEqual(_portal_trigger("ctrl+shift+r"), "<Ctrl><Shift>R")
+        self.assertEqual(_portal_trigger("ctrl+space"), "CTRL+space")
+        self.assertEqual(_portal_trigger("ctrl+shift+r"), "CTRL+SHIFT+r")
+
+    def test_portal_trigger_formats_side_specific_single_modifier_keys(self) -> None:
+        self.assertEqual(_portal_trigger("ctrl_l"), "Control_L")
+        self.assertEqual(_portal_trigger("ctrl_r"), "Control_R")
 
 
 if __name__ == "__main__":

@@ -16,9 +16,17 @@ FasterWhisperModel = Literal[
     "turbo",
     "large-v3-turbo",
 ]
+WhisperCppModel = Literal[
+    "base",
+    "small",
+    "turbo",
+    "large-v3-turbo",
+    "large-v3-turbo-q5_0",
+    "large-v3-turbo-q8_0",
+]
 ComputeDevice = Literal["cpu", "cuda", "auto"]
 ComputeType = Literal["int8", "float16", "float32"]
-SttBackend = Literal["faster-whisper", "nemo-canary"]
+SttBackend = Literal["faster-whisper", "nemo-canary", "whisper-cpp"]
 
 
 @dataclass(frozen=True, slots=True)

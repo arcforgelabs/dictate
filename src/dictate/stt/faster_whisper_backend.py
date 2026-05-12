@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -51,6 +52,7 @@ class FasterWhisperSpeechToText(SpeechToText):
                 self.model_name,
                 device=self.device,
                 compute_type=self.compute_type,
+                cpu_threads=_cpu_threads(),
             )
             logger.info("Model loaded")
         return self._model
@@ -95,3 +97,13 @@ class FasterWhisperSpeechToText(SpeechToText):
 
     def release(self) -> None:
         self._model = None
+
+
+def _cpu_threads() -> int:
+    configured = os.environ.get("DICTATE_CPU_THREADS")
+    if configured:
+        try:
+            return max(1, int(configured))
+        except ValueError:
+            pass
+    return max(4, os.cpu_count() or 4)

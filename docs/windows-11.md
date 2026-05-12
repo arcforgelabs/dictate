@@ -9,6 +9,7 @@ Windows 11 is supported as a separate runtime stream from the Linux tray build.
 - Clipboard output: `dictate --once --copy` through `pyperclip`.
 - Headless push-to-talk daemon: `dictate --no-tray --type-backend pynput`.
 - Speech-to-text: `faster-whisper` on CPU or CUDA where the local Python/CUDA stack supports it.
+- Local AMD GPU path: `whisper-cpp` with a Vulkan-enabled `whisper-server.exe` and `ggml-large-v3-turbo-q5_0.bin`.
 
 The Linux GTK/Ayatana tray is not part of the Windows stream. Windows tray packaging should be developed separately so Linux desktop behavior can keep moving without being blocked by Windows shell work.
 
@@ -41,6 +42,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[windows]"
 .\.venv\Scripts\dictate.exe doctor --quick --type-backend pynput
+.\.venv\Scripts\dictate.exe doctor --quick --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --type-backend pynput
 ```
 
 ## Run

@@ -38,6 +38,8 @@ SWITCH_ABORT_SECONDS = 300
 PREPARE_ABORT_SECONDS = 900
 SWITCH_STATUS_CLEAR_SECONDS = 6
 MODEL_PRESETS: tuple[tuple[str, str, str], ...] = (
+    ("whisper-cpp", "large-v3-turbo-q5_0", "whisper.cpp / large-v3-turbo q5_0"),
+    ("whisper-cpp", "large-v3-turbo-q8_0", "whisper.cpp / large-v3-turbo q8_0"),
     ("faster-whisper", "base", "faster-whisper / base"),
     ("faster-whisper", "turbo", "faster-whisper / turbo"),
     ("faster-whisper", "large-v3", "faster-whisper / large-v3"),

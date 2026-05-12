@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -39,6 +40,21 @@ class WindowsPlatformTests(unittest.TestCase):
                     / "Programs"
                     / "Dictate.lnk",
                 )
+
+    def test_windows_control_defaults_match_repo_stt_default(self) -> None:
+        source_path = Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_control.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        assignments = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in {"DEFAULT_BACKEND", "DEFAULT_MODELS"}
+        }
+
+        self.assertEqual(assignments["DEFAULT_BACKEND"], "faster-whisper")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "base")
 
 
 if __name__ == "__main__":

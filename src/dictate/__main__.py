@@ -11,6 +11,7 @@ Usage:
     dictate doctor ...        Diagnose environment/runtime setup
     dictate prepare-model ... Prepare/download a model before activation
     dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
+    dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0
     dictate --type-backend wtype  Force typing backend for daemon mode
     dictate --model large-v3-turbo  Use a different STT model
     dictate --add-hotword X   Save a hotword for improved recognition
@@ -56,6 +57,7 @@ from dictate.stt import (
     STT_BACKENDS,
     SpeechToText,
     SttBackend,
+    WHISPER_CPP_MODELS,
     create_speech_to_text,
     resolve_model_name,
 )
@@ -104,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Model name. "
             "faster-whisper examples: turbo, large-v3-turbo, large-v3. "
-            f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}."
+            f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}. "
+            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -510,6 +513,10 @@ def _load_stt_or_exit(
     try:
         _ = stt.model
     except Exception as exc:  # noqa: BLE001
+        try:
+            stt.release()
+        except Exception as release_exc:  # noqa: BLE001
+            print(f"Failed to release STT resources: {release_exc}", file=sys.stderr)
         print(
             f"Failed to load backend '{stt_backend}' model '{model_name}': {exc}",
             file=sys.stderr,
@@ -677,44 +684,50 @@ def _run_once(
 ) -> None:
     from dictate.audio import AudioCaptureError, SoundDeviceRecorder
 
-    recorder = SoundDeviceRecorder(sample_rate=SAMPLE_RATE)
-    engine = DictationEngine(
-        stt=stt,
-        sample_rate=SAMPLE_RATE,
-        hotwords=hotwords,
-        lexicon_mode=lexicon_mode,
-        lexicon_replacements=lexicon_replacements,
-    )
-
     try:
-        audio = record_until_enter(recorder)
-    except AudioCaptureError as exc:
-        print(f"Microphone error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+        recorder = SoundDeviceRecorder(sample_rate=SAMPLE_RATE)
+        engine = DictationEngine(
+            stt=stt,
+            sample_rate=SAMPLE_RATE,
+            hotwords=hotwords,
+            lexicon_mode=lexicon_mode,
+            lexicon_replacements=lexicon_replacements,
+        )
 
-    result = engine.transcribe(audio, language=language)
-    if result.status == "empty":
-        print("No audio captured", file=sys.stderr)
-        raise SystemExit(1)
-    if result.status == "too_short":
-        print("Too short, skipped", file=sys.stderr)
-        raise SystemExit(1)
-    if result.status == "no_speech":
-        print("No speech detected", file=sys.stderr)
-        raise SystemExit(1)
-    if result.status == "error":
-        print(f"Transcription failed: {result.error}", file=sys.stderr)
-        raise SystemExit(1)
+        try:
+            audio = record_until_enter(recorder)
+        except AudioCaptureError as exc:
+            print(f"Microphone error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
 
-    output = ClipboardOutput() if copy_to_clipboard else StdoutOutput()
-    try:
-        output.send(result.text)
-    except OutputError as exc:
-        print(f"Output error ({output.name}): {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+        result = engine.transcribe(audio, language=language)
+        if result.status == "empty":
+            print("No audio captured", file=sys.stderr)
+            raise SystemExit(1)
+        if result.status == "too_short":
+            print("Too short, skipped", file=sys.stderr)
+            raise SystemExit(1)
+        if result.status == "no_speech":
+            print("No speech detected", file=sys.stderr)
+            raise SystemExit(1)
+        if result.status == "error":
+            print(f"Transcription failed: {result.error}", file=sys.stderr)
+            raise SystemExit(1)
 
-    if copy_to_clipboard:
-        print("Copied to clipboard", file=sys.stderr)
+        output = ClipboardOutput() if copy_to_clipboard else StdoutOutput()
+        try:
+            output.send(result.text)
+        except OutputError as exc:
+            print(f"Output error ({output.name}): {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+
+        if copy_to_clipboard:
+            print("Copied to clipboard", file=sys.stderr)
+    finally:
+        try:
+            stt.release()
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to release STT resources: {exc}", file=sys.stderr)
 
 
 def _resolve_typing_output_or_exit(type_backend: str):

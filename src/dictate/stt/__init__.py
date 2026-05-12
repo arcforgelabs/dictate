@@ -7,6 +7,7 @@ from dictate.stt.base import (
     SpeechToText,
     SttBackend,
     SttCapabilities,
+    WhisperCppModel,
 )
 from dictate.stt.factory import (
     BACKEND_REGISTRY,
@@ -14,6 +15,7 @@ from dictate.stt.factory import (
     FASTER_WHISPER_MODELS,
     NEMO_CANARY_MODELS,
     STT_BACKENDS,
+    WHISPER_CPP_MODELS,
     BackendReadiness,
     check_backend_readiness,
     create_speech_to_text,
@@ -21,6 +23,7 @@ from dictate.stt.factory import (
 )
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.nemo_canary_backend import NeMoCanarySpeechToText
+from dictate.stt.whisper_cpp_backend import WhisperCppSpeechToText
 
 __all__ = [
     "BACKEND_REGISTRY",
@@ -28,6 +31,7 @@ __all__ = [
     "FASTER_WHISPER_MODELS",
     "NEMO_CANARY_MODELS",
     "STT_BACKENDS",
+    "WHISPER_CPP_MODELS",
     "BackendReadiness",
     "ComputeDevice",
     "ComputeType",
@@ -37,6 +41,8 @@ __all__ = [
     "SpeechToText",
     "SttBackend",
     "SttCapabilities",
+    "WhisperCppModel",
+    "WhisperCppSpeechToText",
     "check_backend_readiness",
     "create_speech_to_text",
     "resolve_model_name",

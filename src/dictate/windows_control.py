@@ -20,7 +20,16 @@ from dictate.history import HISTORY_PATH, HistoryEntry, HistoryStore
 from dictate.hotkey import HotkeyParseError, format_hotkey_combo, normalize_push_to_talk_combo
 from dictate.outputs import ClipboardOutput, OutputError
 
-MODEL_CHOICES = ("tiny", "base", "turbo")
+BACKEND_CHOICES = ("whisper-cpp", "faster-whisper")
+DEFAULT_BACKEND = "faster-whisper"
+MODEL_CHOICES = {
+    "whisper-cpp": ("large-v3-turbo-q5_0", "large-v3-turbo-q8_0"),
+    "faster-whisper": ("tiny", "base", "turbo"),
+}
+DEFAULT_MODELS = {
+    "whisper-cpp": "large-v3-turbo-q5_0",
+    "faster-whisper": "base",
+}
 DEVICE_CHOICES = ("cpu", "auto")
 COMPUTE_CHOICES = ("int8", "float32")
 
@@ -42,10 +51,12 @@ class ControlPanel:
         self.root.after(1500, lambda: self.root.attributes("-topmost", False))
 
         self.status_var = tk.StringVar(value="")
-        self.model_var = tk.StringVar(value="base")
+        self.backend_var = tk.StringVar(value=DEFAULT_BACKEND)
+        self.model_var = tk.StringVar(value=DEFAULT_MODELS[DEFAULT_BACKEND])
         self.device_var = tk.StringVar(value="cpu")
         self.compute_var = tk.StringVar(value="int8")
         self.combo_var = tk.StringVar(value="ctrl_r")
+        self.model_box: ttk.Combobox | None = None
 
         self._build()
         self.refresh()
@@ -61,42 +72,51 @@ class ControlPanel:
 
         config_frame = ttk.LabelFrame(outer, text="Configuration", padding=10)
         config_frame.grid(row=1, column=0, sticky="ew", pady=(10, 10))
-        for idx in range(4):
+        for idx in range(5):
             config_frame.columnconfigure(idx, weight=1)
 
-        ttk.Label(config_frame, text="Speech model").grid(row=0, column=0, sticky="w")
-        model_box = ttk.Combobox(
+        ttk.Label(config_frame, text="Backend").grid(row=0, column=0, sticky="w")
+        backend_box = ttk.Combobox(
             config_frame,
-            textvariable=self.model_var,
-            values=MODEL_CHOICES,
+            textvariable=self.backend_var,
+            values=BACKEND_CHOICES,
             state="readonly",
         )
-        model_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        backend_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        backend_box.bind("<<ComboboxSelected>>", lambda _event: self._sync_model_choices())
 
-        ttk.Label(config_frame, text="Device").grid(row=0, column=1, sticky="w")
+        ttk.Label(config_frame, text="Speech model").grid(row=0, column=1, sticky="w")
+        self.model_box = ttk.Combobox(
+            config_frame,
+            textvariable=self.model_var,
+            state="readonly",
+        )
+        self.model_box.grid(row=1, column=1, sticky="ew", padx=(0, 8))
+
+        ttk.Label(config_frame, text="Device").grid(row=0, column=2, sticky="w")
         device_box = ttk.Combobox(
             config_frame,
             textvariable=self.device_var,
             values=DEVICE_CHOICES,
             state="readonly",
         )
-        device_box.grid(row=1, column=1, sticky="ew", padx=(0, 8))
+        device_box.grid(row=1, column=2, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="Compute").grid(row=0, column=2, sticky="w")
+        ttk.Label(config_frame, text="Compute").grid(row=0, column=3, sticky="w")
         compute_box = ttk.Combobox(
             config_frame,
             textvariable=self.compute_var,
             values=COMPUTE_CHOICES,
             state="readonly",
         )
-        compute_box.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        compute_box.grid(row=1, column=3, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="Push-to-talk").grid(row=0, column=3, sticky="w")
+        ttk.Label(config_frame, text="Push-to-talk").grid(row=0, column=4, sticky="w")
         combo_entry = ttk.Entry(config_frame, textvariable=self.combo_var)
-        combo_entry.grid(row=1, column=3, sticky="ew")
+        combo_entry.grid(row=1, column=4, sticky="ew")
 
         button_frame = ttk.Frame(config_frame)
-        button_frame.grid(row=2, column=0, columnspan=4, sticky="e", pady=(10, 0))
+        button_frame.grid(row=2, column=0, columnspan=5, sticky="e", pady=(10, 0))
         ttk.Button(button_frame, text="Save", command=self.save).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             button_frame,
@@ -122,7 +142,12 @@ class ControlPanel:
 
     def refresh(self) -> None:
         config = load_config()
-        self.model_var.set(config.stt_model if config.stt_model in MODEL_CHOICES else "base")
+        backend = config.stt_backend if config.stt_backend in BACKEND_CHOICES else DEFAULT_BACKEND
+        self.backend_var.set(backend)
+        self._sync_model_choices()
+        model_choices = MODEL_CHOICES[backend]
+        default_model = DEFAULT_MODELS.get(backend, model_choices[0])
+        self.model_var.set(config.stt_model if config.stt_model in model_choices else default_model)
         self.device_var.set(config.stt_device if config.stt_device in DEVICE_CHOICES else "cpu")
         self.compute_var.set(
             config.stt_compute_type if config.stt_compute_type in COMPUTE_CHOICES else "int8"
@@ -134,6 +159,14 @@ class ControlPanel:
             "Changes apply after restart. Use Save & Restart Dictate to apply immediately."
         )
         self.refresh_history()
+
+    def _sync_model_choices(self) -> None:
+        backend = self.backend_var.get()
+        choices = MODEL_CHOICES.get(backend, MODEL_CHOICES[DEFAULT_BACKEND])
+        if self.model_box is not None:
+            self.model_box.configure(values=choices)
+        if self.model_var.get() not in choices:
+            self.model_var.set(DEFAULT_MODELS.get(backend, choices[0]))
 
     def refresh_history(self) -> None:
         for child in self.history_rows.winfo_children():
@@ -171,6 +204,7 @@ class ControlPanel:
         )
 
     def save(self) -> bool:
+        backend = self.backend_var.get()
         model = self.model_var.get()
         device = self.device_var.get()
         compute_type = self.compute_var.get()
@@ -181,7 +215,7 @@ class ControlPanel:
             messagebox.showerror("Invalid Push-to-Talk", str(exc))
             return False
 
-        set_stt_selection("faster-whisper", model)
+        set_stt_selection(backend, model)
         set_stt_runtime_profile(device, compute_type)
         set_push_to_talk_combo(normalized_combo)
         self.combo_var.set(normalized_combo)

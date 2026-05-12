@@ -8,6 +8,7 @@ Linux is the primary tray desktop. Windows 11 is supported as a separate headles
 
 - Local speech-to-text with selectable backends:
   - `faster-whisper` (default)
+  - `whisper-cpp` (local whisper.cpp server; useful for Vulkan/AMD GPU builds)
   - `nemo-canary` (`nvidia/canary-1b`, `nvidia/canary-1b-flash`, `nvidia/canary-1b-v2`)
 - Capability-aware backend contract (`hotwords`, prompt bias, language hint handling) so unsupported options fail soft with clear warnings.
 - Backend-agnostic lexical adaptation modes: `native`, `prompt`, `post`, `hybrid`.
@@ -109,6 +110,7 @@ Select model/device/compute-type/language:
 ```bash
 # code-level faster-whisper fallback is "base"; installer-seeded config defaults to "turbo"
 dictate --stt-backend faster-whisper --model large-v3-turbo
+dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0
 dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
 dictate --device cpu
 dictate --compute-type float16
@@ -137,6 +139,7 @@ dictate --list-lexicon-replacements
 Recommended defaults for low-latency dictation:
 
 - Best balance of accuracy + speed: `nemo-canary` with `nvidia/canary-1b-flash`
+- Best local Windows/AMD path: `whisper-cpp` with `large-v3-turbo-q5_0` and a Vulkan-enabled `whisper-server.exe`
 - Best compatibility + hotword biasing: `faster-whisper` with `large-v3-turbo`
 
 Examples:
@@ -150,6 +153,9 @@ dictate --stt-backend nemo-canary --model nvidia/canary-1b-v2 --language en
 
 # Faster-whisper baseline with Whisper Turbo
 dictate --stt-backend faster-whisper --model large-v3-turbo --language en
+
+# Local whisper.cpp path for Windows/AMD Vulkan builds
+dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --language en
 ```
 
 Faster-whisper model choices used by Dictate (`Speech Model` menu):
@@ -206,6 +212,7 @@ Lexical adaptation modes (backend-agnostic):
 Mode behavior by backend:
 
 - `faster-whisper`: `native`/`hybrid` applies decode-time hotword bias.
+- `whisper-cpp`: hotwords are passed to the local server as prompt context.
 - `nemo-canary`: use `prompt` or `hybrid` for prompt/context biasing, and/or `post`/`hybrid` for post-correction.
 - In `native` mode on backends without native hotwords, hotwords are ignored with a warning.
 

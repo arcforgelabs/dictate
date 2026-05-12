@@ -699,20 +699,49 @@ def _register_host_app(connection, Gio, GLib) -> None:  # noqa: ANN001
 
 
 def _portal_trigger(combo: str) -> str:
-    parts: list[str] = []
+    modifiers: list[str] = []
     key_name = ""
-    for token in normalize_push_to_talk_combo(combo).split("+"):
-        if token in {"ctrl", "ctrl_l", "ctrl_r"}:
-            parts.append("<Ctrl>")
-        elif token in {"shift", "shift_l", "shift_r"}:
-            parts.append("<Shift>")
-        elif token in {"alt", "alt_l", "alt_r"}:
-            parts.append("<Alt>")
-        elif token in {"super", "super_l", "super_r"}:
-            parts.append("<Super>")
+    tokens = normalize_push_to_talk_combo(combo).split("+")
+    for token in tokens:
+        if token in _PORTAL_SINGLE_MODIFIER_KEY_NAMES and len(tokens) == 1:
+            key_name = _PORTAL_SINGLE_MODIFIER_KEY_NAMES[token]
+        elif token in _PORTAL_MODIFIER_NAMES:
+            modifiers.append(_PORTAL_MODIFIER_NAMES[token])
         else:
             key_name = _portal_key_name(token)
-    return "".join(parts) + key_name
+    return "+".join([*modifiers, key_name] if key_name else modifiers)
+
+
+_PORTAL_MODIFIER_NAMES = {
+    "ctrl": "CTRL",
+    "ctrl_l": "CTRL",
+    "ctrl_r": "CTRL",
+    "shift": "SHIFT",
+    "shift_l": "SHIFT",
+    "shift_r": "SHIFT",
+    "alt": "ALT",
+    "alt_l": "ALT",
+    "alt_r": "ALT",
+    "super": "LOGO",
+    "super_l": "LOGO",
+    "super_r": "LOGO",
+}
+
+
+_PORTAL_SINGLE_MODIFIER_KEY_NAMES = {
+    "ctrl": "Control_L",
+    "ctrl_l": "Control_L",
+    "ctrl_r": "Control_R",
+    "shift": "Shift_L",
+    "shift_l": "Shift_L",
+    "shift_r": "Shift_R",
+    "alt": "Alt_L",
+    "alt_l": "Alt_L",
+    "alt_r": "Alt_R",
+    "super": "Super_L",
+    "super_l": "Super_L",
+    "super_r": "Super_R",
+}
 
 
 def _token(prefix: str) -> str:
@@ -727,7 +756,7 @@ def _portal_key_name(token: str) -> str:
         "tab": "Tab",
         "caps_lock": "Caps_Lock",
     }
-    return key_names.get(token, token.upper() if len(token) == 1 else token)
+    return key_names.get(token, token)
 
 
 def _keyboard_device_paths() -> list[str]:
