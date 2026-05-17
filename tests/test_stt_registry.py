@@ -59,6 +59,7 @@ class SttRegistryTests(unittest.TestCase):
         code = textwrap.dedent(
             """
             import builtins
+            import os
 
             original_import = builtins.__import__
 
@@ -68,6 +69,7 @@ class SttRegistryTests(unittest.TestCase):
                 return original_import(name, *args, **kwargs)
 
             builtins.__import__ = blocked_import
+            os.environ["DICTATE_XAI_API_KEY"] = "test-key"
 
             from dictate.stt import STT_BACKENDS, create_speech_to_text
 
