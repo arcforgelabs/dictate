@@ -13,43 +13,18 @@ from dictate.stt.base import (
     SttCapabilities,
 )
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
-from dictate.stt.nemo_canary_backend import NeMoCanarySpeechToText
+from dictate.stt.gemini_backend import GeminiSpeechToText, gemini_api_key_available
 from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
-from dictate.stt.whisper_cpp_backend import (
-    WhisperCppSpeechToText,
-    resolve_whisper_cpp_server,
-    resolve_whisper_cpp_model,
-)
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
-    "faster-whisper": "base",
-    "nemo-canary": "nvidia/canary-1b-flash",
-    "whisper-cpp": "large-v3-turbo-q5_0",
+    "faster-whisper": "turbo",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
+    "gemini": "gemini-3-flash-preview",
 }
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
-    "tiny",
-    "base",
-    "small",
-    "medium",
-    "large-v3",
     "turbo",
-    "large-v3-turbo",
-)
-NEMO_CANARY_MODELS: tuple[str, ...] = (
-    "nvidia/canary-1b",
-    "nvidia/canary-1b-flash",
-    "nvidia/canary-1b-v2",
-)
-WHISPER_CPP_MODELS: tuple[str, ...] = (
-    "base",
-    "small",
-    "turbo",
-    "large-v3-turbo",
-    "large-v3-turbo-q5_0",
-    "large-v3-turbo-q8_0",
 )
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
@@ -57,6 +32,7 @@ OPENAI_MODELS: tuple[str, ...] = (
     "whisper-1",
 )
 XAI_MODELS: tuple[str, ...] = ("grok-speech-to-text",)
+GEMINI_MODELS: tuple[str, ...] = ("gemini-3-flash-preview",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,28 +58,6 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
             compute_type=compute_type,
         ),
     ),
-    "nemo-canary": BackendSpec(
-        backend="nemo-canary",
-        default_model=DEFAULT_MODELS["nemo-canary"],
-        model_examples=NEMO_CANARY_MODELS,
-        description="NVIDIA NeMo Canary multilingual ASR.",
-        capabilities=NeMoCanarySpeechToText.capabilities,
-        builder=lambda model, device, _compute_type: NeMoCanarySpeechToText(
-            model_name=model,
-            device=device,
-        ),
-    ),
-    "whisper-cpp": BackendSpec(
-        backend="whisper-cpp",
-        default_model=DEFAULT_MODELS["whisper-cpp"],
-        model_examples=WHISPER_CPP_MODELS,
-        description="Local whisper.cpp CLI inference.",
-        capabilities=WhisperCppSpeechToText.capabilities,
-        builder=lambda model, device, _compute_type: WhisperCppSpeechToText(
-            model_name=model,
-            device=device,
-        ),
-    ),
     "openai": BackendSpec(
         backend="openai",
         default_model=DEFAULT_MODELS["openai"],
@@ -122,6 +76,17 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="Hosted xAI Speech to Text API.",
         capabilities=XAISpeechToText.capabilities,
         builder=lambda model, device, _compute_type: XAISpeechToText(
+            model_name=model,
+            device=device,
+        ),
+    ),
+    "gemini": BackendSpec(
+        backend="gemini",
+        default_model=DEFAULT_MODELS["gemini"],
+        model_examples=GEMINI_MODELS,
+        description="Hosted Gemini audio understanding transcription.",
+        capabilities=GeminiSpeechToText.capabilities,
+        builder=lambda model, device, _compute_type: GeminiSpeechToText(
             model_name=model,
             device=device,
         ),
@@ -164,21 +129,6 @@ def check_backend_readiness(
     report.notes.append(f"STT backend: {backend}")
     report.notes.append(f"STT model: {model_name}")
 
-    if backend == "nemo-canary":
-        try:
-            from nemo.collections import asr  # noqa: F401
-        except Exception:  # noqa: BLE001
-            report.errors.append(
-                "NeMo backend selected but nemo_toolkit[asr] is missing. "
-                "Install with: uv pip install -e \".[nemo]\""
-            )
-        if not model_name.startswith("nvidia/canary-"):
-            report.warnings.append(
-                "NeMo backend is tuned for Canary models; non-Canary model name may fail."
-            )
-        if device in {"cuda", "auto"}:
-            _check_cuda_with_torch(report, requested_device=device)
-
     if backend == "faster-whisper":
         try:
             import faster_whisper  # noqa: F401
@@ -187,34 +137,16 @@ def check_backend_readiness(
         if device in {"cuda", "auto"}:
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
-    if backend == "whisper-cpp":
-        _check_whisper_cpp(report, model_name=model_name)
-
     if backend == "openai":
         _check_openai(report, model_name=model_name)
 
     if backend == "xai":
         _check_xai(report, model_name=model_name)
 
-    if device == "cpu" and backend == "nemo-canary":
-        report.warnings.append(
-            "NeMo Canary on CPU is likely too slow for push-to-talk dictation."
-        )
+    if backend == "gemini":
+        _check_gemini(report, model_name=model_name)
 
     return report
-
-
-def _check_whisper_cpp(report: BackendReadiness, *, model_name: str) -> None:
-    server_path = resolve_whisper_cpp_server()
-    model_path = resolve_whisper_cpp_model(model_name)
-    if server_path.is_file():
-        report.notes.append(f"whisper.cpp server: {server_path}")
-    else:
-        report.errors.append(f"whisper.cpp server executable not found: {server_path}")
-    if model_path.is_file():
-        report.notes.append(f"whisper.cpp model: {model_path}")
-    else:
-        report.errors.append(f"whisper.cpp model not found: {model_path}")
 
 
 def _check_openai(report: BackendReadiness, *, model_name: str) -> None:
@@ -240,6 +172,21 @@ def _check_xai(report: BackendReadiness, *, model_name: str) -> None:
         report.errors.append(
             "xAI backend selected but no API key is configured. "
             "Set DICTATE_XAI_API_KEY, XAI_API_KEY, or DICTATE_XAI_API_KEY_COMMAND."
+        )
+
+
+def _check_gemini(report: BackendReadiness, *, model_name: str) -> None:
+    if model_name not in GEMINI_MODELS:
+        report.warnings.append(
+            f"Gemini STT model '{model_name}' is not one of the built-in examples."
+        )
+    if gemini_api_key_available():
+        report.notes.append("Gemini API key configured.")
+    else:
+        report.errors.append(
+            "Gemini backend selected but no API key is configured. "
+            "Set DICTATE_GEMINI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY, "
+            "or DICTATE_GEMINI_API_KEY_COMMAND."
         )
 
 

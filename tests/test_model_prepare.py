@@ -39,8 +39,8 @@ class ModelPrepareTests(unittest.TestCase):
         with patch("dictate.model_prepare.create_speech_to_text", return_value=stt):
             with self.assertRaisesRegex(RuntimeError, "load failed"):
                 _create_loaded_stt(
-                    backend="whisper-cpp",
-                    model="large-v3-turbo-q5_0",
+                    backend="faster-whisper",
+                    model="turbo",
                     device="auto",
                     compute_type="int8",
                 )

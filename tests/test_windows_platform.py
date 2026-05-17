@@ -54,7 +54,7 @@ class WindowsPlatformTests(unittest.TestCase):
         }
 
         self.assertEqual(assignments["DEFAULT_BACKEND"], "faster-whisper")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "base")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "turbo")
 
 
 if __name__ == "__main__":

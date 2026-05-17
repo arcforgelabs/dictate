@@ -9,6 +9,7 @@ from dictate.config import (
     add_lexicon_replacements,
     load_config,
     remove_lexicon_replacements,
+    set_api_key_command,
     set_push_to_talk_combo,
     set_stt_runtime_profile,
     set_stt_selection,
@@ -22,8 +23,8 @@ class ConfigSelectionTests(unittest.TestCase):
             add_hotwords(["OpenBao"], path=config_path)
 
             set_stt_selection(
-                backend="nemo-canary",
-                model="nvidia/canary-1b-flash",
+                backend="gemini",
+                model="gemini-3-flash-preview",
                 path=config_path,
             )
             set_stt_runtime_profile(
@@ -37,8 +38,8 @@ class ConfigSelectionTests(unittest.TestCase):
             self.assertEqual(config.hotwords_for_backend("xai"), "OpenBao")
             self.assertIsNone(config.push_to_talk_combo)
             self.assertIsNone(config.push_to_talk_key)
-            self.assertEqual(config.stt_backend, "nemo-canary")
-            self.assertEqual(config.stt_model, "nvidia/canary-1b-flash")
+            self.assertEqual(config.stt_backend, "gemini")
+            self.assertEqual(config.stt_model, "gemini-3-flash-preview")
             self.assertEqual(config.stt_device, "cuda")
             self.assertEqual(config.stt_compute_type, "float16")
 
@@ -65,6 +66,22 @@ class ConfigSelectionTests(unittest.TestCase):
 
             config = load_config(path=config_path)
             self.assertEqual(config.xai_api_key_command, "/usr/bin/printf key")
+
+    def test_load_config_reads_gemini_key_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text("gemini_api_key_command: /usr/bin/printf key\n")
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.gemini_api_key_command, "/usr/bin/printf key")
+
+    def test_set_api_key_command_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            set_api_key_command("gemini", "/usr/bin/printf key", path=config_path)
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.gemini_api_key_command, "/usr/bin/printf key")
 
     def test_set_push_to_talk_combo_replaces_legacy_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -64,6 +65,42 @@ class _DummyPromptSpeechToText(SpeechToText):
         self.received_hotwords = hotwords
         self.received_prompt_context = prompt_context
         return "ok"
+
+
+class _FailingApiSpeechToText(SpeechToText):
+    backend_name = "xai"
+    capabilities = SttCapabilities(supports_hotwords=True, supports_prompt_bias=False)
+    model_name = "grok-speech-to-text"
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+        del audio, language, hotwords, prompt_context
+        raise RuntimeError("remote 503")
+
+
+class _FallbackSpeechToText(SpeechToText):
+    backend_name = "faster-whisper"
+    capabilities = SttCapabilities(supports_hotwords=True, supports_prompt_bias=False)
+    model_name = "base"
+
+    def __init__(self, *, response_text: str = "fallback text", fail: bool = False) -> None:
+        self.response_text = response_text
+        self.fail = fail
+        self.received_hotwords: str | None = None
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+        del audio, language, prompt_context
+        self.received_hotwords = hotwords
+        if self.fail:
+            raise RuntimeError("local model unavailable")
+        return self.response_text
 
 
 class DictationEngineCapabilityTests(unittest.TestCase):
@@ -134,6 +171,36 @@ class DictationEngineCapabilityTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.text, "Testing canary one two three")
+
+    def test_api_backend_failure_uses_cpu_whisper_fallback_for_same_audio(self) -> None:
+        fallback = _FallbackSpeechToText(response_text="recovered turn")
+        engine = DictationEngine(
+            stt=_FailingApiSpeechToText(),
+            hotwords="OpenBao",
+        )
+        audio = np.ones(8000, dtype=np.float32)
+
+        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
+            result = engine.transcribe(audio, language="en")
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.text, "recovered turn")
+        self.assertEqual(fallback.received_hotwords, "OpenBao")
+        self.assertIsNotNone(result.notice)
+        self.assertIn("xAI transcription failed", result.notice or "")
+        self.assertIn("faster-whisper/base on CPU", result.notice or "")
+
+    def test_api_backend_failure_reports_cpu_fallback_failure(self) -> None:
+        fallback = _FallbackSpeechToText(fail=True)
+        engine = DictationEngine(stt=_FailingApiSpeechToText())
+        audio = np.ones(8000, dtype=np.float32)
+
+        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
+            result = engine.transcribe(audio, language="en")
+
+        self.assertEqual(result.status, "error")
+        self.assertIn("xAI transcription failed: remote 503", result.error or "")
+        self.assertIn("CPU fallback failed: local model unavailable", result.error or "")
 
 
 if __name__ == "__main__":

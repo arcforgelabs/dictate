@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dictate.platform_paths import user_data_dir
 
-MAX_ENTRIES = 3
+MAX_ENTRIES = 20
 HISTORY_PATH = user_data_dir() / "recent-history.json"
 
 

@@ -14,18 +14,18 @@ class MainPrepareDispatchTests(unittest.TestCase):
                 [
                     "prepare-model",
                     "--stt-backend",
-                    "nemo-canary",
+                    "faster-whisper",
                     "--model",
-                    "nvidia/canary-1b-flash",
+                    "turbo",
                 ]
             )
         self.assertEqual(result, 9)
         run_prepare_model.assert_called_once_with(
             [
                 "--stt-backend",
-                "nemo-canary",
+                "faster-whisper",
                 "--model",
-                "nvidia/canary-1b-flash",
+                "turbo",
             ]
         )
 

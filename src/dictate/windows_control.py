@@ -11,7 +11,9 @@ from tkinter import messagebox, ttk
 
 from dictate.config import (
     CONFIG_PATH,
+    Config,
     load_config,
+    set_api_key_command,
     set_push_to_talk_combo,
     set_stt_runtime_profile,
     set_stt_selection,
@@ -20,18 +22,23 @@ from dictate.history import HISTORY_PATH, HistoryEntry, HistoryStore
 from dictate.hotkey import HotkeyParseError, format_hotkey_combo, normalize_push_to_talk_combo
 from dictate.outputs import ClipboardOutput, OutputError
 
-BACKEND_CHOICES = ("whisper-cpp", "faster-whisper")
+BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
 DEFAULT_BACKEND = "faster-whisper"
 MODEL_CHOICES = {
-    "whisper-cpp": ("large-v3-turbo-q5_0", "large-v3-turbo-q8_0"),
-    "faster-whisper": ("tiny", "base", "turbo"),
+    "faster-whisper": ("turbo",),
+    "openai": ("gpt-4o-mini-transcribe",),
+    "xai": ("grok-speech-to-text",),
+    "gemini": ("gemini-3-flash-preview",),
 }
 DEFAULT_MODELS = {
-    "whisper-cpp": "large-v3-turbo-q5_0",
-    "faster-whisper": "base",
+    "faster-whisper": "turbo",
+    "openai": "gpt-4o-mini-transcribe",
+    "xai": "grok-speech-to-text",
+    "gemini": "gemini-3-flash-preview",
 }
 DEVICE_CHOICES = ("cpu", "auto")
 COMPUTE_CHOICES = ("int8", "float32")
+HISTORY_PAGE_SIZE = 5
 
 
 def run_control_panel() -> int:
@@ -45,7 +52,7 @@ class ControlPanel:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Dictate Controls")
-        self.root.minsize(720, 520)
+        self.root.minsize(760, 560)
         self.root.lift()
         self.root.attributes("-topmost", True)
         self.root.after(1500, lambda: self.root.attributes("-topmost", False))
@@ -56,6 +63,10 @@ class ControlPanel:
         self.device_var = tk.StringVar(value="cpu")
         self.compute_var = tk.StringVar(value="int8")
         self.combo_var = tk.StringVar(value="ctrl_r")
+        self.api_key_command_var = tk.StringVar(value="")
+        self.history_page_var = tk.StringVar(value="")
+        self._history_page = 0
+        self._history_entries: list[HistoryEntry] = []
         self.model_box: ttk.Combobox | None = None
 
         self._build()
@@ -72,7 +83,7 @@ class ControlPanel:
 
         config_frame = ttk.LabelFrame(outer, text="Configuration", padding=10)
         config_frame.grid(row=1, column=0, sticky="ew", pady=(10, 10))
-        for idx in range(5):
+        for idx in range(4):
             config_frame.columnconfigure(idx, weight=1)
 
         ttk.Label(config_frame, text="Backend").grid(row=0, column=0, sticky="w")
@@ -83,9 +94,9 @@ class ControlPanel:
             state="readonly",
         )
         backend_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
-        backend_box.bind("<<ComboboxSelected>>", lambda _event: self._sync_model_choices())
+        backend_box.bind("<<ComboboxSelected>>", lambda _event: self._on_backend_changed())
 
-        ttk.Label(config_frame, text="Speech model").grid(row=0, column=1, sticky="w")
+        ttk.Label(config_frame, text="Model").grid(row=0, column=1, sticky="w")
         self.model_box = ttk.Combobox(
             config_frame,
             textvariable=self.model_var,
@@ -93,30 +104,39 @@ class ControlPanel:
         )
         self.model_box.grid(row=1, column=1, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="Device").grid(row=0, column=2, sticky="w")
+        ttk.Label(config_frame, text="API key command").grid(row=0, column=2, sticky="w")
+        api_entry = ttk.Entry(config_frame, textvariable=self.api_key_command_var)
+        api_entry.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+
+        ttk.Label(config_frame, text="Push-to-talk").grid(row=0, column=3, sticky="w")
+        combo_entry = ttk.Entry(config_frame, textvariable=self.combo_var)
+        combo_entry.grid(row=1, column=3, sticky="ew")
+
+        advanced_frame = ttk.Frame(config_frame)
+        advanced_frame.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        advanced_frame.columnconfigure(0, weight=1)
+        advanced_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(advanced_frame, text="Local device").grid(row=0, column=0, sticky="w")
         device_box = ttk.Combobox(
-            config_frame,
+            advanced_frame,
             textvariable=self.device_var,
             values=DEVICE_CHOICES,
             state="readonly",
         )
-        device_box.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        device_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="Compute").grid(row=0, column=3, sticky="w")
+        ttk.Label(advanced_frame, text="Local compute").grid(row=0, column=1, sticky="w")
         compute_box = ttk.Combobox(
-            config_frame,
+            advanced_frame,
             textvariable=self.compute_var,
             values=COMPUTE_CHOICES,
             state="readonly",
         )
-        compute_box.grid(row=1, column=3, sticky="ew", padx=(0, 8))
-
-        ttk.Label(config_frame, text="Push-to-talk").grid(row=0, column=4, sticky="w")
-        combo_entry = ttk.Entry(config_frame, textvariable=self.combo_var)
-        combo_entry.grid(row=1, column=4, sticky="ew")
+        compute_box.grid(row=1, column=1, sticky="ew")
 
         button_frame = ttk.Frame(config_frame)
-        button_frame.grid(row=2, column=0, columnspan=5, sticky="e", pady=(10, 0))
+        button_frame.grid(row=3, column=0, columnspan=4, sticky="e", pady=(10, 0))
         ttk.Button(button_frame, text="Save", command=self.save).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             button_frame,
@@ -133,11 +153,30 @@ class ControlPanel:
         self.history_rows.grid(row=0, column=0, sticky="nsew")
         self.history_rows.columnconfigure(0, weight=1)
 
+        history_controls = ttk.Frame(history_frame)
+        history_controls.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        history_controls.columnconfigure(1, weight=1)
+        ttk.Button(history_controls, text="Previous", command=self.previous_history_page).grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
+        ttk.Label(history_controls, textvariable=self.history_page_var, anchor=tk.CENTER).grid(
+            row=0,
+            column=1,
+            sticky="ew",
+        )
+        ttk.Button(history_controls, text="Next", command=self.next_history_page).grid(
+            row=0,
+            column=2,
+            sticky="e",
+        )
+
         ttk.Button(history_frame, text="Refresh History", command=self.refresh_history).grid(
-            row=1,
+            row=2,
             column=0,
             sticky="e",
-            pady=(10, 0),
+            pady=(6, 0),
         )
 
     def refresh(self) -> None:
@@ -152,6 +191,7 @@ class ControlPanel:
         self.compute_var.set(
             config.stt_compute_type if config.stt_compute_type in COMPUTE_CHOICES else "int8"
         )
+        self.api_key_command_var.set(_api_key_command_for_config(config, backend) or "")
         combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
         self.status_var.set(
@@ -159,6 +199,13 @@ class ControlPanel:
             "Changes apply after restart. Use Save & Restart Dictate to apply immediately."
         )
         self.refresh_history()
+
+    def _on_backend_changed(self) -> None:
+        self._sync_model_choices()
+        config = load_config()
+        self.api_key_command_var.set(
+            _api_key_command_for_config(config, self.backend_var.get()) or ""
+        )
 
     def _sync_model_choices(self) -> None:
         backend = self.backend_var.get()
@@ -169,11 +216,18 @@ class ControlPanel:
             self.model_var.set(DEFAULT_MODELS.get(backend, choices[0]))
 
     def refresh_history(self) -> None:
+        self._history_entries = HistoryStore().load()
+        max_page = max(0, (len(self._history_entries) - 1) // HISTORY_PAGE_SIZE)
+        self._history_page = min(self._history_page, max_page)
+        self._render_history_page()
+
+    def _render_history_page(self) -> None:
         for child in self.history_rows.winfo_children():
             child.destroy()
 
-        entries = HistoryStore().load()
+        entries = self._history_entries
         if not entries:
+            self.history_page_var.set("No history")
             ttk.Label(self.history_rows, text="No recent dictations yet.").grid(
                 row=0,
                 column=0,
@@ -181,8 +235,27 @@ class ControlPanel:
             )
             return
 
-        for idx, entry in enumerate(entries):
+        max_page = (len(entries) - 1) // HISTORY_PAGE_SIZE
+        self.history_page_var.set(
+            f"Page {self._history_page + 1} of {max_page + 1} ({len(entries)} entries)"
+        )
+        start = self._history_page * HISTORY_PAGE_SIZE
+        page_entries = entries[start : start + HISTORY_PAGE_SIZE]
+        for idx, entry in enumerate(page_entries):
             self._add_history_row(idx, entry)
+
+    def previous_history_page(self) -> None:
+        if self._history_page > 0:
+            self._history_page -= 1
+            self._render_history_page()
+
+    def next_history_page(self) -> None:
+        if not self._history_entries:
+            return
+        max_page = (len(self._history_entries) - 1) // HISTORY_PAGE_SIZE
+        if self._history_page < max_page:
+            self._history_page += 1
+            self._render_history_page()
 
     def _add_history_row(self, idx: int, entry: HistoryEntry) -> None:
         row = ttk.Frame(self.history_rows, padding=(0, 0, 0, 8))
@@ -217,6 +290,7 @@ class ControlPanel:
 
         set_stt_selection(backend, model)
         set_stt_runtime_profile(device, compute_type)
+        set_api_key_command(backend, self.api_key_command_var.get())
         set_push_to_talk_combo(normalized_combo)
         self.combo_var.set(normalized_combo)
         messagebox.showinfo(
@@ -249,6 +323,16 @@ def _format_timestamp(iso_str: str) -> str:
         return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except Exception:  # noqa: BLE001
         return iso_str
+
+
+def _api_key_command_for_config(config: Config, backend: str) -> str | None:
+    if backend == "openai":
+        return config.openai_api_key_command
+    if backend == "xai":
+        return config.xai_api_key_command
+    if backend == "gemini":
+        return config.gemini_api_key_command
+    return None
 
 
 def _restart_daemon() -> None:

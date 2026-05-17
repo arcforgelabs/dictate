@@ -25,7 +25,6 @@ from dictate.hotkey_backend import (
 )
 from dictate.model_state import (
     get_model_error,
-    is_model_prepared,
     mark_model_failed,
     mark_model_prepared,
 )
@@ -38,14 +37,10 @@ SWITCH_ABORT_SECONDS = 300
 PREPARE_ABORT_SECONDS = 900
 SWITCH_STATUS_CLEAR_SECONDS = 6
 MODEL_PRESETS: tuple[tuple[str, str, str], ...] = (
-    ("whisper-cpp", "large-v3-turbo-q5_0", "whisper.cpp / large-v3-turbo q5_0"),
-    ("whisper-cpp", "large-v3-turbo-q8_0", "whisper.cpp / large-v3-turbo q8_0"),
-    ("faster-whisper", "base", "faster-whisper / base"),
-    ("faster-whisper", "turbo", "faster-whisper / turbo"),
-    ("faster-whisper", "large-v3", "faster-whisper / large-v3"),
-    ("nemo-canary", "nvidia/canary-1b-flash", "nemo-canary / canary-1b-flash"),
-    ("nemo-canary", "nvidia/canary-1b-v2", "nemo-canary / canary-1b-v2"),
-    ("nemo-canary", "nvidia/canary-1b", "nemo-canary / canary-1b"),
+    ("faster-whisper", "turbo", "Local Whisper"),
+    ("openai", "gpt-4o-mini-transcribe", "OpenAI"),
+    ("xai", "grok-speech-to-text", "xAI"),
+    ("gemini", "gemini-3-flash-preview", "Google Gemini"),
 )
 RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
     ("cuda", "int8", "cuda / int8 (recommended)"),
@@ -53,6 +48,29 @@ RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
     ("cpu", "int8", "cpu / int8"),
     ("auto", "int8", "auto / int8"),
 )
+
+
+def _device_for_backend(backend: str, current_device: str) -> str:
+    if backend == "faster-whisper":
+        return current_device if current_device in {"cpu", "cuda", "auto"} else "auto"
+    return "auto"
+
+
+def _compute_type_for_backend(backend: str, current_compute_type: str) -> str:
+    if backend == "faster-whisper":
+        if current_compute_type in {"int8", "float16", "float32"}:
+            return current_compute_type
+    return "int8"
+
+
+def _apply_api_key_command_from_config(backend: str) -> None:
+    config = load_config()
+    if backend == "openai" and config.openai_api_key_command:
+        os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
+    if backend == "xai" and config.xai_api_key_command:
+        os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
+    if backend == "gemini" and config.gemini_api_key_command:
+        os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
 
 class TrayIcon:
@@ -80,7 +98,9 @@ class TrayIcon:
         self._syncing_profile_menu = False
         self._model_items: dict[tuple[str, str], Gtk.RadioMenuItem] = {}
         self._profile_items: dict[tuple[str, str], Gtk.RadioMenuItem] = {}
+        self._daemon_status_counter = 0
 
+        self.daemon.status_callback = self._on_daemon_status
         self._active_backend, self._active_model = self.daemon.current_backend_model()
         self._stt_device, self._stt_compute_type = self.daemon.runtime_stt_options()
 
@@ -101,13 +121,9 @@ class TrayIcon:
         self.toggle_item.connect("toggled", self._on_toggle)
         menu.append(self.toggle_item)
 
-        models_item = Gtk.MenuItem(label="Speech Model")
+        models_item = Gtk.MenuItem(label="Transcription Backend")
         models_item.set_submenu(self._build_model_submenu())
         menu.append(models_item)
-
-        runtime_item = Gtk.MenuItem(label="Runtime Profile")
-        runtime_item.set_submenu(self._build_runtime_submenu())
-        menu.append(runtime_item)
 
         self.switch_status_item = Gtk.MenuItem()
         self.switch_status_label = Gtk.Label(label="")
@@ -144,59 +160,24 @@ class TrayIcon:
 
     def _build_model_submenu(self) -> Gtk.Menu:
         submenu = Gtk.Menu()
-        presets = list(MODEL_PRESETS)
         active_key = (self._active_backend, self._active_model)
-
-        installed_models: list[tuple[str, str, str]] = []
-        installable_models: list[tuple[str, str, str]] = []
-
         preset_keys = {(backend, model) for backend, model, _label in MODEL_PRESETS}
         if active_key not in preset_keys:
-            installed_models.append(
-                (
-                    self._active_backend,
-                    self._active_model,
-                    f"current / {self._active_backend} / {self._active_model}",
-                ),
-            )
+            active_label = f"Current: {self._active_backend} / {self._active_model}"
+            presets = ((self._active_backend, self._active_model, active_label), *MODEL_PRESETS)
+        else:
+            presets = MODEL_PRESETS
 
+        radio_group: Gtk.RadioMenuItem | None = None
         for backend, model, label in presets:
-            if (backend, model) == active_key or is_model_prepared(
-                backend=backend,
-                model=model,
-                device=self._stt_device,
-                compute_type=self._stt_compute_type,
-            ):
-                installed_models.append((backend, model, label))
+            if radio_group is None:
+                item = Gtk.RadioMenuItem.new_with_label(None, label)
+                radio_group = item
             else:
-                installable_models.append((backend, model, label))
-
-        if installed_models:
-            installed_header = Gtk.MenuItem(label="Installed Models")
-            installed_header.set_sensitive(False)
-            submenu.append(installed_header)
-
-            radio_group: Gtk.RadioMenuItem | None = None
-            for backend, model, label in installed_models:
-                if radio_group is None:
-                    item = Gtk.RadioMenuItem.new_with_label(None, label)
-                    radio_group = item
-                else:
-                    item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, label)
-                item.connect("toggled", self._on_model_selected, backend, model)
-                self._model_items[(backend, model)] = item
-                submenu.append(item)
-
-        if installable_models:
-            if installed_models:
-                submenu.append(Gtk.SeparatorMenuItem())
-            installable_header = Gtk.MenuItem(label="Compatible Models")
-            installable_header.set_sensitive(False)
-            submenu.append(installable_header)
-            for backend, model, label in installable_models:
-                item = Gtk.MenuItem(label=f"{label} (download/switch)")
-                item.connect("activate", self._on_installable_model_selected, backend, model)
-                submenu.append(item)
+                item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, label)
+            item.connect("toggled", self._on_model_selected, backend, model)
+            self._model_items[(backend, model)] = item
+            submenu.append(item)
 
         self._set_active_model_menu_item(*active_key)
         return submenu
@@ -210,25 +191,11 @@ class TrayIcon:
         if (backend, model) == (self._active_backend, self._active_model):
             return
 
-        if self._requires_preparation(
-            backend=backend,
-            model=model,
-            device=self._stt_device,
-            compute_type=self._stt_compute_type,
-        ):
-            self._start_prepare_for_switch(
-                backend=backend,
-                model=model,
-                device=self._stt_device,
-                compute_type=self._stt_compute_type,
-            )
-            return
-
         self._start_switch(
             backend=backend,
             model=model,
-            device=self._stt_device,
-            compute_type=self._stt_compute_type,
+            device=_device_for_backend(backend, self._stt_device),
+            compute_type=_compute_type_for_backend(backend, self._stt_compute_type),
         )
 
     def _build_runtime_submenu(self) -> Gtk.Menu:
@@ -284,7 +251,7 @@ class TrayIcon:
     def _on_recent_history(self, _item):
         from dictate.history_dialog import RecentHistoryDialog
 
-        dialog = RecentHistoryDialog(store=self.daemon.history_store)
+        dialog = RecentHistoryDialog(store=self.daemon.history_store, output=self.daemon.output)
         dialog.run()
         dialog.destroy()
 
@@ -347,8 +314,8 @@ class TrayIcon:
         self._start_switch(
             backend=backend,
             model=model,
-            device=self._stt_device,
-            compute_type=self._stt_compute_type,
+            device=_device_for_backend(backend, self._stt_device),
+            compute_type=_compute_type_for_backend(backend, self._stt_compute_type),
         )
 
     def _on_profile_selected(self, item, device: str, compute_type: str) -> None:
@@ -395,14 +362,8 @@ class TrayIcon:
         device: str,
         compute_type: str,
     ) -> bool:
-        if backend != "nemo-canary":
-            return False
-        return not is_model_prepared(
-            backend=backend,
-            model=model,
-            device=device,
-            compute_type=compute_type,
-        )
+        del backend, model, device, compute_type
+        return False
 
     def _start_prepare_for_switch(
         self,
@@ -612,7 +573,7 @@ class TrayIcon:
         self._set_active_model_menu_item(self._active_backend, self._active_model)
         self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status(
-            "Model preparation timed out. Keeping previous model; try canary-1b-flash first."
+            "Model preparation timed out. Keeping previous backend."
         )
         GLib.timeout_add_seconds(
             SWITCH_STATUS_CLEAR_SECONDS,
@@ -682,6 +643,7 @@ class TrayIcon:
         loaded_device = device
         loaded_compute_type = compute_type
         try:
+            _apply_api_key_command_from_config(backend)
             stt = create_speech_to_text(
                 backend=backend,  # type: ignore[arg-type]
                 model=model,
@@ -901,7 +863,7 @@ class TrayIcon:
         self._set_active_model_menu_item(self._active_backend, self._active_model)
         self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status(
-            "Switch timed out. Keeping previous model. Try canary-1b-flash for a faster startup."
+            "Switch timed out. Keeping previous backend."
         )
         self._release_cuda_memory_best_effort()
         GLib.timeout_add_seconds(
@@ -958,6 +920,29 @@ class TrayIcon:
             return
         self.switch_status_item.hide()
 
+    def _on_daemon_status(self, message: str | None) -> None:
+        GLib.idle_add(self._show_daemon_status, message)
+
+    def _show_daemon_status(self, message: str | None) -> bool:
+        self._daemon_status_counter += 1
+        status_id = self._daemon_status_counter
+        self._set_switch_status(message)
+        if message:
+            GLib.timeout_add_seconds(
+                SWITCH_STATUS_CLEAR_SECONDS,
+                self._clear_daemon_status,
+                status_id,
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _clear_daemon_status(self, status_id: int) -> bool:
+        if status_id != self._daemon_status_counter:
+            return GLib.SOURCE_REMOVE
+        if self._switch_in_progress or self._switch_background_mode or self._prepare_in_progress:
+            return GLib.SOURCE_REMOVE
+        self._set_switch_status(None)
+        return GLib.SOURCE_REMOVE
+
     @staticmethod
     def _build_switch_status_message(
         backend: str,
@@ -971,10 +956,6 @@ class TrayIcon:
         if elapsed_seconds is not None:
             minutes, seconds = divmod(max(elapsed_seconds, 0), 60)
             elapsed = f" ({minutes:02d}:{seconds:02d})"
-        if backend == "nemo-canary":
-            if background:
-                return f"Canary {model_label} still loading{elapsed}. You can use current model."
-            return f"Switching to {model_label}{elapsed}. First download may take several minutes."
         if background:
             return f"{backend} / {model_label} still loading{elapsed}. You can use current model."
         return f"Switching to {backend} / {model_label}{elapsed}..."
@@ -989,13 +970,11 @@ class TrayIcon:
         model_label = model.split("/")[-1]
         minutes, seconds = divmod(max(elapsed_seconds, 0), 60)
         elapsed = f"{minutes:02d}:{seconds:02d}"
-        if backend == "nemo-canary":
-            return f"Preparing {model_label} ({elapsed})... download may take several minutes."
         return f"Preparing {backend} / {model_label} ({elapsed})..."
 
     @staticmethod
     def _should_retry_switch_on_cpu(exc: Exception, *, backend: str, requested_device: str) -> bool:
-        if backend != "nemo-canary":
+        if backend != "faster-whisper":
             return False
         if requested_device not in {"auto", "cuda"}:
             return False

@@ -6,22 +6,21 @@ Linux is the primary tray desktop. Windows 11 is supported as a separate headles
 
 ## Features
 
-- Local speech-to-text with selectable backends:
-  - `faster-whisper` (default)
-  - `whisper-cpp` (local whisper.cpp server; useful for Vulkan/AMD GPU builds)
-  - `nemo-canary` (`nvidia/canary-1b`, `nvidia/canary-1b-flash`, `nvidia/canary-1b-v2`)
-  - `openai` (hosted OpenAI transcription; avoids local GPU use)
-  - `xai` (hosted xAI Speech to Text; avoids local GPU use and supports keyterm biasing)
+- Speech-to-text backends kept intentionally small:
+  - `faster-whisper` with `turbo` (default local Whisper path)
+  - `openai` with `gpt-4o-mini-transcribe`
+  - `xai` with `grok-speech-to-text`
+  - `gemini` with `gemini-3-flash-preview`
 - Capability-aware backend contract (`hotwords`, prompt bias, language hint handling) so unsupported options fail soft with clear warnings.
 - Backend-agnostic lexical adaptation modes: `native`, `prompt`, `post`, `hybrid`.
 - Push-to-talk daemon: `Right Ctrl` hold/release to record/transcribe/type.
 - Configurable push-to-talk key (`ctrl_r` default, `ctrl_l` supported for Wayland/laptop compatibility).
 - System tray toggle (pause/resume dictation).
-- Tray menu STT switcher (change backend/model without restart).
-- Tray runtime profile switcher (device/compute tuning without restart).
+- Tray backend switcher (change local/API transcription route without restart).
+- Recent history with copy/paste actions and pagination for up to 20 dictations.
 - One-shot mode for terminal workflows (print to stdout or copy to clipboard).
 - Typing backend auto-selection (`xdotool` on X11, `wtype`/`ydotool` on Wayland, `pynput` on Windows).
-- Explicit backend resource release on switch (including CUDA cache cleanup when switching away from NeMo Canary).
+- Explicit backend resource release on switch.
 
 ## Requirements
 
@@ -68,12 +67,6 @@ powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 
 This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs a Start Menu shortcut named `Dictate`. See [Windows 11 support](docs/windows-11.md) for the supported Windows surface and current gaps.
 
-Optional: install NVIDIA NeMo backend dependencies in your active environment:
-
-```bash
-uv pip install -e ".[nemo]"
-```
-
 ## Usage
 
 Tray mode (default):
@@ -110,30 +103,24 @@ dictate doctor --check-model-load
 Select model/device/compute-type/language:
 
 ```bash
-# code-level faster-whisper fallback is "base"; installer-seeded config defaults to "turbo"
-dictate --stt-backend faster-whisper --model large-v3-turbo
-dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0
-dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
+dictate --stt-backend faster-whisper --model turbo
 dictate --stt-backend openai --model gpt-4o-mini-transcribe
 dictate --stt-backend xai --model grok-speech-to-text
+dictate --stt-backend gemini --model gemini-3-flash-preview
 dictate --device cpu
 dictate --compute-type float16
 dictate --language en
 dictate --lexicon-mode hybrid
 ```
 
-`--compute-type` affects `faster-whisper` only. For `nemo-canary`, it is ignored.
+`--compute-type` affects `faster-whisper` only. Hosted API backends ignore local device and compute settings.
 For `openai`, `--device` and `--compute-type` are ignored; set `OPENAI_API_KEY` or
 `DICTATE_OPENAI_API_KEY` before launch, or set `openai_api_key_command` in the config file
 to a command that prints the key to stdout.
 For `xai`, `--device` and `--compute-type` are ignored; set `XAI_API_KEY` or
 `DICTATE_XAI_API_KEY` before launch, or set `xai_api_key_command` in the config file.
-
-Prepare/download a heavy model ahead of activation:
-
-```bash
-dictate prepare-model --stt-backend nemo-canary --model nvidia/canary-1b-flash --device auto --compute-type int8
-```
+For `gemini`, set `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `DICTATE_GEMINI_API_KEY` before
+launch, or set `gemini_api_key_command` in the config file.
 
 Manage lexical post-corrections:
 
@@ -143,33 +130,29 @@ dictate --remove-lexicon-replacement kinneri
 dictate --list-lexicon-replacements
 ```
 
-## STT Backends (RTX 4090)
+## STT Backends
 
-Recommended defaults for low-latency dictation:
+Supported defaults for low-latency dictation:
 
-- Best balance of accuracy + speed: `nemo-canary` with `nvidia/canary-1b-flash`
-- Best way to avoid local GPU use: `openai` with `gpt-4o-mini-transcribe`
-- Best hosted hotword/keyterm biasing path: `xai` with `grok-speech-to-text`
-- Best local Windows/AMD path: `whisper-cpp` with `large-v3-turbo-q5_0` and a Vulkan-enabled `whisper-server.exe`
-- Best compatibility + hotword biasing: `faster-whisper` with `large-v3-turbo`
+- Local default: `faster-whisper` with `turbo`
+- Hosted OpenAI route: `openai` with `gpt-4o-mini-transcribe`
+- Hosted xAI route: `xai` with `grok-speech-to-text`
+- Hosted Gemini route: `gemini` with `gemini-3-flash-preview`
 
 Examples:
 
 ```bash
-# Fast, high-accuracy Canary path (recommended on RTX 4090)
-dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash --language en
-
-# Canary v2 (often better quality than Canary 1B, but usually heavier)
-dictate --stt-backend nemo-canary --model nvidia/canary-1b-v2 --language en
-
-# Faster-whisper baseline with Whisper Turbo
-dictate --stt-backend faster-whisper --model large-v3-turbo --language en
+# Local Whisper Turbo
+dictate --stt-backend faster-whisper --model turbo --language en
 
 # Hosted transcription path, useful when local GPU should be reserved for other work
 OPENAI_API_KEY=... dictate --stt-backend openai --model gpt-4o-mini-transcribe --language en
 
 # Hosted xAI path with keyterm biasing from configured hotwords
 XAI_API_KEY=... dictate --stt-backend xai --model grok-speech-to-text --language en
+
+# Hosted Gemini path using Gemini audio understanding
+GEMINI_API_KEY=... dictate --stt-backend gemini --model gemini-3-flash-preview --language en
 
 # Desktop autostart can read the key from a local secret-manager helper
 # ~/.config/dictate/config.yaml:
@@ -179,22 +162,12 @@ XAI_API_KEY=... dictate --stt-backend xai --model grok-speech-to-text --language
 # stt_backend: xai
 # stt_model: grok-speech-to-text
 # xai_api_key_command: /home/samuelrodda/.local/bin/dictate-xai-key
-
-# Local whisper.cpp path for Windows/AMD Vulkan builds
-dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --language en
+# stt_backend: gemini
+# stt_model: gemini-3-flash-preview
+# gemini_api_key_command: /home/samuelrodda/.local/bin/dictate-gemini-key
 ```
 
-Faster-whisper model choices used by Dictate (`Speech Model` menu):
-
-- `base` (not "bass"): smallest option, fastest startup, lowest resource use, lower accuracy.
-- `turbo`: optimized large-family variant (maps to `large-v3-turbo`), best speed/accuracy balance for push-to-talk.
-- `large-v3`: full large model, highest accuracy in difficult audio, highest latency/memory usage.
-
-Quick rule of thumb:
-
-- If latency is critical: start with `turbo`.
-- If quality is critical and you can accept extra delay: try `large-v3`.
-- If you need minimal cold-start and resource use: use `base`.
+The app UI exposes one local Whisper option: `faster-whisper/turbo`.
 
 Force typing backend (daemon modes):
 
@@ -231,22 +204,22 @@ CLI `--hotwords` and saved hotwords are merged at startup.
 Lexical adaptation modes (backend-agnostic):
 
 - `native` (default): use backend-native hotword biasing (effective on `faster-whisper`)
-- `prompt`: use prompt/context biasing (effective on prompt-capable backends such as `nemo-canary`)
+- `prompt`: use prompt/context biasing (effective on prompt-capable API backends)
 - `post`: run lightweight post-correction against hotwords/replacements
 - `hybrid`: apply all supported strategies
 
 Mode behavior by backend:
 
 - `faster-whisper`: `native`/`hybrid` applies decode-time hotword bias.
-- `whisper-cpp`: hotwords are passed to the local server as prompt context.
-- `nemo-canary`: use `prompt` or `hybrid` for prompt/context biasing, and/or `post`/`hybrid` for post-correction.
+- `openai` and `gemini`: use `prompt` or `hybrid` for prompt/context biasing, and/or `post`/`hybrid` for post-correction.
+- `xai`: `native`/`hybrid` passes keyterms to the hosted STT API.
 - In `native` mode on backends without native hotwords, hotwords are ignored with a warning.
 
 Examples:
 
 ```bash
-# Use prompt biasing for Canary with your hotwords list
-dictate --stt-backend nemo-canary --lexicon-mode prompt
+# Use prompt biasing with your hotwords list on a prompt-capable API backend
+dictate --stt-backend gemini --lexicon-mode prompt
 
 # Hybrid mode combines native/prompt/post where available
 dictate --lexicon-mode hybrid
@@ -270,25 +243,17 @@ push_to_talk_combo: ctrl_l
 In tray mode, a microphone icon appears in the system tray with a right-click menu:
 
 - **Dictation active** — checkbox to pause/resume listening for the hotkey. The icon switches to a muted microphone when paused.
-- **Speech Model** — switch backend/model live. For unprepared `nemo-canary` choices, Dictate first runs a subprocess preparation step, then activates on success.
-- **Runtime Profile** — switch device/compute profile live (for example `cuda/int8`, `cuda/float16`, `cpu/int8`).
-- Switching away from a loaded backend releases prior model resources; for NeMo Canary this includes CUDA cache cleanup to avoid long-lived VRAM retention.
-- If switching fails, Dictate keeps the previous model active and shows an error dialog.
+- **Transcription Backend** — switch between Local Whisper, OpenAI, xAI, and Gemini live.
+- **Recent History** — copy or paste a previous dictation. History keeps up to 20 entries and paginates the list.
+- If switching fails, Dictate keeps the previous backend active and shows an error dialog.
 - **Quit** — stops the daemon.
 
 You can also quit from the terminal with `Ctrl+C`.
 
-Runtime profile presets currently shipped in tray:
-
-- `cuda / int8` (recommended default)
-- `cuda / float16`
-- `cpu / int8`
-- `auto / int8`
-
 ## Notes And Troubleshooting
 
-- First run will likely download model files (Whisper or NeMo, depending on backend). Network is required once per model.
-- Tray model/profile selections are persisted in the platform config file and used on startup unless CLI flags override them.
+- First local run will likely download Whisper model files. Network is required once per model.
+- Tray backend selections are persisted in the platform config file and used on startup unless CLI flags override them.
 - Persisted STT selection keys:
   - `stt_backend`
   - `stt_model`
@@ -298,6 +263,7 @@ Runtime profile presets currently shipped in tray:
   - `push_to_talk_combo` (examples: `ctrl_r`, `ctrl_l`, `ctrl+space`, `ctrl+shift`)
   - `lexicon_mode` (optional startup default; set manually in config)
   - `lexicon_replacements` (managed by CLI replacement commands)
+  - `openai_api_key_command`, `xai_api_key_command`, `gemini_api_key_command`
 - Preflight now checks STT backend readiness (dependency imports + CUDA visibility) before model load.
 - Startup stderr is mirrored to logs:
   - Linux latest run: `~/.local/share/dictate/logs/latest.log`
@@ -311,7 +277,6 @@ Runtime profile presets currently shipped in tray:
 - On Windows 11, use `dictate --no-tray --type-backend pynput` or one-shot mode; the Linux tray is not part of the Windows stream.
 - If preflight reports missing tools, install them via your distro package manager (e.g. `xdotool`, `xclip`, `wtype`) or install the Windows extra with `pip install -e ".[windows]"`.
 - Dictation uses the system default microphone input device. If your default input is misconfigured, fix it in your OS audio settings.
-- If NeMo backend fails to load, install optional deps with `uv pip install -e ".[nemo]"`.
 - If the app does not launch from GUI, run `dictate doctor --quick` and inspect the reported active log directory.
 
 ## Benchmarking
@@ -322,9 +287,9 @@ Use the local benchmark harness to compare backends/models on your own accent an
 dictate benchmark \
   --manifest benchmarks/example_manifest.csv \
   --audio-root benchmarks \
-  --stt-backend nemo-canary \
-  --model nvidia/canary-1b-flash \
-  --device cuda \
+  --stt-backend faster-whisper \
+  --model turbo \
+  --device auto \
   --language en
 ```
 

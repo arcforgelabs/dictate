@@ -29,6 +29,7 @@ class Config:
     stt_compute_type: str | None = None
     openai_api_key_command: str | None = None
     xai_api_key_command: str | None = None
+    gemini_api_key_command: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
@@ -89,6 +90,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     stt_compute_type = data.get("stt_compute_type")
     openai_api_key_command = data.get("openai_api_key_command")
     xai_api_key_command = data.get("xai_api_key_command")
+    gemini_api_key_command = data.get("gemini_api_key_command")
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
@@ -101,6 +103,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         openai_api_key_command = None
     if not isinstance(xai_api_key_command, str):
         xai_api_key_command = None
+    if not isinstance(gemini_api_key_command, str):
+        gemini_api_key_command = None
 
     return Config(
         hotwords=hotwords,
@@ -114,6 +118,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_compute_type=stt_compute_type,
         openai_api_key_command=openai_api_key_command,
         xai_api_key_command=xai_api_key_command,
+        gemini_api_key_command=gemini_api_key_command,
     )
 
 
@@ -174,6 +179,25 @@ def set_stt_runtime_profile(device: str, compute_type: str, path: Path = CONFIG_
     data = _load_raw(path)
     data["stt_device"] = device
     data["stt_compute_type"] = compute_type
+    _save_raw(data, path)
+
+
+def set_api_key_command(backend: str, command: str | None, path: Path = CONFIG_PATH) -> None:
+    """Persist or clear the API key command for a hosted backend."""
+    key_by_backend = {
+        "openai": "openai_api_key_command",
+        "xai": "xai_api_key_command",
+        "gemini": "gemini_api_key_command",
+    }
+    key = key_by_backend.get(backend)
+    if key is None:
+        return
+    data = _load_raw(path)
+    cleaned = command.strip() if isinstance(command, str) else ""
+    if cleaned:
+        data[key] = cleaned
+    else:
+        data.pop(key, None)
     _save_raw(data, path)
 
 

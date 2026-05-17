@@ -16,10 +16,9 @@ from dictate.runtime_logging import (
     resolve_log_paths,
 )
 from dictate.stt import (
-    NEMO_CANARY_MODELS,
+    GEMINI_MODELS,
     OPENAI_MODELS,
     STT_BACKENDS,
-    WHISPER_CPP_MODELS,
     XAI_MODELS,
     create_speech_to_text,
     resolve_model_name,
@@ -39,11 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Model name override for diagnosis. "
-            "faster-whisper examples: base, turbo, large-v3-turbo. "
-            f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}. "
-            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}. "
+            "local example: turbo. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
-            f"xai examples: {', '.join(XAI_MODELS)}."
+            f"xai examples: {', '.join(XAI_MODELS)}. "
+            f"gemini examples: {', '.join(GEMINI_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -86,6 +84,8 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
         os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
     if args.stt_backend == "xai" and config.xai_api_key_command:
         os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
+    if args.stt_backend == "gemini" and config.gemini_api_key_command:
+        os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
     report = run_preflight(
         require_typing=True,

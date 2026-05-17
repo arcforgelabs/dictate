@@ -5,13 +5,27 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
 
 class AudioCaptureError(RuntimeError):
     """Raised when audio recording fails."""
+
+
+class AudioRecorder(Protocol):
+    """Minimal audio capture contract for injection into Daemon."""
+
+    @property
+    def is_recording(self) -> bool:
+        ...
+
+    def start(self) -> None:
+        ...
+
+    def stop(self) -> np.ndarray:
+        ...
 
 
 class SoundDeviceRecorder:

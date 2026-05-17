@@ -10,8 +10,7 @@ Usage:
     dictate controls          Open Windows-friendly configuration/history controls
     dictate doctor ...        Diagnose environment/runtime setup
     dictate prepare-model ... Prepare/download a model before activation
-    dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
-    dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0
+    dictate --stt-backend faster-whisper
     dictate --type-backend wtype  Force typing backend for daemon mode
     dictate --model large-v3-turbo  Use a different STT model
     dictate --add-hotword X   Save a hotword for improved recognition
@@ -24,7 +23,7 @@ import sys
 import threading
 from typing import Sequence
 
-# Disable HF Xet transport by default to avoid observed hangs on large Canary artifacts.
+# Disable HF Xet transport by default to avoid observed hangs on large model artifacts.
 # Users can override by setting HF_HUB_DISABLE_XET=0 before launch.
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
@@ -53,12 +52,11 @@ from dictate.outputs import (
 from dictate.stt import (
     ComputeDevice,
     ComputeType,
-    NEMO_CANARY_MODELS,
+    GEMINI_MODELS,
     OPENAI_MODELS,
     STT_BACKENDS,
     SpeechToText,
     SttBackend,
-    WHISPER_CPP_MODELS,
     XAI_MODELS,
     create_speech_to_text,
     resolve_model_name,
@@ -107,11 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Model name. "
-            "faster-whisper examples: turbo, large-v3-turbo, large-v3. "
-            f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}. "
-            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}. "
+            "local example: turbo. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
-            f"xai examples: {', '.join(XAI_MODELS)}."
+            f"xai examples: {', '.join(XAI_MODELS)}. "
+            f"gemini examples: {', '.join(GEMINI_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -124,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--compute-type",
         choices=["int8", "float16", "float32"],
         default="int8",
-        help="faster-whisper compute type (ignored by nemo-canary)",
+        help="faster-whisper compute type (ignored by hosted API backends)",
     )
     parser.add_argument(
         "--language",
@@ -315,7 +312,10 @@ def _resolve_startup_stt(
             file=sys.stderr,
         )
     backend: SttBackend = args.stt_backend
-    model_name = _resolve_saved_model_name(backend, args.model)
+    if model_flag:
+        model_name = resolve_model_name(backend, args.model)
+    else:
+        model_name = _resolve_saved_model_name(backend, args.model)
     if not backend_flag and not model_flag and args.model is None:
         print(
             f"Using automatic STT selection: backend='{backend}' model='{model_name}'",
@@ -329,6 +329,8 @@ def _apply_configured_secret_commands(*, config: Config, stt_backend: SttBackend
         os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
     if stt_backend == "xai" and config.xai_api_key_command:
         os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
+    if stt_backend == "gemini" and config.gemini_api_key_command:
+        os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
 
 def _resolve_saved_model_name(backend: SttBackend, configured_model: str | None) -> str:
@@ -339,9 +341,7 @@ def _resolve_saved_model_name(backend: SttBackend, configured_model: str | None)
 
 def _default_model_for_backend(backend: SttBackend) -> str:
     if backend == "faster-whisper":
-        if _cuda_available_for_faster_whisper():
-            return "turbo"
-        return "base"
+        return "turbo"
     return resolve_model_name(backend, None)
 
 
@@ -697,6 +697,7 @@ def _run_once(
 ) -> None:
     from dictate.audio import AudioCaptureError, SoundDeviceRecorder
 
+    engine: DictationEngine | None = None
     try:
         recorder = SoundDeviceRecorder(sample_rate=SAMPLE_RATE)
         engine = DictationEngine(
@@ -714,6 +715,8 @@ def _run_once(
             raise SystemExit(1) from exc
 
         result = engine.transcribe(audio, language=language)
+        if result.notice:
+            print(result.notice, file=sys.stderr)
         if result.status == "empty":
             print("No audio captured", file=sys.stderr)
             raise SystemExit(1)
@@ -738,7 +741,10 @@ def _run_once(
             print("Copied to clipboard", file=sys.stderr)
     finally:
         try:
-            stt.release()
+            if engine is not None:
+                engine.release()
+            else:
+                stt.release()
         except Exception as exc:  # noqa: BLE001
             print(f"Failed to release STT resources: {exc}", file=sys.stderr)
 

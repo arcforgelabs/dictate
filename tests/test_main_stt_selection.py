@@ -41,11 +41,11 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="nemo-canary", stt_model="nvidia/canary-1b-v2"),
+                config=Config(stt_backend="gemini", stt_model="gemini-3-flash-preview"),
             )
 
-        self.assertEqual(backend, "nemo-canary")
-        self.assertEqual(model, "nvidia/canary-1b-v2")
+        self.assertEqual(backend, "gemini")
+        self.assertEqual(model, "gemini-3-flash-preview")
 
     def test_cli_flags_override_saved_selection(self) -> None:
         parser = main_module.build_parser()
@@ -55,7 +55,7 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=["--stt-backend", "faster-whisper", "--model", "small"],
-                config=Config(stt_backend="nemo-canary", stt_model="nvidia/canary-1b-v2"),
+                config=Config(stt_backend="gemini", stt_model="gemini-3-flash-preview"),
             )
 
         self.assertEqual(backend, "faster-whisper")
@@ -74,7 +74,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 )
 
         self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "base")
+        self.assertEqual(model, "turbo")
 
     def test_default_startup_stt_prefers_turbo_when_cuda_is_available(self) -> None:
         parser = main_module.build_parser()
@@ -91,7 +91,7 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(backend, "faster-whisper")
         self.assertEqual(model, "turbo")
 
-    def test_default_startup_stt_prefers_base_when_cuda_is_unavailable(self) -> None:
+    def test_default_startup_stt_uses_single_local_turbo_model_without_cuda(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -104,7 +104,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 )
 
         self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "base")
+        self.assertEqual(model, "turbo")
 
     def test_saved_backend_without_model_uses_auto_recommended_model(self) -> None:
         parser = main_module.build_parser()
@@ -121,7 +121,7 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(backend, "faster-whisper")
         self.assertEqual(model, "turbo")
 
-    def test_whisper_cpp_backend_without_model_uses_local_turbo_default(self) -> None:
+    def test_saved_non_example_model_name_is_preserved(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -129,11 +129,39 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="whisper-cpp"),
+                config=Config(stt_backend="faster-whisper", stt_model="base"),
             )
 
-        self.assertEqual(backend, "whisper-cpp")
-        self.assertEqual(model, "large-v3-turbo-q5_0")
+        self.assertEqual(backend, "faster-whisper")
+        self.assertEqual(model, "base")
+
+    def test_saved_custom_hosted_model_name_is_preserved(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend, model = main_module._resolve_startup_stt(
+                args=args,
+                cli_args=[],
+                config=Config(stt_backend="gemini", stt_model="gemini-future-model"),
+            )
+
+        self.assertEqual(backend, "gemini")
+        self.assertEqual(model, "gemini-future-model")
+
+    def test_gemini_backend_without_model_uses_remote_default(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend, model = main_module._resolve_startup_stt(
+                args=args,
+                cli_args=[],
+                config=Config(stt_backend="gemini"),
+            )
+
+        self.assertEqual(backend, "gemini")
+        self.assertEqual(model, "gemini-3-flash-preview")
 
     def test_openai_backend_without_model_uses_remote_default(self) -> None:
         parser = main_module.build_parser()
@@ -176,6 +204,21 @@ class MainSttSelectionTests(unittest.TestCase):
 
             self.assertEqual(
                 main_module.os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
+                "/usr/bin/printf key",
+            )
+
+    def test_gemini_key_command_from_config_is_applied(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            main_module._apply_configured_secret_commands(
+                config=Config(
+                    stt_backend="gemini",
+                    gemini_api_key_command="/usr/bin/printf key",
+                ),
+                stt_backend="gemini",
+            )
+
+            self.assertEqual(
+                main_module.os.environ.get("DICTATE_GEMINI_API_KEY_COMMAND"),
                 "/usr/bin/printf key",
             )
 
