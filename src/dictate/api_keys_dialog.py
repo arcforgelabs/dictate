@@ -11,6 +11,7 @@ from gi.repository import Gtk
 from dictate.api_keys import (
     API_BACKEND_LABELS,
     ApiKeyStorageError,
+    api_key_status,
     clear_api_key,
     has_stored_api_key,
     save_api_key,
@@ -59,10 +60,17 @@ class ApiKeysDialog(Gtk.Dialog):
             except ApiKeyStorageError as exc:
                 status = f"Could not check stored key status in {store}: {exc}"
             else:
+                readiness = api_key_status(backend)
                 if has_key:
-                    status = f"Stored key exists in {store}. Enter a replacement key or clear it."
+                    status = (
+                        f"Stored key status: {readiness.status}. "
+                        "Enter a replacement key or clear it."
+                    )
                 else:
-                    status = "No stored key. Enter the API key for this backend."
+                    status = (
+                        f"API key status: {readiness.status}. "
+                        "Enter the API key for this backend."
+                    )
         status_label = Gtk.Label(label=status)
         status_label.set_xalign(0.0)
         status_label.set_line_wrap(True)
@@ -108,6 +116,20 @@ class ApiKeysDialog(Gtk.Dialog):
 
 
 def save_stored_key_or_error(parent: Gtk.Window | None, backend: str, api_key: str) -> bool:
+    status = api_key_status(backend, api_key=api_key, validate_remote=True)
+    if not status.ready:
+        dialog = Gtk.MessageDialog(
+            transient_for=parent,
+            flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.CLOSE,
+            text="API key not saved",
+        )
+        label = API_BACKEND_LABELS.get(backend, backend)
+        dialog.format_secondary_text(f"{label} key status: {status.status}")
+        dialog.run()
+        dialog.destroy()
+        return False
     try:
         save_api_key(backend, api_key)
     except ApiKeyStorageError as exc:

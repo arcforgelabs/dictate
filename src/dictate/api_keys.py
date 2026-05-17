@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import ctypes
+import json
+import os
+import re
 import shutil
+import shlex
 import subprocess
 import sys
 from ctypes import wintypes
+from dataclasses import dataclass
+from urllib import error, request
 
 API_BACKENDS: tuple[str, ...] = ("openai", "xai", "gemini")
 API_BACKEND_LABELS: dict[str, str] = {
@@ -18,6 +24,20 @@ API_BACKEND_LABELS: dict[str, str] = {
 
 class ApiKeyStorageError(RuntimeError):
     """Raised when an API key cannot be stored or loaded."""
+
+
+@dataclass(frozen=True, slots=True)
+class ApiKeyStatus:
+    """User-facing hosted API key readiness."""
+
+    backend: str
+    status: str
+    source: str | None = None
+    detail: str | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self.status == "Ready"
 
 
 def save_api_key(backend: str, api_key: str) -> None:
@@ -54,6 +74,76 @@ def clear_api_key(backend: str) -> None:
 def has_stored_api_key(backend: str) -> bool:
     """Return whether the OS secret store has a non-empty key for a backend."""
     return bool(read_api_key(backend))
+
+
+def api_key_status(
+    backend: str,
+    *,
+    api_key: str | None = None,
+    include_command: bool = True,
+    validate_remote: bool = False,
+    timeout: int = 5,
+) -> ApiKeyStatus:
+    """Return Ready, None, or Invalid for a hosted backend API key."""
+    _validate_backend(backend)
+    if api_key is None:
+        try:
+            api_key, source = _configured_api_key(backend, include_command=include_command)
+        except Exception as exc:  # noqa: BLE001
+            _log_api_key_validation_failure(backend, "read", exc)
+            return ApiKeyStatus(backend=backend, status="Invalid", detail="read failed")
+    else:
+        api_key = api_key.strip()
+        source = "entered"
+
+    if not api_key:
+        return ApiKeyStatus(backend=backend, status="None")
+
+    format_error = validate_api_key_format(backend, api_key)
+    if format_error:
+        _log_api_key_validation_failure(backend, "format", format_error)
+        return ApiKeyStatus(
+            backend=backend,
+            status="Invalid",
+            source=source,
+            detail=format_error,
+        )
+
+    if not validate_remote:
+        return ApiKeyStatus(backend=backend, status="Ready", source=source)
+
+    try:
+        _validate_api_key_remote(backend, api_key, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        _log_api_key_validation_failure(backend, "remote", exc)
+        return ApiKeyStatus(backend=backend, status="Invalid", source=source, detail=str(exc))
+    return ApiKeyStatus(backend=backend, status="Ready", source=source)
+
+
+def validate_api_key_format(backend: str, api_key: str) -> str | None:
+    """Return None when an API key has the expected provider-local shape."""
+    _validate_backend(backend)
+    cleaned = api_key.strip()
+    if not cleaned:
+        return "empty API key"
+    if any(ch.isspace() for ch in cleaned):
+        return "API key contains whitespace"
+    if any(ord(ch) < 32 for ch in cleaned):
+        return "API key contains control characters"
+
+    if _custom_base_url_configured(backend):
+        return None
+
+    if backend == "xai":
+        if not re.fullmatch(r"xai-[A-Za-z0-9._-]{16,}", cleaned):
+            return "xAI API keys must start with xai- and contain only token characters"
+    elif backend == "openai":
+        if not re.fullmatch(r"sk-[A-Za-z0-9._-]{16,}", cleaned):
+            return "OpenAI API keys must start with sk- and contain only token characters"
+    elif backend == "gemini":
+        if not re.fullmatch(r"AIza[A-Za-z0-9_-]{20,}", cleaned):
+            return "Gemini API keys must start with AIza and contain only token characters"
+    return None
 
 
 def secret_store_available() -> bool:
@@ -278,6 +368,169 @@ _ERROR_NOT_FOUND = 1168
 def _validate_backend(backend: str) -> None:
     if backend not in API_BACKENDS:
         raise ApiKeyStorageError(f"Unsupported API backend: {backend}")
+
+
+def _configured_api_key(backend: str, *, include_command: bool = True) -> tuple[str | None, str | None]:
+    for env_name in _api_key_env_names(backend):
+        value = os.environ.get(env_name)
+        if value:
+            return (value.strip(), env_name)
+    command_env = f"DICTATE_{backend.upper()}_API_KEY_COMMAND"
+    command = os.environ.get(command_env)
+    if include_command and command:
+        api_key = _api_key_from_command(command, backend=backend)
+        if api_key:
+            return (api_key, command_env)
+    return (read_api_key(backend), "secret-store")
+
+
+def _api_key_env_names(backend: str) -> tuple[str, ...]:
+    if backend == "openai":
+        return ("DICTATE_OPENAI_API_KEY", "OPENAI_API_KEY")
+    if backend == "xai":
+        return ("DICTATE_XAI_API_KEY", "XAI_API_KEY")
+    if backend == "gemini":
+        return ("DICTATE_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+    return ()
+
+
+def _custom_base_url_configured(backend: str) -> bool:
+    env_name = f"DICTATE_{backend.upper()}_BASE_URL"
+    return bool(os.environ.get(env_name))
+
+
+def _api_key_from_command(command: str, *, backend: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            shlex.split(command),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ApiKeyStorageError(f"{API_BACKEND_LABELS[backend]} API key command failed.") from exc
+    output = completed.stdout.strip()
+    if not output:
+        return None
+    return output.splitlines()[0].strip() or None
+
+
+def _validate_api_key_remote(backend: str, api_key: str, *, timeout: int) -> None:
+    if _custom_base_url_configured(backend):
+        return
+    if backend == "xai":
+        base_url = os.environ.get("DICTATE_XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
+        _validate_bearer_key(
+            url=f"{base_url}/api-key",
+            api_key=api_key,
+            timeout=timeout,
+            backend=backend,
+        )
+        return
+    if backend == "openai":
+        base_url = os.environ.get("DICTATE_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip(
+            "/"
+        )
+        _validate_openai_transcription_key(
+            url=f"{base_url}/audio/transcriptions",
+            api_key=api_key,
+            timeout=timeout,
+        )
+        return
+    if backend == "gemini":
+        base_url = os.environ.get(
+            "DICTATE_GEMINI_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta",
+        ).rstrip("/")
+        _read_validation_response(
+            url=f"{base_url}/models",
+            headers={"x-goog-api-key": api_key},
+            timeout=timeout,
+            backend=backend,
+        )
+
+
+def _validate_bearer_key(*, url: str, api_key: str, timeout: int, backend: str) -> None:
+    _read_validation_response(
+        url=url,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=timeout,
+        backend=backend,
+    )
+
+
+def _validate_openai_transcription_key(*, url: str, api_key: str, timeout: int) -> None:
+    boundary = "----dictate-openai-api-key-validation"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="model"\r\n\r\n'
+        "gpt-4o-mini-transcribe\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("utf-8")
+    validation_request = request.Request(
+        url,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with request.urlopen(validation_request, timeout=timeout) as response:
+            response.read()
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code in {400, 422}:
+            return
+        summary = _truncate_validation_detail(detail)
+        raise ApiKeyStorageError(f"HTTP {exc.code}: {summary}") from exc
+    except error.URLError as exc:
+        raise ApiKeyStorageError(str(exc.reason)) from exc
+
+
+def _read_validation_response(
+    *,
+    url: str,
+    headers: dict[str, str],
+    timeout: int,
+    backend: str,
+) -> None:
+    validation_request = request.Request(url, headers=headers, method="GET")
+    try:
+        with request.urlopen(validation_request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        summary = _truncate_validation_detail(detail)
+        raise ApiKeyStorageError(f"HTTP {exc.code}: {summary}") from exc
+    except error.URLError as exc:
+        raise ApiKeyStorageError(str(exc.reason)) from exc
+
+    if backend != "xai":
+        return
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        return
+    for blocked_field in ("api_key_blocked", "api_key_disabled", "team_blocked"):
+        if data.get(blocked_field) is True:
+            raise ApiKeyStorageError(f"xAI reported {blocked_field}=true")
+
+
+def _truncate_validation_detail(detail: str) -> str:
+    cleaned = " ".join(detail.split())
+    if len(cleaned) > 240:
+        return f"{cleaned[:237]}..."
+    return cleaned or "empty response"
+
+
+def _log_api_key_validation_failure(backend: str, phase: str, detail: object) -> None:
+    print(
+        f"Dictate API key validation failed for {backend} during {phase}: {detail}",
+        file=sys.stderr,
+    )
 
 
 def _is_windows() -> bool:

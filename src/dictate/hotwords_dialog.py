@@ -8,7 +8,7 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gdk, Gtk
 
-from dictate.config import add_hotwords, load_config, remove_hotwords
+from dictate.config import add_hotwords, load_config, parse_hotwords_text, remove_hotwords
 
 
 class HotwordsDialog(Gtk.Dialog):
@@ -44,10 +44,11 @@ class HotwordsDialog(Gtk.Dialog):
 
         # --- Add row: entry + button ---
         add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.entry = Gtk.Entry()
-        self.entry.set_placeholder_text("New hotword...")
-        self.entry.set_hexpand(True)
-        self.entry.connect("activate", self._on_add)
+        self.entry = Gtk.TextView()
+        self.entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.entry.set_size_request(-1, 72)
+        self.entry.get_buffer().set_text("")
+        self.entry.set_tooltip_text("Paste comma, semicolon, newline, or bullet-separated terms.")
         add_box.pack_start(self.entry, True, True, 0)
 
         add_btn = Gtk.Button(label="Add")
@@ -87,17 +88,19 @@ class HotwordsDialog(Gtk.Dialog):
 
     def _on_add(self, _widget: Gtk.Widget) -> None:
         """Add hotword(s) from entry field. Supports comma-separated input."""
-        text = self.entry.get_text().strip()
+        buffer = self.entry.get_buffer()
+        start, end = buffer.get_bounds()
+        text = buffer.get_text(start, end, True).strip()
         if not text:
             return
 
-        words = [w.strip() for w in text.split(",") if w.strip()]
+        words = parse_hotwords_text(text)
         added = add_hotwords(words)
 
         for word in added:
             self._add_row(word)
 
-        self.entry.set_text("")
+        buffer.set_text("")
         self.entry.grab_focus()
 
     def _on_remove(self, _widget: Gtk.Widget | None) -> None:

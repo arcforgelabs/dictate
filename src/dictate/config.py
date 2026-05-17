@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -150,6 +151,18 @@ def add_hotwords(words: list[str], path: Path = CONFIG_PATH) -> list[str]:
         data["hotwords"] = existing + added
         _save_raw(data, path)
     return added
+
+
+def parse_hotwords_text(value: str) -> list[str]:
+    """Parse pasted hotwords from comma, semicolon, newline, or bullet-separated text."""
+    parsed: list[str] = []
+    for raw in re.split(r"[,;\n\r]+", value):
+        word = raw.strip()
+        word = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", word).strip()
+        word = " ".join(word.split())
+        if word:
+            parsed.append(word)
+    return parsed
 
 
 def remove_hotwords(words: list[str], path: Path = CONFIG_PATH) -> list[str]:

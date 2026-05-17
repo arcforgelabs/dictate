@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import ast
+import os
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from dictate import platform_paths
+from dictate.config import Config
 from dictate.doctor import _desktop_entry_path
 from dictate.outputs import PynputOutput, detect_session_type, resolve_typing_backend
 
@@ -55,6 +58,28 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertEqual(assignments["DEFAULT_BACKEND"], "faster-whisper")
         self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "turbo")
+
+    def test_windows_controls_apply_configured_key_command(self) -> None:
+        fake_tkinter = types.ModuleType("tkinter")
+        fake_tkinter.messagebox = types.SimpleNamespace()
+        fake_tkinter.ttk = types.SimpleNamespace()
+
+        with (
+            patch.dict("sys.modules", {"tkinter": fake_tkinter}),
+            patch.dict("os.environ", {}, clear=True),
+            patch(
+                "dictate.windows_control.load_config",
+                return_value=Config(xai_api_key_command="/usr/bin/printf key"),
+            ),
+        ):
+            from dictate.windows_control import _apply_api_key_command_from_config
+
+            _apply_api_key_command_from_config("xai")
+
+            self.assertEqual(
+                os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
+                "/usr/bin/printf key",
+            )
 
 
 if __name__ == "__main__":

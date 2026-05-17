@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from dictate.api_keys import API_BACKEND_LABELS, api_key_status
 from dictate.stt.base import (
     ComputeDevice,
     ComputeType,
@@ -154,25 +155,31 @@ def _check_openai(report: BackendReadiness, *, model_name: str) -> None:
         report.warnings.append(
             f"OpenAI STT model '{model_name}' is not one of the built-in examples."
         )
-    if openai_api_key_available():
-        report.notes.append("OpenAI API key configured.")
-    else:
+    status = api_key_status("openai", validate_remote=True)
+    if status.ready:
+        report.notes.append("OpenAI API key ready.")
+    elif not openai_api_key_available():
         report.errors.append(
             "OpenAI backend selected but no API key is configured. "
             "Set DICTATE_OPENAI_API_KEY, OPENAI_API_KEY, or DICTATE_OPENAI_API_KEY_COMMAND."
         )
+    else:
+        report.errors.append(f"OpenAI API key status: {status.status}.")
 
 
 def _check_xai(report: BackendReadiness, *, model_name: str) -> None:
     if model_name not in XAI_MODELS:
         report.warnings.append(f"xAI STT model '{model_name}' is not one of the built-in examples.")
-    if xai_api_key_available():
-        report.notes.append("xAI API key configured.")
-    else:
+    status = api_key_status("xai", validate_remote=True)
+    if status.ready:
+        report.notes.append("xAI API key ready.")
+    elif not xai_api_key_available():
         report.errors.append(
             "xAI backend selected but no API key is configured. "
             "Set DICTATE_XAI_API_KEY, XAI_API_KEY, or DICTATE_XAI_API_KEY_COMMAND."
         )
+    else:
+        report.errors.append(f"xAI API key status: {status.status}.")
 
 
 def _check_gemini(report: BackendReadiness, *, model_name: str) -> None:
@@ -180,14 +187,18 @@ def _check_gemini(report: BackendReadiness, *, model_name: str) -> None:
         report.warnings.append(
             f"Gemini STT model '{model_name}' is not one of the built-in examples."
         )
-    if gemini_api_key_available():
-        report.notes.append("Gemini API key configured.")
-    else:
+    status = api_key_status("gemini", validate_remote=True)
+    if status.ready:
+        report.notes.append("Gemini API key ready.")
+    elif not gemini_api_key_available():
         report.errors.append(
             "Gemini backend selected but no API key is configured. "
             "Set DICTATE_GEMINI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY, "
             "or DICTATE_GEMINI_API_KEY_COMMAND."
         )
+    else:
+        label = API_BACKEND_LABELS["gemini"]
+        report.errors.append(f"{label} API key status: {status.status}.")
 
 
 def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:
@@ -212,7 +223,11 @@ def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: Comput
         report.notes.append(f"CUDA detected: {device_name}")
 
 
-def _check_cuda_with_ctranslate2(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:
+def _check_cuda_with_ctranslate2(
+    report: BackendReadiness,
+    *,
+    requested_device: ComputeDevice,
+) -> None:
     try:
         import ctranslate2
     except Exception:  # noqa: BLE001

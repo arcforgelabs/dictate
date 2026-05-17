@@ -65,6 +65,7 @@ class SttRegistryTests(unittest.TestCase):
         with (
             patch.dict("os.environ", {"OPENAI_API_KEY": "", "DICTATE_OPENAI_API_KEY": ""}),
             patch("dictate.stt.openai_backend.read_api_key", return_value=None),
+            patch("dictate.api_keys.read_api_key", return_value=None),
         ):
             report = check_backend_readiness(
                 backend="openai",
@@ -84,6 +85,7 @@ class SttRegistryTests(unittest.TestCase):
                 },
             ),
             patch("dictate.stt.gemini_backend.read_api_key", return_value=None),
+            patch("dictate.api_keys.read_api_key", return_value=None),
         ):
             report = check_backend_readiness(
                 backend="gemini",
@@ -96,6 +98,7 @@ class SttRegistryTests(unittest.TestCase):
         with (
             patch.dict("os.environ", {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": ""}),
             patch("dictate.stt.xai_backend.read_api_key", return_value=None),
+            patch("dictate.api_keys.read_api_key", return_value=None),
         ):
             report = check_backend_readiness(
                 backend="xai",

@@ -33,7 +33,14 @@ from dictate.model_state import (
     mark_model_failed,
     mark_model_prepared,
 )
-from dictate.api_keys import API_BACKENDS, API_BACKEND_LABELS, ApiKeyStorageError, clear_api_key
+from dictate.api_keys import (
+    API_BACKENDS,
+    API_BACKEND_LABELS,
+    ApiKeyStatus,
+    ApiKeyStorageError,
+    api_key_status,
+    clear_api_key,
+)
 from dictate.stt import BACKEND_REGISTRY, create_speech_to_text
 
 ICON_ACTIVE = "microphone-sensitivity-high-symbolic"
@@ -42,17 +49,9 @@ SWITCH_LOCK_SECONDS = 15
 SWITCH_ABORT_SECONDS = 300
 PREPARE_ABORT_SECONDS = 900
 SWITCH_STATUS_CLEAR_SECONDS = 6
-MODEL_PRESETS: tuple[tuple[str, str, str], ...] = (
-    ("faster-whisper", "turbo", "Local Whisper"),
-    ("openai", "gpt-4o-mini-transcribe", "OpenAI"),
-    ("xai", "grok-speech-to-text", "xAI"),
-    ("gemini", "gemini-3-flash-preview", "Google Gemini"),
-)
-RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
-    ("cuda", "int8", "cuda / int8 (recommended)"),
-    ("cuda", "float16", "cuda / float16"),
-    ("cpu", "int8", "cpu / int8"),
-    ("auto", "int8", "auto / int8"),
+LOCAL_RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
+    ("cpu", "int8", "CPU"),
+    ("cuda", "int8", "GPU"),
 )
 
 
@@ -88,6 +87,26 @@ def _hotwords_available_for_backend(backend: str) -> bool:
 
 def _api_key_available_for_backend(backend: str) -> bool:
     return backend in API_BACKENDS
+
+
+def _api_key_command_configured_for_backend(backend: str) -> bool:
+    command_env = f"DICTATE_{backend.upper()}_API_KEY_COMMAND"
+    if os.environ.get(command_env):
+        return True
+    config = load_config()
+    if backend == "openai":
+        return bool(config.openai_api_key_command)
+    if backend == "xai":
+        return bool(config.xai_api_key_command)
+    if backend == "gemini":
+        return bool(config.gemini_api_key_command)
+    return False
+
+
+def _local_runtime_name(device: str) -> str:
+    if device == "cuda":
+        return "GPU"
+    return "CPU"
 
 
 class TrayIcon:
@@ -140,7 +159,14 @@ class TrayIcon:
         self.toggle_item.connect("toggled", self._on_toggle)
         menu.append(self.toggle_item)
 
-        models_item = Gtk.MenuItem(label="Model")
+        self.model_status_item = Gtk.MenuItem()
+        self.model_status_label = Gtk.Label(label="")
+        self.model_status_label.set_xalign(0.0)
+        self.model_status_item.add(self.model_status_label)
+        self.model_status_item.set_sensitive(False)
+        menu.append(self.model_status_item)
+
+        models_item = Gtk.MenuItem(label="Select Model")
         models_item.set_submenu(self._build_model_submenu())
         menu.append(models_item)
 
@@ -156,20 +182,11 @@ class TrayIcon:
         self.switch_status_item.hide()
         menu.append(self.switch_status_item)
 
-        self.hotwords_item = Gtk.MenuItem(label="Hotwords")
-        self.hotwords_item.set_no_show_all(True)
-        self.hotwords_item.connect("activate", self._on_manage_hotwords)
-        menu.append(self.hotwords_item)
-
-        self.api_key_item = Gtk.MenuItem(label="API Key")
-        self.api_key_item.set_submenu(self._build_api_key_submenu())
-        menu.append(self.api_key_item)
-
         push_to_talk_item = Gtk.MenuItem(label="Hotkeys")
         push_to_talk_item.connect("activate", self._on_push_to_talk)
         menu.append(push_to_talk_item)
 
-        history_item = Gtk.MenuItem(label="History")
+        history_item = Gtk.MenuItem(label="Recent History")
         history_item.connect("activate", self._on_recent_history)
         menu.append(history_item)
 
@@ -181,31 +198,80 @@ class TrayIcon:
 
         menu.show_all()
         self._sync_capability_menu_items()
+        self._update_model_status_label()
         self.indicator.set_menu(menu)
 
     def _build_model_submenu(self) -> Gtk.Menu:
         submenu = Gtk.Menu()
-        active_key = (self._active_backend, self._active_model)
-        preset_keys = {(backend, model) for backend, model, _label in MODEL_PRESETS}
-        if active_key not in preset_keys:
-            active_label = f"Current: {self._active_backend} / {self._active_model}"
-            presets = ((self._active_backend, self._active_model, active_label), *MODEL_PRESETS)
-        else:
-            presets = MODEL_PRESETS
-
         radio_group: Gtk.RadioMenuItem | None = None
-        for backend, model, label in presets:
+        self._model_items.clear()
+        self._profile_items.clear()
+
+        def append_model_item(parent: Gtk.Menu, backend: str, model: str) -> None:
+            nonlocal radio_group
+            if radio_group is None:
+                item = Gtk.RadioMenuItem.new_with_label(None, model)
+                radio_group = item
+            else:
+                item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, model)
+            item.connect("toggled", self._on_model_selected, backend, model)
+            self._model_items[(backend, model)] = item
+            parent.append(item)
+
+        local_item = Gtk.MenuItem(label=f"Local ({_local_runtime_name(self._stt_device)})")
+        local_menu = Gtk.Menu()
+        for model in self._models_for_backend("faster-whisper"):
+            append_model_item(local_menu, "faster-whisper", model)
+        local_menu.append(Gtk.SeparatorMenuItem())
+        self._append_local_runtime_items(local_menu)
+        if _hotwords_available_for_backend("faster-whisper"):
+            local_menu.append(Gtk.SeparatorMenuItem())
+            hotwords_item = Gtk.MenuItem(label="Hotwords")
+            hotwords_item.connect("activate", self._on_manage_hotwords, "faster-whisper")
+            local_menu.append(hotwords_item)
+        local_item.set_submenu(local_menu)
+        submenu.append(local_item)
+
+        for backend in API_BACKENDS:
+            label = API_BACKEND_LABELS.get(backend, backend)
+            status = self._api_key_status_for_backend(backend)
+            provider_item = Gtk.MenuItem(label=f"{label} ({status.status})")
+            provider_menu = Gtk.Menu()
+            for model in self._models_for_backend(backend):
+                append_model_item(provider_menu, backend, model)
+            provider_menu.append(Gtk.SeparatorMenuItem())
+            api_item = Gtk.MenuItem(label=f"API Key: {status.status}")
+            api_item.connect("activate", self._on_api_key, backend)
+            provider_menu.append(api_item)
+            if _hotwords_available_for_backend(backend):
+                hotwords_item = Gtk.MenuItem(label="Hotwords")
+                hotwords_item.connect("activate", self._on_manage_hotwords, backend)
+                provider_menu.append(hotwords_item)
+            provider_item.set_submenu(provider_menu)
+            submenu.append(provider_item)
+
+        self._set_active_model_menu_item(self._active_backend, self._active_model)
+        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
+        return submenu
+
+    def _models_for_backend(self, backend: str) -> tuple[str, ...]:
+        spec = BACKEND_REGISTRY.get(backend)  # type: ignore[arg-type]
+        models = list(spec.model_examples if spec is not None else ())
+        if self._active_backend == backend and self._active_model not in models:
+            models.insert(0, self._active_model)
+        return tuple(models)
+
+    def _append_local_runtime_items(self, submenu: Gtk.Menu) -> None:
+        radio_group: Gtk.RadioMenuItem | None = None
+        for device, compute_type, label in LOCAL_RUNTIME_PROFILES:
             if radio_group is None:
                 item = Gtk.RadioMenuItem.new_with_label(None, label)
                 radio_group = item
             else:
                 item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, label)
-            item.connect("toggled", self._on_model_selected, backend, model)
-            self._model_items[(backend, model)] = item
+            item.connect("toggled", self._on_profile_selected, device, compute_type)
+            self._profile_items[(device, compute_type)] = item
             submenu.append(item)
-
-        self._set_active_model_menu_item(*active_key)
-        return submenu
 
     def _on_installable_model_selected(self, _item, backend: str, model: str) -> None:
         if self._prepare_in_progress:
@@ -216,6 +282,16 @@ class TrayIcon:
         if (backend, model) == (self._active_backend, self._active_model):
             return
 
+        if backend in API_BACKENDS:
+            status = self._api_key_status_for_backend(backend)
+            if not status.ready:
+                label = API_BACKEND_LABELS.get(backend, backend)
+                self._set_switch_status(
+                    f"{label} API key: {status.status}. "
+                    "Add a valid key before selecting this model."
+                )
+                return
+
         self._start_switch(
             backend=backend,
             model=model,
@@ -225,11 +301,11 @@ class TrayIcon:
 
     def _build_runtime_submenu(self) -> Gtk.Menu:
         submenu = Gtk.Menu()
-        profiles = list(RUNTIME_PROFILES)
+        profiles = list(LOCAL_RUNTIME_PROFILES)
         active_key = (self._stt_device, self._stt_compute_type)
         known_profiles = {
             (device, compute_type)
-            for device, compute_type, _label in RUNTIME_PROFILES
+            for device, compute_type, _label in LOCAL_RUNTIME_PROFILES
         }
         if active_key not in known_profiles:
             profiles.insert(
@@ -255,14 +331,6 @@ class TrayIcon:
         self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         return submenu
 
-    def _build_api_key_submenu(self) -> Gtk.Menu:
-        submenu = Gtk.Menu()
-        for backend in API_BACKENDS:
-            item = Gtk.MenuItem(label=API_BACKEND_LABELS.get(backend, backend))
-            item.connect("activate", self._on_api_key, backend)
-            submenu.append(item)
-        return submenu
-
     def _on_toggle(self, item):
         if item.get_active():
             self.daemon.resume()
@@ -271,7 +339,7 @@ class TrayIcon:
             self.daemon.pause()
             self.indicator.set_icon_full(ICON_PAUSED, "Dictate paused")
 
-    def _on_manage_hotwords(self, _item):
+    def _on_manage_hotwords(self, _item, backend: str | None = None):
         from dictate.hotwords_dialog import HotwordsDialog
 
         dialog = HotwordsDialog()
@@ -279,6 +347,7 @@ class TrayIcon:
         dialog.destroy()
 
         # Live-reload: update engine hotwords from saved config
+        del backend
         self.daemon.set_hotwords(load_config().hotwords_for_backend(self._active_backend))
 
     def _on_recent_history(self, _item):
@@ -307,6 +376,7 @@ class TrayIcon:
                         dialog.show_error("Enter an API key before saving.")
                         continue
                     if save_stored_key_or_error(dialog, backend, dialog.api_key):
+                        self._build_menu()
                         if backend == self._active_backend:
                             self._set_switch_status("API key saved.")
                             self._reload_active_api_backend()
@@ -333,6 +403,7 @@ class TrayIcon:
                         self._pending_api_key_clear_switch_id = self._latest_switch_id
                         break
                     if clear_stored_key_or_error(dialog, backend):
+                        self._build_menu()
                         label = API_BACKEND_LABELS.get(backend, backend)
                         self._set_switch_status(f"{label} API key cleared.")
                         break
@@ -382,6 +453,17 @@ class TrayIcon:
         if (backend, model) == (self._active_backend, self._active_model):
             return
 
+        if backend in API_BACKENDS:
+            status = self._api_key_status_for_backend(backend)
+            if not status.ready:
+                label = API_BACKEND_LABELS.get(backend, backend)
+                self._set_active_model_menu_item(self._active_backend, self._active_model)
+                self._set_switch_status(
+                    f"{label} API key: {status.status}. "
+                    "Add a valid key before selecting this model."
+                )
+                return
+
         if self._requires_preparation(
             backend=backend,
             model=model,
@@ -415,27 +497,32 @@ class TrayIcon:
             return
         if self._switch_in_progress:
             return
-        if (device, compute_type) == (self._stt_device, self._stt_compute_type):
+        target_backend = "faster-whisper"
+        target_model = self._active_model if self._active_backend == "faster-whisper" else "turbo"
+        if (
+            self._active_backend == target_backend
+            and (device, compute_type) == (self._stt_device, self._stt_compute_type)
+        ):
             return
 
         if self._requires_preparation(
-            backend=self._active_backend,
-            model=self._active_model,
+            backend=target_backend,
+            model=target_model,
             device=device,
             compute_type=compute_type,
         ):
             self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
             self._start_prepare_for_switch(
-                backend=self._active_backend,
-                model=self._active_model,
+                backend=target_backend,
+                model=target_model,
                 device=device,
                 compute_type=compute_type,
             )
             return
 
         self._start_switch(
-            backend=self._active_backend,
-            model=self._active_model,
+            backend=target_backend,
+            model=target_model,
             device=device,
             compute_type=compute_type,
         )
@@ -730,6 +817,11 @@ class TrayIcon:
         loaded_compute_type = compute_type
         try:
             _apply_api_key_command_from_config(backend)
+            if backend in API_BACKENDS:
+                status = api_key_status(backend, validate_remote=True)
+                if not status.ready:
+                    label = API_BACKEND_LABELS.get(backend, backend)
+                    raise RuntimeError(f"{label} API key status: {status.status}")
             stt = create_speech_to_text(
                 backend=backend,  # type: ignore[arg-type]
                 model=model,
@@ -840,6 +932,7 @@ class TrayIcon:
                 self._set_active_model_menu_item(backend, model)
                 self._set_active_profile_menu_item(device, compute_type)
                 self._sync_capability_menu_items()
+                self._update_model_status_label()
                 self._set_switch_status(f"Switched to {backend} / {model}.")
                 self._complete_pending_api_key_clear(switch_id)
                 GLib.timeout_add_seconds(
@@ -849,7 +942,10 @@ class TrayIcon:
                 )
             else:
                 print(
-                    f"STT switch failed ({backend}/{model} {device}/{compute_type}): {error_message}",
+                    (
+                        f"STT switch failed ({backend}/{model} "
+                        f"{device}/{compute_type}): {error_message}"
+                    ),
                     file=sys.stderr,
                 )
                 mark_model_failed(
@@ -911,7 +1007,8 @@ class TrayIcon:
         self._switch_background_mode = True
         self._set_switch_menu_sensitive(True)
         self._set_switch_status(
-            "Still downloading/loading in background. You can keep using current model or choose another."
+            "Still downloading/loading in background. "
+            "You can keep using current model or choose another."
         )
         return GLib.SOURCE_REMOVE
 
@@ -1002,12 +1099,7 @@ class TrayIcon:
             item.set_sensitive(sensitive)
 
     def _sync_capability_menu_items(self) -> None:
-        if not hasattr(self, "hotwords_item"):
-            return
-        if _hotwords_available_for_backend(self._active_backend):
-            self.hotwords_item.show()
-        else:
-            self.hotwords_item.hide()
+        self._update_model_status_label()
 
     def _complete_pending_api_key_clear(self, switch_id: int) -> None:
         backend = self._pending_api_key_clear_backend
@@ -1031,6 +1123,7 @@ class TrayIcon:
             dialog.destroy()
             return
         label = API_BACKEND_LABELS.get(backend, backend)
+        self._build_menu()
         self._set_switch_status(f"{label} API key cleared.")
 
     def _clear_pending_api_key_clear(self, switch_id: int) -> None:
@@ -1050,6 +1143,27 @@ class TrayIcon:
             device=_device_for_backend(self._active_backend, self._stt_device),
             compute_type=_compute_type_for_backend(self._active_backend, self._stt_compute_type),
         )
+
+    def _api_key_status_for_backend(self, backend: str) -> ApiKeyStatus:
+        if backend not in API_BACKENDS:
+            return ApiKeyStatus(backend=backend, status="None")
+        status = api_key_status(backend, include_command=False)
+        if (
+            _api_key_command_configured_for_backend(backend)
+            and status.source in {None, "secret-store"}
+        ):
+            return ApiKeyStatus(backend=backend, status="Ready", source="api-key-command")
+        return status
+
+    def _update_model_status_label(self) -> None:
+        if not hasattr(self, "model_status_label"):
+            return
+        if self._active_backend == "faster-whisper":
+            label = f"Model: Local / {self._active_model} ({_local_runtime_name(self._stt_device)})"
+        else:
+            provider = API_BACKEND_LABELS.get(self._active_backend, self._active_backend)
+            label = f"Model: {provider} / {self._active_model}"
+        self.model_status_label.set_text(label)
 
     def _set_switch_status(self, message: str | None) -> None:
         if not hasattr(self, "switch_status_item"):

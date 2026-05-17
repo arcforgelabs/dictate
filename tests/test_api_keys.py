@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import subprocess
 import unittest
+import urllib.error
+from contextlib import redirect_stderr
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from dictate import api_keys
@@ -82,6 +85,191 @@ class ApiKeysTests(unittest.TestCase):
     def test_backend_rejects_unknown_provider(self) -> None:
         with self.assertRaises(api_keys.ApiKeyStorageError):
             api_keys.save_api_key("not-a-provider", "secret")
+
+    def test_api_key_status_reports_none_without_configured_key(self) -> None:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("dictate.api_keys.read_api_key", return_value=None),
+        ):
+            status = api_keys.api_key_status("xai")
+
+        self.assertEqual(status.status, "None")
+
+    def test_xai_key_format_requires_xai_prefix(self) -> None:
+        self.assertIsNone(api_keys.validate_api_key_format("xai", "xai-abc1234567890123456"))
+        self.assertIsNotNone(api_keys.validate_api_key_format("xai", "sk-abc1234567890123456"))
+
+    def test_custom_openai_base_url_allows_non_openai_bearer_token(self) -> None:
+        with patch.dict("os.environ", {"DICTATE_OPENAI_BASE_URL": "https://proxy.test/v1"}):
+            self.assertIsNone(api_keys.validate_api_key_format("openai", "proxy-token-123"))
+
+    def test_custom_xai_base_url_allows_non_xai_bearer_token(self) -> None:
+        with patch.dict("os.environ", {"DICTATE_XAI_BASE_URL": "https://proxy.test/v1"}):
+            self.assertIsNone(api_keys.validate_api_key_format("xai", "proxy-token-123"))
+
+    def test_custom_gemini_base_url_allows_non_gemini_bearer_token(self) -> None:
+        with patch.dict("os.environ", {"DICTATE_GEMINI_BASE_URL": "https://proxy.test/v1"}):
+            self.assertIsNone(api_keys.validate_api_key_format("gemini", "proxy-token-123"))
+
+    def test_custom_base_url_skips_provider_remote_validation_endpoint(self) -> None:
+        with (
+            patch.dict("os.environ", {"DICTATE_OPENAI_BASE_URL": "https://proxy.test/v1"}),
+            patch("dictate.api_keys.request.urlopen") as urlopen,
+        ):
+            status = api_keys.api_key_status(
+                "openai",
+                api_key="proxy-token-123",
+                validate_remote=True,
+            )
+
+        self.assertEqual(status.status, "Ready")
+        urlopen.assert_not_called()
+
+    def test_status_can_skip_api_key_commands_for_ui_rendering(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf xai-abc1234567890123456"},
+                clear=True,
+            ),
+            patch("dictate.api_keys.read_api_key", return_value=None),
+            patch("dictate.api_keys.subprocess.run") as run,
+        ):
+            status = api_keys.api_key_status("xai", include_command=False)
+
+        self.assertEqual(status.status, "None")
+        run.assert_not_called()
+
+    def test_empty_api_key_command_falls_back_to_stored_key(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["secret-command"],
+            returncode=0,
+            stderr="",
+            stdout="\n",
+        )
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf ''"},
+                clear=True,
+            ),
+            patch("dictate.api_keys.subprocess.run", return_value=completed),
+            patch("dictate.api_keys.read_api_key", return_value="xai-abc1234567890123456"),
+        ):
+            status = api_keys.api_key_status("xai")
+
+        self.assertEqual(status.status, "Ready")
+        self.assertEqual(status.source, "secret-store")
+
+    def test_openai_remote_validation_uses_transcription_endpoint(self) -> None:
+        captured = {}
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001
+            captured["url"] = request.full_url
+            captured["method"] = request.get_method()
+            captured["headers"] = dict(request.header_items())
+            captured["body"] = request.data
+            raise urllib.error.HTTPError(
+                request.full_url,
+                400,
+                "missing file",
+                hdrs={},
+                fp=BytesIO(b'{"error":"missing file"}'),
+            )
+
+        with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
+            status = api_keys.api_key_status(
+                "openai",
+                api_key="sk-abc1234567890123456",
+                validate_remote=True,
+            )
+
+        self.assertEqual(status.status, "Ready")
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/audio/transcriptions")
+        self.assertEqual(captured["method"], "POST")
+        self.assertIn("Bearer sk-", captured["headers"]["Authorization"])
+        self.assertIn(b'gpt-4o-mini-transcribe', captured["body"])
+
+    def test_xai_status_validates_remote_api_key_endpoint(self) -> None:
+        class FakeResponse:
+            def __enter__(self):  # noqa: ANN204
+                return self
+
+            def __exit__(self, *_exc):  # noqa: ANN002
+                return False
+
+            def read(self) -> bytes:
+                return (
+                    b'{"api_key_blocked": false, '
+                    b'"api_key_disabled": false, '
+                    b'"team_blocked": false}'
+                )
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        key = "xai-abc1234567890123456"
+        with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
+            status = api_keys.api_key_status("xai", api_key=key, validate_remote=True)
+
+        self.assertEqual(status.status, "Ready")
+        self.assertEqual(captured["url"], "https://api.x.ai/v1/api-key")
+        self.assertIn("Bearer xai-", captured["headers"]["Authorization"])
+
+    def test_remote_validation_failure_logs_without_key_value(self) -> None:
+        key = "xai-abc1234567890123456"
+        stderr = StringIO()
+        with (
+            patch(
+                "dictate.api_keys.request.urlopen",
+                side_effect=urllib.error.URLError("offline"),
+            ),
+            redirect_stderr(stderr),
+        ):
+            status = api_keys.api_key_status("xai", api_key=key, validate_remote=True)
+
+        self.assertEqual(status.status, "Invalid")
+        self.assertIn("remote", stderr.getvalue())
+        self.assertNotIn(key, stderr.getvalue())
+
+    def test_status_defaults_to_local_format_check(self) -> None:
+        with patch("dictate.api_keys.request.urlopen") as urlopen:
+            status = api_keys.api_key_status("xai", api_key="xai-abc1234567890123456")
+
+        self.assertEqual(status.status, "Ready")
+        urlopen.assert_not_called()
+
+    def test_gemini_remote_validation_uses_header_not_query(self) -> None:
+        class FakeResponse:
+            def __enter__(self):  # noqa: ANN204
+                return self
+
+            def __exit__(self, *_exc):  # noqa: ANN002
+                return False
+
+            def read(self) -> bytes:
+                return b"{}"
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            return FakeResponse()
+
+        key = "AIzaabcdefghijklmnopqrstuvwxyz"
+        with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
+            status = api_keys.api_key_status("gemini", api_key=key, validate_remote=True)
+
+        self.assertEqual(status.status, "Ready")
+        self.assertEqual(captured["url"], "https://generativelanguage.googleapis.com/v1beta/models")
+        self.assertNotIn(key, captured["url"])
+        self.assertEqual(captured["headers"]["X-goog-api-key"], key)
 
     def test_windows_clear_ignores_missing_credential(self) -> None:
         class FakeAdvapi32:

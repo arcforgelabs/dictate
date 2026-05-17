@@ -8,6 +8,7 @@ from dictate.config import (
     add_hotwords,
     add_lexicon_replacements,
     load_config,
+    parse_hotwords_text,
     remove_lexicon_replacements,
     set_api_key_command,
     set_push_to_talk_combo,
@@ -50,6 +51,14 @@ class ConfigSelectionTests(unittest.TestCase):
 
             config = load_config(path=config_path)
             self.assertEqual(config.push_to_talk_combo, "ctrl+space")
+
+    def test_parse_hotwords_text_accepts_pasted_lists(self) -> None:
+        text = "Arc Forge, OpenBao\n- Pixel Forge\n1. Lab Flow;  3Shape"
+
+        self.assertEqual(
+            parse_hotwords_text(text),
+            ["Arc Forge", "OpenBao", "Pixel Forge", "Lab Flow", "3Shape"],
+        )
 
     def test_load_config_reads_openai_key_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

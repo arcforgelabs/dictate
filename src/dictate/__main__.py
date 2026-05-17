@@ -33,6 +33,7 @@ from dictate.config import (
     add_hotwords,
     add_lexicon_replacements,
     load_config,
+    parse_hotwords_text,
     remove_hotwords,
     remove_lexicon_replacements,
 )
@@ -589,7 +590,7 @@ def _resolve_hotwords(
 
 
 def _parse_csv_words(value: str) -> list[str]:
-    return [word.strip() for word in value.split(",") if word.strip()]
+    return parse_hotwords_text(value)
 
 
 def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
