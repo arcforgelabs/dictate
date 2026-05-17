@@ -17,6 +17,7 @@ HCURSOR = getattr(wintypes, "HCURSOR", wintypes.HANDLE)
 HICON = getattr(wintypes, "HICON", wintypes.HANDLE)
 LPVOID = getattr(wintypes, "LPVOID", ctypes.c_void_p)
 LRESULT = getattr(wintypes, "LRESULT", ctypes.c_ssize_t)
+UINT_PTR = getattr(wintypes, "UINT_PTR", wintypes.WPARAM)
 
 WM_DESTROY = 0x0002
 WM_COMMAND = 0x0111
@@ -121,11 +122,72 @@ class WindowsTrayIcon:
         self._kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
         self._user32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASSW)]
         self._user32.RegisterClassW.restype = wintypes.ATOM
+        self._user32.CreateWindowExW.argtypes = [
+            wintypes.DWORD,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.HWND,
+            wintypes.HMENU,
+            wintypes.HINSTANCE,
+            LPVOID,
+        ]
         self._user32.CreateWindowExW.restype = wintypes.HWND
+        self._user32.DefWindowProcW.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
         self._user32.DefWindowProcW.restype = LRESULT
+        self._user32.LoadImageW.argtypes = [
+            wintypes.HINSTANCE,
+            wintypes.LPCWSTR,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
         self._user32.LoadImageW.restype = HICON
+        self._user32.LoadIconW.argtypes = [wintypes.HINSTANCE, LPVOID]
         self._user32.LoadIconW.restype = HICON
         self._user32.CreatePopupMenu.restype = wintypes.HMENU
+        self._user32.AppendMenuW.argtypes = [
+            wintypes.HMENU,
+            wintypes.UINT,
+            UINT_PTR,
+            wintypes.LPCWSTR,
+        ]
+        self._user32.TrackPopupMenu.argtypes = [
+            wintypes.HMENU,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.HWND,
+            LPVOID,
+        ]
+        self._user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        self._user32.PostMessageW.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        self._user32.DestroyMenu.argtypes = [wintypes.HMENU]
+        self._user32.DestroyWindow.argtypes = [wintypes.HWND]
+        self._user32.GetMessageW.argtypes = [
+            ctypes.POINTER(_MSG),
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.UINT,
+        ]
+        self._user32.TranslateMessage.argtypes = [ctypes.POINTER(_MSG)]
+        self._user32.DispatchMessageW.argtypes = [ctypes.POINTER(_MSG)]
         self._shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(_NOTIFYICONDATAW)]
         self._shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
