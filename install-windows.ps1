@@ -13,7 +13,7 @@ function Test-PythonVersion {
         [string[]]$ArgumentList
     )
 
-    & $Exe @ArgumentList -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" *> $null
+    & $Exe @ArgumentList -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info < (3, 13) else 1)" *> $null
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -36,6 +36,7 @@ function Resolve-Python {
 
     $py = Get-Command py -ErrorAction SilentlyContinue
     if ($py) {
+        $candidates += [pscustomobject]@{ Exe = $py.Source; ArgumentList = @("-3.12") }
         $candidates += [pscustomobject]@{ Exe = $py.Source; ArgumentList = @("-3.11") }
     }
 
@@ -45,7 +46,7 @@ function Resolve-Python {
         }
     }
 
-    throw "Python 3.11+ was not found. Install Python from python.org or winget, then rerun this script."
+    throw "Python 3.11 or 3.12 was not found. Install Python from python.org or winget, then rerun this script."
 }
 
 function Invoke-Checked {
@@ -59,6 +60,33 @@ function Invoke-Checked {
     & $Exe @ArgumentList
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Test-VcRuntime {
+    $system32 = Join-Path $env:WINDIR "System32"
+    $required = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+    foreach ($dll in $required) {
+        if (-not (Test-Path (Join-Path $system32 $dll))) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Ensure-VcRuntime {
+    if (Test-VcRuntime) {
+        Write-Host "==> Microsoft Visual C++ runtime already installed"
+        return
+    }
+
+    $installer = Join-Path $env:TEMP "vc_redist.x64.exe"
+    $url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    Write-Host "==> Installing Microsoft Visual C++ runtime"
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer
+    $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+    if (($process.ExitCode -ne 0) -and ($process.ExitCode -ne 3010)) {
+        throw "Microsoft Visual C++ runtime install failed with exit code $($process.ExitCode)."
     }
 }
 
@@ -200,6 +228,8 @@ $pythonCommand = Resolve-Python
 $venvDir = Join-Path $PSScriptRoot ".venv"
 $scriptsDir = Join-Path $venvDir "Scripts"
 $venvPython = Join-Path $scriptsDir "python.exe"
+
+Ensure-VcRuntime
 
 if ($RecreateVenv -and (Test-Path $venvDir)) {
     Write-Host "==> Removing existing virtual environment: $venvDir"

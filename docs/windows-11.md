@@ -4,7 +4,7 @@ Windows 11 is supported as a separate runtime stream from the Linux tray build.
 
 ## Supported Surface
 
-- Python 3.11 or newer.
+- Python 3.11 or 3.12.
 - One-shot dictation: `dictate --once`.
 - Clipboard output: `dictate --once --copy` through `pyperclip`.
 - Push-to-talk tray app: `dictate --type-backend pynput`.
@@ -30,7 +30,7 @@ From PowerShell in a repo root:
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-That command creates `.venv`, installs Dictate with the Windows dependencies, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds Start Menu shortcuts named `Dictate` and `Dictate Controls`.
+That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds Start Menu shortcuts named `Dictate` and `Dictate Controls`.
 
 Skip model preparation or verification when needed:
 
@@ -51,6 +51,8 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[windows]"
 .\.venv\Scripts\dictate.exe doctor --quick --type-backend pynput
+.\.venv\Scripts\dictate.exe doctor --quick --fix --type-backend pynput
+.\.venv\Scripts\dictate.exe doctor --quick --update-paths --type-backend pynput
 .\.venv\Scripts\dictate.exe doctor --quick --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --type-backend pynput
 ```
 

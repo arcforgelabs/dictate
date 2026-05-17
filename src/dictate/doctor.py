@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
 
-from dictate.config import load_config
+from dictate.config import CONFIG_PATH, load_config
 from dictate.preflight import run_preflight
 from dictate.runtime_logging import (
     FALLBACK_LOG_DIR,
@@ -71,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force model instantiation check (may download model files)",
     )
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply safe local repairs such as creating config/log directories and Windows shortcuts",
+    )
+    parser.add_argument(
+        "--update-paths",
+        action="store_true",
+        help="Print supported update/install commands for this platform",
+    )
     return parser
 
 
@@ -97,6 +109,8 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
         stt_device=args.device,
     )
 
+    if args.fix:
+        _apply_safe_fixes(report)
     _check_runtime_paths(report)
 
     should_check_model_load = args.check_model_load or not args.quick
@@ -108,7 +122,9 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
             device=args.device,
         )
 
-    _print_report(report)
+    fixes = _fix_items(report)
+    updates = _update_paths() if args.update_paths else []
+    _print_report(report, fixes=fixes, updates=updates)
     return 0 if report.ok else 2
 
 
@@ -170,7 +186,165 @@ def _check_model_load(report, *, backend: str, model_name: str, device: str) -> 
                 report.warnings.append(f"Model release failed: {exc}")
 
 
-def _print_report(report) -> None:  # noqa: ANN001
+def _apply_safe_fixes(report) -> None:  # noqa: ANN001
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        report.notes.append(f"Ensured log directory exists: {LOG_DIR}")
+    except Exception as exc:  # noqa: BLE001
+        report.errors.append(f"Could not create log directory {LOG_DIR}: {exc}")
+
+    try:
+        _seed_config_if_missing()
+        report.notes.append(f"Ensured config file exists: {CONFIG_PATH}")
+    except Exception as exc:  # noqa: BLE001
+        report.errors.append(f"Could not seed config file {CONFIG_PATH}: {exc}")
+
+    if sys.platform.startswith("win"):
+        try:
+            _install_windows_shortcuts()
+            report.notes.append("Ensured Windows Start Menu shortcuts exist.")
+        except Exception as exc:  # noqa: BLE001
+            report.errors.append(f"Could not install Windows Start Menu shortcuts: {exc}")
+    else:
+        try:
+            _install_linux_desktop_entry()
+            report.notes.append("Ensured Linux desktop entry exists.")
+        except Exception as exc:  # noqa: BLE001
+            report.errors.append(f"Could not install Linux desktop entry: {exc}")
+
+
+def _seed_config_if_missing() -> None:
+    if CONFIG_PATH.exists():
+        return
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    default_config = Path(__file__).resolve().parents[2] / "config" / "default-config.yaml"
+    if default_config.is_file():
+        shutil.copyfile(default_config, CONFIG_PATH)
+        return
+    CONFIG_PATH.write_text(
+        "push_to_talk_combo: ctrl_r\n"
+        "stt_backend: faster-whisper\n"
+        "stt_model: turbo\n"
+        "stt_device: auto\n"
+        "stt_compute_type: int8\n",
+        encoding="utf-8",
+    )
+
+
+def _install_windows_shortcuts() -> None:
+    scripts_dir = Path(sys.executable).resolve().parent
+    tray_launcher = scripts_dir / "dictate-tray.vbs"
+    controls_launcher = scripts_dir / "dictate-controls.exe"
+    if not tray_launcher.is_file():
+        raise RuntimeError(f"tray launcher not found: {tray_launcher}")
+    if not controls_launcher.is_file():
+        raise RuntimeError(f"controls launcher not found: {controls_launcher}")
+
+    programs_dir = _desktop_entry_path().parent
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
+    script = f"""
+$programsDir = {_ps_quote(programs_dir)}
+New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut((Join-Path $programsDir 'Dictate.lnk'))
+$shortcut.TargetPath = {_ps_quote(tray_launcher)}
+$shortcut.WorkingDirectory = {_ps_quote(scripts_dir.parents[1])}
+$shortcut.Description = 'Start Dictate push-to-talk tray'
+if (Test-Path {_ps_quote(icon_path)}) {{ $shortcut.IconLocation = {_ps_quote(icon_path)} }}
+$shortcut.Save()
+$controls = $shell.CreateShortcut((Join-Path $programsDir 'Dictate Controls.lnk'))
+$controls.TargetPath = {_ps_quote(controls_launcher)}
+$controls.WorkingDirectory = {_ps_quote(scripts_dir.parents[1])}
+$controls.Description = 'Open Dictate configuration and recent history'
+if (Test-Path {_ps_quote(icon_path)}) {{ $controls.IconLocation = {_ps_quote(icon_path)} }}
+$controls.Save()
+"""
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        check=True,
+    )
+
+
+def _ps_quote(value: Path | str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _install_linux_desktop_entry() -> None:
+    desktop_path = _desktop_entry_path()
+    desktop_path.parent.mkdir(parents=True, exist_ok=True)
+    exec_path = shutil.which("dictate") or str(Path.home() / ".local" / "bin" / "dictate")
+    desktop_path.write_text(
+        "[Desktop Entry]\n"
+        "Name=Dictate\n"
+        "Comment=Local voice-to-text with push-to-talk\n"
+        f"Exec={exec_path}\n"
+        "Icon=microphone-sensitivity-high-symbolic\n"
+        "Type=Application\n"
+        "Categories=Utility;Audio;\n"
+        "Keywords=voice;speech;transcription;dictation;asr;whisper;canary;\n",
+        encoding="utf-8",
+    )
+    update_desktop_database = shutil.which("update-desktop-database")
+    if update_desktop_database:
+        subprocess.run(
+            [update_desktop_database, str(desktop_path.parent)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+def _fix_items(report) -> list[str]:  # noqa: ANN001
+    items: list[str] = []
+    for warning in report.warnings:
+        if "Desktop entry not found" in warning:
+            items.append("Run `dictate doctor --fix` to recreate Start Menu/Desktop launchers.")
+        if "Log directory is not writable" in warning or "fallback log directory" in warning:
+            items.append("Run `dictate doctor --fix` to recreate writable log/config directories.")
+        if "CUDA" in warning:
+            items.append("Use Local / CPU in controls, or install a CUDA-enabled CTranslate2 stack.")
+    for error in report.errors:
+        if "faster-whisper package is not importable" in error:
+            if sys.platform.startswith("win"):
+                items.append(
+                    "Install or repair the Microsoft Visual C++ runtime, then rerun `dictate doctor`."
+                )
+            else:
+                items.append("Run `./install.sh` or reinstall Dictate with local STT dependencies.")
+        if "API key" in error:
+            items.append("Open Dictate Controls and save a valid provider API key before selecting it.")
+        if "No microphone" in error or "audio devices" in error:
+            items.append("Set a default microphone in Windows Sound settings or your desktop audio settings.")
+        if "typing backend" in error or "Hotkey backend" in error:
+            items.append("Install the platform typing/hotkey dependency, or use `dictate --once`.")
+    return _dedupe(items)
+
+
+def _update_paths() -> list[str]:
+    if sys.platform.startswith("win"):
+        return [
+            'Hosted install/update: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"',
+            r"Source checkout update: git pull --ff-only; powershell -ExecutionPolicy Bypass -File .\install-windows.ps1",
+            r"Smoke update: powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -NoPrepareTurbo -NoVerify",
+        ]
+    return [
+        "Source checkout update: git pull --ff-only && ./install.sh",
+        "Smoke update: ./install.sh --no-prepare-turbo --no-verify",
+    ]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _print_report(report, *, fixes: list[str] | None = None, updates: list[str] | None = None) -> None:  # noqa: ANN001
     print("dictate doctor report", file=sys.stderr)
     for note in report.notes:
         print(f"[OK] {note}", file=sys.stderr)
@@ -178,6 +352,10 @@ def _print_report(report) -> None:  # noqa: ANN001
         print(f"[WARN] {warning}", file=sys.stderr)
     for error in report.errors:
         print(f"[FAIL] {error}", file=sys.stderr)
+    for fix in fixes or []:
+        print(f"[FIX] {fix}", file=sys.stderr)
+    for update in updates or []:
+        print(f"[UPDATE] {update}", file=sys.stderr)
     if report.ok:
         print("Result: healthy", file=sys.stderr)
     else:

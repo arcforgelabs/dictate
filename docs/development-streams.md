@@ -32,7 +32,7 @@ Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:install
 - `master`: release-ready integration branch for both streams.
 - `linux/*`: Linux-specific work.
 - `windows/*`: Windows-specific work.
-- `release/YYYY.M.D-N`: release stabilization branch when a release needs final fixes.
+- `release/YYYY.M.D`: release stabilization branch when a release needs final fixes.
 
 Keep shared STT, audio, config, history, and CLI behavior on `master` unless the change is explicitly platform-specific.
 
@@ -47,4 +47,4 @@ Recommended project views:
 - `Windows 11 Stream`: filter `platform:windows`.
 - `Packaging`: filter `area:packaging` or `area:installer`.
 
-Milestone names should use the public release version, for example `2026.5.7-1`.
+Milestone names should use the public release version, for example `2026.5.18`.

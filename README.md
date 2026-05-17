@@ -26,7 +26,7 @@ Linux is the primary tray desktop. Windows 11 is supported as a separate headles
 
 - Linux (X11 recommended; Wayland supported depending on typing backend and hotkey support).
 - Windows 11 for headless push-to-talk and one-shot modes.
-- Python >= 3.11.
+- Python 3.11 or 3.12.
 - Microphone/audio: `sounddevice` + a working PortAudio setup.
 - Typing backend (for daemon modes):
   - X11: `xdotool` (recommended)
@@ -72,6 +72,7 @@ powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercon
 ```
 
 This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs Start Menu shortcuts named `Dictate` and `Dictate Controls`. The `Dictate` shortcut starts the Windows tray app. See [Windows 11 support](docs/windows-11.md) for details.
+The Windows installer also verifies the Microsoft Visual C++ runtime needed by the native transcription wheels and installs it when it is missing.
 
 ## Usage
 
@@ -103,6 +104,8 @@ Run diagnostics:
 
 ```bash
 dictate doctor --quick
+dictate doctor --quick --fix
+dictate doctor --quick --update-paths
 dictate doctor --check-model-load
 ```
 
