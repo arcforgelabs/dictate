@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import numpy as np
-from faster_whisper import WhisperModel
 
 from dictate.stt.base import ComputeDevice, ComputeType, SpeechToText, SttCapabilities
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,8 @@ class FasterWhisperSpeechToText(SpeechToText):
     @property
     def model(self) -> WhisperModel:
         if self._model is None:
+            from faster_whisper import WhisperModel
+
             logger.info(
                 "Loading faster-whisper model: %s (%s)",
                 self.model_name,

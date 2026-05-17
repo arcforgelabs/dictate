@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -51,6 +54,37 @@ class SttRegistryTests(unittest.TestCase):
         self.assertEqual(openai.backend_name, "openai")
         self.assertEqual(xai.backend_name, "xai")
         self.assertEqual(gemini.backend_name, "gemini")
+
+    def test_registry_import_does_not_require_faster_whisper_runtime(self) -> None:
+        code = textwrap.dedent(
+            """
+            import builtins
+
+            original_import = builtins.__import__
+
+            def blocked_import(name, *args, **kwargs):
+                if name == "faster_whisper" or name.startswith("faster_whisper."):
+                    raise FileNotFoundError("missing faster-whisper runtime")
+                return original_import(name, *args, **kwargs)
+
+            builtins.__import__ = blocked_import
+
+            from dictate.stt import STT_BACKENDS, create_speech_to_text
+
+            assert "xai" in STT_BACKENDS
+            stt = create_speech_to_text(backend="xai", model="grok-speech-to-text", device="cpu")
+            assert stt.backend_name == "xai"
+            """
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_backend_readiness_returns_metadata(self) -> None:
         report = check_backend_readiness(
