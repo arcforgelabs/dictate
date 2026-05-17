@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
 from dictate.stt.gemini_backend import GeminiSpeechToText, _extract_text, gemini_api_key_available
+
+
+def _print_command(value: str) -> str:
+    python = Path(sys.executable).as_posix()
+    return f'{python} -c "import sys; sys.stdout.write({value!r})"'
 
 
 class _FakeResponse:
@@ -69,7 +76,7 @@ class GeminiBackendTests(unittest.TestCase):
         with (
             patch.dict(
                 os.environ,
-                {"DICTATE_GEMINI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                {"DICTATE_GEMINI_API_KEY_COMMAND": _print_command("command-key")},
                 clear=True,
             ),
             patch("dictate.stt.gemini_backend.read_api_key", return_value=None),

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -12,6 +14,11 @@ from dictate.stt.openai_backend import (
     _extract_text,
     openai_api_key_available,
 )
+
+
+def _print_command(value: str) -> str:
+    python = Path(sys.executable).as_posix()
+    return f'{python} -c "import sys; sys.stdout.write({value!r})"'
 
 
 class _FakeResponse:
@@ -69,7 +76,7 @@ class OpenAIBackendTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                {"DICTATE_OPENAI_API_KEY_COMMAND": _print_command("command-key")},
                 clear=True,
             ),
             patch("dictate.stt.openai_backend.read_api_key", return_value=None),
@@ -80,7 +87,7 @@ class OpenAIBackendTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                {"DICTATE_OPENAI_API_KEY_COMMAND": _print_command("command-key")},
                 clear=True,
             ),
             patch("dictate.api_keys.shutil.which", return_value=None),
@@ -91,7 +98,7 @@ class OpenAIBackendTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                {"DICTATE_OPENAI_API_KEY_COMMAND": _print_command("command-key")},
                 clear=True,
             ),
             patch("dictate.stt.openai_backend.read_api_key", return_value="stored-key"),
