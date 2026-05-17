@@ -409,6 +409,8 @@ def _restart_daemon() -> None:
 $matches = Get-CimInstance Win32_Process |
     Where-Object {
         $_.CommandLine -like '*dictate.exe* --no-tray*' -or
+        $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
+        $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
         $_.CommandLine -like '*dictate-daemon.cmd*'
     }
 foreach ($match in $matches) {

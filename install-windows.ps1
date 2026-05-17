@@ -90,6 +90,14 @@ function Write-LauncherScripts {
     $daemonPath = Join-Path $ScriptsDir "dictate-daemon.cmd"
     $oncePath = Join-Path $ScriptsDir "dictate-once.cmd"
     $controlsPath = Join-Path $ScriptsDir "dictate-controls.cmd"
+    $trayPath = Join-Path $ScriptsDir "dictate-tray.cmd"
+    $trayVbsPath = Join-Path $ScriptsDir "dictate-tray.vbs"
+
+    Set-Content -Path $trayPath -Encoding ASCII -Value @(
+        "@echo off",
+        'set "SCRIPT_DIR=%~dp0"',
+        '"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*'
+    )
 
     Set-Content -Path $daemonPath -Encoding ASCII -Value @(
         "@echo off",
@@ -109,7 +117,18 @@ function Write-LauncherScripts {
         'start "" "%SCRIPT_DIR%dictate-controls.exe" %*'
     )
 
+    Set-Content -Path $trayVbsPath -Encoding ASCII -Value @(
+        'Set shell = CreateObject("WScript.Shell")',
+        'Set fso = CreateObject("Scripting.FileSystemObject")',
+        'scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)',
+        'venvDir = fso.GetParentFolderName(scriptDir)',
+        'shell.CurrentDirectory = fso.GetParentFolderName(venvDir)',
+        'shell.Run """" & scriptDir & "\pythonw.exe"" -m dictate --type-backend pynput", 0, False'
+    )
+
     Write-Host "==> Wrote launchers:"
+    Write-Host "    $trayPath"
+    Write-Host "    $trayVbsPath"
     Write-Host "    $daemonPath"
     Write-Host "    $oncePath"
     Write-Host "    $controlsPath"
@@ -136,7 +155,11 @@ function Install-StartMenuShortcut {
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $TargetPath
     $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = "Start Dictate push-to-talk"
+    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
+    $shortcut.Description = "Start Dictate push-to-talk tray"
+    if (Test-Path $iconPath) {
+        $shortcut.IconLocation = $iconPath
+    }
     $shortcut.Save()
 
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
@@ -192,7 +215,7 @@ Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "$
 
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
-Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-daemon.cmd") -WorkingDirectory $PSScriptRoot
+Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
 Install-ControlsShortcut -TargetPath (Join-Path $scriptsDir "dictate-controls.exe") -WorkingDirectory $PSScriptRoot
 
 if (-not $NoPrepareTurbo) {
@@ -205,7 +228,10 @@ if (-not $NoVerify) {
 
 Write-Host ""
 Write-Host "Dictate is installed."
-Write-Host "Start push-to-talk from the Start Menu shortcut named 'Dictate', or run:"
+Write-Host "Start push-to-talk with a Windows tray icon from the Start Menu shortcut named 'Dictate', or run:"
+Write-Host "  .\.venv\Scripts\dictate-tray.cmd"
+Write-Host ""
+Write-Host "Headless push-to-talk daemon:"
 Write-Host "  .\.venv\Scripts\dictate-daemon.cmd"
 Write-Host ""
 Write-Host "Control panel:"

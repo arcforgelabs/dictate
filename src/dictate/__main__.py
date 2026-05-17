@@ -793,20 +793,26 @@ def _run_tray(
     push_to_talk_combo: str,
 ) -> None:
     from dictate.daemon import Daemon
-    from dictate.tray import TrayIcon
 
     output = _resolve_typing_output_or_exit(type_backend)
-    TrayIcon(
-        Daemon(
-            stt,
-            output=output,
-            language=language,
-            hotwords=hotwords,
-            lexicon_mode=lexicon_mode,
-            lexicon_replacements=lexicon_replacements,
-            push_to_talk_combo=push_to_talk_combo,
-        )
-    ).run()
+    daemon = Daemon(
+        stt,
+        output=output,
+        language=language,
+        hotwords=hotwords,
+        lexicon_mode=lexicon_mode,
+        lexicon_replacements=lexicon_replacements,
+        push_to_talk_combo=push_to_talk_combo,
+    )
+    if sys.platform.startswith("win"):
+        from dictate.windows_tray import WindowsTrayIcon
+
+        WindowsTrayIcon(daemon).run()
+        return
+
+    from dictate.tray import TrayIcon
+
+    TrayIcon(daemon).run()
 
 
 if __name__ == "__main__":

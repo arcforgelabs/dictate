@@ -7,21 +7,30 @@ Windows 11 is supported as a separate runtime stream from the Linux tray build.
 - Python 3.11 or newer.
 - One-shot dictation: `dictate --once`.
 - Clipboard output: `dictate --once --copy` through `pyperclip`.
+- Push-to-talk tray app: `dictate --type-backend pynput`.
 - Headless push-to-talk daemon: `dictate --no-tray --type-backend pynput`.
 - Speech-to-text: `faster-whisper` on CPU or CUDA where the local Python/CUDA stack supports it.
 - Local AMD GPU path: `whisper-cpp` with a Vulkan-enabled `whisper-server.exe` and `ggml-large-v3-turbo-q5_0.bin`.
 
-The Linux GTK/Ayatana tray is not part of the Windows stream. Windows tray packaging should be developed separately so Linux desktop behavior can keep moving without being blocked by Windows shell work.
+The Windows tray uses the native notification area. The Linux GTK/Ayatana tray remains a separate implementation.
 
 ## Install
 
-From PowerShell in the repo root:
+Hosted one-liner from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"
+```
+
+This follows the same broad pattern as OpenClaw's Windows installer script: a public PowerShell bootstrap downloads the current source and runs the platform installer. Dictate is a Python desktop app, so it does not need an npm package for the Windows install path.
+
+From PowerShell in a repo root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-That one command creates `.venv`, installs Dictate with the Windows dependencies, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds a Start Menu shortcut named `Dictate`.
+That command creates `.venv`, installs Dictate with the Windows dependencies, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds Start Menu shortcuts named `Dictate` and `Dictate Controls`.
 
 Skip model preparation or verification when needed:
 
@@ -47,6 +56,12 @@ py -3.11 -m venv .venv
 
 ## Run
 
+Tray push-to-talk:
+
+```powershell
+.\.venv\Scripts\dictate-tray.cmd
+```
+
 Headless push-to-talk:
 
 ```powershell
@@ -66,12 +81,11 @@ One-shot:
 - History: `%LOCALAPPDATA%\dictate\recent-history.json`
 - Logs: `%LOCALAPPDATA%\dictate\logs\`
 - Fallback logs: `%TEMP%\dictate-logs\`
-- Launchers: `.venv\Scripts\dictate-daemon.cmd` and `.venv\Scripts\dictate-once.cmd`
+- Launchers: `.venv\Scripts\dictate-tray.cmd`, `.venv\Scripts\dictate-daemon.cmd`, `.venv\Scripts\dictate-once.cmd`, and `.venv\Scripts\dictate-controls.cmd`
 - Start Menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Dictate.lnk`
 
 ## Known Gaps
 
-- No native Windows tray yet.
 - No signed Windows installer package yet; the repo-local PowerShell installer is the supported path for now.
 - Global hotkey reliability depends on `pynput` permissions and the active desktop/session.
 - NeMo Canary on Windows is not part of the supported baseline.

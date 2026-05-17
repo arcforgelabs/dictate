@@ -81,6 +81,36 @@ class WindowsPlatformTests(unittest.TestCase):
                 "/usr/bin/printf key",
             )
 
+    def test_windows_installer_shortcut_starts_tray_launcher(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
+        self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
+        self.assertIn('"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*', script)
+        self.assertIn(
+            'Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs")',
+            script,
+        )
+
+    def test_hosted_windows_bootstrap_downloads_public_source_archive(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "install.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/heads/master.zip", script)
+        self.assertIn("Invoke-WebRequest -UseBasicParsing", script)
+        self.assertIn("install-windows.ps1", script)
+
+    def test_windows_control_restart_stops_tray_processes(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_control.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("*dictate.exe* --type-backend pynput*", source)
+        self.assertIn("*pythonw.exe* -m dictate --type-backend pynput*", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -65,7 +65,13 @@ Windows 11 install from PowerShell:
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs a Start Menu shortcut named `Dictate`. See [Windows 11 support](docs/windows-11.md) for the supported Windows surface and current gaps.
+Hosted Windows one-liner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"
+```
+
+This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs Start Menu shortcuts named `Dictate` and `Dictate Controls`. The `Dictate` shortcut starts the Windows tray app. See [Windows 11 support](docs/windows-11.md) for details.
 
 ## Usage
 
@@ -241,11 +247,11 @@ push_to_talk_combo: ctrl_l
 In tray mode, a microphone icon appears in the system tray with a right-click menu:
 
 - **Active** — checkbox to pause/resume listening for the hotkey. The icon switches to a muted microphone when paused.
-- **Model** — switch between Local Whisper, OpenAI, xAI, and Gemini live.
+- **Select Model** — switch between Local, OpenAI, xAI, and Gemini live.
 - **Hotwords** — manage saved vocabulary when the selected backend can use it.
 - **API Key** — store or clear OpenAI, xAI, and Gemini keys in the OS secret store.
 - **Hotkeys** — configure the recording shortcut.
-- **History** — copy or paste a previous dictation. History keeps up to 20 entries and paginates the list.
+- **Recent History** — copy or paste a previous dictation. History keeps up to 20 entries and paginates the list.
 - If switching fails, Dictate keeps the previous backend active and shows an error dialog.
 - **Quit** — stops the daemon.
 
@@ -275,7 +281,7 @@ You can also quit from the terminal with `Ctrl+C`.
   - `xdotool` generally will not work for native Wayland apps.
   - Prefer `wtype` (simple) or `ydotool` (may require extra setup/permissions).
   - Global hotkeys can be restricted on some Wayland compositors; if your combo does not fire, try `push_to_talk_combo: ctrl_l` or `push_to_talk_combo: ctrl+space`, use `--once`, or run an X11 session.
-- On Windows 11, use `dictate --no-tray --type-backend pynput` or one-shot mode; the Linux tray is not part of the Windows stream.
+- On Windows 11, the Start Menu shortcut named `Dictate` starts the native tray app. Use `dictate --no-tray --type-backend pynput` only when you explicitly want a headless daemon.
 - If preflight reports missing tools, install them via your distro package manager (e.g. `xdotool`, `xclip`, `wtype`) or install the Windows extra with `pip install -e ".[windows]"`.
 - Dictation uses the system default microphone input device. If your default input is misconfigured, fix it in your OS audio settings.
 - If the app does not launch from GUI, run `dictate doctor --quick` and inspect the reported active log directory.

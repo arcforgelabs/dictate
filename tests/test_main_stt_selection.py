@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sys
+import types
 import unittest
 from unittest.mock import Mock, patch
 
@@ -284,6 +286,40 @@ class MainSttSelectionTests(unittest.TestCase):
                     )
 
         self.assertTrue(stt.released)
+
+    def test_run_tray_uses_native_windows_tray_on_windows(self) -> None:
+        stt = FakeOnceStt()
+        output = Mock()
+        calls = {}
+        fake_windows_tray = types.ModuleType("dictate.windows_tray")
+
+        class FakeWindowsTrayIcon:
+            def __init__(self, daemon) -> None:  # noqa: ANN001
+                calls["daemon"] = daemon
+
+            def run(self) -> None:
+                calls["ran"] = True
+
+        fake_windows_tray.WindowsTrayIcon = FakeWindowsTrayIcon
+
+        with (
+            patch.object(main_module.sys, "platform", "win32"),
+            patch.object(main_module, "_resolve_typing_output_or_exit", return_value=output),
+            patch.dict(sys.modules, {"dictate.windows_tray": fake_windows_tray}),
+        ):
+            main_module._run_tray(
+                stt,
+                type_backend="auto",
+                language=None,
+                hotwords=None,
+                lexicon_mode="native",
+                lexicon_replacements=None,
+                push_to_talk_combo="ctrl_r",
+            )
+
+        self.assertTrue(calls["ran"])
+        self.assertIs(calls["daemon"].output, output)
+        self.assertIs(calls["daemon"].engine.stt, stt)
 
     def test_saved_lexicon_mode_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
