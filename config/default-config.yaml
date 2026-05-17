@@ -31,3 +31,11 @@ push_to_talk_combo: ctrl_r
 stt_backend: faster-whisper
 stt_compute_type: int8
 stt_device: auto
+# To avoid local GPU use, set:
+# stt_backend: openai
+# stt_model: gpt-4o-mini-transcribe
+# openai_api_key_command: /path/to/command/that/prints/the/key
+# Or use xAI Speech to Text:
+# stt_backend: xai
+# stt_model: grok-speech-to-text
+# xai_api_key_command: /path/to/command/that/prints/the/key

@@ -27,11 +27,21 @@ class Config:
     stt_model: str | None = None
     stt_device: str | None = None
     stt_compute_type: str | None = None
+    openai_api_key_command: str | None = None
+    xai_api_key_command: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
         """Hotwords as a single space-separated string for faster-whisper."""
         return " ".join(self.hotwords) if self.hotwords else None
+
+    def hotwords_for_backend(self, backend: str) -> str | None:
+        """Hotwords formatted for the selected backend."""
+        if not self.hotwords:
+            return None
+        if backend == "xai":
+            return "\n".join(self.hotwords)
+        return self.hotwords_str
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
@@ -77,6 +87,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     stt_model = data.get("stt_model")
     stt_device = data.get("stt_device")
     stt_compute_type = data.get("stt_compute_type")
+    openai_api_key_command = data.get("openai_api_key_command")
+    xai_api_key_command = data.get("xai_api_key_command")
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
@@ -85,6 +97,10 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_device = None
     if not isinstance(stt_compute_type, str):
         stt_compute_type = None
+    if not isinstance(openai_api_key_command, str):
+        openai_api_key_command = None
+    if not isinstance(xai_api_key_command, str):
+        xai_api_key_command = None
 
     return Config(
         hotwords=hotwords,
@@ -96,6 +112,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_model=stt_model,
         stt_device=stt_device,
         stt_compute_type=stt_compute_type,
+        openai_api_key_command=openai_api_key_command,
+        xai_api_key_command=xai_api_key_command,
     )
 
 

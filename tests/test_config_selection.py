@@ -34,6 +34,7 @@ class ConfigSelectionTests(unittest.TestCase):
 
             config = load_config(path=config_path)
             self.assertEqual(config.hotwords, ["OpenBao"])
+            self.assertEqual(config.hotwords_for_backend("xai"), "OpenBao")
             self.assertIsNone(config.push_to_talk_combo)
             self.assertIsNone(config.push_to_talk_key)
             self.assertEqual(config.stt_backend, "nemo-canary")
@@ -48,6 +49,22 @@ class ConfigSelectionTests(unittest.TestCase):
 
             config = load_config(path=config_path)
             self.assertEqual(config.push_to_talk_combo, "ctrl+space")
+
+    def test_load_config_reads_openai_key_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text("openai_api_key_command: /usr/bin/printf key\n")
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.openai_api_key_command, "/usr/bin/printf key")
+
+    def test_load_config_reads_xai_key_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text("xai_api_key_command: /usr/bin/printf key\n")
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.xai_api_key_command, "/usr/bin/printf key")
 
     def test_set_push_to_talk_combo_replaces_legacy_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

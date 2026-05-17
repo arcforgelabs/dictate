@@ -10,6 +10,8 @@ Linux is the primary tray desktop. Windows 11 is supported as a separate headles
   - `faster-whisper` (default)
   - `whisper-cpp` (local whisper.cpp server; useful for Vulkan/AMD GPU builds)
   - `nemo-canary` (`nvidia/canary-1b`, `nvidia/canary-1b-flash`, `nvidia/canary-1b-v2`)
+  - `openai` (hosted OpenAI transcription; avoids local GPU use)
+  - `xai` (hosted xAI Speech to Text; avoids local GPU use and supports keyterm biasing)
 - Capability-aware backend contract (`hotwords`, prompt bias, language hint handling) so unsupported options fail soft with clear warnings.
 - Backend-agnostic lexical adaptation modes: `native`, `prompt`, `post`, `hybrid`.
 - Push-to-talk daemon: `Right Ctrl` hold/release to record/transcribe/type.
@@ -112,6 +114,8 @@ Select model/device/compute-type/language:
 dictate --stt-backend faster-whisper --model large-v3-turbo
 dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0
 dictate --stt-backend nemo-canary --model nvidia/canary-1b-flash
+dictate --stt-backend openai --model gpt-4o-mini-transcribe
+dictate --stt-backend xai --model grok-speech-to-text
 dictate --device cpu
 dictate --compute-type float16
 dictate --language en
@@ -119,6 +123,11 @@ dictate --lexicon-mode hybrid
 ```
 
 `--compute-type` affects `faster-whisper` only. For `nemo-canary`, it is ignored.
+For `openai`, `--device` and `--compute-type` are ignored; set `OPENAI_API_KEY` or
+`DICTATE_OPENAI_API_KEY` before launch, or set `openai_api_key_command` in the config file
+to a command that prints the key to stdout.
+For `xai`, `--device` and `--compute-type` are ignored; set `XAI_API_KEY` or
+`DICTATE_XAI_API_KEY` before launch, or set `xai_api_key_command` in the config file.
 
 Prepare/download a heavy model ahead of activation:
 
@@ -139,6 +148,8 @@ dictate --list-lexicon-replacements
 Recommended defaults for low-latency dictation:
 
 - Best balance of accuracy + speed: `nemo-canary` with `nvidia/canary-1b-flash`
+- Best way to avoid local GPU use: `openai` with `gpt-4o-mini-transcribe`
+- Best hosted hotword/keyterm biasing path: `xai` with `grok-speech-to-text`
 - Best local Windows/AMD path: `whisper-cpp` with `large-v3-turbo-q5_0` and a Vulkan-enabled `whisper-server.exe`
 - Best compatibility + hotword biasing: `faster-whisper` with `large-v3-turbo`
 
@@ -153,6 +164,21 @@ dictate --stt-backend nemo-canary --model nvidia/canary-1b-v2 --language en
 
 # Faster-whisper baseline with Whisper Turbo
 dictate --stt-backend faster-whisper --model large-v3-turbo --language en
+
+# Hosted transcription path, useful when local GPU should be reserved for other work
+OPENAI_API_KEY=... dictate --stt-backend openai --model gpt-4o-mini-transcribe --language en
+
+# Hosted xAI path with keyterm biasing from configured hotwords
+XAI_API_KEY=... dictate --stt-backend xai --model grok-speech-to-text --language en
+
+# Desktop autostart can read the key from a local secret-manager helper
+# ~/.config/dictate/config.yaml:
+# stt_backend: openai
+# stt_model: gpt-4o-mini-transcribe
+# openai_api_key_command: /home/samuelrodda/.local/bin/dictate-openai-key
+# stt_backend: xai
+# stt_model: grok-speech-to-text
+# xai_api_key_command: /home/samuelrodda/.local/bin/dictate-xai-key
 
 # Local whisper.cpp path for Windows/AMD Vulkan builds
 dictate --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --language en

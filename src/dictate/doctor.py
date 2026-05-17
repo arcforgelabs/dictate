@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from dictate.config import load_config
 from dictate.preflight import run_preflight
 from dictate.runtime_logging import (
     FALLBACK_LOG_DIR,
@@ -16,8 +17,10 @@ from dictate.runtime_logging import (
 )
 from dictate.stt import (
     NEMO_CANARY_MODELS,
+    OPENAI_MODELS,
     STT_BACKENDS,
     WHISPER_CPP_MODELS,
+    XAI_MODELS,
     create_speech_to_text,
     resolve_model_name,
 )
@@ -38,7 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Model name override for diagnosis. "
             "faster-whisper examples: base, turbo, large-v3-turbo. "
             f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}. "
-            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}."
+            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}. "
+            f"openai examples: {', '.join(OPENAI_MODELS)}. "
+            f"xai examples: {', '.join(XAI_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -76,6 +81,11 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     model_name = resolve_model_name(args.stt_backend, args.model)
+    config = load_config()
+    if args.stt_backend == "openai" and config.openai_api_key_command:
+        os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
+    if args.stt_backend == "xai" and config.xai_api_key_command:
+        os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
 
     report = run_preflight(
         require_typing=True,

@@ -135,6 +135,50 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(backend, "whisper-cpp")
         self.assertEqual(model, "large-v3-turbo-q5_0")
 
+    def test_openai_backend_without_model_uses_remote_default(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend, model = main_module._resolve_startup_stt(
+                args=args,
+                cli_args=[],
+                config=Config(stt_backend="openai"),
+            )
+
+        self.assertEqual(backend, "openai")
+        self.assertEqual(model, "gpt-4o-mini-transcribe")
+
+    def test_openai_key_command_from_config_is_applied(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            main_module._apply_configured_secret_commands(
+                config=Config(
+                    stt_backend="openai",
+                    openai_api_key_command="/usr/bin/printf key",
+                ),
+                stt_backend="openai",
+            )
+
+            self.assertEqual(
+                main_module.os.environ.get("DICTATE_OPENAI_API_KEY_COMMAND"),
+                "/usr/bin/printf key",
+            )
+
+    def test_xai_key_command_from_config_is_applied(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            main_module._apply_configured_secret_commands(
+                config=Config(
+                    stt_backend="xai",
+                    xai_api_key_command="/usr/bin/printf key",
+                ),
+                stt_backend="xai",
+            )
+
+            self.assertEqual(
+                main_module.os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
+                "/usr/bin/printf key",
+            )
+
     def test_saved_runtime_profile_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])

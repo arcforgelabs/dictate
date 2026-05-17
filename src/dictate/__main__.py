@@ -54,10 +54,12 @@ from dictate.stt import (
     ComputeDevice,
     ComputeType,
     NEMO_CANARY_MODELS,
+    OPENAI_MODELS,
     STT_BACKENDS,
     SpeechToText,
     SttBackend,
     WHISPER_CPP_MODELS,
+    XAI_MODELS,
     create_speech_to_text,
     resolve_model_name,
 )
@@ -107,7 +109,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Model name. "
             "faster-whisper examples: turbo, large-v3-turbo, large-v3. "
             f"nemo-canary examples: {', '.join(NEMO_CANARY_MODELS)}. "
-            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}."
+            f"whisper-cpp examples: {', '.join(WHISPER_CPP_MODELS)}. "
+            f"openai examples: {', '.join(OPENAI_MODELS)}. "
+            f"xai examples: {', '.join(XAI_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -208,6 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     config = load_config()
     stt_backend, model_name = _resolve_startup_stt(args=args, cli_args=cli_args, config=config)
+    _apply_configured_secret_commands(config=config, stt_backend=stt_backend)
     stt_device, stt_compute_type = _resolve_startup_runtime(
         args=args,
         cli_args=cli_args,
@@ -317,6 +322,13 @@ def _resolve_startup_stt(
             file=sys.stderr,
         )
     return (backend, model_name)
+
+
+def _apply_configured_secret_commands(*, config: Config, stt_backend: SttBackend) -> None:
+    if stt_backend == "openai" and config.openai_api_key_command:
+        os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
+    if stt_backend == "xai" and config.xai_api_key_command:
+        os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
 
 
 def _resolve_saved_model_name(backend: SttBackend, configured_model: str | None) -> str:
@@ -546,7 +558,8 @@ def _resolve_hotwords(
     words = list(config.hotwords)
     if cli_hotwords:
         words.extend(_parse_csv_words(cli_hotwords))
-    hotwords_str = " ".join(words) if words else None
+    separator = "\n" if stt.backend_name == "xai" else " "
+    hotwords_str = separator.join(words) if words else None
     if not hotwords_str:
         return None
     if lexicon_mode == "native" and not stt.capabilities.supports_hotwords:

@@ -14,16 +14,20 @@ from dictate.stt.base import (
 )
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.nemo_canary_backend import NeMoCanarySpeechToText
+from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
 from dictate.stt.whisper_cpp_backend import (
     WhisperCppSpeechToText,
     resolve_whisper_cpp_server,
     resolve_whisper_cpp_model,
 )
+from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "base",
     "nemo-canary": "nvidia/canary-1b-flash",
     "whisper-cpp": "large-v3-turbo-q5_0",
+    "openai": "gpt-4o-mini-transcribe",
+    "xai": "grok-speech-to-text",
 }
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "tiny",
@@ -47,6 +51,12 @@ WHISPER_CPP_MODELS: tuple[str, ...] = (
     "large-v3-turbo-q5_0",
     "large-v3-turbo-q8_0",
 )
+OPENAI_MODELS: tuple[str, ...] = (
+    "gpt-4o-mini-transcribe",
+    "gpt-4o-transcribe",
+    "whisper-1",
+)
+XAI_MODELS: tuple[str, ...] = ("grok-speech-to-text",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +100,28 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="Local whisper.cpp CLI inference.",
         capabilities=WhisperCppSpeechToText.capabilities,
         builder=lambda model, device, _compute_type: WhisperCppSpeechToText(
+            model_name=model,
+            device=device,
+        ),
+    ),
+    "openai": BackendSpec(
+        backend="openai",
+        default_model=DEFAULT_MODELS["openai"],
+        model_examples=OPENAI_MODELS,
+        description="Hosted OpenAI Audio Transcriptions API.",
+        capabilities=OpenAISpeechToText.capabilities,
+        builder=lambda model, device, _compute_type: OpenAISpeechToText(
+            model_name=model,
+            device=device,
+        ),
+    ),
+    "xai": BackendSpec(
+        backend="xai",
+        default_model=DEFAULT_MODELS["xai"],
+        model_examples=XAI_MODELS,
+        description="Hosted xAI Speech to Text API.",
+        capabilities=XAISpeechToText.capabilities,
+        builder=lambda model, device, _compute_type: XAISpeechToText(
             model_name=model,
             device=device,
         ),
@@ -158,6 +190,12 @@ def check_backend_readiness(
     if backend == "whisper-cpp":
         _check_whisper_cpp(report, model_name=model_name)
 
+    if backend == "openai":
+        _check_openai(report, model_name=model_name)
+
+    if backend == "xai":
+        _check_xai(report, model_name=model_name)
+
     if device == "cpu" and backend == "nemo-canary":
         report.warnings.append(
             "NeMo Canary on CPU is likely too slow for push-to-talk dictation."
@@ -177,6 +215,32 @@ def _check_whisper_cpp(report: BackendReadiness, *, model_name: str) -> None:
         report.notes.append(f"whisper.cpp model: {model_path}")
     else:
         report.errors.append(f"whisper.cpp model not found: {model_path}")
+
+
+def _check_openai(report: BackendReadiness, *, model_name: str) -> None:
+    if model_name not in OPENAI_MODELS:
+        report.warnings.append(
+            f"OpenAI STT model '{model_name}' is not one of the built-in examples."
+        )
+    if openai_api_key_available():
+        report.notes.append("OpenAI API key configured.")
+    else:
+        report.errors.append(
+            "OpenAI backend selected but no API key is configured. "
+            "Set DICTATE_OPENAI_API_KEY, OPENAI_API_KEY, or DICTATE_OPENAI_API_KEY_COMMAND."
+        )
+
+
+def _check_xai(report: BackendReadiness, *, model_name: str) -> None:
+    if model_name not in XAI_MODELS:
+        report.warnings.append(f"xAI STT model '{model_name}' is not one of the built-in examples.")
+    if xai_api_key_available():
+        report.notes.append("xAI API key configured.")
+    else:
+        report.errors.append(
+            "xAI backend selected but no API key is configured. "
+            "Set DICTATE_XAI_API_KEY, XAI_API_KEY, or DICTATE_XAI_API_KEY_COMMAND."
+        )
 
 
 def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:

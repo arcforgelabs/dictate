@@ -279,7 +279,7 @@ class TrayIcon:
         dialog.destroy()
 
         # Live-reload: update engine hotwords from saved config
-        self.daemon.set_hotwords(load_config().hotwords_str)
+        self.daemon.set_hotwords(load_config().hotwords_for_backend(self._active_backend))
 
     def _on_recent_history(self, _item):
         from dictate.history_dialog import RecentHistoryDialog
@@ -771,7 +771,7 @@ class TrayIcon:
                 if loaded_stt is not None:
                     self.daemon.switch_speech_to_text(
                         loaded_stt,  # type: ignore[arg-type]
-                        hotwords=load_config().hotwords_str,
+                        hotwords=load_config().hotwords_for_backend(backend),
                     )
                 set_stt_selection(backend=backend, model=model)
                 set_stt_runtime_profile(device=device, compute_type=compute_type)
