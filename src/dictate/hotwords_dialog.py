@@ -16,7 +16,7 @@ class HotwordsDialog(Gtk.Dialog):
 
     def __init__(self, parent: Gtk.Window | None = None):
         super().__init__(
-            title="Manage Hotwords",
+            title="Hotwords",
             transient_for=parent,
             modal=True,
             destroy_with_parent=True,

@@ -66,10 +66,13 @@ class GeminiBackendTests(unittest.TestCase):
         self.assertTrue(parts[1]["inlineData"]["data"])
 
     def test_api_key_can_come_from_command(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"DICTATE_GEMINI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {"DICTATE_GEMINI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                clear=True,
+            ),
+            patch("dictate.stt.gemini_backend.read_api_key", return_value=None),
         ):
             self.assertTrue(gemini_api_key_available())
 

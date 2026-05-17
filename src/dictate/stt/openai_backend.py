@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from dictate.api_keys import read_api_key
 from dictate.stt.base import ComputeDevice, SpeechToText, SttCapabilities
 
 
@@ -76,6 +77,8 @@ def _api_key() -> str:
     api_key = os.environ.get("DICTATE_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not api_key:
         api_key = _api_key_from_command()
+    if not api_key:
+        api_key = read_api_key("openai")
     if not api_key:
         raise RuntimeError(
             "OpenAI STT backend selected but no API key is configured. "

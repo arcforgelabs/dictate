@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from dictate.api_keys import read_api_key
 from dictate.stt.base import ComputeDevice, SpeechToText, SttCapabilities
 
 
@@ -71,6 +72,8 @@ def _api_key() -> str:
     )
     if not api_key:
         api_key = _api_key_from_command()
+    if not api_key:
+        api_key = read_api_key("gemini")
     if not api_key:
         raise RuntimeError(
             "Gemini STT backend selected but no API key is configured. "

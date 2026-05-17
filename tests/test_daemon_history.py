@@ -44,6 +44,11 @@ class _FakeStt:
         pass
 
 
+class _FakeApiStt(_FakeStt):
+    backend_name = "openai"
+    api_key = "stored-in-memory"
+
+
 class DaemonHistoryTests(unittest.TestCase):
     def _make_daemon(self, tmp_dir: str):
         from dictate.daemon import Daemon
@@ -147,6 +152,20 @@ class DaemonHistoryTests(unittest.TestCase):
 
             np.testing.assert_array_equal(daemon._audio_queue.get_nowait(), first)
             np.testing.assert_array_equal(daemon._audio_queue.get_nowait(), second)
+
+    def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _FakeApiStt()
+            daemon = Daemon(stt, output=output, history_store=store)
+
+            daemon.clear_active_api_key("openai")
+
+            self.assertEqual(stt.api_key, "")
 
 
 if __name__ == "__main__":

@@ -9,11 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from dictate.api_keys import API_BACKENDS, ApiKeyStorageError, has_stored_api_key, save_api_key
 from dictate.config import (
     CONFIG_PATH,
-    Config,
     load_config,
-    set_api_key_command,
     set_push_to_talk_combo,
     set_stt_runtime_profile,
     set_stt_selection,
@@ -63,11 +62,12 @@ class ControlPanel:
         self.device_var = tk.StringVar(value="cpu")
         self.compute_var = tk.StringVar(value="int8")
         self.combo_var = tk.StringVar(value="ctrl_r")
-        self.api_key_command_var = tk.StringVar(value="")
+        self.api_key_var = tk.StringVar(value="")
         self.history_page_var = tk.StringVar(value="")
         self._history_page = 0
         self._history_entries: list[HistoryEntry] = []
         self.model_box: ttk.Combobox | None = None
+        self.api_entry: ttk.Entry | None = None
 
         self._build()
         self.refresh()
@@ -104,11 +104,11 @@ class ControlPanel:
         )
         self.model_box.grid(row=1, column=1, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="API key command").grid(row=0, column=2, sticky="w")
-        api_entry = ttk.Entry(config_frame, textvariable=self.api_key_command_var)
-        api_entry.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        ttk.Label(config_frame, text="API key").grid(row=0, column=2, sticky="w")
+        self.api_entry = ttk.Entry(config_frame, textvariable=self.api_key_var, show="*")
+        self.api_entry.grid(row=1, column=2, sticky="ew", padx=(0, 8))
 
-        ttk.Label(config_frame, text="Push-to-talk").grid(row=0, column=3, sticky="w")
+        ttk.Label(config_frame, text="Hotkeys").grid(row=0, column=3, sticky="w")
         combo_entry = ttk.Entry(config_frame, textvariable=self.combo_var)
         combo_entry.grid(row=1, column=3, sticky="ew")
 
@@ -144,7 +144,7 @@ class ControlPanel:
             command=self.save_and_restart,
         ).pack(side=tk.LEFT)
 
-        history_frame = ttk.LabelFrame(outer, text="Recent History", padding=10)
+        history_frame = ttk.LabelFrame(outer, text="History", padding=10)
         history_frame.grid(row=2, column=0, sticky="nsew")
         history_frame.columnconfigure(0, weight=1)
         history_frame.rowconfigure(0, weight=1)
@@ -191,21 +191,22 @@ class ControlPanel:
         self.compute_var.set(
             config.stt_compute_type if config.stt_compute_type in COMPUTE_CHOICES else "int8"
         )
-        self.api_key_command_var.set(_api_key_command_for_config(config, backend) or "")
+        self.api_key_var.set("")
         combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
+        self._sync_api_key_field()
+        key_status = "stored" if _has_api_key(backend) else "not stored"
         self.status_var.set(
             f"Config: {CONFIG_PATH}\nHistory: {HISTORY_PATH}\n"
+            f"API key for {backend}: {key_status}\n"
             "Changes apply after restart. Use Save & Restart Dictate to apply immediately."
         )
         self.refresh_history()
 
     def _on_backend_changed(self) -> None:
         self._sync_model_choices()
-        config = load_config()
-        self.api_key_command_var.set(
-            _api_key_command_for_config(config, self.backend_var.get()) or ""
-        )
+        self.api_key_var.set("")
+        self._sync_api_key_field()
 
     def _sync_model_choices(self) -> None:
         backend = self.backend_var.get()
@@ -214,6 +215,12 @@ class ControlPanel:
             self.model_box.configure(values=choices)
         if self.model_var.get() not in choices:
             self.model_var.set(DEFAULT_MODELS.get(backend, choices[0]))
+
+    def _sync_api_key_field(self) -> None:
+        if self.api_entry is None:
+            return
+        state = tk.NORMAL if self.backend_var.get() in API_BACKENDS else tk.DISABLED
+        self.api_entry.configure(state=state)
 
     def refresh_history(self) -> None:
         self._history_entries = HistoryStore().load()
@@ -285,17 +292,24 @@ class ControlPanel:
         try:
             normalized_combo = normalize_push_to_talk_combo(combo)
         except HotkeyParseError as exc:
-            messagebox.showerror("Invalid Push-to-Talk", str(exc))
+            messagebox.showerror("Invalid Hotkey", str(exc))
             return False
 
+        api_key = self.api_key_var.get().strip()
+        if backend in API_BACKENDS and api_key:
+            try:
+                save_api_key(backend, api_key)
+            except ApiKeyStorageError as exc:
+                messagebox.showerror("API Key Not Saved", str(exc))
+                return False
+            self.api_key_var.set("")
         set_stt_selection(backend, model)
         set_stt_runtime_profile(device, compute_type)
-        set_api_key_command(backend, self.api_key_command_var.get())
         set_push_to_talk_combo(normalized_combo)
         self.combo_var.set(normalized_combo)
         messagebox.showinfo(
             "Saved",
-            f"Saved configuration.\nPush-to-talk: {format_hotkey_combo(normalized_combo)}",
+            f"Saved configuration.\nHotkey: {format_hotkey_combo(normalized_combo)}",
         )
         return True
 
@@ -325,14 +339,13 @@ def _format_timestamp(iso_str: str) -> str:
         return iso_str
 
 
-def _api_key_command_for_config(config: Config, backend: str) -> str | None:
-    if backend == "openai":
-        return config.openai_api_key_command
-    if backend == "xai":
-        return config.xai_api_key_command
-    if backend == "gemini":
-        return config.gemini_api_key_command
-    return None
+def _has_api_key(backend: str) -> bool:
+    if backend not in API_BACKENDS:
+        return False
+    try:
+        return has_stored_api_key(backend)
+    except ApiKeyStorageError:
+        return False
 
 
 def _restart_daemon() -> None:

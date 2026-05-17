@@ -114,13 +114,11 @@ dictate --lexicon-mode hybrid
 ```
 
 `--compute-type` affects `faster-whisper` only. Hosted API backends ignore local device and compute settings.
-For `openai`, `--device` and `--compute-type` are ignored; set `OPENAI_API_KEY` or
-`DICTATE_OPENAI_API_KEY` before launch, or set `openai_api_key_command` in the config file
-to a command that prints the key to stdout.
-For `xai`, `--device` and `--compute-type` are ignored; set `XAI_API_KEY` or
-`DICTATE_XAI_API_KEY` before launch, or set `xai_api_key_command` in the config file.
-For `gemini`, set `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `DICTATE_GEMINI_API_KEY` before
-launch, or set `gemini_api_key_command` in the config file.
+For hosted backends, use the tray **API Key** provider menu or Windows controls to store keys in the OS secret store
+(Secret Service/libsecret on Linux, Windows Credential Manager on Windows). Dictate never writes raw API keys
+to `config.yaml`. Environment variables such as `DICTATE_OPENAI_API_KEY`, `DICTATE_XAI_API_KEY`, and
+`DICTATE_GEMINI_API_KEY` still take priority, and advanced users can keep using `*_api_key_command` config
+entries that call their own secret manager.
 
 Manage lexical post-corrections:
 
@@ -154,8 +152,8 @@ XAI_API_KEY=... dictate --stt-backend xai --model grok-speech-to-text --language
 # Hosted Gemini path using Gemini audio understanding
 GEMINI_API_KEY=... dictate --stt-backend gemini --model gemini-3-flash-preview --language en
 
-# Desktop autostart can read the key from a local secret-manager helper
-# ~/.config/dictate/config.yaml:
+# Desktop autostart can use keys stored from the tray API Key provider menu.
+# Advanced external secret-manager helpers are still supported:
 # stt_backend: openai
 # stt_model: gpt-4o-mini-transcribe
 # openai_api_key_command: /home/samuelrodda/.local/bin/dictate-openai-key
@@ -242,9 +240,12 @@ push_to_talk_combo: ctrl_l
 
 In tray mode, a microphone icon appears in the system tray with a right-click menu:
 
-- **Dictation active** — checkbox to pause/resume listening for the hotkey. The icon switches to a muted microphone when paused.
-- **Transcription Backend** — switch between Local Whisper, OpenAI, xAI, and Gemini live.
-- **Recent History** — copy or paste a previous dictation. History keeps up to 20 entries and paginates the list.
+- **Active** — checkbox to pause/resume listening for the hotkey. The icon switches to a muted microphone when paused.
+- **Model** — switch between Local Whisper, OpenAI, xAI, and Gemini live.
+- **Hotwords** — manage saved vocabulary when the selected backend can use it.
+- **API Key** — store or clear OpenAI, xAI, and Gemini keys in the OS secret store.
+- **Hotkeys** — configure the recording shortcut.
+- **History** — copy or paste a previous dictation. History keeps up to 20 entries and paginates the list.
 - If switching fails, Dictate keeps the previous backend active and shows an error dialog.
 - **Quit** — stops the daemon.
 

@@ -27,7 +27,7 @@ class RecentHistoryDialog(Gtk.Dialog):
         output: TextOutput | None = None,
     ):
         super().__init__(
-            title="Recent History",
+            title="History",
             transient_for=parent,
             modal=True,
             destroy_with_parent=True,

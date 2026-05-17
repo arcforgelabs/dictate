@@ -65,10 +65,13 @@ class XAIBackendTests(unittest.TestCase):
         self.assertIn(b"OpenBao", body)
 
     def test_api_key_can_come_from_command(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
-            clear=True,
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                clear=True,
+            ),
+            patch("dictate.stt.xai_backend.read_api_key", return_value=None),
         ):
             self.assertTrue(xai_api_key_available())
 

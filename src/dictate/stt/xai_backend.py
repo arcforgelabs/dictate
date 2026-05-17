@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from dictate.api_keys import read_api_key
 from dictate.stt.base import ComputeDevice, SpeechToText, SttCapabilities
 
 
@@ -73,6 +74,8 @@ def _api_key() -> str:
     api_key = os.environ.get("DICTATE_XAI_API_KEY") or os.environ.get("XAI_API_KEY")
     if not api_key:
         api_key = _api_key_from_command()
+    if not api_key:
+        api_key = read_api_key("xai")
     if not api_key:
         raise RuntimeError(
             "xAI STT backend selected but no API key is configured. "

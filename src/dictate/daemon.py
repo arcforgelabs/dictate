@@ -78,6 +78,13 @@ class Daemon:
         with self._engine_lock:
             self.engine.set_hotwords(hotwords)
 
+    def clear_active_api_key(self, backend: str) -> None:
+        """Remove a hosted backend key from the currently loaded STT object."""
+        with self._engine_lock:
+            stt = self.engine.stt
+            if stt.backend_name == backend and hasattr(stt, "api_key"):
+                setattr(stt, "api_key", "")
+
     def set_push_to_talk_combo(self, combo: str) -> None:
         """Update push-to-talk combo without restarting daemon."""
         self.push_to_talk_combo = normalize_push_to_talk_combo(combo)

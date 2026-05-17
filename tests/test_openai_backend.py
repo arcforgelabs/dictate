@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from dictate.stt.openai_backend import OpenAISpeechToText, _extract_text, openai_api_key_available
+from dictate.stt.openai_backend import (
+    OpenAISpeechToText,
+    _api_key,
+    _extract_text,
+    openai_api_key_available,
+)
 
 
 class _FakeResponse:
@@ -61,12 +66,37 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn(b"Use Arc Forge terms.", body)
 
     def test_api_key_can_come_from_command(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
-            clear=True,
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                clear=True,
+            ),
+            patch("dictate.stt.openai_backend.read_api_key", return_value=None),
         ):
             self.assertTrue(openai_api_key_available())
+
+    def test_api_key_command_still_works_without_secret_tool(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                clear=True,
+            ),
+            patch("dictate.api_keys.shutil.which", return_value=None),
+        ):
+            self.assertTrue(openai_api_key_available())
+
+    def test_api_key_command_takes_precedence_over_os_stored_key(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_OPENAI_API_KEY_COMMAND": "/usr/bin/printf command-key"},
+                clear=True,
+            ),
+            patch("dictate.stt.openai_backend.read_api_key", return_value="stored-key"),
+        ):
+            self.assertEqual(_api_key(), "command-key")
 
 
 if __name__ == "__main__":

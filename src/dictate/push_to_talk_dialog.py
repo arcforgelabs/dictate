@@ -32,7 +32,7 @@ class PushToTalkDialog(Gtk.Dialog):
 
     def __init__(self, current_combo: str, parent: Gtk.Window | None = None):
         super().__init__(
-            title="Push-to-Talk Settings",
+            title="Hotkeys",
             transient_for=parent,
             modal=True,
             destroy_with_parent=True,

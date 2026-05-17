@@ -15,7 +15,12 @@ gi.require_version("AyatanaAppIndicator3", "0.1")
 
 from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 
-from dictate.config import load_config, set_push_to_talk_combo, set_stt_runtime_profile, set_stt_selection
+from dictate.config import (
+    load_config,
+    set_push_to_talk_combo,
+    set_stt_runtime_profile,
+    set_stt_selection,
+)
 from dictate.daemon import Daemon
 from dictate.hotkey import format_hotkey_combo
 from dictate.hotkey_backend import (
@@ -28,7 +33,8 @@ from dictate.model_state import (
     mark_model_failed,
     mark_model_prepared,
 )
-from dictate.stt import create_speech_to_text
+from dictate.api_keys import API_BACKENDS, API_BACKEND_LABELS, ApiKeyStorageError, clear_api_key
+from dictate.stt import BACKEND_REGISTRY, create_speech_to_text
 
 ICON_ACTIVE = "microphone-sensitivity-high-symbolic"
 ICON_PAUSED = "microphone-disabled-symbolic"
@@ -73,6 +79,17 @@ def _apply_api_key_command_from_config(backend: str) -> None:
         os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
 
+def _hotwords_available_for_backend(backend: str) -> bool:
+    spec = BACKEND_REGISTRY.get(backend)  # type: ignore[arg-type]
+    if spec is None:
+        return False
+    return spec.capabilities.supports_hotwords or spec.capabilities.supports_prompt_bias
+
+
+def _api_key_available_for_backend(backend: str) -> bool:
+    return backend in API_BACKENDS
+
+
 class TrayIcon:
     def __init__(self, daemon: Daemon):
         self.daemon = daemon
@@ -94,6 +111,8 @@ class TrayIcon:
         self._prepare_target_compute_type = ""
         self._prepare_process: subprocess.Popen[str] | None = None
         self._pending_switch_after_prepare: tuple[str, str, str, str] | None = None
+        self._pending_api_key_clear_backend: str | None = None
+        self._pending_api_key_clear_switch_id = 0
         self._syncing_model_menu = False
         self._syncing_profile_menu = False
         self._model_items: dict[tuple[str, str], Gtk.RadioMenuItem] = {}
@@ -116,12 +135,12 @@ class TrayIcon:
     def _build_menu(self):
         menu = Gtk.Menu()
 
-        self.toggle_item = Gtk.CheckMenuItem(label="Dictation active")
+        self.toggle_item = Gtk.CheckMenuItem(label="Active")
         self.toggle_item.set_active(True)
         self.toggle_item.connect("toggled", self._on_toggle)
         menu.append(self.toggle_item)
 
-        models_item = Gtk.MenuItem(label="Transcription Backend")
+        models_item = Gtk.MenuItem(label="Model")
         models_item.set_submenu(self._build_model_submenu())
         menu.append(models_item)
 
@@ -137,15 +156,20 @@ class TrayIcon:
         self.switch_status_item.hide()
         menu.append(self.switch_status_item)
 
-        hotwords_item = Gtk.MenuItem(label="Manage Hotwords...")
-        hotwords_item.connect("activate", self._on_manage_hotwords)
-        menu.append(hotwords_item)
+        self.hotwords_item = Gtk.MenuItem(label="Hotwords")
+        self.hotwords_item.set_no_show_all(True)
+        self.hotwords_item.connect("activate", self._on_manage_hotwords)
+        menu.append(self.hotwords_item)
 
-        push_to_talk_item = Gtk.MenuItem(label="Push-to-Talk...")
+        self.api_key_item = Gtk.MenuItem(label="API Key")
+        self.api_key_item.set_submenu(self._build_api_key_submenu())
+        menu.append(self.api_key_item)
+
+        push_to_talk_item = Gtk.MenuItem(label="Hotkeys")
         push_to_talk_item.connect("activate", self._on_push_to_talk)
         menu.append(push_to_talk_item)
 
-        history_item = Gtk.MenuItem(label="Recent History...")
+        history_item = Gtk.MenuItem(label="History")
         history_item.connect("activate", self._on_recent_history)
         menu.append(history_item)
 
@@ -156,6 +180,7 @@ class TrayIcon:
         menu.append(quit_item)
 
         menu.show_all()
+        self._sync_capability_menu_items()
         self.indicator.set_menu(menu)
 
     def _build_model_submenu(self) -> Gtk.Menu:
@@ -230,6 +255,14 @@ class TrayIcon:
         self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         return submenu
 
+    def _build_api_key_submenu(self) -> Gtk.Menu:
+        submenu = Gtk.Menu()
+        for backend in API_BACKENDS:
+            item = Gtk.MenuItem(label=API_BACKEND_LABELS.get(backend, backend))
+            item.connect("activate", self._on_api_key, backend)
+            submenu.append(item)
+        return submenu
+
     def _on_toggle(self, item):
         if item.get_active():
             self.daemon.resume()
@@ -255,6 +288,59 @@ class TrayIcon:
         dialog.run()
         dialog.destroy()
 
+    def _on_api_key(self, _item, backend: str):
+        from dictate.api_keys_dialog import (
+            ApiKeysDialog,
+            clear_stored_key_or_error,
+            save_stored_key_or_error,
+        )
+
+        if not _api_key_available_for_backend(backend):
+            return
+
+        dialog = ApiKeysDialog(backend=backend)
+        try:
+            while True:
+                response = dialog.run()
+                if response == Gtk.ResponseType.OK:
+                    if not dialog.api_key:
+                        dialog.show_error("Enter an API key before saving.")
+                        continue
+                    if save_stored_key_or_error(dialog, backend, dialog.api_key):
+                        if backend == self._active_backend:
+                            self._set_switch_status("API key saved.")
+                            self._reload_active_api_backend()
+                        else:
+                            label = API_BACKEND_LABELS.get(backend, backend)
+                            self._set_switch_status(f"{label} API key saved.")
+                        break
+                    continue
+                if response == ApiKeysDialog.CLEAR_RESPONSE:
+                    if backend == self._active_backend:
+                        self._set_switch_status(
+                            "Switching to Local Whisper before clearing API key."
+                        )
+                        self._start_switch(
+                            backend="faster-whisper",
+                            model="turbo",
+                            device=_device_for_backend("faster-whisper", self._stt_device),
+                            compute_type=_compute_type_for_backend(
+                                "faster-whisper",
+                                self._stt_compute_type,
+                            ),
+                        )
+                        self._pending_api_key_clear_backend = backend
+                        self._pending_api_key_clear_switch_id = self._latest_switch_id
+                        break
+                    if clear_stored_key_or_error(dialog, backend):
+                        label = API_BACKEND_LABELS.get(backend, backend)
+                        self._set_switch_status(f"{label} API key cleared.")
+                        break
+                    continue
+                break
+        finally:
+            dialog.destroy()
+
     def _on_push_to_talk(self, _item):
         from dictate.push_to_talk_dialog import PushToTalkDialog
 
@@ -265,7 +351,7 @@ class TrayIcon:
                 authorized, error = request_portal_shortcut_authorization(dialog.result_combo)
                 if not authorized:
                     self._set_switch_status(
-                        f"Push-to-talk not authorized by GNOME: {error}"
+                        f"Hotkey not authorized by GNOME: {error}"
                     )
                     dialog.destroy()
                     return
@@ -274,11 +360,11 @@ class TrayIcon:
                 self.daemon.set_push_to_talk_combo(dialog.result_combo)
             except HotkeyBackendUnavailableError as exc:
                 self._set_switch_status(
-                    f"Push-to-talk saved but not active yet: {exc}"
+                    f"Hotkey saved but not active yet: {exc}"
                 )
             else:
                 self._set_switch_status(
-                    f"Push-to-talk updated: {format_hotkey_combo(dialog.result_combo)}"
+                    f"Hotkey updated: {format_hotkey_combo(dialog.result_combo)}"
                 )
         dialog.destroy()
 
@@ -753,7 +839,9 @@ class TrayIcon:
                 )
                 self._set_active_model_menu_item(backend, model)
                 self._set_active_profile_menu_item(device, compute_type)
+                self._sync_capability_menu_items()
                 self._set_switch_status(f"Switched to {backend} / {model}.")
+                self._complete_pending_api_key_clear(switch_id)
                 GLib.timeout_add_seconds(
                     SWITCH_STATUS_CLEAR_SECONDS,
                     self._clear_status_for_switch_id,
@@ -773,6 +861,7 @@ class TrayIcon:
                 )
                 self._set_active_model_menu_item(self._active_backend, self._active_model)
                 self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
+                self._clear_pending_api_key_clear(switch_id)
                 self._set_switch_status("Switch failed. Keeping previous model.")
                 GLib.timeout_add_seconds(
                     SWITCH_STATUS_CLEAR_SECONDS,
@@ -859,6 +948,7 @@ class TrayIcon:
         self._latest_switch_id = self._switch_counter
         self._switch_in_progress = False
         self._switch_background_mode = False
+        self._clear_pending_api_key_clear(switch_id)
         self._set_switch_menu_sensitive(True)
         self._set_active_model_menu_item(self._active_backend, self._active_model)
         self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
@@ -910,6 +1000,56 @@ class TrayIcon:
             item.set_sensitive(sensitive)
         for item in self._profile_items.values():
             item.set_sensitive(sensitive)
+
+    def _sync_capability_menu_items(self) -> None:
+        if not hasattr(self, "hotwords_item"):
+            return
+        if _hotwords_available_for_backend(self._active_backend):
+            self.hotwords_item.show()
+        else:
+            self.hotwords_item.hide()
+
+    def _complete_pending_api_key_clear(self, switch_id: int) -> None:
+        backend = self._pending_api_key_clear_backend
+        if backend is None or switch_id != self._pending_api_key_clear_switch_id:
+            return
+        self._clear_pending_api_key_clear(switch_id)
+        try:
+            clear_api_key(backend)
+        except ApiKeyStorageError as exc:
+            label = API_BACKEND_LABELS.get(backend, backend)
+            self._set_switch_status(f"Local Whisper active; {label} API key not cleared.")
+            dialog = Gtk.MessageDialog(
+                transient_for=None,
+                flags=0,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text=f"{label} API key not cleared",
+            )
+            dialog.format_secondary_text(str(exc))
+            dialog.run()
+            dialog.destroy()
+            return
+        label = API_BACKEND_LABELS.get(backend, backend)
+        self._set_switch_status(f"{label} API key cleared.")
+
+    def _clear_pending_api_key_clear(self, switch_id: int) -> None:
+        if switch_id != self._pending_api_key_clear_switch_id:
+            return
+        self._pending_api_key_clear_backend = None
+        self._pending_api_key_clear_switch_id = 0
+
+    def _reload_active_api_backend(self) -> None:
+        if self._switch_in_progress or self._prepare_in_progress:
+            return
+        if not _api_key_available_for_backend(self._active_backend):
+            return
+        self._start_switch(
+            backend=self._active_backend,
+            model=self._active_model,
+            device=_device_for_backend(self._active_backend, self._stt_device),
+            compute_type=_compute_type_for_backend(self._active_backend, self._stt_compute_type),
+        )
 
     def _set_switch_status(self, message: str | None) -> None:
         if not hasattr(self, "switch_status_item"):
@@ -1050,7 +1190,7 @@ class TrayIcon:
             self.daemon.start()
         except HotkeyBackendUnavailableError as exc:
             self._set_switch_status(
-                f"Push-to-talk not active yet: {exc}. Open Push-to-Talk to retry authorization."
+                f"Hotkey not active yet: {exc}. Open Hotkeys to retry authorization."
             )
             print(f"Hotkey backend unavailable: {exc}", file=sys.stderr)
 

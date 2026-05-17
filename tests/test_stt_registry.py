@@ -62,7 +62,10 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any(note.startswith("STT model:") for note in report.notes))
 
     def test_openai_readiness_requires_api_key(self) -> None:
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "DICTATE_OPENAI_API_KEY": ""}):
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "", "DICTATE_OPENAI_API_KEY": ""}),
+            patch("dictate.stt.openai_backend.read_api_key", return_value=None),
+        ):
             report = check_backend_readiness(
                 backend="openai",
                 model="gpt-4o-mini-transcribe",
@@ -71,13 +74,16 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any("API key" in error for error in report.errors))
 
     def test_gemini_readiness_requires_api_key(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "GEMINI_API_KEY": "",
-                "GOOGLE_API_KEY": "",
-                "DICTATE_GEMINI_API_KEY": "",
-            },
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GEMINI_API_KEY": "",
+                    "GOOGLE_API_KEY": "",
+                    "DICTATE_GEMINI_API_KEY": "",
+                },
+            ),
+            patch("dictate.stt.gemini_backend.read_api_key", return_value=None),
         ):
             report = check_backend_readiness(
                 backend="gemini",
@@ -87,7 +93,10 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any("API key" in error for error in report.errors))
 
     def test_xai_readiness_requires_api_key(self) -> None:
-        with patch.dict("os.environ", {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": ""}):
+        with (
+            patch.dict("os.environ", {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": ""}),
+            patch("dictate.stt.xai_backend.read_api_key", return_value=None),
+        ):
             report = check_backend_readiness(
                 backend="xai",
                 model="grok-speech-to-text",
