@@ -548,7 +548,7 @@ def _update_command() -> list[str] | None:
 
 def _windows_update_command() -> list[str]:
     for root in _candidate_source_roots():
-        if not (root / ".git").is_dir():
+        if not (root / ".git").exists():
             continue
         wizard = root / "install-windows-wizard.ps1"
         if wizard.is_file():

@@ -65,6 +65,18 @@ function Sync-ShortcutOptions {
     }
 }
 
+function Get-StartMenuProgramsDir {
+    $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    if (-not $env:APPDATA) {
+        $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+    }
+    return $programsDir
+}
+
+function Get-StartupShortcutPath {
+    return (Join-Path (Join-Path (Get-StartMenuProgramsDir) "Startup") "Dictate.lnk")
+}
+
 function Drain-LogQueue {
     param($Queue)
     $line = $null
@@ -279,6 +291,9 @@ $startupCheck.Top = 24
 $startupCheck.Width = 180
 $startupCheck.Checked = $true
 $optionsGroup.Controls.Add($startupCheck)
+if ($InitialAction -eq "Update") {
+    $startupCheck.Checked = Test-Path (Get-StartupShortcutPath)
+}
 
 $shortcutCheck = New-Object System.Windows.Forms.CheckBox
 $shortcutCheck.Text = "Create Start Menu entry"

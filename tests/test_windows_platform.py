@@ -346,6 +346,9 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("-WorkingDirectory $workingDirectory", script)
         self.assertIn("Add_CheckedChanged({ Sync-ShortcutOptions })", script)
         self.assertIn('$startupCheck.Enabled = $false', script)
+        self.assertIn("function Get-StartupShortcutPath", script)
+        self.assertIn('$InitialAction -eq "Update"', script)
+        self.assertIn("$startupCheck.Checked = Test-Path (Get-StartupShortcutPath)", script)
         self.assertIn("https://arcforge.au/terms", script)
         self.assertIn("https://github.com/arcforgelabs/dictate#readme", script)
         self.assertIn("Please acknowledge the Dictate terms before continuing.", script)
@@ -401,7 +404,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("install-windows-wizard.ps1", source)
         self.assertIn("HOSTED_WINDOWS_UPDATE_COMMAND", source)
         self.assertIn("update.ps1 | iex", source)
-        self.assertIn('root / ".git"', source)
+        self.assertIn('(root / ".git").exists()', source)
         self.assertIn('"Update"', source)
 
     def test_non_windows_update_command_requires_dictate_source_root(self) -> None:
