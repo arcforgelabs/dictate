@@ -414,6 +414,7 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn("Start Dictate automatically at sign-in", source)
+        self.assertIn("Dictate Controls.lnk", source)
         self.assertIn(r"HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dictate", source)
 
     def test_windows_tray_modifies_icon_when_recording(self) -> None:

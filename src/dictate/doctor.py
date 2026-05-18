@@ -267,6 +267,7 @@ $shortcut.WorkingDirectory = $installLocation
 $shortcut.Description = 'Start Dictate push-to-talk tray'
 if (Test-Path $displayIcon) {{ $shortcut.IconLocation = $displayIcon }}
 $shortcut.Save()
+Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir 'Dictate Controls.lnk')
 $startup = $shell.CreateShortcut((Join-Path $startupDir 'Dictate.lnk'))
 $startup.TargetPath = {_ps_quote(tray_launcher)}
 $startup.WorkingDirectory = $installLocation
