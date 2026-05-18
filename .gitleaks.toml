@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow documented fake provider keys used by unit tests."
+regexes = [
+  '''sk-abc1234567890123456''',
+  '''xai-abc1234567890123456''',
+  '''AIzaabcdefghijklmnopqrstuvwxyz''',
+]

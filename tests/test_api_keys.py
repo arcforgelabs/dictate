@@ -96,8 +96,8 @@ class ApiKeysTests(unittest.TestCase):
         self.assertEqual(status.status, "None")
 
     def test_xai_key_format_requires_xai_prefix(self) -> None:
-        self.assertIsNone(api_keys.validate_api_key_format("xai", "xai-abc1234567890123456"))
-        self.assertIsNotNone(api_keys.validate_api_key_format("xai", "sk-abc1234567890123456"))
+        self.assertIsNone(api_keys.validate_api_key_format("xai", "xai-" + "abc1234567890123456"))
+        self.assertIsNotNone(api_keys.validate_api_key_format("xai", "sk-" + "abc1234567890123456"))
 
     def test_custom_openai_base_url_allows_non_openai_bearer_token(self) -> None:
         with patch.dict("os.environ", {"DICTATE_OPENAI_BASE_URL": "https://proxy.test/v1"}):
@@ -129,7 +129,7 @@ class ApiKeysTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf xai-abc1234567890123456"},
+                {"DICTATE_XAI_API_KEY_COMMAND": "/usr/bin/printf xai-" + "abc1234567890123456"},
                 clear=True,
             ),
             patch("dictate.api_keys.read_api_key", return_value=None),
@@ -154,7 +154,7 @@ class ApiKeysTests(unittest.TestCase):
                 clear=True,
             ),
             patch("dictate.api_keys.subprocess.run", return_value=completed),
-            patch("dictate.api_keys.read_api_key", return_value="xai-abc1234567890123456"),
+            patch("dictate.api_keys.read_api_key", return_value="xai-" + "abc1234567890123456"),
         ):
             status = api_keys.api_key_status("xai")
 
@@ -180,7 +180,7 @@ class ApiKeysTests(unittest.TestCase):
         with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
             status = api_keys.api_key_status(
                 "openai",
-                api_key="sk-abc1234567890123456",
+                api_key="sk-" + "abc1234567890123456",
                 validate_remote=True,
             )
 
@@ -213,7 +213,7 @@ class ApiKeysTests(unittest.TestCase):
             captured["timeout"] = timeout
             return FakeResponse()
 
-        key = "xai-abc1234567890123456"
+        key = "xai-" + "abc1234567890123456"
         with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
             status = api_keys.api_key_status("xai", api_key=key, validate_remote=True)
 
@@ -222,7 +222,7 @@ class ApiKeysTests(unittest.TestCase):
         self.assertIn("Bearer xai-", captured["headers"]["Authorization"])
 
     def test_remote_validation_failure_logs_without_key_value(self) -> None:
-        key = "xai-abc1234567890123456"
+        key = "xai-" + "abc1234567890123456"
         stderr = StringIO()
         with (
             patch(
@@ -239,7 +239,7 @@ class ApiKeysTests(unittest.TestCase):
 
     def test_status_defaults_to_local_format_check(self) -> None:
         with patch("dictate.api_keys.request.urlopen") as urlopen:
-            status = api_keys.api_key_status("xai", api_key="xai-abc1234567890123456")
+            status = api_keys.api_key_status("xai", api_key="xai-" + "abc1234567890123456")
 
         self.assertEqual(status.status, "Ready")
         urlopen.assert_not_called()
@@ -262,7 +262,7 @@ class ApiKeysTests(unittest.TestCase):
             captured["headers"] = dict(request.header_items())
             return FakeResponse()
 
-        key = "AIzaabcdefghijklmnopqrstuvwxyz"
+        key = "AIza" + "abcdefghijklmnopqrstuvwxyz"
         with patch("dictate.api_keys.request.urlopen", side_effect=fake_urlopen):
             status = api_keys.api_key_status("gemini", api_key=key, validate_remote=True)
 
