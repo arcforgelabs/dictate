@@ -396,6 +396,8 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        self.assertIn('[System.IO.Directory]::GetCurrentDirectory()', script)
+        self.assertIn('Join-Path $currentDirectory "source"', script)
         self.assertIn("function Stop-DictateProcesses", script)
         self.assertIn("Stop-DictateProcesses", script)
         self.assertLess(script.index("Stop-DictateProcesses"), script.index("Remove-Item -Recurse -Force $sourceDir"))

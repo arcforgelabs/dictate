@@ -11,11 +11,16 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $InstallRoot) {
-    $base = $env:LOCALAPPDATA
-    if (-not $base) {
-        $base = Join-Path $HOME "AppData\Local"
+    $currentDirectory = [System.IO.Directory]::GetCurrentDirectory()
+    if (Test-Path (Join-Path $currentDirectory "source")) {
+        $InstallRoot = $currentDirectory
+    } else {
+        $base = $env:LOCALAPPDATA
+        if (-not $base) {
+            $base = Join-Path $HOME "AppData\Local"
+        }
+        $InstallRoot = Join-Path $base "Dictate"
     }
-    $InstallRoot = Join-Path $base "Dictate"
 }
 
 $installRootPath = [System.IO.Path]::GetFullPath($InstallRoot)
