@@ -23,6 +23,7 @@ WM_DESTROY = 0x0002
 WM_COMMAND = 0x0111
 WM_USER = 0x0400
 WM_TRAYICON = WM_USER + 20
+WM_RECORDING_CHANGED = WM_USER + 21
 WM_LBUTTONDBLCLK = 0x0203
 WM_RBUTTONUP = 0x0205
 WM_NULL = 0x0000
@@ -113,9 +114,11 @@ class WindowsTrayIcon:
         self._configure_win32_api()
         self._class_name = "DictateTrayWindow"
         self._hwnd = None
-        self._hicon = None
+        self._icons: dict[bool, object] = {}
         self._wndproc = None
         self._quitting = False
+        self._recording = False
+        self.daemon.recording_callback = self._on_recording_changed
 
     def _configure_win32_api(self) -> None:
         self._kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
@@ -245,7 +248,7 @@ class WindowsTrayIcon:
         data = self._notify_data()
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         data.uCallbackMessage = WM_TRAYICON
-        data.hIcon = self._load_icon()
+        data.hIcon = self._load_icon(self._recording)
         data.szTip = self._tooltip()
         if not self._shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data)):
             raise ctypes.WinError()
@@ -254,7 +257,8 @@ class WindowsTrayIcon:
         if self._hwnd is None:
             return
         data = self._notify_data()
-        data.uFlags = NIF_TIP
+        data.uFlags = NIF_ICON | NIF_TIP
+        data.hIcon = self._load_icon(self._recording)
         data.szTip = self._tooltip()
         self._shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
 
@@ -272,12 +276,15 @@ class WindowsTrayIcon:
         data.uID = 1
         return data
 
-    def _load_icon(self):
-        if self._hicon:
-            return self._hicon
-        icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
+    def _load_icon(self, recording: bool = False):
+        if recording in self._icons:
+            return self._icons[recording]
+        icon_name = "dictate-listening.ico" if recording else "dictate.ico"
+        icon_path = Path(__file__).resolve().parents[2] / "assets" / icon_name
+        if not icon_path.is_file() and not recording:
+            icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
         if icon_path.is_file():
-            self._hicon = self._user32.LoadImageW(
+            self._icons[recording] = self._user32.LoadImageW(
                 None,
                 str(icon_path),
                 IMAGE_ICON,
@@ -285,14 +292,28 @@ class WindowsTrayIcon:
                 0,
                 LR_LOADFROMFILE,
             )
-        if not self._hicon:
-            self._hicon = self._user32.LoadIconW(None, IDI_APPLICATION)
-        return self._hicon
+        if not self._icons.get(recording):
+            self._icons[recording] = self._user32.LoadIconW(None, IDI_APPLICATION)
+        return self._icons[recording]
 
     def _tooltip(self) -> str:
-        state = "active" if self.daemon.active else "paused"
+        if self._recording:
+            state = "recording"
+        else:
+            state = "active" if self.daemon.active else "paused"
         backend, model = self.daemon.current_backend_model()
         return f"Dictate {state}: {backend}/{model}"[:127]
+
+    def _on_recording_changed(self, recording: bool) -> None:
+        self._recording = recording
+        if self._hwnd is None:
+            return
+        self._user32.PostMessageW(
+            self._hwnd,
+            WM_RECORDING_CHANGED,
+            1 if recording else 0,
+            0,
+        )
 
     def _message_loop(self) -> None:
         msg = _MSG()
@@ -304,6 +325,10 @@ class WindowsTrayIcon:
         if msg == WM_TRAYICON:
             if lparam in {WM_RBUTTONUP, WM_LBUTTONDBLCLK}:
                 self._show_menu()
+            return 0
+        if msg == WM_RECORDING_CHANGED:
+            self._recording = bool(wparam)
+            self._modify_icon()
             return 0
         if msg == WM_COMMAND:
             self._handle_command(int(wparam) & 0xFFFF)

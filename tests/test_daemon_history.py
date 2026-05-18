@@ -49,6 +49,18 @@ class _FakeApiStt(_FakeStt):
     api_key = "stored-in-memory"
 
 
+class _FakeRecorder:
+    def __init__(self) -> None:
+        self.is_recording = False
+
+    def start(self) -> None:
+        self.is_recording = True
+
+    def stop(self) -> np.ndarray:
+        self.is_recording = False
+        return np.ones(16, dtype=np.float32)
+
+
 class DaemonHistoryTests(unittest.TestCase):
     def _make_daemon(self, tmp_dir: str):
         from dictate.daemon import Daemon
@@ -108,6 +120,27 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(messages, ["xAI failed; used CPU fallback"])
             output.send.assert_called_once_with("recovered")
             self.assertEqual(store.load()[0].text, "recovered")
+
+    def test_recording_callback_tracks_capture_start_and_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            messages: list[bool] = []
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            daemon = Daemon(
+                _FakeStt(),
+                output=output,
+                history_store=store,
+                recording_callback=messages.append,
+                recorder=_FakeRecorder(),
+            )
+
+            daemon._start_recording()
+            daemon._finalize_recording()
+
+            self.assertEqual(messages, [True, False])
 
     def test_shutdown_disables_hotkey_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

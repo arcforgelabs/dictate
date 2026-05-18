@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import ctypes
 import os
 import tempfile
 import types
@@ -19,6 +20,14 @@ from dictate.doctor import (
 )
 from dictate.outputs import PynputOutput, detect_session_type, resolve_typing_backend
 from dictate.startup import set_startup_enabled, startup_enabled, startup_entry_path
+from dictate.windows_tray import (
+    NIF_ICON,
+    NIF_TIP,
+    NIM_MODIFY,
+    WM_RECORDING_CHANGED,
+    WindowsTrayIcon,
+    _NOTIFYICONDATAW,
+)
 
 
 class WindowsPlatformTests(unittest.TestCase):
@@ -202,7 +211,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("--no-startup", script)
         self.assertIn('ICON_PATH="$ICON_DIR/dictate.png"', script)
-        self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate-controls.png" "$ICON_PATH"', script)
+        self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
         self.assertIn('cat > "$DESKTOP_DIR/dictate.desktop"', script)
         self.assertIn('cat > "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn("Name=Dictate Settings", script)
@@ -295,6 +304,59 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("Start Dictate automatically at sign-in", source)
         self.assertIn(r"HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dictate", source)
+
+    def test_windows_tray_modifies_icon_when_recording(self) -> None:
+        calls: list[tuple[int, int, int, str]] = []
+
+        def notify_icon(message: int, data_pointer) -> int:  # noqa: ANN001
+            data = ctypes.cast(data_pointer, ctypes.POINTER(_NOTIFYICONDATAW)).contents
+            calls.append((message, data.uFlags, data.hIcon, data.szTip))
+            return 1
+
+        tray = WindowsTrayIcon.__new__(WindowsTrayIcon)
+        tray.daemon = types.SimpleNamespace(
+            active=True,
+            current_backend_model=lambda: ("faster-whisper", "turbo"),
+        )
+        tray._hwnd = 123
+        tray._recording = True
+        tray._shell32 = types.SimpleNamespace(Shell_NotifyIconW=notify_icon)
+        tray._load_icon = lambda recording=False: 222 if recording else 111
+
+        tray._modify_icon()
+
+        self.assertEqual(calls[0][0], NIM_MODIFY)
+        self.assertTrue(calls[0][1] & NIF_ICON)
+        self.assertTrue(calls[0][1] & NIF_TIP)
+        self.assertEqual(calls[0][2], 222)
+        self.assertIn("recording", calls[0][3])
+
+    def test_windows_tray_recording_callback_posts_icon_update(self) -> None:
+        posted: list[tuple[int, int, int]] = []
+        tray = WindowsTrayIcon.__new__(WindowsTrayIcon)
+        tray._hwnd = 123
+        tray._recording = False
+        tray._user32 = types.SimpleNamespace(
+            PostMessageW=lambda hwnd, message, wparam, lparam: posted.append(
+                (message, wparam, lparam)
+            )
+        )
+
+        tray._on_recording_changed(True)
+
+        self.assertTrue(tray._recording)
+        self.assertEqual(posted, [(WM_RECORDING_CHANGED, 1, 0)])
+
+    def test_windows_tray_recording_message_refreshes_icon(self) -> None:
+        modified_states: list[bool] = []
+        tray = WindowsTrayIcon.__new__(WindowsTrayIcon)
+        tray._recording = False
+        tray._modify_icon = lambda: modified_states.append(tray._recording)
+
+        result = tray._window_proc(123, WM_RECORDING_CHANGED, 1, 0)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(modified_states, [True])
 
 
 if __name__ == "__main__":

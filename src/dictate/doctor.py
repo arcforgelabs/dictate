@@ -258,7 +258,7 @@ def _install_windows_shortcuts() -> None:
 
     programs_dir = _desktop_entry_path().parent
     startup_dir = programs_dir / "Startup"
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate.ico"
     install_location = scripts_dir.parents[1]
     uninstall_script = install_location / "uninstall-windows.ps1"
     script = f"""

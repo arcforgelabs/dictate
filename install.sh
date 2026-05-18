@@ -118,7 +118,7 @@ ln -sf "$INSTALL_DIR/venv/bin/dictate" "$BIN_DIR/dictate"
 
 echo "Installing icon ..."
 mkdir -p "$ICON_DIR"
-install -m 644 "$SCRIPT_DIR/assets/dictate-controls.png" "$ICON_PATH"
+install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
 
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"

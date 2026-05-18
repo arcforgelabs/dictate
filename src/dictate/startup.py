@@ -95,7 +95,7 @@ def install_windows_startup_shortcut() -> Path:
     if not tray_launcher.is_file():
         raise RuntimeError(f"tray launcher not found: {tray_launcher}")
     install_location = scripts_dir.parents[1]
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate.ico"
     script = f"""
 $startupDir = {_ps_quote(startup_path.parent)}
 $shortcutPath = {_ps_quote(startup_path)}
@@ -159,7 +159,7 @@ def _linux_icon_path() -> str:
     )
     if installed_icon.is_file():
         return str(installed_icon)
-    source_icon = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.png"
+    source_icon = Path(__file__).resolve().parents[2] / "assets" / "dictate.png"
     if source_icon.is_file():
         return str(source_icon)
     return "microphone-sensitivity-high-symbolic"

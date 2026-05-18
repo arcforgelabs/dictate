@@ -183,7 +183,7 @@ function New-DictateShortcut {
         [string]$Description
     )
 
-    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
+    $iconPath = Join-Path $PSScriptRoot "assets\dictate.ico"
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($ShortcutPath)
     $shortcut.TargetPath = $TargetPath
@@ -302,7 +302,7 @@ Write-LauncherScripts -ScriptsDir $scriptsDir
 Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
 Install-ControlsShortcut -TargetPath (Join-Path $scriptsDir "dictate-controls.exe") -WorkingDirectory $PSScriptRoot
 Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
-Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate-controls.ico")
+Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 
 if (-not $NoPrepareTurbo) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--model", "turbo", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper turbo model"

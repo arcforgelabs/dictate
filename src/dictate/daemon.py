@@ -38,6 +38,7 @@ class Daemon:
         history_store: HistoryStore | None = None,
         push_to_talk_combo: str = "ctrl_r",
         status_callback: Callable[[str | None], None] | None = None,
+        recording_callback: Callable[[bool], None] | None = None,
         recorder: AudioRecorder | None = None,
     ):
         self.active = True
@@ -45,6 +46,7 @@ class Daemon:
         self.output = output
         self.history_store = history_store or HistoryStore()
         self.status_callback = status_callback
+        self.recording_callback = recording_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -164,6 +166,7 @@ class Daemon:
                 return
 
             print("\r  \033[91m● Recording...\033[0m", end="", file=sys.stderr, flush=True)
+            self._notify_recording(True)
 
     def _finalize_recording(self) -> None:
         with self._recording_lock:
@@ -171,8 +174,10 @@ class Daemon:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
+                self._notify_recording(False)
                 return
 
+            self._notify_recording(False)
             if audio.size > 0:
                 self._queue_latest_audio(audio)
 
@@ -293,6 +298,14 @@ class Daemon:
             self.status_callback(message)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Status callback failed: {exc}", file=sys.stderr)
+
+    def _notify_recording(self, recording: bool) -> None:
+        if self.recording_callback is None:
+            return
+        try:
+            self.recording_callback(recording)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Recording callback failed: {exc}", file=sys.stderr)
 
     def _queue_latest_audio(self, audio: np.ndarray) -> None:
         self._audio_queue.put_nowait(audio)
