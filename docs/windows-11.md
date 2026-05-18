@@ -19,13 +19,13 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 Hosted one-liner from PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
 
 The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. If Node.js is already installed, this is equivalent:
 
 ```powershell
-npx @iamsamuelrodda/dictate install
+npx @arcforgelabs/dictate install
 ```
 
 From PowerShell in a repo root:

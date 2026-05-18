@@ -72,7 +72,7 @@ class WindowsPlatformTests(unittest.TestCase):
         with patch("dictate.doctor.sys.platform", "win32"):
             updates = _update_paths()
 
-        self.assertTrue(any("cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate" in item for item in updates))
+        self.assertTrue(any("cdn.jsdelivr.net/npm/@arcforgelabs/dictate" in item for item in updates))
         self.assertTrue(any("install-windows.ps1" in item for item in updates))
         self.assertTrue(any("install-windows-wizard.ps1" in item for item in updates))
         self.assertTrue(any("update-windows.ps1" in item for item in updates))
@@ -527,7 +527,7 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('"name": "@iamsamuelrodda/dictate"', package_json)
+        self.assertIn('"name": "@arcforgelabs/dictate"', package_json)
         self.assertIn('"version": "2026.5.18-1"', package_json)
         self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
         self.assertIn('"access": "public"', package_json)

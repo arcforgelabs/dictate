@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $TermsUrl = "https://arcforge.au/terms"
 $DocumentationUrl = "https://github.com/arcforgelabs/dictate#readme"
-$HostedWindowsUpdateUrl = "https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/update.ps1"
+$HostedWindowsUpdateUrl = "https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing

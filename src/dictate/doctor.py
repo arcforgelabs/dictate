@@ -340,7 +340,7 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
 def _update_paths() -> list[str]:
     if sys.platform.startswith("win"):
         return [
-            'Hosted install/update: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"',
+            'Hosted install/update: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"',
             r"Windows setup wizard: powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1",
             r"Source checkout update: powershell -ExecutionPolicy Bypass -File .\update-windows.ps1",
             r"Source checkout uninstall: powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1",

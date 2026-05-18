@@ -48,10 +48,12 @@ v2026.5.18-1
 
 Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.
 
-The npm package is published as `@iamsamuelrodda/dictate` and powers the hosted CDN install/update scripts. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready.
+The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN install/update scripts. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready.
+
+The previous personal-scope package, `@iamsamuelrodda/dictate`, should remain available long enough for existing users to update. After the first `@arcforgelabs/dictate` package is visible on npm and the hosted install smoke passes, deprecate the personal package with a migration notice pointing users to `@arcforgelabs/dictate`.
 
 The current public install path is:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```

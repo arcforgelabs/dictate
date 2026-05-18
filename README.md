@@ -15,7 +15,7 @@ future work.
 Windows 11 normal install:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
 
 Open **Dictate** from the Start Menu after install.
@@ -46,7 +46,7 @@ source directory. They will not work from `C:\Windows\System32`.
 Node/npm users can also run:
 
 ```powershell
-npx @iamsamuelrodda/dictate install
+npx @arcforgelabs/dictate install
 ```
 
 ## Workflow
@@ -68,8 +68,8 @@ Startup can be changed from Settings.
 Windows installed from the hosted installer:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/update.ps1 | iex"
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/uninstall.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/uninstall.ps1 | iex"
 ```
 
 Windows from source:
