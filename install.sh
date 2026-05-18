@@ -118,10 +118,12 @@ ln -sf "$INSTALL_DIR/venv/bin/dictate" "$BIN_DIR/dictate"
 
 echo "Installing icon ..."
 mkdir -p "$ICON_DIR"
+rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"
 install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
 
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"
+rm -f "$DESKTOP_DIR/dictate-settings.desktop"
 cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
 [Desktop Entry]
 Name=Dictate

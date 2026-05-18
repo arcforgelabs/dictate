@@ -210,6 +210,8 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("--no-startup", script)
         self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
+        self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
+        self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn('cat > "$DESKTOP_DIR/dictate.desktop"', script)
         self.assertIn('cat > "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn("X-GNOME-Autostart-enabled=true", script)
