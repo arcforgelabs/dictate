@@ -36,3 +36,7 @@ Release tags and GitHub milestones should use the public version with a leading 
 ```text
 v2026.5.18
 ```
+
+Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.
+
+The npm package is published as `@iamsamuelrodda/dictate`. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready; the CDN one-liner uses the package published to npm.

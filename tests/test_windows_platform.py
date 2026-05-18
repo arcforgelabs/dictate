@@ -72,7 +72,7 @@ class WindowsPlatformTests(unittest.TestCase):
         with patch("dictate.doctor.sys.platform", "win32"):
             updates = _update_paths()
 
-        self.assertTrue(any("raw.githubusercontent.com/arcforgelabs/dictate" in item for item in updates))
+        self.assertTrue(any("cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate" in item for item in updates))
         self.assertTrue(any("install-windows.ps1" in item for item in updates))
         self.assertTrue(any("install-windows-wizard.ps1" in item for item in updates))
         self.assertTrue(any("update-windows.ps1" in item for item in updates))
@@ -318,7 +318,9 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/heads/master.zip", script)
+        self.assertIn('$DictateVersion = "2026.5.18"', script)
+        self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
+        self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn("Invoke-WebRequest -UseBasicParsing", script)
         self.assertIn("install-windows.ps1", script)
         self.assertIn("install-windows-wizard.ps1", script)
@@ -441,6 +443,9 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        self.assertIn('$DictateVersion = "2026.5.18"', script)
+        self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
+        self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn('[System.IO.Directory]::GetCurrentDirectory()', script)
         self.assertIn('$candidateSource = Join-Path $currentDirectory "source"', script)
         self.assertIn('Join-Path $candidateSource "update-windows.ps1"', script)
@@ -512,6 +517,26 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(modified_states, [True])
+
+    def test_ci_includes_windows_user_smoke_gate(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Windows user install smoke", workflow)
+        self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
+        self.assertIn("needs: [tests, windows-user-smoke, npm]", workflow)
+
+    def test_npm_package_exposes_public_installer_shim(self) -> None:
+        package_json = (Path(__file__).resolve().parents[1] / "package.json").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('"name": "@iamsamuelrodda/dictate"', package_json)
+        self.assertIn('"version": "2026.5.18"', package_json)
+        self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
+        self.assertIn('"access": "public"', package_json)
+        self.assertIn('"provenance": true', package_json)
 
 
 if __name__ == "__main__":

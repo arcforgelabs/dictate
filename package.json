@@ -1,0 +1,50 @@
+{
+  "name": "@iamsamuelrodda/dictate",
+  "version": "2026.5.18",
+  "description": "Installer shim for Dictate desktop voice-to-text.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/arcforgelabs/dictate#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arcforgelabs/dictate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/arcforgelabs/dictate/issues"
+  },
+  "bin": {
+    "dictate-install": "npm/dictate-lifecycle.mjs",
+    "dictate-update": "npm/dictate-lifecycle.mjs",
+    "dictate-uninstall": "npm/dictate-lifecycle.mjs"
+  },
+  "files": [
+    "install.ps1",
+    "update.ps1",
+    "install-windows.ps1",
+    "install-windows-wizard.ps1",
+    "update-windows.ps1",
+    "uninstall-windows.ps1",
+    "install.sh",
+    "update.sh",
+    "uninstall.sh",
+    "config/default-config.yaml",
+    "assets/dictate.ico",
+    "assets/dictate.png",
+    "assets/dictate-listening.ico",
+    "assets/dictate-listening.png",
+    "npm/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "pack:check": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

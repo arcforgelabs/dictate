@@ -97,11 +97,11 @@ fi
 
 PIP_TARGET="$SCRIPT_DIR"
 if [ "$SESSION_BACKEND" = "x11" ]; then
-  PIP_TARGET="$SCRIPT_DIR[x11]"
+  PIP_TARGET="${SCRIPT_DIR}[x11]"
 elif [ "$SESSION_BACKEND" = "wayland" ]; then
-  PIP_TARGET="$SCRIPT_DIR[wayland]"
+  PIP_TARGET="${SCRIPT_DIR}[wayland]"
 elif [ "$SESSION_BACKEND" = "unknown" ]; then
-  PIP_TARGET="$SCRIPT_DIR[x11,wayland]"
+  PIP_TARGET="${SCRIPT_DIR}[x11,wayland]"
 fi
 
 echo "Detected install session backend: $SESSION_BACKEND"

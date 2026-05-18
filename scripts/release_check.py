@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 import sys
 import tomllib
@@ -28,11 +29,13 @@ def main() -> int:
     args = build_parser().parse_args()
     repo_root = Path(__file__).resolve().parents[1]
     pyproject_version = _read_pyproject_version(repo_root / "pyproject.toml")
+    npm_version = _read_package_json_version(repo_root / "package.json")
     version_values = _read_version_module(repo_root / "src" / "dictate" / "version.py")
 
     expected = _normalize_tag(args.tag) if args.tag else pyproject_version
     _require_calver(expected)
     _require_equal("pyproject.toml project.version", pyproject_version, expected)
+    _require_equal("package.json version", npm_version, expected)
     _require_equal("RELEASE_VERSION", version_values["RELEASE_VERSION"], expected)
     _require_equal("PACKAGE_VERSION", version_values["PACKAGE_VERSION"], expected)
 
@@ -44,6 +47,11 @@ def _read_pyproject_version(path: Path) -> str:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
     return str(data["project"]["version"])
+
+
+def _read_package_json_version(path: Path) -> str:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return str(data["version"])
 
 
 def _read_version_module(path: Path) -> dict[str, str]:

@@ -1,6 +1,6 @@
 param(
     [string]$InstallRoot,
-    [string]$ArchiveUrl = "https://github.com/arcforgelabs/dictate/archive/refs/heads/master.zip",
+    [string]$ArchiveUrl,
     [switch]$NoVerify,
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
@@ -10,6 +10,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$DictateVersion = "2026.5.18"
+
+if (-not $ArchiveUrl) {
+    $ArchiveUrl = "https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip"
+}
 
 if (-not $InstallRoot) {
     $currentDirectory = [System.IO.Directory]::GetCurrentDirectory()
@@ -57,8 +62,13 @@ New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $installRootPath | Out-Null
 
 try {
-    Write-Host "==> Downloading $ArchiveUrl"
-    Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archivePath
+    if (Test-Path -LiteralPath $ArchiveUrl) {
+        Write-Host "==> Copying local archive $ArchiveUrl"
+        Copy-Item -Force -LiteralPath $ArchiveUrl -Destination $archivePath
+    } else {
+        Write-Host "==> Downloading $ArchiveUrl"
+        Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archivePath
+    }
 
     Write-Host "==> Expanding source archive"
     Expand-Archive -Force -Path $archivePath -DestinationPath $stagingRoot

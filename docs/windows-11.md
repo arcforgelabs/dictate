@@ -19,10 +19,14 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 Hosted one-liner from PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"
 ```
 
-This follows the same broad pattern as OpenClaw's Windows installer script: a public PowerShell bootstrap downloads the current source and runs the platform installer. Dictate is a Python desktop app, so it does not need an npm package for the Windows install path.
+The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. If Node.js is already installed, this is equivalent:
+
+```powershell
+npx @iamsamuelrodda/dictate install
+```
 
 From PowerShell in a repo root:
 
@@ -59,6 +63,14 @@ scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle
 ```
 
 The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` also runs a no-model/no-shortcut install, focused tests, version check, and uninstall cleanup. `lifecycle` adds update and uninstall smoke checks.
+
+GitHub-hosted Windows user smoke test:
+
+```powershell
+.\scripts\windows-user-smoke.ps1
+```
+
+This CI gate installs Dictate through the hosted bootstrap path from a deterministic source zip, verifies the Start Menu shortcut, default startup shortcut, Installed Apps registry entry, config seeding, `dictate --version`, `dictate doctor --quick`, `dictate doctor --fix`, hosted update, and uninstall cleanup. It does not test a real microphone, visible tray interaction, or Windows Search indexing.
 
 Update or uninstall from a repo root:
 

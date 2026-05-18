@@ -35,7 +35,7 @@ from dictate.update_status import (
 from dictate.version import RELEASE_VERSION
 
 HOSTED_WINDOWS_UPDATE_COMMAND = (
-    "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/update.ps1 | iex"
+    "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/update.ps1 | iex"
 )
 BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
 DEFAULT_BACKEND = "faster-whisper"

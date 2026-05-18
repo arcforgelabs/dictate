@@ -74,7 +74,13 @@ powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
 Hosted Windows one-liner:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@iamsamuelrodda/dictate@latest/install.ps1 | iex"
+```
+
+Node/npm users can also run:
+
+```powershell
+npx @iamsamuelrodda/dictate install
 ```
 
 This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs a Start Menu shortcut named `Dictate`. The `Dictate` shortcut starts the Windows tray app. See [Windows 11 support](docs/windows-11.md) for details.
