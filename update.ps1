@@ -23,6 +23,24 @@ $sourceDir = Join-Path $installRootPath "source"
 $stagingRoot = Join-Path $env:TEMP ("dictate-update-" + [guid]::NewGuid().ToString("N"))
 $archivePath = Join-Path $stagingRoot "dictate.zip"
 
+function Stop-DictateProcesses {
+    $currentPid = $PID
+    $matches = Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.ProcessId -ne $currentPid -and (
+                $_.Name -in @("dictate.exe", "dictate-controls.exe") -or
+                $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
+                $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
+                $_.CommandLine -like '*dictate-daemon.cmd*' -or
+                $_.CommandLine -like '*dictate-controls*'
+            )
+        }
+    foreach ($match in $matches) {
+        Stop-Process -Id $match.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 Write-Host "==> Updating Dictate in $installRootPath"
 New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $installRootPath | Out-Null
@@ -41,6 +59,7 @@ try {
     }
 
     if (Test-Path $sourceDir) {
+        Stop-DictateProcesses
         Write-Host "==> Replacing existing managed source: $sourceDir"
         Remove-Item -Recurse -Force $sourceDir
     }

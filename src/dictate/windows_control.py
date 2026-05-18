@@ -34,6 +34,9 @@ from dictate.update_status import (
 )
 from dictate.version import RELEASE_VERSION
 
+HOSTED_WINDOWS_UPDATE_COMMAND = (
+    "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/update.ps1 | iex"
+)
 BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
 DEFAULT_BACKEND = "faster-whisper"
 MODEL_CHOICES = {
@@ -527,29 +530,50 @@ def _source_root() -> Path:
 
 
 def _update_command() -> list[str] | None:
-    script_names = (
-        ("install-windows-wizard.ps1", "wizard"),
-        ("update-windows.ps1", "update"),
-    ) if sys.platform.startswith("win") else (("update.sh", "update"),)
+    if sys.platform.startswith("win"):
+        return _windows_update_command()
+
     for root in _candidate_source_roots():
-        for script_name, mode in script_names:
-            script = root / script_name
-            if not script.is_file():
-                continue
-            if sys.platform.startswith("win"):
-                command = [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(script),
-                ]
-                if mode == "wizard":
-                    command.extend(["-InitialAction", "Update"])
-                return command
+        script = root / "update.sh"
+        if script.is_file():
             return ["bash", str(script)]
     return None
+
+
+def _windows_update_command() -> list[str]:
+    for root in _candidate_source_roots():
+        if not (root / ".git").is_dir():
+            continue
+        wizard = root / "install-windows-wizard.ps1"
+        if wizard.is_file():
+            return [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(wizard),
+                "-InitialAction",
+                "Update",
+            ]
+        updater = root / "update-windows.ps1"
+        if updater.is_file():
+            return [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(updater),
+            ]
+    return [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        HOSTED_WINDOWS_UPDATE_COMMAND,
+    ]
 
 
 def _candidate_source_roots() -> list[Path]:

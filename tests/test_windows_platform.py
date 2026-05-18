@@ -378,7 +378,19 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("subprocess.Popen(command", source)
         self.assertIn("self.root.after(500, self.root.destroy)", source)
         self.assertIn("install-windows-wizard.ps1", source)
+        self.assertIn("HOSTED_WINDOWS_UPDATE_COMMAND", source)
+        self.assertIn("update.ps1 | iex", source)
+        self.assertIn('root / ".git"', source)
         self.assertIn('"Update"', source)
+
+    def test_hosted_windows_update_stops_dictate_before_replacing_source(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "update.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("function Stop-DictateProcesses", script)
+        self.assertIn("Stop-DictateProcesses", script)
+        self.assertLess(script.index("Stop-DictateProcesses"), script.index("Remove-Item -Recurse -Force $sourceDir"))
 
     def test_doctor_windows_fix_repairs_startup_and_installed_apps_entries(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "src" / "dictate" / "doctor.py").read_text(
