@@ -22,6 +22,7 @@ from dictate.history import HISTORY_PATH, HistoryEntry, HistoryStore
 from dictate.hotkey import HotkeyParseError, format_hotkey_combo, normalize_push_to_talk_combo
 from dictate.outputs import ClipboardOutput, OutputError
 from dictate.stt import BACKEND_REGISTRY
+from dictate.startup import set_startup_enabled, startup_enabled
 
 BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
 DEFAULT_BACKEND = "faster-whisper"
@@ -63,6 +64,7 @@ class ControlPanel:
         self.combo_var = tk.StringVar(value="ctrl_r")
         self.api_key_var = tk.StringVar(value="")
         self.api_status_var = tk.StringVar(value="API key: None")
+        self.launch_on_startup_var = tk.BooleanVar(value=True)
         self.history_page_var = tk.StringVar(value="")
         self._history_page = 0
         self._history_entries: list[HistoryEntry] = []
@@ -135,6 +137,12 @@ class ControlPanel:
         runtime_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
         runtime_box.bind("<<ComboboxSelected>>", lambda _event: self._on_runtime_changed())
 
+        ttk.Checkbutton(
+            advanced_frame,
+            text="Launch on start up",
+            variable=self.launch_on_startup_var,
+        ).grid(row=1, column=1, sticky="w", padx=(8, 0))
+
         button_frame = ttk.Frame(config_frame)
         button_frame.grid(row=4, column=0, columnspan=4, sticky="e", pady=(10, 0))
         ttk.Button(button_frame, text="Save", command=self.save).pack(side=tk.LEFT, padx=(0, 6))
@@ -191,6 +199,7 @@ class ControlPanel:
         self.api_key_var.set("")
         combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
+        self.launch_on_startup_var.set(startup_enabled())
         self._sync_api_key_field()
         self._sync_status_line()
         self.refresh_history()
@@ -352,6 +361,11 @@ class ControlPanel:
                     return False
                 self.api_key_var.set("")
                 self._sync_api_key_field()
+        try:
+            set_startup_enabled(self.launch_on_startup_var.get())
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Startup Setting Not Saved", str(exc))
+            return False
         set_stt_selection(backend, model)
         set_stt_runtime_profile(device, compute_type)
         set_push_to_talk_combo(normalized_combo)

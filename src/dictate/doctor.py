@@ -25,6 +25,12 @@ from dictate.stt import (
     create_speech_to_text,
     resolve_model_name,
 )
+from dictate.startup import (
+    app_entry_path,
+    install_linux_desktop_integration,
+    settings_entry_path,
+    startup_entry_path,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -134,6 +140,16 @@ def _check_runtime_paths(report) -> None:  # noqa: ANN001
         report.notes.append(f"Desktop entry: {desktop_path}")
     else:
         report.warnings.append(f"Desktop entry not found: {desktop_path}")
+    settings_path = settings_entry_path()
+    if settings_path.exists():
+        report.notes.append(f"Settings entry: {settings_path}")
+    else:
+        report.warnings.append(f"Settings entry not found: {settings_path}")
+    startup_path = startup_entry_path()
+    if startup_path.exists():
+        report.notes.append(f"Startup entry: {startup_path}")
+    else:
+        report.warnings.append(f"Startup entry not found: {startup_path}")
 
     primary_log_writable = False
     try:
@@ -202,15 +218,15 @@ def _apply_safe_fixes(report) -> None:  # noqa: ANN001
     if sys.platform.startswith("win"):
         try:
             _install_windows_shortcuts()
-            report.notes.append("Ensured Windows Start Menu shortcuts exist.")
+            report.notes.append("Ensured Windows Start Menu, startup, and Installed Apps entries exist.")
         except Exception as exc:  # noqa: BLE001
-            report.errors.append(f"Could not install Windows Start Menu shortcuts: {exc}")
+            report.errors.append(f"Could not install Windows shortcuts/app registration: {exc}")
     else:
         try:
             _install_linux_desktop_entry()
-            report.notes.append("Ensured Linux desktop entry exists.")
+            report.notes.append("Ensured Linux app launcher and startup entries exist.")
         except Exception as exc:  # noqa: BLE001
-            report.errors.append(f"Could not install Linux desktop entry: {exc}")
+            report.errors.append(f"Could not install Linux app launcher/startup entries: {exc}")
 
 
 def _seed_config_if_missing() -> None:
@@ -241,23 +257,51 @@ def _install_windows_shortcuts() -> None:
         raise RuntimeError(f"controls launcher not found: {controls_launcher}")
 
     programs_dir = _desktop_entry_path().parent
+    startup_dir = programs_dir / "Startup"
     icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
+    install_location = scripts_dir.parents[1]
+    uninstall_script = install_location / "uninstall-windows.ps1"
     script = f"""
 $programsDir = {_ps_quote(programs_dir)}
+$startupDir = {_ps_quote(startup_dir)}
+$installLocation = {_ps_quote(install_location)}
+$displayIcon = {_ps_quote(icon_path)}
+$uninstallScript = {_ps_quote(uninstall_script)}
 New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
+New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut((Join-Path $programsDir 'Dictate.lnk'))
 $shortcut.TargetPath = {_ps_quote(tray_launcher)}
-$shortcut.WorkingDirectory = {_ps_quote(scripts_dir.parents[1])}
+$shortcut.WorkingDirectory = $installLocation
 $shortcut.Description = 'Start Dictate push-to-talk tray'
-if (Test-Path {_ps_quote(icon_path)}) {{ $shortcut.IconLocation = {_ps_quote(icon_path)} }}
+if (Test-Path $displayIcon) {{ $shortcut.IconLocation = $displayIcon }}
 $shortcut.Save()
 $controls = $shell.CreateShortcut((Join-Path $programsDir 'Dictate Controls.lnk'))
 $controls.TargetPath = {_ps_quote(controls_launcher)}
-$controls.WorkingDirectory = {_ps_quote(scripts_dir.parents[1])}
+$controls.WorkingDirectory = $installLocation
 $controls.Description = 'Open Dictate configuration and recent history'
-if (Test-Path {_ps_quote(icon_path)}) {{ $controls.IconLocation = {_ps_quote(icon_path)} }}
+if (Test-Path $displayIcon) {{ $controls.IconLocation = $displayIcon }}
 $controls.Save()
+$startup = $shell.CreateShortcut((Join-Path $startupDir 'Dictate.lnk'))
+$startup.TargetPath = {_ps_quote(tray_launcher)}
+$startup.WorkingDirectory = $installLocation
+$startup.Description = 'Start Dictate automatically at sign-in'
+if (Test-Path $displayIcon) {{ $startup.IconLocation = $displayIcon }}
+$startup.Save()
+$keyPath = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dictate'
+New-Item -Force -Path $keyPath | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'DisplayName' -Value 'Dictate' -PropertyType String | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'DisplayVersion' -Value '2026.5.18' -PropertyType String | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'Publisher' -Value 'Arc Forge Labs' -PropertyType String | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'InstallLocation' -Value $installLocation -PropertyType String | Out-Null
+if (Test-Path $displayIcon) {{ New-ItemProperty -Force -Path $keyPath -Name 'DisplayIcon' -Value $displayIcon -PropertyType String | Out-Null }}
+if (Test-Path $uninstallScript) {{
+    $uninstallCommand = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
+    New-ItemProperty -Force -Path $keyPath -Name 'UninstallString' -Value $uninstallCommand -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name 'QuietUninstallString' -Value "$uninstallCommand -Quiet" -PropertyType String | Out-Null
+}}
+New-ItemProperty -Force -Path $keyPath -Name 'NoModify' -Value 1 -PropertyType DWord | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'NoRepair' -Value 1 -PropertyType DWord | Out-Null
 """
     subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
@@ -270,28 +314,7 @@ def _ps_quote(value: Path | str) -> str:
 
 
 def _install_linux_desktop_entry() -> None:
-    desktop_path = _desktop_entry_path()
-    desktop_path.parent.mkdir(parents=True, exist_ok=True)
-    exec_path = shutil.which("dictate") or str(Path.home() / ".local" / "bin" / "dictate")
-    desktop_path.write_text(
-        "[Desktop Entry]\n"
-        "Name=Dictate\n"
-        "Comment=Local voice-to-text with push-to-talk\n"
-        f"Exec={exec_path}\n"
-        "Icon=microphone-sensitivity-high-symbolic\n"
-        "Type=Application\n"
-        "Categories=Utility;Audio;\n"
-        "Keywords=voice;speech;transcription;dictation;asr;whisper;canary;\n",
-        encoding="utf-8",
-    )
-    update_desktop_database = shutil.which("update-desktop-database")
-    if update_desktop_database:
-        subprocess.run(
-            [update_desktop_database, str(desktop_path.parent)],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    install_linux_desktop_integration(include_startup=True)
 
 
 def _fix_items(report) -> list[str]:  # noqa: ANN001
@@ -299,6 +322,10 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
     for warning in report.warnings:
         if "Desktop entry not found" in warning:
             items.append("Run `dictate doctor --fix` to recreate Start Menu/Desktop launchers.")
+        if "Settings entry not found" in warning:
+            items.append("Run `dictate doctor --fix` to recreate the Settings launcher.")
+        if "Startup entry not found" in warning:
+            items.append("Run `dictate doctor --fix` to restore launch-on-startup integration.")
         if "Log directory is not writable" in warning or "fallback log directory" in warning:
             items.append("Run `dictate doctor --fix` to recreate writable log/config directories.")
         if "CUDA" in warning:
@@ -363,27 +390,4 @@ def _print_report(report, *, fixes: list[str] | None = None, updates: list[str] 
 
 
 def _desktop_entry_path() -> Path:
-    if sys.platform.startswith("win"):
-        start_menu = os.environ.get("APPDATA")
-        if start_menu:
-            return (
-                Path(start_menu)
-                / "Microsoft"
-                / "Windows"
-                / "Start Menu"
-                / "Programs"
-                / "Dictate.lnk"
-            )
-        return (
-            Path.home()
-            / "AppData"
-            / "Roaming"
-            / "Microsoft"
-            / "Windows"
-            / "Start Menu"
-            / "Programs"
-            / "Dictate.lnk"
-        )
-    xdg_data_home = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
-    return base / "applications" / "dictate.desktop"
+    return app_entry_path()

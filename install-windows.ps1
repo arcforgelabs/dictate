@@ -2,6 +2,7 @@ param(
     [switch]$NoVerify,
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
+    [switch]$NoStartup,
     [switch]$RecreateVenv
 )
 
@@ -162,6 +163,38 @@ function Write-LauncherScripts {
     Write-Host "    $controlsPath"
 }
 
+function Get-StartMenuProgramsDir {
+    $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    if (-not $env:APPDATA) {
+        $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+    }
+    return $programsDir
+}
+
+function Get-StartupDir {
+    return (Join-Path (Get-StartMenuProgramsDir) "Startup")
+}
+
+function New-DictateShortcut {
+    param(
+        [string]$ShortcutPath,
+        [string]$TargetPath,
+        [string]$WorkingDirectory,
+        [string]$Description
+    )
+
+    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.WorkingDirectory = $WorkingDirectory
+    $shortcut.Description = $Description
+    if (Test-Path $iconPath) {
+        $shortcut.IconLocation = $iconPath
+    }
+    $shortcut.Save()
+}
+
 function Install-StartMenuShortcut {
     param(
         [string]$TargetPath,
@@ -172,23 +205,11 @@ function Install-StartMenuShortcut {
         return
     }
 
-    $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-    if (-not $env:APPDATA) {
-        $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
-    }
+    $programsDir = Get-StartMenuProgramsDir
     New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
 
     $shortcutPath = Join-Path $programsDir "Dictate.lnk"
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $TargetPath
-    $shortcut.WorkingDirectory = $WorkingDirectory
-    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
-    $shortcut.Description = "Start Dictate push-to-talk tray"
-    if (Test-Path $iconPath) {
-        $shortcut.IconLocation = $iconPath
-    }
-    $shortcut.Save()
+    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Start Dictate push-to-talk tray"
 
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
 }
@@ -203,25 +224,58 @@ function Install-ControlsShortcut {
         return
     }
 
-    $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-    if (-not $env:APPDATA) {
-        $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
-    }
+    $programsDir = Get-StartMenuProgramsDir
     New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
 
     $shortcutPath = Join-Path $programsDir "Dictate Controls.lnk"
-    $iconPath = Join-Path $PSScriptRoot "assets\dictate-controls.ico"
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $TargetPath
-    $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = "Open Dictate configuration and recent history"
-    if (Test-Path $iconPath) {
-        $shortcut.IconLocation = $iconPath
-    }
-    $shortcut.Save()
+    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Open Dictate configuration and recent history"
 
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
+}
+
+function Install-StartupShortcut {
+    param(
+        [string]$TargetPath,
+        [string]$WorkingDirectory
+    )
+
+    if ($NoShortcut -or $NoStartup) {
+        return
+    }
+
+    $startupDir = Get-StartupDir
+    New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
+
+    $shortcutPath = Join-Path $startupDir "Dictate.lnk"
+    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Start Dictate automatically at sign-in"
+
+    Write-Host "==> Installed startup shortcut: $shortcutPath"
+}
+
+function Register-InstalledApp {
+    param(
+        [string]$InstallLocation,
+        [string]$DisplayIcon
+    )
+
+    $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate"
+    New-Item -Force -Path $keyPath | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "DisplayName" -Value "Dictate" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.5.18" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "Publisher" -Value "Arc Forge Labs" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "InstallLocation" -Value $InstallLocation -PropertyType String | Out-Null
+    if (Test-Path $DisplayIcon) {
+        New-ItemProperty -Force -Path $keyPath -Name "DisplayIcon" -Value $DisplayIcon -PropertyType String | Out-Null
+    }
+    $uninstallScript = Join-Path $InstallLocation "uninstall-windows.ps1"
+    if (Test-Path $uninstallScript) {
+        $uninstallCommand = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
+        New-ItemProperty -Force -Path $keyPath -Name "UninstallString" -Value $uninstallCommand -PropertyType String | Out-Null
+        New-ItemProperty -Force -Path $keyPath -Name "QuietUninstallString" -Value "$uninstallCommand -Quiet" -PropertyType String | Out-Null
+    }
+    New-ItemProperty -Force -Path $keyPath -Name "NoModify" -Value 1 -PropertyType DWord | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "NoRepair" -Value 1 -PropertyType DWord | Out-Null
+    Write-Host "==> Registered Dictate in Windows Installed Apps"
 }
 
 $pythonCommand = Resolve-Python
@@ -247,6 +301,8 @@ Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
 Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
 Install-ControlsShortcut -TargetPath (Join-Path $scriptsDir "dictate-controls.exe") -WorkingDirectory $PSScriptRoot
+Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
+Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate-controls.ico")
 
 if (-not $NoPrepareTurbo) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--model", "turbo", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper turbo model"
@@ -258,6 +314,7 @@ if (-not $NoVerify) {
 
 Write-Host ""
 Write-Host "Dictate is installed."
+Write-Host "Dictate starts automatically when you sign in."
 Write-Host "Start push-to-talk with a Windows tray icon from the Start Menu shortcut named 'Dictate', or run:"
 Write-Host "  .\.venv\Scripts\dictate-tray.cmd"
 Write-Host ""

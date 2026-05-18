@@ -8,12 +8,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/dictate"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+ICON_DIR="$INSTALL_DIR/share/icons"
+ICON_PATH="$ICON_DIR/dictate.png"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dictate"
 CONFIG_PATH="$CONFIG_DIR/config.yaml"
 DEFAULT_CONFIG_SOURCE="$SCRIPT_DIR/config/default-config.yaml"
 VERIFY=1
 PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
+STARTUP=1
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # Prefer the distro Python so --system-site-packages can see modules such as
@@ -24,11 +28,11 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--session-backend auto|x11|wayland]
+Usage: $0 [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--session-backend auto|x11|wayland]
 
 Installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate,
-seeds the default config on first install, and prepares the faster-whisper
-turbo model unless disabled.
+seeds the default config on first install, creates app launcher/autostart entries,
+and prepares the faster-whisper turbo model unless disabled.
 EOF
 }
 
@@ -64,6 +68,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-seed-default-config)
       SEED_DEFAULT_CONFIG=0
+      ;;
+    --no-startup)
+      STARTUP=0
       ;;
     --session-backend)
       shift
@@ -109,6 +116,10 @@ echo "Linking binary ..."
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/venv/bin/dictate" "$BIN_DIR/dictate"
 
+echo "Installing icon ..."
+mkdir -p "$ICON_DIR"
+install -m 644 "$SCRIPT_DIR/assets/dictate-controls.png" "$ICON_PATH"
+
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
@@ -116,13 +127,42 @@ cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
 Name=Dictate
 Comment=Local voice-to-text with push-to-talk
 Exec=$HOME/.local/bin/dictate
-Icon=microphone-sensitivity-high-symbolic
+Icon=$ICON_PATH
 Type=Application
-Categories=Utility;Audio;
+Categories=AudioVideo;Audio;
 Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
+Terminal=false
+EOF
+cat > "$DESKTOP_DIR/dictate-settings.desktop" <<EOF
+[Desktop Entry]
+Name=Dictate Settings
+Comment=Configure Dictate voice-to-text
+Exec=$HOME/.local/bin/dictate controls
+Icon=$ICON_PATH
+Type=Application
+Categories=Settings;
+Keywords=voice;speech;transcription;dictation;settings;controls;asr;whisper;canary;
+Terminal=false
 EOF
 
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+
+if [ "$STARTUP" -eq 1 ]; then
+  echo "Installing autostart entry ..."
+  mkdir -p "$AUTOSTART_DIR"
+  cat > "$AUTOSTART_DIR/dictate.desktop" <<EOF
+[Desktop Entry]
+Name=Dictate
+Comment=Local voice-to-text with push-to-talk
+Exec=$HOME/.local/bin/dictate
+Icon=$ICON_PATH
+Type=Application
+Categories=AudioVideo;Audio;
+Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+fi
 
 if [ "$SEED_DEFAULT_CONFIG" -eq 1 ]; then
   if [ ! -f "$CONFIG_PATH" ]; then
@@ -195,4 +235,8 @@ if [ "$VERIFY" -eq 1 ]; then
     --model turbo
 fi
 
-echo "Done. 'dictate' is now available on your PATH and in the app launcher."
+if [ "$STARTUP" -eq 1 ]; then
+  echo "Done. 'dictate' is now available on your PATH, in the app launcher, and starts when you sign in."
+else
+  echo "Done. 'dictate' is now available on your PATH and in the app launcher."
+fi
