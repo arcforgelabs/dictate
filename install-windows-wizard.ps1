@@ -53,6 +53,84 @@ function Sync-RunButton {
     }
 }
 
+function Sync-ShortcutOptions {
+    if ($null -ne $startupCheck) {
+        if ($shortcutCheck.Checked) {
+            $startupCheck.Enabled = $true
+        } else {
+            $startupCheck.Checked = $false
+            $startupCheck.Enabled = $false
+        }
+    }
+}
+
+function Drain-LogQueue {
+    param($Queue)
+    $line = $null
+    while ($Queue.TryDequeue([ref]$line)) {
+        Append-Log $line
+        $line = $null
+    }
+}
+
+function Invoke-LoggedProcess {
+    param(
+        [string]$Label,
+        [string]$FileName,
+        [string]$ArgumentString
+    )
+
+    Append-Log "==> $Label"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FileName
+    $psi.Arguments = $ArgumentString
+    $psi.WorkingDirectory = $PSScriptRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $stdoutQueue = New-Object "System.Collections.Concurrent.ConcurrentQueue[string]"
+    $stderrQueue = New-Object "System.Collections.Concurrent.ConcurrentQueue[string]"
+    $stdoutHandler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($null -ne $eventArgs.Data) {
+            $stdoutQueue.Enqueue($eventArgs.Data)
+        }
+    }
+    $stderrHandler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($null -ne $eventArgs.Data) {
+            $stderrQueue.Enqueue($eventArgs.Data)
+        }
+    }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    $process.add_OutputDataReceived($stdoutHandler)
+    $process.add_ErrorDataReceived($stderrHandler)
+    try {
+        [void]$process.Start()
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        while (-not $process.WaitForExit(100)) {
+            Drain-LogQueue $stdoutQueue
+            Drain-LogQueue $stderrQueue
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+        $process.WaitForExit()
+        Drain-LogQueue $stdoutQueue
+        Drain-LogQueue $stderrQueue
+        if ($process.ExitCode -ne 0) {
+            throw "$Label failed with exit code $($process.ExitCode)."
+        }
+    } finally {
+        $process.remove_OutputDataReceived($stdoutHandler)
+        $process.remove_ErrorDataReceived($stderrHandler)
+        $process.Dispose()
+    }
+}
+
 function Invoke-Step {
     param(
         [string]$Label,
@@ -60,29 +138,10 @@ function Invoke-Step {
         [string[]]$Arguments
     )
 
-    Append-Log "==> $Label"
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "powershell"
-    $psi.Arguments = (
+    $argumentString = (
         @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$FilePath`"") + $Arguments
     ) -join " "
-    $psi.WorkingDirectory = $PSScriptRoot
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-    [void]$process.Start()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-    if ($stdout) { Append-Log $stdout.TrimEnd() }
-    if ($stderr) { Append-Log $stderr.TrimEnd() }
-    if ($process.ExitCode -ne 0) {
-        throw "$Label failed with exit code $($process.ExitCode)."
-    }
+    Invoke-LoggedProcess $Label "powershell" $argumentString
 }
 
 function Invoke-DictateDoctorFix {
@@ -91,27 +150,7 @@ function Invoke-DictateDoctorFix {
         throw "Dictate is not installed in this source folder. Run Install first."
     }
 
-    Append-Log "==> Repairing Dictate with doctor --fix"
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $dictateExe
-    $psi.Arguments = "doctor --quick --fix --type-backend pynput"
-    $psi.WorkingDirectory = $PSScriptRoot
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-    [void]$process.Start()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-    if ($stdout) { Append-Log $stdout.TrimEnd() }
-    if ($stderr) { Append-Log $stderr.TrimEnd() }
-    if ($process.ExitCode -ne 0) {
-        throw "doctor --fix failed with exit code $($process.ExitCode)."
-    }
+    Invoke-LoggedProcess "Repairing Dictate with doctor --fix" $dictateExe "doctor --quick --fix --type-backend pynput"
 }
 
 function Start-SelectedAction {
@@ -223,6 +262,7 @@ $shortcutCheck.Left = 220
 $shortcutCheck.Top = 24
 $shortcutCheck.Width = 200
 $shortcutCheck.Checked = $true
+$shortcutCheck.Add_CheckedChanged({ Sync-ShortcutOptions })
 $optionsGroup.Controls.Add($shortcutCheck)
 
 $prepareCheck = New-Object System.Windows.Forms.CheckBox
