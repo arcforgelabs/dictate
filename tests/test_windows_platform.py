@@ -404,6 +404,35 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('root / ".git"', source)
         self.assertIn('"Update"', source)
 
+    def test_non_windows_update_command_requires_dictate_source_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bad_root = Path(temp_dir) / "bad"
+            good_root = Path(temp_dir) / "good"
+            bad_root.mkdir()
+            good_root.mkdir()
+            (bad_root / "update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (good_root / "update.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (good_root / "pyproject.toml").write_text("[project]\nname='dictate'\n", encoding="utf-8")
+            (good_root / "src" / "dictate").mkdir(parents=True)
+
+            fake_tkinter = types.ModuleType("tkinter")
+            fake_tkinter.messagebox = types.SimpleNamespace()
+            fake_tkinter.ttk = types.SimpleNamespace()
+
+            with (
+                patch.dict("sys.modules", {"tkinter": fake_tkinter}),
+            ):
+                from dictate import windows_control
+
+            with (
+                patch.object(windows_control.sys, "platform", "linux"),
+                patch.object(windows_control, "_candidate_source_roots", return_value=[bad_root, good_root]),
+            ):
+                self.assertEqual(
+                    windows_control._update_command(),
+                    ["bash", str(good_root / "update.sh")],
+                )
+
     def test_hosted_windows_update_stops_dictate_before_replacing_source(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "update.ps1").read_text(
             encoding="utf-8"

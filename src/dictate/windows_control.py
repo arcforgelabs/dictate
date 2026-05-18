@@ -541,7 +541,7 @@ def _update_command() -> list[str] | None:
 
     for root in _candidate_source_roots():
         script = root / "update.sh"
-        if script.is_file():
+        if script.is_file() and _is_dictate_source_root(root):
             return ["bash", str(script)]
     return None
 
@@ -597,6 +597,14 @@ def _candidate_source_roots() -> list[Path]:
         seen.add(resolved)
         result.append(resolved)
     return result
+
+
+def _is_dictate_source_root(root: Path) -> bool:
+    return (
+        (root / "pyproject.toml").is_file()
+        and (root / "src" / "dictate").is_dir()
+        and (root / "update.sh").is_file()
+    )
 
 
 def _restart_daemon() -> None:
