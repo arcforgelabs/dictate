@@ -120,7 +120,7 @@ function Start-SelectedAction {
     $logBox.Clear()
     try {
         if (-not $termsCheck.Checked) {
-            throw "You must accept the Arc Forge terms before continuing."
+            throw "Please acknowledge the Dictate terms before continuing."
         }
         $action = Get-SelectedAction
         $commonArgs = @()
@@ -250,17 +250,25 @@ $removeUserDataCheck.Checked = $false
 $optionsGroup.Controls.Add($removeUserDataCheck)
 
 $termsCheck = New-Object System.Windows.Forms.CheckBox
-$termsCheck.Text = "By using Dictate, I agree to the Arc Forge Terms of Service"
+$termsCheck.Text = "I understand Dictate has real-world risks and agree to the Arc Forge terms"
 $termsCheck.Left = 18
 $termsCheck.Top = 104
-$termsCheck.Width = 410
+$termsCheck.Width = 500
 $termsCheck.Checked = $false
 $termsCheck.Add_CheckedChanged({ Sync-RunButton })
 $optionsGroup.Controls.Add($termsCheck)
 
+$expectationLabel = New-Object System.Windows.Forms.Label
+$expectationLabel.Text = "Support and maintenance are best-effort. Check important output and report issues."
+$expectationLabel.Left = 36
+$expectationLabel.Top = 124
+$expectationLabel.Width = 500
+$expectationLabel.Height = 18
+$optionsGroup.Controls.Add($expectationLabel)
+
 $termsLink = New-Object System.Windows.Forms.LinkLabel
 $termsLink.Text = "Terms"
-$termsLink.Left = 430
+$termsLink.Left = 548
 $termsLink.Top = 105
 $termsLink.Width = 52
 $termsLink.Add_Click({ Open-ExternalUrl $TermsUrl })
@@ -268,8 +276,8 @@ $optionsGroup.Controls.Add($termsLink)
 
 $docsLink = New-Object System.Windows.Forms.LinkLabel
 $docsLink.Text = "Documentation"
-$docsLink.Left = 496
-$docsLink.Top = 105
+$docsLink.Left = 548
+$docsLink.Top = 124
 $docsLink.Width = 120
 $docsLink.Add_Click({ Open-ExternalUrl $DocumentationUrl })
 $optionsGroup.Controls.Add($docsLink)

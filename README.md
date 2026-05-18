@@ -94,7 +94,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1
 
 Use `--remove-user-data` on Linux or `-RemoveUserData` on Windows only when you also want to remove config, logs, history, and downloaded model data.
 
-Dictate is provided as-is. Review important output before using it, keep control of connected model-provider accounts and costs, and follow the applicable Arc Forge terms at <https://arcforge.au/terms>.
+Dictate is built to be useful, but it has real-world risks. Support and maintenance are best-effort, and important output should be checked before you rely on it. Report issues so they can be fixed; if Dictate saves you time and you have the means, paid support helps keep the work moving. Arc Forge terms are at <https://arcforge.au/terms>.
 
 ## Usage
 
