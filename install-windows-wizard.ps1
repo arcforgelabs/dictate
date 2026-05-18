@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $TermsUrl = "https://arcforge.au/terms"
 $DocumentationUrl = "https://github.com/arcforgelabs/dictate#readme"
+$HostedWindowsUpdateUrl = "https://raw.githubusercontent.com/arcforgelabs/dictate/master/update.ps1"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -77,14 +78,15 @@ function Invoke-LoggedProcess {
     param(
         [string]$Label,
         [string]$FileName,
-        [string]$ArgumentString
+        [string]$ArgumentString,
+        [string]$WorkingDirectory = $PSScriptRoot
     )
 
     Append-Log "==> $Label"
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FileName
     $psi.Arguments = $ArgumentString
-    $psi.WorkingDirectory = $PSScriptRoot
+    $psi.WorkingDirectory = $WorkingDirectory
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
@@ -135,13 +137,33 @@ function Invoke-Step {
     param(
         [string]$Label,
         [string]$FilePath,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = $PSScriptRoot
     )
 
     $argumentString = (
         @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$FilePath`"") + $Arguments
     ) -join " "
-    Invoke-LoggedProcess $Label "powershell" $argumentString
+    Invoke-LoggedProcess -Label $Label -FileName "powershell" -ArgumentString $argumentString -WorkingDirectory $WorkingDirectory
+}
+
+function Invoke-DictateUpdate {
+    param([string[]]$Arguments)
+
+    if (Test-Path (Join-Path $PSScriptRoot ".git")) {
+        Invoke-Step "Updating Dictate" (Join-Path $PSScriptRoot "update-windows.ps1") $Arguments
+        return
+    }
+
+    $tempUpdater = Join-Path ([System.IO.Path]::GetTempPath()) ("dictate-update-" + [guid]::NewGuid().ToString("N") + ".ps1")
+    try {
+        Append-Log "==> Fetching current hosted updater"
+        Invoke-WebRequest -UseBasicParsing -Uri $HostedWindowsUpdateUrl -OutFile $tempUpdater
+        $workingDirectory = Split-Path -Parent $PSScriptRoot
+        Invoke-Step -Label "Updating Dictate from hosted source" -FilePath $tempUpdater -Arguments $Arguments -WorkingDirectory $workingDirectory
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue -Path $tempUpdater
+    }
 }
 
 function Invoke-DictateDoctorFix {
@@ -171,7 +193,7 @@ function Start-SelectedAction {
         if ($action -eq "Install") {
             Invoke-Step "Installing Dictate" (Join-Path $PSScriptRoot "install-windows.ps1") $commonArgs
         } elseif ($action -eq "Update") {
-            Invoke-Step "Updating Dictate" (Join-Path $PSScriptRoot "update-windows.ps1") $commonArgs
+            Invoke-DictateUpdate $commonArgs
         } elseif ($action -eq "Repair") {
             Invoke-DictateDoctorFix
         } elseif ($action -eq "Uninstall") {
