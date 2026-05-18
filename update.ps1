@@ -12,7 +12,12 @@ $ErrorActionPreference = "Stop"
 
 if (-not $InstallRoot) {
     $currentDirectory = [System.IO.Directory]::GetCurrentDirectory()
-    if (Test-Path (Join-Path $currentDirectory "source")) {
+    $candidateSource = Join-Path $currentDirectory "source"
+    if (
+        (Test-Path (Join-Path $candidateSource "update-windows.ps1")) -and
+        (Test-Path (Join-Path $candidateSource "pyproject.toml")) -and
+        (Test-Path (Join-Path $candidateSource "src\dictate"))
+    ) {
         $InstallRoot = $currentDirectory
     } else {
         $base = $env:LOCALAPPDATA
