@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VM_NAME="win11-dev"
+VM_NAME="${DICTATE_WINDOWS_VM:-dictate-windows}"
 MODE="syntax"
 TIMEOUT_SECONDS="900"
 KEEP_GUEST_WORKDIR=0
@@ -13,7 +13,7 @@ usage() {
 Usage: scripts/windows-vm-smoke.sh [options]
 
 Options:
-  --vm <name>          libvirt/QEMU VM name. Default: win11-dev
+  --vm <name>          libvirt/QEMU VM name. Default: $VM_NAME
   --mode <mode>        syntax, install, or lifecycle. Default: syntax
   --timeout <seconds>  Guest command timeout. Default: 900
   --keep-guest-workdir Leave %TEMP%\\dictate-vm-smoke in the guest for inspection

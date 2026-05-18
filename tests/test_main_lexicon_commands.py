@@ -28,7 +28,7 @@ class MainLexiconCommandTests(unittest.TestCase):
                 "--add-lexicon-replacement",
                 "kinneri=canary",
                 "--add-lexicon-replacement",
-                "openbow=OpenBao",
+                "acme-widgit=AcmeWidget",
             ]
         )
 
@@ -41,7 +41,7 @@ class MainLexiconCommandTests(unittest.TestCase):
         add_fn.assert_called_once_with(
             {
                 "kinneri": "canary",
-                "openbow": "OpenBao",
+                "acme-widgit": "AcmeWidget",
             }
         )
 

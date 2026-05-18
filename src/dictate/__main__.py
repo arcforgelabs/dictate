@@ -1,5 +1,5 @@
 """
-dictate — local voice-to-text for the terminal.
+dictate — desktop dictation for the focused app.
 
 Usage:
     dictate                   Push-to-talk with system tray icon
@@ -70,7 +70,7 @@ SAMPLE_RATE = 16000
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dictate",
-        description="Local voice-to-text for the terminal",
+        description="Desktop dictation that types into the focused app",
         epilog="Diagnostics: dictate benchmark --help | dictate doctor --help",
     )
     parser.add_argument(
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--hotwords",
         default=None,
-        help="Comma-separated words to boost recognition (e.g. 'OpenBao,Vikunja')",
+        help="Comma-separated words to boost recognition (e.g. 'AcmeWidget,ProjectNova')",
     )
     parser.add_argument(
         "--add-hotword",
@@ -171,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="WRONG=RIGHT",
         help=(
             "Add lexical post-correction replacement(s), for example "
-            "--add-lexicon-replacement kinneri=canary"
+            "--add-lexicon-replacement acme-widgit=AcmeWidget"
         ),
     )
     parser.add_argument(

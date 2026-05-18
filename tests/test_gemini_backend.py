@@ -61,7 +61,7 @@ class GeminiBackendTests(unittest.TestCase):
         with patch.dict(os.environ, {"DICTATE_GEMINI_API_KEY": "test-key"}, clear=True):
             with patch("dictate.stt.gemini_backend.urllib.request.urlopen", fake_urlopen):
                 stt = GeminiSpeechToText(model_name="gemini-3-flash-preview")
-                text = stt.transcribe(audio, language="en", prompt_context="Use Arc Forge terms.")
+                text = stt.transcribe(audio, language="en", prompt_context="Use AcmeWidget terms.")
 
         self.assertEqual(text, "hello from gemini")
         self.assertIn("/models/gemini-3-flash-preview:generateContent", captured["url"])

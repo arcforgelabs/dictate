@@ -34,7 +34,7 @@ class XAIBackendTests(unittest.TestCase):
         self.assertEqual(_extract_text('{"text":"hello"}'), "hello")
 
     def test_keyterms_are_split_for_repeated_form_fields(self) -> None:
-        self.assertEqual(_keyterms("Arc Forge\nOpenBao,Pixel Forge"), ["Arc Forge", "OpenBao", "Pixel Forge"])
+        self.assertEqual(_keyterms("AcmeWidget\nProjectNova,TeamAtlas"), ["AcmeWidget", "ProjectNova", "TeamAtlas"])
 
     def test_transcribe_posts_audio_to_configured_endpoint(self) -> None:
         captured = {}
@@ -57,7 +57,7 @@ class XAIBackendTests(unittest.TestCase):
         ):
             stt = XAISpeechToText(model_name="grok-speech-to-text")
             with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-                text = stt.transcribe(audio, language="en", hotwords="Arc Forge\nOpenBao")
+                text = stt.transcribe(audio, language="en", hotwords="AcmeWidget\nProjectNova")
 
         self.assertEqual(text, "hello world")
         self.assertEqual(captured["url"], "https://example.test/v1/stt")
@@ -68,8 +68,8 @@ class XAIBackendTests(unittest.TestCase):
         self.assertIn(b'name="language"', body)
         self.assertIn(b"en", body)
         self.assertEqual(body.count(b'name="keyterm"'), 2)
-        self.assertIn(b"Arc Forge", body)
-        self.assertIn(b"OpenBao", body)
+        self.assertIn(b"AcmeWidget", body)
+        self.assertIn(b"ProjectNova", body)
 
     def test_api_key_can_come_from_command(self) -> None:
         with (

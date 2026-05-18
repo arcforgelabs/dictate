@@ -21,7 +21,7 @@ class ConfigSelectionTests(unittest.TestCase):
     def test_set_stt_preferences_preserve_hotwords(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
-            add_hotwords(["OpenBao"], path=config_path)
+            add_hotwords(["AcmeWidget"], path=config_path)
 
             set_stt_selection(
                 backend="gemini",
@@ -35,8 +35,8 @@ class ConfigSelectionTests(unittest.TestCase):
             )
 
             config = load_config(path=config_path)
-            self.assertEqual(config.hotwords, ["OpenBao"])
-            self.assertEqual(config.hotwords_for_backend("xai"), "OpenBao")
+            self.assertEqual(config.hotwords, ["AcmeWidget"])
+            self.assertEqual(config.hotwords_for_backend("xai"), "AcmeWidget")
             self.assertIsNone(config.push_to_talk_combo)
             self.assertIsNone(config.push_to_talk_key)
             self.assertEqual(config.stt_backend, "gemini")
@@ -53,11 +53,11 @@ class ConfigSelectionTests(unittest.TestCase):
             self.assertEqual(config.push_to_talk_combo, "ctrl+space")
 
     def test_parse_hotwords_text_accepts_pasted_lists(self) -> None:
-        text = "Arc Forge, OpenBao\n- Pixel Forge\n1. Lab Flow;  3Shape"
+        text = "AcmeWidget, ProjectNova\n- TeamAtlas\n1. ModelThree;  WidgetSuite"
 
         self.assertEqual(
             parse_hotwords_text(text),
-            ["Arc Forge", "OpenBao", "Pixel Forge", "Lab Flow", "3Shape"],
+            ["AcmeWidget", "ProjectNova", "TeamAtlas", "ModelThree", "WidgetSuite"],
         )
 
     def test_load_config_reads_openai_key_command(self) -> None:
@@ -108,12 +108,12 @@ class ConfigSelectionTests(unittest.TestCase):
             add_lexicon_replacements(
                 {
                     "kinneri": "canary",
-                    "openbow": "OpenBao",
+                    "acme-widgit": "AcmeWidget",
                 },
                 path=config_path,
             )
-            removed = remove_lexicon_replacements(["openbow"], path=config_path)
-            self.assertEqual(removed, ["openbow"])
+            removed = remove_lexicon_replacements(["acme-widgit"], path=config_path)
+            self.assertEqual(removed, ["acme-widgit"])
 
             config = load_config(path=config_path)
             self.assertEqual(

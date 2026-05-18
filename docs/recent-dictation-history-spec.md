@@ -4,8 +4,8 @@
 
 Current dictation flow is:
 
-1. User holds `Right Ctrl` to record.
-2. User releases `Right Ctrl`.
+1. User holds the configured push-to-talk shortcut to record.
+2. User releases the shortcut.
 3. Dictate transcribes and sends text to the active target (`xdotool`/`wtype`/`ydotool`).
 
 If text is lost after that step (wrong target, accidental deletion, no editable field), there is no recovery path. This feature adds a lightweight local history so the most recent dictated text can be recovered and copied again.

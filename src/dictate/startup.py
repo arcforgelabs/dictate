@@ -115,7 +115,7 @@ def _linux_desktop_entry(*, autostart: bool) -> str:
     lines = [
         "[Desktop Entry]",
         "Name=Dictate",
-        "Comment=Local voice-to-text with push-to-talk",
+        "Comment=Dictate into the focused app",
         f"Exec={exec_path}",
         f"Icon={_linux_icon_path()}",
         "Type=Application",

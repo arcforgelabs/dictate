@@ -24,14 +24,14 @@ class LexiconTests(unittest.TestCase):
         stt = _DummySpeechToText()
         plan = build_lexicon_plan(
             stt=stt,
-            hotwords="OpenBao canary",
+            hotwords="AcmeWidget canary",
             lexicon_mode="hybrid",
             replacements={"kinneri": "canary"},
         )
 
-        self.assertEqual(plan.decode_hotwords, "OpenBao canary")
+        self.assertEqual(plan.decode_hotwords, "AcmeWidget canary")
         self.assertIsNotNone(plan.prompt_context)
-        self.assertEqual(plan.post_hotwords, ("OpenBao", "canary"))
+        self.assertEqual(plan.post_hotwords, ("AcmeWidget", "canary"))
         self.assertEqual(plan.post_replacements, {"kinneri": "canary"})
 
     def test_apply_post_corrections_prefers_explicit_map(self) -> None:

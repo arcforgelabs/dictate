@@ -127,7 +127,7 @@ rm -f "$DESKTOP_DIR/dictate-settings.desktop"
 cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
 [Desktop Entry]
 Name=Dictate
-Comment=Local voice-to-text with push-to-talk
+Comment=Dictate into the focused app
 Exec=$HOME/.local/bin/dictate
 Icon=$ICON_PATH
 Type=Application
@@ -144,7 +144,7 @@ if [ "$STARTUP" -eq 1 ]; then
   cat > "$AUTOSTART_DIR/dictate.desktop" <<EOF
 [Desktop Entry]
 Name=Dictate
-Comment=Local voice-to-text with push-to-talk
+Comment=Dictate into the focused app
 Exec=$HOME/.local/bin/dictate
 Icon=$ICON_PATH
 Type=Application

@@ -1,7 +1,7 @@
 {
   "name": "@iamsamuelrodda/dictate",
   "version": "2026.5.18",
-  "description": "Installer shim for Dictate desktop voice-to-text.",
+  "description": "Installer shim for Dictate desktop dictation.",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/arcforgelabs/dictate#readme",

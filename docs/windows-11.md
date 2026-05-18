@@ -1,6 +1,6 @@
 # Windows 11 Support
 
-Windows 11 is supported as a separate runtime stream from the Linux tray build.
+Windows 11 is a supported desktop target for Dictate. The normal path is the installed `Dictate` app entry, which starts the Windows tray app and lets you configure model, API keys, startup, updates, hotkeys, and recent history.
 
 ## Supported Surface
 
@@ -40,7 +40,7 @@ Windows setup wizard from a repo root:
 powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
 ```
 
-That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds a Start Menu shortcut named `Dictate`.
+That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, registers Dictate in Installed Apps, adds a Start Menu shortcut named `Dictate`, and enables launch on startup by default.
 
 Skip model preparation or verification when needed:
 
@@ -57,9 +57,9 @@ CI/smoke-test install without a Start Menu shortcut:
 Host-driven QEMU/KVM VM smoke test from Linux:
 
 ```bash
-scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax
-scripts/windows-vm-smoke.sh --vm win11-dev --mode install
-scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle
+scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode syntax
+scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode install
+scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode lifecycle
 ```
 
 The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` also runs a no-model/no-shortcut install, focused tests, version check, and uninstall cleanup. `lifecycle` adds update and uninstall smoke checks.
@@ -97,7 +97,7 @@ py -3.11 -m venv .venv
 
 ## Run
 
-Tray push-to-talk:
+Tray app:
 
 ```powershell
 .\.venv\Scripts\dictate-tray.cmd
@@ -124,9 +124,23 @@ One-shot:
 - Fallback logs: `%TEMP%\dictate-logs\`
 - Launchers: `.venv\Scripts\dictate-tray.cmd`, `.venv\Scripts\dictate-daemon.cmd`, `.venv\Scripts\dictate-once.cmd`, and `.venv\Scripts\dictate-controls.cmd`
 - Start Menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Dictate.lnk`
+- Startup shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Dictate.lnk`
+
+## Settings
+
+Open `Dictate` from the Start Menu for the tray app, then open settings from the tray menu. Current settings include:
+
+- selected provider/model status at the top
+- Provider and Select Model controls
+- API key entry/status for hosted providers
+- Hotkeys
+- Local CPU/GPU runtime choice
+- Launch on start up
+- About section with version, update status, Check for Updates, Update, Documentation, and Terms
+- Recent History paging with copy/paste actions
 
 ## Known Gaps
 
-- No signed Windows installer package yet; the repo-local PowerShell installer is the supported path for now.
+- No signed Windows installer package yet; the hosted PowerShell bootstrap and repo-local PowerShell installer are the supported paths for now.
 - Global hotkey reliability depends on `pynput` permissions and the active desktop/session.
 - NeMo Canary on Windows is not part of the supported baseline.

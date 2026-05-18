@@ -1,7 +1,7 @@
 [project]
 name = "dictate"
 version = "2026.5.18"
-description = "Local voice-to-text for desktop dictation. Record, transcribe, type."
+description = "Desktop dictation that types into the focused app."
 requires-python = ">=3.11,<3.13"
 license = { text = "Apache-2.0" }
 

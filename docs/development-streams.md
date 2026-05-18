@@ -1,29 +1,30 @@
 # Development Streams
 
-Dictate now has two active platform streams.
+Dictate has two active platform streams.
 
 ## Linux Stream
 
-Linux remains the primary desktop stream:
+Linux desktop stream:
 
 - GTK/Ayatana tray.
 - X11 typing through `xdotool`.
 - Wayland typing through `wtype` or `ydotool`.
 - Wayland global shortcuts through desktop portals where available.
-- Linux install scripts and desktop-entry work.
+- Linux install scripts, desktop entry, icon, and autostart integration.
 
 Use GitHub labels such as `platform:linux`, `area:tray`, `area:hotkeys`, and `area:packaging`.
 
 ## Windows 11 Stream
 
-Windows 11 is a parallel compatibility stream:
+Windows 11 desktop stream:
 
-- Headless push-to-talk through `pynput`.
+- Tray and headless push-to-talk through `pynput`.
 - Clipboard output through `pyperclip`.
 - Windows app-data paths for config, history, and logs.
-- Windows CI smoke tests.
-- Repo-local PowerShell install path.
-- Future native tray and signed installer work.
+- Windows Settings/About UI.
+- Windows CI smoke tests for install, update, app registration, startup, and uninstall.
+- Hosted and repo-local PowerShell install paths.
+- Future signed installer work.
 
 Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:installer`, and `area:packaging`.
 

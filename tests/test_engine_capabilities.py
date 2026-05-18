@@ -106,7 +106,7 @@ class _FallbackSpeechToText(SpeechToText):
 class DictationEngineCapabilityTests(unittest.TestCase):
     def test_hotwords_dropped_when_backend_does_not_support_them(self) -> None:
         stt = _DummyNoHotwordsSpeechToText()
-        engine = DictationEngine(stt=stt, hotwords="OpenBao Kubernetes")
+        engine = DictationEngine(stt=stt, hotwords="AcmeWidget ProjectNova")
         audio = np.ones(8000, dtype=np.float32)
 
         result = engine.transcribe(audio, language="en")
@@ -117,20 +117,20 @@ class DictationEngineCapabilityTests(unittest.TestCase):
 
     def test_hotwords_passed_when_backend_supports_them(self) -> None:
         stt = _DummyHotwordsSpeechToText()
-        engine = DictationEngine(stt=stt, hotwords="OpenBao Kubernetes")
+        engine = DictationEngine(stt=stt, hotwords="AcmeWidget ProjectNova")
         audio = np.ones(8000, dtype=np.float32)
 
         result = engine.transcribe(audio, language="en")
 
         self.assertEqual(result.status, "ok")
-        self.assertEqual(stt.received_hotwords, "OpenBao Kubernetes")
+        self.assertEqual(stt.received_hotwords, "AcmeWidget ProjectNova")
         self.assertIsNone(stt.received_prompt_context)
 
     def test_prompt_mode_passes_context_on_prompt_capable_backend(self) -> None:
         stt = _DummyPromptSpeechToText()
         engine = DictationEngine(
             stt=stt,
-            hotwords="OpenBao Kubernetes",
+            hotwords="AcmeWidget ProjectNova",
             lexicon_mode="prompt",
         )
         audio = np.ones(8000, dtype=np.float32)
@@ -140,7 +140,7 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertIsNone(stt.received_hotwords)
         self.assertIsNotNone(stt.received_prompt_context)
-        self.assertIn("OpenBao", stt.received_prompt_context or "")
+        self.assertIn("AcmeWidget", stt.received_prompt_context or "")
 
     def test_post_mode_applies_single_edit_correction_for_hotwords(self) -> None:
         stt = _DummyHotwordsSpeechToText(response_text="Testing canery one two three")
@@ -176,7 +176,7 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         fallback = _FallbackSpeechToText(response_text="recovered turn")
         engine = DictationEngine(
             stt=_FailingApiSpeechToText(),
-            hotwords="OpenBao",
+            hotwords="AcmeWidget",
         )
         audio = np.ones(8000, dtype=np.float32)
 
@@ -185,7 +185,7 @@ class DictationEngineCapabilityTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.text, "recovered turn")
-        self.assertEqual(fallback.received_hotwords, "OpenBao")
+        self.assertEqual(fallback.received_hotwords, "AcmeWidget")
         self.assertIsNotNone(result.notice)
         self.assertIn("xAI transcription failed", result.notice or "")
         self.assertIn("faster-whisper/base on CPU", result.notice or "")

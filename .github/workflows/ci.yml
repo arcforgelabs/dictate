@@ -6,6 +6,9 @@ on:
     branches: [master]
     tags: ["v20*"]
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}

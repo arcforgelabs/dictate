@@ -59,7 +59,7 @@ class OpenAIBackendTests(unittest.TestCase):
         ):
             stt = OpenAISpeechToText(model_name="gpt-4o-mini-transcribe")
             with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-                text = stt.transcribe(audio, language="en", prompt_context="Use Arc Forge terms.")
+                text = stt.transcribe(audio, language="en", prompt_context="Use AcmeWidget terms.")
 
         self.assertEqual(text, "hello world")
         self.assertEqual(captured["url"], "https://example.test/v1/audio/transcriptions")
@@ -70,7 +70,7 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn(b'name="language"', body)
         self.assertIn(b"en", body)
         self.assertIn(b'name="prompt"', body)
-        self.assertIn(b"Use Arc Forge terms.", body)
+        self.assertIn(b"Use AcmeWidget terms.", body)
 
     def test_api_key_can_come_from_command(self) -> None:
         with (

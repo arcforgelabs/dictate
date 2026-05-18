@@ -1,32 +1,4 @@
-hotwords:
-  - Todoist
-  - Joplin
-  - Kubernetes
-  - Arc
-  - Bitwarden
-  - OpenBao
-  - Claude Code
-  - Prometheus
-  - Grafana
-  - Pi
-  - Arc Forge
-  - ASIC
-  - GIMP
-  - Ghostty
-  - Inkscape
-  - See
-  - see
-  - Seazona
-  - OpenClaw
-  - Aegis
-  - Cato
-  - Rodda
-  - Sure
-  - Moasure
-  - Schemantics
-  - root
-  - Xero
-  - Pixel Forge
+hotwords: []
 push_to_talk_combo: ctrl_r
 stt_backend: faster-whisper
 stt_compute_type: int8

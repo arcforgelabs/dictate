@@ -24,4 +24,4 @@ body:
     id: logs
     attributes:
       label: Relevant logs
-      description: Include output from `%LOCALAPPDATA%\dictate\logs\latest.log` when available.
+      description: Include output from `%LOCALAPPDATA%\dictate\logs\latest.log` when available. Remove API keys, personal hotwords, private names, and sensitive dictation text before posting.
