@@ -252,24 +252,30 @@ def _install_windows_shortcuts() -> None:
     icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate.ico"
     install_location = scripts_dir.parents[1]
     uninstall_script = install_location / "uninstall-windows.ps1"
+    wscript = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "wscript.exe"
+    tray_arguments = f'"{tray_launcher}"'
     script = f"""
 $programsDir = {_ps_quote(programs_dir)}
 $startupDir = {_ps_quote(startup_dir)}
 $installLocation = {_ps_quote(install_location)}
 $displayIcon = {_ps_quote(icon_path)}
 $uninstallScript = {_ps_quote(uninstall_script)}
+$wscript = {_ps_quote(wscript)}
+$trayArguments = {_ps_quote(tray_arguments)}
 New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut((Join-Path $programsDir 'Dictate.lnk'))
-$shortcut.TargetPath = {_ps_quote(tray_launcher)}
+$shortcut.TargetPath = $wscript
+$shortcut.Arguments = $trayArguments
 $shortcut.WorkingDirectory = $installLocation
 $shortcut.Description = 'Start Dictate push-to-talk tray'
 if (Test-Path $displayIcon) {{ $shortcut.IconLocation = $displayIcon }}
 $shortcut.Save()
 Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir 'Dictate Controls.lnk')
 $startup = $shell.CreateShortcut((Join-Path $startupDir 'Dictate.lnk'))
-$startup.TargetPath = {_ps_quote(tray_launcher)}
+$startup.TargetPath = $wscript
+$startup.Arguments = $trayArguments
 $startup.WorkingDirectory = $installLocation
 $startup.Description = 'Start Dictate automatically at sign-in'
 if (Test-Path $displayIcon) {{ $startup.IconLocation = $displayIcon }}
@@ -277,7 +283,7 @@ $startup.Save()
 $keyPath = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dictate'
 New-Item -Force -Path $keyPath | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'DisplayName' -Value 'Dictate' -PropertyType String | Out-Null
-New-ItemProperty -Force -Path $keyPath -Name 'DisplayVersion' -Value '2026.5.18' -PropertyType String | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'DisplayVersion' -Value '2026.5.18-1' -PropertyType String | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'Publisher' -Value 'Arc Forge Labs' -PropertyType String | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'InstallLocation' -Value $installLocation -PropertyType String | Out-Null
 if (Test-Path $displayIcon) {{ New-ItemProperty -Force -Path $keyPath -Name 'DisplayIcon' -Value $displayIcon -PropertyType String | Out-Null }}

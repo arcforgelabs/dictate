@@ -88,16 +88,20 @@ def install_windows_startup_shortcut() -> Path:
         raise RuntimeError(f"tray launcher not found: {tray_launcher}")
     install_location = scripts_dir.parents[1]
     icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate.ico"
+    wscript = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "wscript.exe"
+    tray_arguments = f'"{tray_launcher}"'
     script = f"""
 $startupDir = {_ps_quote(startup_path.parent)}
 $shortcutPath = {_ps_quote(startup_path)}
-$targetPath = {_ps_quote(tray_launcher)}
+$targetPath = {_ps_quote(wscript)}
+$arguments = {_ps_quote(tray_arguments)}
 $workingDirectory = {_ps_quote(install_location)}
 $iconPath = {_ps_quote(icon_path)}
 New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $targetPath
+$shortcut.Arguments = $arguments
 $shortcut.WorkingDirectory = $workingDirectory
 $shortcut.Description = 'Start Dictate automatically at sign-in'
 if (Test-Path $iconPath) {{ $shortcut.IconLocation = $iconPath }}

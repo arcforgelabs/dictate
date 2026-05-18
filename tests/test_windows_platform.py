@@ -191,14 +191,9 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
         self.assertIn('"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*', script)
-        self.assertIn(
-            'Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs")',
-            script,
-        )
-        self.assertIn(
-            'Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs")',
-            script,
-        )
+        self.assertIn('$wscript = Join-Path $env:WINDIR "System32\\wscript.exe"', script)
+        self.assertIn('Install-StartMenuShortcut -TargetPath $wscript -Arguments $trayArgs', script)
+        self.assertIn('Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs', script)
         self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
         self.assertIn('Remove-Item -Force -ErrorAction SilentlyContinue -Path $shortcutPath, $legacyShortcutPath', script)
         self.assertIn('Remove-Item -Force $shortcutPath', script)
@@ -318,7 +313,7 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('$DictateVersion = "2026.5.18"', script)
+        self.assertIn('$DictateVersion = "2026.5.18-1"', script)
         self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
         self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn("Invoke-WebRequest -UseBasicParsing", script)
@@ -443,7 +438,7 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('$DictateVersion = "2026.5.18"', script)
+        self.assertIn('$DictateVersion = "2026.5.18-1"', script)
         self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
         self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn('[System.IO.Directory]::GetCurrentDirectory()', script)
@@ -533,7 +528,7 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn('"name": "@iamsamuelrodda/dictate"', package_json)
-        self.assertIn('"version": "2026.5.18"', package_json)
+        self.assertIn('"version": "2026.5.18-1"', package_json)
         self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
         self.assertIn('"access": "public"', package_json)
         self.assertIn('"provenance": true', package_json)

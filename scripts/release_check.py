@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 
-CALVER_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}$")
+CALVER_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}(?:-\d+)?$")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,7 +78,7 @@ def _normalize_tag(tag: str) -> str:
 
 def _require_calver(version: str) -> None:
     if not CALVER_RE.fullmatch(version):
-        raise SystemExit(f"expected CalVer YYYY.M.D, got: {version}")
+        raise SystemExit(f"expected CalVer YYYY.M.D or same-day patch YYYY.M.D-N, got: {version}")
 
 
 def _require_equal(label: str, actual: str, expected: str) -> None:

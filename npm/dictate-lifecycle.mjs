@@ -24,7 +24,7 @@ const scripts = isWindows
   ? {
       install: ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(packageRoot, "install.ps1")]],
       update: ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(packageRoot, "update.ps1")]],
-      uninstall: ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(packageRoot, "uninstall-windows.ps1")]],
+      uninstall: ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(packageRoot, "uninstall.ps1")]],
       wizard: ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(packageRoot, "install.ps1"), "-Wizard"]],
     }
   : {

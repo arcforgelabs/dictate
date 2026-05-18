@@ -179,6 +179,7 @@ function New-DictateShortcut {
     param(
         [string]$ShortcutPath,
         [string]$TargetPath,
+        [string]$Arguments = "",
         [string]$WorkingDirectory,
         [string]$Description
     )
@@ -187,6 +188,7 @@ function New-DictateShortcut {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($ShortcutPath)
     $shortcut.TargetPath = $TargetPath
+    $shortcut.Arguments = $Arguments
     $shortcut.WorkingDirectory = $WorkingDirectory
     $shortcut.Description = $Description
     if (Test-Path $iconPath) {
@@ -198,6 +200,7 @@ function New-DictateShortcut {
 function Install-StartMenuShortcut {
     param(
         [string]$TargetPath,
+        [string]$Arguments = "",
         [string]$WorkingDirectory
     )
 
@@ -214,7 +217,7 @@ function Install-StartMenuShortcut {
     }
 
     Remove-Item -Force -ErrorAction SilentlyContinue -Path $legacyShortcutPath
-    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Start Dictate push-to-talk tray"
+    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -Arguments $Arguments -WorkingDirectory $WorkingDirectory -Description "Start Dictate push-to-talk tray"
 
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
 }
@@ -222,6 +225,7 @@ function Install-StartMenuShortcut {
 function Install-StartupShortcut {
     param(
         [string]$TargetPath,
+        [string]$Arguments = "",
         [string]$WorkingDirectory
     )
 
@@ -239,7 +243,7 @@ function Install-StartupShortcut {
     New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
 
     $shortcutPath = Join-Path $startupDir "Dictate.lnk"
-    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Start Dictate automatically at sign-in"
+    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -Arguments $Arguments -WorkingDirectory $WorkingDirectory -Description "Start Dictate automatically at sign-in"
 
     Write-Host "==> Installed startup shortcut: $shortcutPath"
 }
@@ -253,7 +257,7 @@ function Register-InstalledApp {
     $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate"
     New-Item -Force -Path $keyPath | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "DisplayName" -Value "Dictate" -PropertyType String | Out-Null
-    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.5.18" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.5.18-1" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "Publisher" -Value "Arc Forge Labs" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "InstallLocation" -Value $InstallLocation -PropertyType String | Out-Null
     if (Test-Path $DisplayIcon) {
@@ -291,8 +295,11 @@ Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "$
 
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
-Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
-Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
+$trayVbs = Join-Path $scriptsDir "dictate-tray.vbs"
+$wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+$trayArgs = "`"$trayVbs`""
+Install-StartMenuShortcut -TargetPath $wscript -Arguments $trayArgs -WorkingDirectory $PSScriptRoot
+Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs -WorkingDirectory $PSScriptRoot
 Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 
 if (-not $NoPrepareTurbo) {

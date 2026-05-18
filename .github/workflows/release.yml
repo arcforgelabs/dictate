@@ -129,7 +129,7 @@ jobs:
           if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "npm package ${PACKAGE_NAME}@${PACKAGE_VERSION} already exists; skipping publish"
           else
-            npm publish --access public
+            npm publish --access public --tag latest
           fi
 
       - name: Create GitHub release

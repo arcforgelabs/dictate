@@ -25,12 +25,14 @@ class _FakeResponse:
 
 class UpdateStatusTests(unittest.TestCase):
     def test_parse_calver_accepts_optional_v_prefix(self) -> None:
-        self.assertEqual(parse_calver("2026.5.18"), (2026, 5, 18))
-        self.assertEqual(parse_calver("v2026.5.19"), (2026, 5, 19))
+        self.assertEqual(parse_calver("2026.5.18"), (2026, 5, 18, 0))
+        self.assertEqual(parse_calver("v2026.5.19"), (2026, 5, 19, 0))
+        self.assertEqual(parse_calver("v2026.5.18-1"), (2026, 5, 18, 1))
         self.assertIsNone(parse_calver("latest"))
 
     def test_is_newer_version_compares_calver(self) -> None:
         self.assertTrue(is_newer_version("2026.5.19", "2026.5.18"))
+        self.assertTrue(is_newer_version("2026.5.18-1", "2026.5.18"))
         self.assertFalse(is_newer_version("2026.5.18", "2026.5.18"))
         self.assertFalse(is_newer_version("2026.5.17", "2026.5.18"))
 

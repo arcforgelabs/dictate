@@ -27,13 +27,14 @@ class UpdateStatus:
     url: str | None = None
 
 
-def parse_calver(value: str | None) -> tuple[int, int, int] | None:
+def parse_calver(value: str | None) -> tuple[int, int, int, int] | None:
     if not value:
         return None
-    match = re.fullmatch(r"v?(\d{4})\.(\d{1,2})\.(\d{1,2})", value.strip())
+    match = re.fullmatch(r"v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?", value.strip())
     if not match:
         return None
-    return tuple(int(part) for part in match.groups())
+    year, month, day, sequence = match.groups()
+    return (int(year), int(month), int(day), int(sequence or 0))
 
 
 def is_newer_version(latest: str | None, current: str | None = RELEASE_VERSION) -> bool:

@@ -1,8 +1,8 @@
 {
   "name": "@iamsamuelrodda/dictate",
-  "version": "2026.5.18",
+  "version": "2026.5.18-1",
   "description": "Installer shim for Dictate desktop dictation.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/arcforgelabs/dictate#readme",
   "repository": {
@@ -23,6 +23,7 @@
     "install-windows.ps1",
     "install-windows-wizard.ps1",
     "update-windows.ps1",
+    "uninstall.ps1",
     "uninstall-windows.ps1",
     "install.sh",
     "update.sh",
@@ -34,8 +35,7 @@
     "assets/dictate-listening.png",
     "npm/",
     "README.md",
-    "LICENSE",
-    "NOTICE"
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public",

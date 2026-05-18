@@ -9,8 +9,8 @@ from dictate.version import PACKAGE_VERSION, RELEASE_VERSION
 
 class VersionTests(unittest.TestCase):
     def test_release_and_package_versions_are_calver(self) -> None:
-        self.assertEqual(RELEASE_VERSION, "2026.5.18")
-        self.assertEqual(PACKAGE_VERSION, "2026.5.18")
+        self.assertEqual(RELEASE_VERSION, "2026.5.18-1")
+        self.assertEqual(PACKAGE_VERSION, "2026.5.18-1")
 
     def test_calver_script_generates_release_and_pep440_versions(self) -> None:
         release = subprocess.check_output(
@@ -19,6 +19,8 @@ class VersionTests(unittest.TestCase):
                 "scripts/calver.py",
                 "--date",
                 "2026-05-18",
+                "--sequence",
+                "1",
             ],
             text=True,
         ).strip()
@@ -28,6 +30,8 @@ class VersionTests(unittest.TestCase):
                 "scripts/calver.py",
                 "--date",
                 "2026-05-18",
+                "--sequence",
+                "1",
                 "--format",
                 "pep440",
             ],

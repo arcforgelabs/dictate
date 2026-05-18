@@ -306,6 +306,7 @@ Write-Output "==> PowerShell syntax parse"
     'install-windows-wizard.ps1',
     'update.ps1',
     'update-windows.ps1',
+    'uninstall.ps1',
     'uninstall-windows.ps1',
     'scripts/windows-user-smoke.ps1'
 )

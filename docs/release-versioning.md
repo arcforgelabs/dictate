@@ -18,6 +18,13 @@ Python package metadata uses the same PEP 440-compatible version:
 2026.5.18
 ```
 
+If a same-day replacement package is needed because an immutable package
+registry already has `YYYY.M.D`, append a small patch sequence:
+
+```text
+2026.5.18-1
+```
+
 The app reports the public release version through:
 
 ```bash
@@ -28,6 +35,7 @@ Generate versions with:
 
 ```bash
 python scripts/calver.py --date 2026-05-18
+python scripts/calver.py --date 2026-05-18 --sequence 1
 python scripts/calver.py --date 2026-05-18 --format pep440
 ```
 
@@ -35,6 +43,7 @@ Release tags and GitHub milestones should use the public version with a leading 
 
 ```text
 v2026.5.18
+v2026.5.18-1
 ```
 
 Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.
