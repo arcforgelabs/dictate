@@ -221,6 +221,12 @@ function Install-StartupShortcut {
     )
 
     if ($NoShortcut -or $NoStartup) {
+        $startupDir = Get-StartupDir
+        $shortcutPath = Join-Path $startupDir "Dictate.lnk"
+        if (Test-Path $shortcutPath) {
+            Remove-Item -Force $shortcutPath
+            Write-Host "==> Removed startup shortcut: $shortcutPath"
+        }
         return
     }
 

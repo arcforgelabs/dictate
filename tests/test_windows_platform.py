@@ -199,6 +199,8 @@ class WindowsPlatformTests(unittest.TestCase):
             'Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs")',
             script,
         )
+        self.assertIn('Remove-Item -Force $shortcutPath', script)
+        self.assertIn('Removed startup shortcut', script)
         self.assertIn("Register-InstalledApp", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
 
@@ -376,6 +378,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("TERMS_URL", source)
         self.assertIn("check_update_status()", source)
         self.assertIn("subprocess.Popen(command", source)
+        self.assertIn("_update_working_directory()", source)
         self.assertIn("self.root.after(500, self.root.destroy)", source)
         self.assertIn("install-windows-wizard.ps1", source)
         self.assertIn("HOSTED_WINDOWS_UPDATE_COMMAND", source)

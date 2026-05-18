@@ -376,7 +376,7 @@ class ControlPanel:
         ):
             return
         try:
-            subprocess.Popen(command, cwd=str(_source_root()))  # noqa: S603
+            subprocess.Popen(command, cwd=str(_update_working_directory()))  # noqa: S603
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Update Failed", str(exc))
             return
@@ -527,6 +527,12 @@ def _apply_api_key_command_from_config(backend: str) -> None:
 
 def _source_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _update_working_directory() -> Path:
+    source_root = _source_root()
+    parent = source_root.parent
+    return parent if parent.exists() else Path.home()
 
 
 def _update_command() -> list[str] | None:
