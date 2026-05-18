@@ -377,7 +377,8 @@ class ControlPanel:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Update Failed", str(exc))
             return
-        messagebox.showinfo("Update Started", "Dictate updater started in the background.")
+        self.update_status_var.set("Updates: Started; closing Settings...")
+        self.root.after(500, self.root.destroy)
 
     def _render_history_page(self) -> None:
         for child in self.history_rows.winfo_children():

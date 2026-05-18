@@ -22,6 +22,24 @@ function Remove-LegacyEntries {
     Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir "Dictate Controls.lnk")
 }
 
+function Stop-DictateProcesses {
+    $currentPid = $PID
+    $matches = Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.ProcessId -ne $currentPid -and (
+                $_.Name -in @("dictate.exe", "dictate-controls.exe") -or
+                $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
+                $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
+                $_.CommandLine -like '*dictate-daemon.cmd*' -or
+                $_.CommandLine -like '*dictate-controls*'
+            )
+        }
+    foreach ($match in $matches) {
+        Stop-Process -Id $match.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 if ((-not $SkipGitPull) -and (Test-Path (Join-Path $PSScriptRoot ".git"))) {
     Write-Host "==> Updating source checkout"
     & git -C $PSScriptRoot pull --ff-only
@@ -31,6 +49,7 @@ if ((-not $SkipGitPull) -and (Test-Path (Join-Path $PSScriptRoot ".git"))) {
 }
 
 Remove-LegacyEntries
+Stop-DictateProcesses
 
 $installerArgs = @("-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "install-windows.ps1"))
 if ($NoVerify) { $installerArgs += "-NoVerify" }

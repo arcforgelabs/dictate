@@ -240,6 +240,8 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
         self.assertIn("git -C $PSScriptRoot pull --ff-only", script)
+        self.assertIn("function Stop-DictateProcesses", script)
+        self.assertIn("Stop-DictateProcesses", script)
         self.assertIn('Join-Path $PSScriptRoot "install-windows.ps1"', script)
 
     def test_windows_uninstaller_removes_discovery_entries(self) -> None:
@@ -250,6 +252,8 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('Join-Path $programsDir "Dictate.lnk"', script)
         self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
         self.assertIn('Join-Path $startupDir "Dictate.lnk"', script)
+        self.assertIn("function Stop-DictateProcesses", script)
+        self.assertIn("Stop-DictateProcesses", script)
         self.assertIn("[switch]$RemoveUserData", script)
         self.assertIn("User config/data preserved", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
@@ -372,6 +376,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("TERMS_URL", source)
         self.assertIn("check_update_status()", source)
         self.assertIn("subprocess.Popen(command", source)
+        self.assertIn("self.root.after(500, self.root.destroy)", source)
         self.assertIn("install-windows-wizard.ps1", source)
         self.assertIn('"Update"', source)
 

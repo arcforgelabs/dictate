@@ -12,6 +12,24 @@ function Remove-IfExists {
     }
 }
 
+function Stop-DictateProcesses {
+    $currentPid = $PID
+    $matches = Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.ProcessId -ne $currentPid -and (
+                $_.Name -in @("dictate.exe", "dictate-controls.exe") -or
+                $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
+                $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
+                $_.CommandLine -like '*dictate-daemon.cmd*' -or
+                $_.CommandLine -like '*dictate-controls*'
+            )
+        }
+    foreach ($match in $matches) {
+        Stop-Process -Id $match.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 if (-not $env:APPDATA) {
     $programsDir = Join-Path $HOME "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
@@ -26,6 +44,8 @@ $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dicta
 if (Test-Path $uninstallKey) {
     Remove-Item -Recurse -Force -Path $uninstallKey
 }
+
+Stop-DictateProcesses
 
 $venvDir = Join-Path $PSScriptRoot ".venv"
 if (Test-Path $venvDir) {
