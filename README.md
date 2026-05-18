@@ -335,4 +335,5 @@ uv run python -m unittest discover -s tests
 
 ## License
 
-MIT (see `LICENSE`).
+Apache-2.0 (see `LICENSE`). Preserve `NOTICE` when redistributing the project.
+Contributions are accepted under the terms in `CONTRIBUTING.md`.
