@@ -50,6 +50,16 @@ CI/smoke-test install without a Start Menu shortcut:
 .\install-windows.ps1 -NoPrepareTurbo -NoVerify -NoShortcut
 ```
 
+Host-driven QEMU/KVM VM smoke test from Linux:
+
+```bash
+scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax
+scripts/windows-vm-smoke.sh --vm win11-dev --mode install
+scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle
+```
+
+The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` also runs a no-model/no-shortcut install, focused tests, version check, and uninstall cleanup. `lifecycle` adds update and uninstall smoke checks.
+
 Update or uninstall from a repo root:
 
 ```powershell

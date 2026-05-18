@@ -305,7 +305,11 @@ if (-not $NoVerify) {
 
 Write-Host ""
 Write-Host "Dictate is installed."
-Write-Host "Dictate starts automatically when you sign in."
+if ($NoShortcut -or $NoStartup) {
+    Write-Host "Dictate startup shortcut was not installed."
+} else {
+    Write-Host "Dictate starts automatically when you sign in."
+}
 Write-Host "Start push-to-talk with a Windows tray icon from the Start Menu shortcut named 'Dictate', or run:"
 Write-Host "  .\.venv\Scripts\dictate-tray.cmd"
 Write-Host ""
