@@ -193,7 +193,9 @@ function Start-SelectedAction {
         if ($action -eq "Install") {
             Invoke-Step "Installing Dictate" (Join-Path $PSScriptRoot "install-windows.ps1") $commonArgs
         } elseif ($action -eq "Update") {
-            Invoke-DictateUpdate $commonArgs
+            $updateArgs = @($commonArgs)
+            if ($startupCheck.Checked) { $updateArgs += "-ForceStartup" }
+            Invoke-DictateUpdate $updateArgs
         } elseif ($action -eq "Repair") {
             Invoke-DictateDoctorFix
         } elseif ($action -eq "Uninstall") {

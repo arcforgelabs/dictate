@@ -3,6 +3,7 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
+    [switch]$ForceStartup,
     [switch]$RecreateVenv,
     [switch]$SkipGitPull
 )
@@ -20,6 +21,11 @@ function Get-StartMenuProgramsDir {
 function Remove-LegacyEntries {
     $programsDir = Get-StartMenuProgramsDir
     Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir "Dictate Controls.lnk")
+}
+
+function Get-StartupShortcutPath {
+    $programsDir = Get-StartMenuProgramsDir
+    return (Join-Path (Join-Path $programsDir "Startup") "Dictate.lnk")
 }
 
 function Stop-DictateProcesses {
@@ -55,7 +61,7 @@ $installerArgs = @("-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRo
 if ($NoVerify) { $installerArgs += "-NoVerify" }
 if ($NoPrepareTurbo) { $installerArgs += "-NoPrepareTurbo" }
 if ($NoShortcut) { $installerArgs += "-NoShortcut" }
-if ($NoStartup) { $installerArgs += "-NoStartup" }
+if ($NoStartup -or ((-not $ForceStartup) -and (-not (Test-Path (Get-StartupShortcutPath))))) { $installerArgs += "-NoStartup" }
 if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
 
 & powershell @installerArgs

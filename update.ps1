@@ -5,6 +5,7 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
+    [switch]$ForceStartup,
     [switch]$RecreateVenv
 )
 
@@ -86,6 +87,7 @@ try {
     if ($NoPrepareTurbo) { $updaterArgs += "-NoPrepareTurbo" }
     if ($NoShortcut) { $updaterArgs += "-NoShortcut" }
     if ($NoStartup) { $updaterArgs += "-NoStartup" }
+    if ($ForceStartup) { $updaterArgs += "-ForceStartup" }
     if ($RecreateVenv) { $updaterArgs += "-RecreateVenv" }
 
     Write-Host "==> Running Dictate Windows updater"

@@ -225,7 +225,11 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
         self.assertIn('git -C "$SCRIPT_DIR" pull --ff-only', script)
-        self.assertIn('"$SCRIPT_DIR/install.sh" "$@"', script)
+        self.assertIn('AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"', script)
+        self.assertIn('AUTOSTART_PATH="$AUTOSTART_DIR/dictate.desktop"', script)
+        self.assertIn('args=("$@")', script)
+        self.assertIn('args+=("--no-startup")', script)
+        self.assertIn('"$SCRIPT_DIR/install.sh" "${args[@]}"', script)
 
     def test_linux_uninstaller_removes_runtime_and_preserves_data_by_default(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "uninstall.sh").read_text(
@@ -249,6 +253,9 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("function Stop-DictateProcesses", script)
         self.assertIn("Stop-DictateProcesses", script)
         self.assertIn('Join-Path $PSScriptRoot "install-windows.ps1"', script)
+        self.assertIn("[switch]$ForceStartup", script)
+        self.assertIn("function Get-StartupShortcutPath", script)
+        self.assertIn("-not (Test-Path (Get-StartupShortcutPath))", script)
 
     def test_windows_uninstaller_removes_discovery_entries(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "uninstall-windows.ps1").read_text(
@@ -345,6 +352,8 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("update-windows.ps1", script)
         self.assertIn("uninstall-windows.ps1", script)
         self.assertIn("doctor --quick --fix --type-backend pynput", script)
+        self.assertIn("-ForceStartup", script)
+        self.assertIn("Invoke-DictateUpdate $updateArgs", script)
 
     def test_release_uploads_lifecycle_scripts(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml").read_text(
@@ -406,6 +415,8 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('Join-Path $candidateSource "src\\dictate"', script)
         self.assertIn("function Stop-DictateProcesses", script)
         self.assertIn("Stop-DictateProcesses", script)
+        self.assertIn("[switch]$ForceStartup", script)
+        self.assertIn('if ($ForceStartup) { $updaterArgs += "-ForceStartup" }', script)
         self.assertLess(script.index("Stop-DictateProcesses"), script.index("Remove-Item -Recurse -Force $sourceDir"))
 
     def test_doctor_windows_fix_repairs_startup_and_installed_apps_entries(self) -> None:
