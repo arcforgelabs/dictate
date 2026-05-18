@@ -57,6 +57,21 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-DoctorSmoke {
+    param(
+        [string]$Description,
+        [string[]]$ArgumentList
+    )
+    Write-Step $Description
+    & (Join-Path $ScriptsDir "dictate.exe") @ArgumentList
+    if (($LASTEXITCODE -ne 0) -and ($LASTEXITCODE -ne 2)) {
+        throw "$Description failed with exit code $LASTEXITCODE"
+    }
+    if ($LASTEXITCODE -eq 2) {
+        Write-Host "Doctor reported hosted-runner device limitations; continuing after install surface checks."
+    }
+}
+
 function Get-StartMenuProgramsDir {
     if ($env:APPDATA) {
         return (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs")
@@ -164,11 +179,11 @@ try {
     Assert-InstalledUserSurface
 
     Invoke-Checked "Show installed Dictate version" (Join-Path $ScriptsDir "dictate.exe") @("--version")
-    Invoke-Checked "Run quick doctor" (Join-Path $ScriptsDir "dictate.exe") @("doctor", "--quick", "--type-backend", "pynput")
+    Invoke-DoctorSmoke "Run quick doctor" @("doctor", "--quick", "--type-backend", "pynput")
 
     Write-Step "Deleting shortcuts to verify doctor --fix repairs launchers"
     Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath (Get-StartMenuShortcutPath), (Get-StartupShortcutPath)
-    Invoke-Checked "Run doctor repair" (Join-Path $ScriptsDir "dictate.exe") @("doctor", "--quick", "--fix", "--type-backend", "pynput")
+    Invoke-DoctorSmoke "Run doctor repair" @("doctor", "--quick", "--fix", "--type-backend", "pynput")
     Assert-ShortcutTargetsTray -Path (Get-StartMenuShortcutPath)
     Assert-ShortcutTargetsTray -Path (Get-StartupShortcutPath)
 
