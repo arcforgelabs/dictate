@@ -281,7 +281,6 @@ Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "$
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
 Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
-Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path (Get-StartMenuProgramsDir) "Dictate Controls.lnk")
 Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
 Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 

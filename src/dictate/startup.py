@@ -51,7 +51,6 @@ def set_startup_enabled(enabled: bool) -> None:
 def install_linux_app_entry() -> Path:
     path = app_entry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _linux_settings_entry_path().unlink(missing_ok=True)
     path.write_text(_linux_desktop_entry(autostart=False), encoding="utf-8")
     update_desktop_database = shutil.which("update-desktop-database")
     if update_desktop_database:
@@ -148,10 +147,6 @@ def _linux_applications_dir() -> Path:
     xdg_data_home = os.environ.get("XDG_DATA_HOME")
     base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
     return base / "applications"
-
-
-def _linux_settings_entry_path() -> Path:
-    return _linux_applications_dir() / "dictate-settings.desktop"
 
 
 def _linux_autostart_dir() -> Path:

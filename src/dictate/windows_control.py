@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -23,6 +25,14 @@ from dictate.hotkey import HotkeyParseError, format_hotkey_combo, normalize_push
 from dictate.outputs import ClipboardOutput, OutputError
 from dictate.stt import BACKEND_REGISTRY
 from dictate.startup import set_startup_enabled, startup_enabled
+from dictate.update_status import (
+    DOCUMENTATION_URL,
+    RELEASES_URL,
+    TERMS_URL,
+    UpdateStatus,
+    check_update_status,
+)
+from dictate.version import RELEASE_VERSION
 
 BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
 DEFAULT_BACKEND = "faster-whisper"
@@ -49,7 +59,7 @@ def run_control_panel() -> int:
 class ControlPanel:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Dictate Controls")
+        self.root.title("Dictate Settings")
         self.root.minsize(760, 560)
         self.root.lift()
         self.root.attributes("-topmost", True)
@@ -66,19 +76,25 @@ class ControlPanel:
         self.api_status_var = tk.StringVar(value="API key: None")
         self.launch_on_startup_var = tk.BooleanVar(value=True)
         self.history_page_var = tk.StringVar(value="")
+        self.version_var = tk.StringVar(value=f"Version: {RELEASE_VERSION}")
+        self.update_status_var = tk.StringVar(value="Updates: Not checked")
+        self._checking_updates = False
+        self._latest_update_url: str | None = None
         self._history_page = 0
         self._history_entries: list[HistoryEntry] = []
         self.model_box: ttk.Combobox | None = None
         self.api_entry: ttk.Entry | None = None
+        self.update_button: ttk.Button | None = None
 
         self._build()
         self.refresh()
+        self.root.after(300, self.check_for_updates)
 
     def _build(self) -> None:
         outer = ttk.Frame(self.root, padding=12)
         outer.pack(fill=tk.BOTH, expand=True)
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(2, weight=1)
+        outer.rowconfigure(3, weight=1)
 
         status = ttk.Label(outer, textvariable=self.status_var, justify=tk.LEFT)
         status.grid(row=0, column=0, sticky="ew")
@@ -152,8 +168,51 @@ class ControlPanel:
             command=self.save_and_restart,
         ).pack(side=tk.LEFT)
 
+        about_frame = ttk.LabelFrame(outer, text="About", padding=10)
+        about_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        about_frame.columnconfigure(1, weight=1)
+        ttk.Label(about_frame, textvariable=self.version_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(about_frame, textvariable=self.update_status_var).grid(
+            row=0,
+            column=1,
+            sticky="w",
+            padx=(18, 0),
+        )
+        ttk.Button(about_frame, text="Check for Updates", command=self.check_for_updates).grid(
+            row=0,
+            column=2,
+            sticky="e",
+            padx=(0, 6),
+        )
+        self.update_button = ttk.Button(
+            about_frame,
+            text="Update",
+            command=self.run_update,
+            state=tk.DISABLED,
+        )
+        self.update_button.grid(row=0, column=3, sticky="e", padx=(0, 6))
+        ttk.Button(
+            about_frame,
+            text="Documentation",
+            command=lambda: webbrowser.open(DOCUMENTATION_URL),
+        ).grid(
+            row=0,
+            column=4,
+            sticky="e",
+            padx=(0, 6),
+        )
+        ttk.Button(
+            about_frame,
+            text="Terms",
+            command=lambda: webbrowser.open(TERMS_URL),
+        ).grid(
+            row=0,
+            column=5,
+            sticky="e",
+        )
+
         history_frame = ttk.LabelFrame(outer, text="Recent History", padding=10)
-        history_frame.grid(row=2, column=0, sticky="nsew")
+        history_frame.grid(row=3, column=0, sticky="nsew")
         history_frame.columnconfigure(0, weight=1)
         history_frame.rowconfigure(0, weight=1)
 
@@ -270,6 +329,55 @@ class ControlPanel:
         max_page = max(0, (len(self._history_entries) - 1) // HISTORY_PAGE_SIZE)
         self._history_page = min(self._history_page, max_page)
         self._render_history_page()
+
+    def check_for_updates(self) -> None:
+        if self._checking_updates:
+            return
+        self._checking_updates = True
+        self._latest_update_url = None
+        if self.update_button is not None:
+            self.update_button.configure(state=tk.DISABLED)
+        self.update_status_var.set("Updates: Checking...")
+
+        def worker() -> None:
+            status = check_update_status()
+            try:
+                self.root.after(0, lambda: self._set_update_status(status))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_update_status(self, status: UpdateStatus) -> None:
+        self._checking_updates = False
+        if status.error:
+            self.update_status_var.set("Updates: Unable to check")
+        elif status.update_available and status.latest_version:
+            self.update_status_var.set(f"Updates: {status.latest_version} available")
+            self._latest_update_url = status.url or RELEASES_URL
+            if self.update_button is not None:
+                self.update_button.configure(state=tk.NORMAL)
+        elif status.checked:
+            self.update_status_var.set("Updates: Up to date")
+        else:
+            self.update_status_var.set("Updates: Not checked")
+
+    def run_update(self) -> None:
+        command = _update_command()
+        if command is None:
+            webbrowser.open(self._latest_update_url or RELEASES_URL)
+            return
+        if not messagebox.askyesno(
+            "Update Dictate",
+            "Run the Dictate updater now? Dictate may need to restart after the update.",
+        ):
+            return
+        try:
+            subprocess.Popen(command, cwd=str(_source_root()))  # noqa: S603
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Update Failed", str(exc))
+            return
+        messagebox.showinfo("Update Started", "Dictate updater started in the background.")
 
     def _render_history_page(self) -> None:
         for child in self.history_rows.winfo_children():
@@ -411,6 +519,53 @@ def _apply_api_key_command_from_config(backend: str) -> None:
         os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
     if backend == "gemini" and config.gemini_api_key_command:
         os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
+
+
+def _source_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _update_command() -> list[str] | None:
+    script_names = (
+        ("install-windows-wizard.ps1", "wizard"),
+        ("update-windows.ps1", "update"),
+    ) if sys.platform.startswith("win") else (("update.sh", "update"),)
+    for root in _candidate_source_roots():
+        for script_name, mode in script_names:
+            script = root / script_name
+            if not script.is_file():
+                continue
+            if sys.platform.startswith("win"):
+                command = [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                ]
+                if mode == "wizard":
+                    command.extend(["-InitialAction", "Update"])
+                return command
+            return ["bash", str(script)]
+    return None
+
+
+def _candidate_source_roots() -> list[Path]:
+    roots = [Path.cwd(), _source_root()]
+    roots.extend(Path(sys.executable).resolve().parents)
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        result.append(resolved)
+    return result
 
 
 def _restart_daemon() -> None:

@@ -65,14 +65,36 @@ Windows 11 install from PowerShell:
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
+Windows setup wizard:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
+```
+
 Hosted Windows one-liner:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"
 ```
 
-This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs Start Menu shortcuts named `Dictate` and `Dictate Controls`. The `Dictate` shortcut starts the Windows tray app. See [Windows 11 support](docs/windows-11.md) for details.
+This creates `.venv`, installs the Windows dependencies, seeds config, writes launcher scripts, prepares the default model, runs diagnostics, and installs a Start Menu shortcut named `Dictate`. The `Dictate` shortcut starts the Windows tray app. See [Windows 11 support](docs/windows-11.md) for details.
 The Windows installer also verifies the Microsoft Visual C++ runtime needed by the native transcription wheels and installs it when it is missing.
+
+Update or uninstall from a source checkout:
+
+```bash
+./update.sh
+./uninstall.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\update-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1
+```
+
+Use `--remove-user-data` on Linux or `-RemoveUserData` on Windows only when you also want to remove config, logs, history, and downloaded model data.
+
+Dictate is provided as-is. Review important output before using it, keep control of connected model-provider accounts and costs, and follow the applicable Arc Forge terms at <https://arcforge.au/terms>.
 
 ## Usage
 

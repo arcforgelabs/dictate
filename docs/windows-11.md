@@ -30,7 +30,13 @@ From PowerShell in a repo root:
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds Start Menu shortcuts named `Dictate` and `Dictate Controls`.
+Windows setup wizard from a repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
+```
+
+That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, and adds a Start Menu shortcut named `Dictate`.
 
 Skip model preparation or verification when needed:
 
@@ -43,6 +49,17 @@ CI/smoke-test install without a Start Menu shortcut:
 ```powershell
 .\install-windows.ps1 -NoPrepareTurbo -NoVerify -NoShortcut
 ```
+
+Update or uninstall from a repo root:
+
+```powershell
+.\update-windows.ps1
+.\uninstall-windows.ps1
+```
+
+Use `-RemoveUserData` with the uninstaller only when config, logs, history, and downloaded model data should also be removed.
+
+The setup wizard links to Dictate documentation and Arc Forge terms at <https://arcforge.au/terms>. Treat Dictate as provided as-is: verify important transcriptions, keep control of connected provider accounts, and do not rely on AI output for regulated or high-stakes decisions without review.
 
 Manual install:
 

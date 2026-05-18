@@ -5,7 +5,6 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
-    [switch]$Wizard,
     [switch]$RecreateVenv
 )
 
@@ -21,10 +20,10 @@ if (-not $InstallRoot) {
 
 $installRootPath = [System.IO.Path]::GetFullPath($InstallRoot)
 $sourceDir = Join-Path $installRootPath "source"
-$stagingRoot = Join-Path $env:TEMP ("dictate-install-" + [guid]::NewGuid().ToString("N"))
+$stagingRoot = Join-Path $env:TEMP ("dictate-update-" + [guid]::NewGuid().ToString("N"))
 $archivePath = Join-Path $stagingRoot "dictate.zip"
 
-Write-Host "==> Installing Dictate to $installRootPath"
+Write-Host "==> Updating Dictate in $installRootPath"
 New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $installRootPath | Out-Null
 
@@ -35,10 +34,10 @@ try {
     Write-Host "==> Expanding source archive"
     Expand-Archive -Force -Path $archivePath -DestinationPath $stagingRoot
     $expanded = Get-ChildItem -Path $stagingRoot -Directory |
-        Where-Object { Test-Path (Join-Path $_.FullName "install-windows.ps1") } |
+        Where-Object { Test-Path (Join-Path $_.FullName "update-windows.ps1") } |
         Select-Object -First 1
     if (-not $expanded) {
-        throw "Downloaded archive did not contain install-windows.ps1."
+        throw "Downloaded archive did not contain update-windows.ps1."
     }
 
     if (Test-Path $sourceDir) {
@@ -47,24 +46,23 @@ try {
     }
     Move-Item -Path $expanded.FullName -Destination $sourceDir
 
-    $installerScript = if ($Wizard) {
-        Join-Path $sourceDir "install-windows-wizard.ps1"
-    } else {
-        Join-Path $sourceDir "install-windows.ps1"
-    }
-    $installerArgs = @("-ExecutionPolicy", "Bypass", "-File", $installerScript)
-    if (-not $Wizard) {
-        if ($NoVerify) { $installerArgs += "-NoVerify" }
-        if ($NoPrepareTurbo) { $installerArgs += "-NoPrepareTurbo" }
-        if ($NoShortcut) { $installerArgs += "-NoShortcut" }
-        if ($NoStartup) { $installerArgs += "-NoStartup" }
-        if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
-    }
+    $updaterArgs = @(
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        (Join-Path $sourceDir "update-windows.ps1"),
+        "-SkipGitPull"
+    )
+    if ($NoVerify) { $updaterArgs += "-NoVerify" }
+    if ($NoPrepareTurbo) { $updaterArgs += "-NoPrepareTurbo" }
+    if ($NoShortcut) { $updaterArgs += "-NoShortcut" }
+    if ($NoStartup) { $updaterArgs += "-NoStartup" }
+    if ($RecreateVenv) { $updaterArgs += "-RecreateVenv" }
 
-    Write-Host "==> Running Dictate Windows installer"
-    & powershell @installerArgs
+    Write-Host "==> Running Dictate Windows updater"
+    & powershell @updaterArgs
     if ($LASTEXITCODE -ne 0) {
-        throw "Dictate Windows installer failed with exit code $LASTEXITCODE."
+        throw "Dictate Windows updater failed with exit code $LASTEXITCODE."
     }
 } finally {
     if (Test-Path $stagingRoot) {
@@ -73,5 +71,4 @@ try {
 }
 
 Write-Host ""
-Write-Host "Dictate install source: $sourceDir"
-Write-Host "Start Dictate from the Start Menu shortcut named 'Dictate'."
+Write-Host "Dictate updated from: $sourceDir"

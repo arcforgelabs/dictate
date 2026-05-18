@@ -59,7 +59,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            dist/* install.ps1 install-windows.ps1 \
+            dist/* \
+            install.ps1 install-windows.ps1 install-windows-wizard.ps1 \
+            update.ps1 update-windows.ps1 uninstall-windows.ps1 \
+            install.sh update.sh uninstall.sh \
             --verify-tag \
             --title "Dictate ${{ steps.version.outputs.version }}" \
             --notes "CalVer release ${{ steps.version.outputs.version }}."

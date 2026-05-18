@@ -267,7 +267,6 @@ $shortcut.WorkingDirectory = $installLocation
 $shortcut.Description = 'Start Dictate push-to-talk tray'
 if (Test-Path $displayIcon) {{ $shortcut.IconLocation = $displayIcon }}
 $shortcut.Save()
-Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir 'Dictate Controls.lnk')
 $startup = $shell.CreateShortcut((Join-Path $startupDir 'Dictate.lnk'))
 $startup.TargetPath = {_ps_quote(tray_launcher)}
 $startup.WorkingDirectory = $installLocation
@@ -323,7 +322,7 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
             else:
                 items.append("Run `./install.sh` or reinstall Dictate with local STT dependencies.")
         if "API key" in error:
-            items.append("Open Dictate Controls and save a valid provider API key before selecting it.")
+            items.append("Open Dictate Settings and save a valid provider API key before selecting it.")
         if "No microphone" in error or "audio devices" in error:
             items.append("Set a default microphone in Windows Sound settings or your desktop audio settings.")
         if "typing backend" in error or "Hotkey backend" in error:
@@ -335,12 +334,17 @@ def _update_paths() -> list[str]:
     if sys.platform.startswith("win"):
         return [
             'Hosted install/update: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/arcforgelabs/dictate/master/install.ps1 | iex"',
-            r"Source checkout update: git pull --ff-only; powershell -ExecutionPolicy Bypass -File .\install-windows.ps1",
-            r"Smoke update: powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -NoPrepareTurbo -NoVerify",
+            r"Windows setup wizard: powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1",
+            r"Source checkout update: powershell -ExecutionPolicy Bypass -File .\update-windows.ps1",
+            r"Source checkout uninstall: powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1",
+            r"Repair: dictate doctor --quick --fix --type-backend pynput",
+            r"Smoke update: powershell -ExecutionPolicy Bypass -File .\update-windows.ps1 -NoPrepareTurbo -NoVerify",
         ]
     return [
-        "Source checkout update: git pull --ff-only && ./install.sh",
-        "Smoke update: ./install.sh --no-prepare-turbo --no-verify",
+        "Source checkout update: ./update.sh",
+        "Source checkout uninstall: ./uninstall.sh",
+        "Repair: dictate doctor --quick --fix",
+        "Smoke update: ./update.sh --no-prepare-turbo --no-verify",
     ]
 
 

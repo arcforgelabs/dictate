@@ -74,6 +74,9 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertTrue(any("raw.githubusercontent.com/arcforgelabs/dictate" in item for item in updates))
         self.assertTrue(any("install-windows.ps1" in item for item in updates))
+        self.assertTrue(any("install-windows-wizard.ps1" in item for item in updates))
+        self.assertTrue(any("update-windows.ps1" in item for item in updates))
+        self.assertTrue(any("uninstall-windows.ps1" in item for item in updates))
 
     def test_doctor_fix_items_include_launcher_repair(self) -> None:
         report = types.SimpleNamespace(
@@ -198,11 +201,6 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         self.assertIn("Register-InstalledApp", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
-        self.assertIn(
-            'Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path '
-            '(Get-StartMenuProgramsDir) "Dictate Controls.lnk")',
-            script,
-        )
 
     def test_linux_installer_creates_searchable_launcher_icon_and_autostart(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
@@ -210,11 +208,39 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("--no-startup", script)
         self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
-        self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn('cat > "$DESKTOP_DIR/dictate.desktop"', script)
         self.assertIn('cat > "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn("X-GNOME-Autostart-enabled=true", script)
         self.assertIn("Terminal=false", script)
+
+    def test_linux_update_script_migrates_legacy_entries_and_runs_installer(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "update.sh").read_text(encoding="utf-8")
+
+        self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop"', script)
+        self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
+        self.assertIn('git -C "$SCRIPT_DIR" pull --ff-only', script)
+        self.assertIn('"$SCRIPT_DIR/install.sh" "$@"', script)
+
+    def test_linux_uninstaller_removes_runtime_and_preserves_data_by_default(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "uninstall.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("--remove-user-data", script)
+        self.assertIn('remove_file "$DESKTOP_DIR/dictate.desktop"', script)
+        self.assertIn('remove_file "$DESKTOP_DIR/dictate-settings.desktop"', script)
+        self.assertIn('remove_file "$AUTOSTART_DIR/dictate.desktop"', script)
+        self.assertIn('rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/share/icons"', script)
+        self.assertIn("Preserved user config/data", script)
+
+    def test_windows_update_script_migrates_legacy_shortcut_and_runs_installer(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "update-windows.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
+        self.assertIn("git -C $PSScriptRoot pull --ff-only", script)
+        self.assertIn('Join-Path $PSScriptRoot "install-windows.ps1"', script)
 
     def test_windows_uninstaller_removes_discovery_entries(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "uninstall-windows.ps1").read_text(
@@ -222,7 +248,10 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn('Join-Path $programsDir "Dictate.lnk"', script)
+        self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
         self.assertIn('Join-Path $startupDir "Dictate.lnk"', script)
+        self.assertIn("[switch]$RemoveUserData", script)
+        self.assertIn("User config/data preserved", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
 
     def test_windows_installer_uses_supported_python_range(self) -> None:
@@ -275,6 +304,38 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/heads/master.zip", script)
         self.assertIn("Invoke-WebRequest -UseBasicParsing", script)
         self.assertIn("install-windows.ps1", script)
+        self.assertIn("install-windows-wizard.ps1", script)
+        self.assertIn("[switch]$Wizard", script)
+
+    def test_windows_wizard_exposes_lifecycle_actions(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "install-windows-wizard.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Install Dictate", script)
+        self.assertIn("Update Dictate", script)
+        self.assertIn("Repair launchers and runtime checks (doctor --fix)", script)
+        self.assertIn("Uninstall Dictate", script)
+        self.assertIn("Launch on startup", script)
+        self.assertIn("Create Start Menu entry", script)
+        self.assertIn("By using Dictate, I agree to the Arc Forge Terms of Service", script)
+        self.assertIn("https://arcforge.au/terms", script)
+        self.assertIn("https://github.com/arcforgelabs/dictate#readme", script)
+        self.assertIn("You must accept the Arc Forge terms before continuing.", script)
+        self.assertIn("update-windows.ps1", script)
+        self.assertIn("uninstall-windows.ps1", script)
+        self.assertIn("doctor --quick --fix --type-backend pynput", script)
+
+    def test_release_uploads_lifecycle_scripts(self) -> None:
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("install-windows-wizard.ps1", workflow)
+        self.assertIn("update-windows.ps1", workflow)
+        self.assertIn("uninstall-windows.ps1", workflow)
+        self.assertIn("update.sh", workflow)
+        self.assertIn("uninstall.sh", workflow)
 
     def test_windows_control_restart_stops_tray_processes(self) -> None:
         source = (
@@ -292,6 +353,22 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("Launch on start up", source)
         self.assertIn("startup_enabled()", source)
         self.assertIn("set_startup_enabled(self.launch_on_startup_var.get())", source)
+
+    def test_control_panel_exposes_about_version_and_update_status(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_control.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('ttk.LabelFrame(outer, text="About"', source)
+        self.assertIn("Version: {RELEASE_VERSION}", source)
+        self.assertIn("Check for Updates", source)
+        self.assertIn("Update", source)
+        self.assertIn("DOCUMENTATION_URL", source)
+        self.assertIn("TERMS_URL", source)
+        self.assertIn("check_update_status()", source)
+        self.assertIn("subprocess.Popen(command", source)
+        self.assertIn("install-windows-wizard.ps1", source)
+        self.assertIn('"Update"', source)
 
     def test_doctor_windows_fix_repairs_startup_and_installed_apps_entries(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "src" / "dictate" / "doctor.py").read_text(
