@@ -79,7 +79,6 @@ class WindowsPlatformTests(unittest.TestCase):
         report = types.SimpleNamespace(
             warnings=[
                 "Desktop entry not found: C:\\Users\\sam\\Dictate.lnk",
-                "Settings entry not found: C:\\Users\\sam\\Dictate Controls.lnk",
                 "Startup entry not found: C:\\Users\\sam\\Startup\\Dictate.lnk",
             ],
             errors=[],
@@ -91,10 +90,6 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         self.assertIn(
             "Run `dictate doctor --fix` to restore launch-on-startup integration.",
-            _fix_items(report),
-        )
-        self.assertIn(
-            "Run `dictate doctor --fix` to recreate the Settings launcher.",
             _fix_items(report),
         )
 
@@ -116,14 +111,12 @@ class WindowsPlatformTests(unittest.TestCase):
                 settings_path = data_dir / "applications" / "dictate-settings.desktop"
                 startup_path = config_dir / "autostart" / "dictate.desktop"
                 content = desktop_path.read_text(encoding="utf-8")
-                settings_content = settings_path.read_text(encoding="utf-8")
                 startup_content = startup_path.read_text(encoding="utf-8")
 
         self.assertIn("Exec=/usr/bin/dictate", content)
         self.assertIn("Icon=", content)
         self.assertIn("Terminal=false", content)
-        self.assertIn("Name=Dictate Settings", settings_content)
-        self.assertIn("Exec=/usr/bin/dictate controls", settings_content)
+        self.assertFalse(settings_path.exists())
         self.assertIn("X-GNOME-Autostart-enabled=true", startup_content)
         run.assert_called_once()
 
@@ -205,17 +198,20 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         self.assertIn("Register-InstalledApp", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
+        self.assertIn(
+            'Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path '
+            '(Get-StartMenuProgramsDir) "Dictate Controls.lnk")',
+            script,
+        )
 
     def test_linux_installer_creates_searchable_launcher_icon_and_autostart(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
 
         self.assertIn("--no-startup", script)
-        self.assertIn('ICON_PATH="$ICON_DIR/dictate.png"', script)
+        self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
+        self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn('cat > "$DESKTOP_DIR/dictate.desktop"', script)
-        self.assertIn('cat > "$DESKTOP_DIR/dictate-settings.desktop"', script)
-        self.assertIn("Name=Dictate Settings", script)
-        self.assertIn('Exec=$HOME/.local/bin/dictate controls', script)
         self.assertIn('cat > "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn("X-GNOME-Autostart-enabled=true", script)
         self.assertIn("Terminal=false", script)

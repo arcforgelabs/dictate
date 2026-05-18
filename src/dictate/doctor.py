@@ -28,7 +28,6 @@ from dictate.stt import (
 from dictate.startup import (
     app_entry_path,
     install_linux_desktop_integration,
-    settings_entry_path,
     startup_entry_path,
 )
 
@@ -140,11 +139,6 @@ def _check_runtime_paths(report) -> None:  # noqa: ANN001
         report.notes.append(f"Desktop entry: {desktop_path}")
     else:
         report.warnings.append(f"Desktop entry not found: {desktop_path}")
-    settings_path = settings_entry_path()
-    if settings_path.exists():
-        report.notes.append(f"Settings entry: {settings_path}")
-    else:
-        report.warnings.append(f"Settings entry not found: {settings_path}")
     startup_path = startup_entry_path()
     if startup_path.exists():
         report.notes.append(f"Startup entry: {startup_path}")
@@ -250,11 +244,8 @@ def _seed_config_if_missing() -> None:
 def _install_windows_shortcuts() -> None:
     scripts_dir = Path(sys.executable).resolve().parent
     tray_launcher = scripts_dir / "dictate-tray.vbs"
-    controls_launcher = scripts_dir / "dictate-controls.exe"
     if not tray_launcher.is_file():
         raise RuntimeError(f"tray launcher not found: {tray_launcher}")
-    if not controls_launcher.is_file():
-        raise RuntimeError(f"controls launcher not found: {controls_launcher}")
 
     programs_dir = _desktop_entry_path().parent
     startup_dir = programs_dir / "Startup"
@@ -276,12 +267,7 @@ $shortcut.WorkingDirectory = $installLocation
 $shortcut.Description = 'Start Dictate push-to-talk tray'
 if (Test-Path $displayIcon) {{ $shortcut.IconLocation = $displayIcon }}
 $shortcut.Save()
-$controls = $shell.CreateShortcut((Join-Path $programsDir 'Dictate Controls.lnk'))
-$controls.TargetPath = {_ps_quote(controls_launcher)}
-$controls.WorkingDirectory = $installLocation
-$controls.Description = 'Open Dictate configuration and recent history'
-if (Test-Path $displayIcon) {{ $controls.IconLocation = $displayIcon }}
-$controls.Save()
+Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path $programsDir 'Dictate Controls.lnk')
 $startup = $shell.CreateShortcut((Join-Path $startupDir 'Dictate.lnk'))
 $startup.TargetPath = {_ps_quote(tray_launcher)}
 $startup.WorkingDirectory = $installLocation
@@ -322,8 +308,6 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
     for warning in report.warnings:
         if "Desktop entry not found" in warning:
             items.append("Run `dictate doctor --fix` to recreate Start Menu/Desktop launchers.")
-        if "Settings entry not found" in warning:
-            items.append("Run `dictate doctor --fix` to recreate the Settings launcher.")
         if "Startup entry not found" in warning:
             items.append("Run `dictate doctor --fix` to restore launch-on-startup integration.")
         if "Log directory is not writable" in warning or "fallback log directory" in warning:

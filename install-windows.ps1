@@ -214,25 +214,6 @@ function Install-StartMenuShortcut {
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
 }
 
-function Install-ControlsShortcut {
-    param(
-        [string]$TargetPath,
-        [string]$WorkingDirectory
-    )
-
-    if ($NoShortcut) {
-        return
-    }
-
-    $programsDir = Get-StartMenuProgramsDir
-    New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
-
-    $shortcutPath = Join-Path $programsDir "Dictate Controls.lnk"
-    New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Open Dictate configuration and recent history"
-
-    Write-Host "==> Installed Start Menu shortcut: $shortcutPath"
-}
-
 function Install-StartupShortcut {
     param(
         [string]$TargetPath,
@@ -300,7 +281,7 @@ Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "$
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
 Install-StartMenuShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
-Install-ControlsShortcut -TargetPath (Join-Path $scriptsDir "dictate-controls.exe") -WorkingDirectory $PSScriptRoot
+Remove-Item -Force -ErrorAction SilentlyContinue -Path (Join-Path (Get-StartMenuProgramsDir) "Dictate Controls.lnk")
 Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs") -WorkingDirectory $PSScriptRoot
 Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 

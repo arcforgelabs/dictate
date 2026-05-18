@@ -281,8 +281,6 @@ class WindowsTrayIcon:
             return self._icons[recording]
         icon_name = "dictate-listening.ico" if recording else "dictate.ico"
         icon_path = Path(__file__).resolve().parents[2] / "assets" / icon_name
-        if not icon_path.is_file() and not recording:
-            icon_path = Path(__file__).resolve().parents[2] / "assets" / "dictate-controls.ico"
         if icon_path.is_file():
             self._icons[recording] = self._user32.LoadImageW(
                 None,

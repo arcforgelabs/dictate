@@ -10,7 +10,7 @@ BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 ICON_DIR="$INSTALL_DIR/share/icons"
-ICON_PATH="$ICON_DIR/dictate.png"
+ICON_PATH="$ICON_DIR/dictate-simple.png"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dictate"
 CONFIG_PATH="$CONFIG_DIR/config.yaml"
 DEFAULT_CONFIG_SOURCE="$SCRIPT_DIR/config/default-config.yaml"
@@ -118,10 +118,12 @@ ln -sf "$INSTALL_DIR/venv/bin/dictate" "$BIN_DIR/dictate"
 
 echo "Installing icon ..."
 mkdir -p "$ICON_DIR"
+rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"
 install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
 
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"
+rm -f "$DESKTOP_DIR/dictate-settings.desktop"
 cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
 [Desktop Entry]
 Name=Dictate
@@ -131,17 +133,6 @@ Icon=$ICON_PATH
 Type=Application
 Categories=AudioVideo;Audio;
 Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
-Terminal=false
-EOF
-cat > "$DESKTOP_DIR/dictate-settings.desktop" <<EOF
-[Desktop Entry]
-Name=Dictate Settings
-Comment=Configure Dictate voice-to-text
-Exec=$HOME/.local/bin/dictate controls
-Icon=$ICON_PATH
-Type=Application
-Categories=Settings;
-Keywords=voice;speech;transcription;dictation;settings;controls;asr;whisper;canary;
 Terminal=false
 EOF
 

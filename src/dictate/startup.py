@@ -15,12 +15,6 @@ def app_entry_path() -> Path:
     return _linux_applications_dir() / "dictate.desktop"
 
 
-def settings_entry_path() -> Path:
-    if sys.platform.startswith("win"):
-        return _windows_programs_dir() / "Dictate Controls.lnk"
-    return _linux_applications_dir() / "dictate-settings.desktop"
-
-
 def startup_entry_path() -> Path:
     if sys.platform.startswith("win"):
         return _windows_programs_dir() / "Startup" / "Dictate.lnk"
@@ -57,9 +51,8 @@ def set_startup_enabled(enabled: bool) -> None:
 def install_linux_app_entry() -> Path:
     path = app_entry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_linux_desktop_entry(autostart=False, settings=False), encoding="utf-8")
-    settings_path = settings_entry_path()
-    settings_path.write_text(_linux_desktop_entry(autostart=False, settings=True), encoding="utf-8")
+    _linux_settings_entry_path().unlink(missing_ok=True)
+    path.write_text(_linux_desktop_entry(autostart=False), encoding="utf-8")
     update_desktop_database = shutil.which("update-desktop-database")
     if update_desktop_database:
         subprocess.run(
@@ -74,18 +67,17 @@ def install_linux_app_entry() -> Path:
 def install_linux_startup_entry() -> Path:
     path = startup_entry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_linux_desktop_entry(autostart=True, settings=False), encoding="utf-8")
+    path.write_text(_linux_desktop_entry(autostart=True), encoding="utf-8")
     return path
 
 
 def install_linux_desktop_integration(
     *,
     include_startup: bool = True,
-) -> tuple[Path, Path, Path | None]:
+) -> tuple[Path, Path | None]:
     app_path = install_linux_app_entry()
-    settings_path = settings_entry_path()
     startup_path = install_linux_startup_entry() if include_startup else None
-    return app_path, settings_path, startup_path
+    return app_path, startup_path
 
 
 def install_windows_startup_shortcut() -> Path:
@@ -118,30 +110,17 @@ $shortcut.Save()
     return startup_path
 
 
-def _linux_desktop_entry(*, autostart: bool, settings: bool) -> str:
+def _linux_desktop_entry(*, autostart: bool) -> str:
     exec_path = _linux_exec_path()
-    name = "Dictate Settings" if settings else "Dictate"
-    comment = (
-        "Configure Dictate voice-to-text"
-        if settings
-        else "Local voice-to-text with push-to-talk"
-    )
-    exec_line = f"{exec_path} controls" if settings else exec_path
-    categories = "Settings;" if settings else "AudioVideo;Audio;"
-    keywords = (
-        "voice;speech;transcription;dictation;settings;controls;asr;whisper;canary;"
-        if settings
-        else "voice;speech;transcription;dictation;asr;whisper;canary;"
-    )
     lines = [
         "[Desktop Entry]",
-        f"Name={name}",
-        f"Comment={comment}",
-        f"Exec={exec_line}",
+        "Name=Dictate",
+        "Comment=Local voice-to-text with push-to-talk",
+        f"Exec={exec_path}",
         f"Icon={_linux_icon_path()}",
         "Type=Application",
-        f"Categories={categories}",
-        f"Keywords={keywords}",
+        "Categories=AudioVideo;Audio;",
+        "Keywords=voice;speech;transcription;dictation;asr;whisper;canary;",
         "Terminal=false",
     ]
     if autostart:
@@ -155,7 +134,7 @@ def _linux_exec_path() -> str:
 
 def _linux_icon_path() -> str:
     installed_icon = (
-        Path.home() / ".local" / "share" / "dictate" / "share" / "icons" / "dictate.png"
+        Path.home() / ".local" / "share" / "dictate" / "share" / "icons" / "dictate-simple.png"
     )
     if installed_icon.is_file():
         return str(installed_icon)
@@ -169,6 +148,10 @@ def _linux_applications_dir() -> Path:
     xdg_data_home = os.environ.get("XDG_DATA_HOME")
     base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
     return base / "applications"
+
+
+def _linux_settings_entry_path() -> Path:
+    return _linux_applications_dir() / "dictate-settings.desktop"
 
 
 def _linux_autostart_dir() -> Path:
