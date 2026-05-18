@@ -201,14 +201,19 @@ function Install-StartMenuShortcut {
         [string]$WorkingDirectory
     )
 
-    if ($NoShortcut) {
-        return
-    }
-
     $programsDir = Get-StartMenuProgramsDir
     New-Item -ItemType Directory -Force -Path $programsDir | Out-Null
 
     $shortcutPath = Join-Path $programsDir "Dictate.lnk"
+    $legacyShortcutPath = Join-Path $programsDir "Dictate Controls.lnk"
+
+    if ($NoShortcut) {
+        Remove-Item -Force -ErrorAction SilentlyContinue -Path $shortcutPath, $legacyShortcutPath
+        Write-Host "==> Removed Start Menu shortcuts"
+        return
+    }
+
+    Remove-Item -Force -ErrorAction SilentlyContinue -Path $legacyShortcutPath
     New-DictateShortcut -ShortcutPath $shortcutPath -TargetPath $TargetPath -WorkingDirectory $WorkingDirectory -Description "Start Dictate push-to-talk tray"
 
     Write-Host "==> Installed Start Menu shortcut: $shortcutPath"

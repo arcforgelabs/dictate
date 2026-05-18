@@ -199,6 +199,8 @@ class WindowsPlatformTests(unittest.TestCase):
             'Install-StartupShortcut -TargetPath (Join-Path $scriptsDir "dictate-tray.vbs")',
             script,
         )
+        self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
+        self.assertIn('Remove-Item -Force -ErrorAction SilentlyContinue -Path $shortcutPath, $legacyShortcutPath', script)
         self.assertIn('Remove-Item -Force $shortcutPath', script)
         self.assertIn('Removed startup shortcut', script)
         self.assertIn("Register-InstalledApp", script)
