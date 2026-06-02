@@ -313,7 +313,7 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('$DictateVersion = "2026.5.18-1"', script)
+        self.assertIn('$DictateVersion = "2026.6.2"', script)
         self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
         self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn("Invoke-WebRequest -UseBasicParsing", script)
@@ -438,7 +438,7 @@ class WindowsPlatformTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('$DictateVersion = "2026.5.18-1"', script)
+        self.assertIn('$DictateVersion = "2026.6.2"', script)
         self.assertIn("https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip", script)
         self.assertIn("Copy-Item -Force -LiteralPath $ArchiveUrl", script)
         self.assertIn('[System.IO.Directory]::GetCurrentDirectory()', script)
@@ -534,7 +534,7 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn('"name": "@arcforgelabs/dictate"', package_json)
-        self.assertIn('"version": "2026.5.18-1"', package_json)
+        self.assertIn('"version": "2026.6.2"', package_json)
         self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
         self.assertIn('"access": "public"', package_json)
         self.assertIn('"provenance": true', package_json)

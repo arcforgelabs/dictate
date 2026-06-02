@@ -1,6 +1,6 @@
 {
   "name": "@arcforgelabs/dictate",
-  "version": "2026.5.18-1",
+  "version": "2026.6.2",
   "description": "Installer shim for Dictate desktop dictation.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 [package]
 name = "dictate-ui-shell"
-version = "2026.5.18-1"
+version = "2026.6.2"
 description = "Dictate — Quiet Console shell (Tauri 2)"
 authors = ["Arc Forge Labs"]
 edition = "2021"
