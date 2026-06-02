@@ -18,7 +18,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": ["deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,6 +38,15 @@
           "libayatana-appindicator3-1",
           "libasound2",
           "libportaudio2"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3",
+          "alsa-lib",
+          "portaudio"
         ]
       }
     }

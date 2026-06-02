@@ -237,6 +237,22 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('remove_file "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn('rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/share/icons"', script)
         self.assertIn("Preserved user config/data", script)
+        # Hardened cleanup: stop a running source daemon and remove the
+        # dictate-ui-server symlink + legacy logs (still preserving user data).
+        self.assertIn("stop_source_processes", script)
+        self.assertIn("UI_SERVER_BIN_PATH", script)
+        self.assertIn('remove_managed_symlink "$UI_SERVER_BIN_PATH"', script)
+        self.assertIn('"$INSTALL_DIR/logs"', script)
+
+    def test_linux_installer_warns_on_packaged_conflict(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(
+            encoding="utf-8"
+        )
+        # Source install should warn (not silently double up) when the .deb/.rpm
+        # package is already installed.
+        self.assertIn("dpkg-query -W -f='${Status}' dictate", script)
+        self.assertIn("rpm -q dictate", script)
+        self.assertIn("sudo apt remove dictate", script)
 
     def test_windows_update_script_migrates_legacy_shortcut_and_runs_installer(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "update-windows.ps1").read_text(

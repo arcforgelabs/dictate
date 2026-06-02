@@ -113,6 +113,17 @@ fi
 
 echo "Detected install session backend: $SESSION_BACKEND"
 
+# The packaged build (.deb/.rpm) and this source install both ship a tray/daemon
+# and would fight over the push-to-talk key. Warn rather than silently double up.
+if command -v dpkg-query >/dev/null 2>&1 \
+   && dpkg-query -W -f='${Status}' dictate 2>/dev/null | grep -q "install ok installed"; then
+  echo "WARNING: a packaged Dictate (.deb) is already installed and would conflict."
+  echo "  Use one install method. To remove the package first: sudo apt remove dictate"
+elif command -v rpm >/dev/null 2>&1 && rpm -q dictate >/dev/null 2>&1; then
+  echo "WARNING: a packaged Dictate (.rpm) is already installed and would conflict."
+  echo "  Use one install method. To remove the package first: sudo dnf remove dictate"
+fi
+
 echo "Creating venv at $INSTALL_DIR ..."
 uv venv "$INSTALL_DIR/venv" --python "$PYTHON_BIN" --system-site-packages --quiet
 

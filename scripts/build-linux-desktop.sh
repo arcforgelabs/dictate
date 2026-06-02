@@ -14,9 +14,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Which bundle types to produce (deb,appimage). Override for a faster/leaner CI
+# Which bundle types to produce (deb,rpm,appimage). Override for a faster/leaner
 # artifact, e.g. DICTATE_BUNDLES=deb scripts/build-linux-desktop.sh
-BUNDLES="${DICTATE_BUNDLES:-deb,appimage}"
+BUNDLES="${DICTATE_BUNDLES:-deb,rpm,appimage}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ missing '$1' — see the header of this script for setup."; exit 1; }; }
 
@@ -51,19 +51,23 @@ if ! npm --prefix ui-shell exec -- tauri --version >/dev/null 2>&1; then
   npm --prefix ui-shell install
 fi
 
-# The .deb is the reliable primary artifact; the AppImage (linuxdeploy) is
-# fussier in CI, so build it best-effort and never let it sink the .deb.
-if printf '%s' "$BUNDLES" | grep -q deb; then
-  echo "▶ building the .deb bundle"
-  ( cd ui-shell && npm run tauri -- build --bundles deb )
+# .deb/.rpm are the reliable primary artifacts (their bundlers don't walk the
+# engine's internal libs); the AppImage (linuxdeploy) is fussier, so build it
+# best-effort and never let it sink the native packages.
+RELIABLE=""
+printf '%s' "$BUNDLES" | grep -q deb && RELIABLE="deb"
+printf '%s' "$BUNDLES" | grep -q rpm && RELIABLE="${RELIABLE:+$RELIABLE,}rpm"
+if [ -n "$RELIABLE" ]; then
+  echo "▶ building native packages ($RELIABLE)"
+  ( cd ui-shell && npm run tauri -- build --bundles "$RELIABLE" )
 fi
 if printf '%s' "$BUNDLES" | grep -q appimage; then
   echo "▶ building the AppImage bundle (best-effort)"
   ( cd ui-shell && npm run tauri -- build --bundles appimage --verbose ) \
-    || echo "⚠ AppImage bundling failed (linuxdeploy); shipping the .deb only"
+    || echo "⚠ AppImage bundling failed (linuxdeploy); shipping native packages only"
 fi
 
 echo
 echo "✓ artifacts:"
 find ui-shell/src-tauri/target/release/bundle -maxdepth 2 -type f \
-  \( -name '*.deb' -o -name '*.AppImage' \) -print
+  \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print
