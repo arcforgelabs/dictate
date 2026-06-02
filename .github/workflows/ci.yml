@@ -160,7 +160,6 @@ jobs:
         run: |
           cargo build --release --manifest-path ui-shell/src-tauri/Cargo.toml
           cargo test --release --manifest-path ui-shell/src-tauri/Cargo.toml
-          if-no-files-found: error
 
   package:
     name: Package artifact check
