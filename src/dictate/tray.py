@@ -190,6 +190,10 @@ class TrayIcon:
         history_item.connect("activate", self._on_recent_history)
         menu.append(history_item)
 
+        settings_item = Gtk.MenuItem(label="Open Settings…")
+        settings_item.connect("activate", self._on_open_settings)
+        menu.append(settings_item)
+
         menu.append(Gtk.SeparatorMenuItem())
 
         quit_item = Gtk.MenuItem(label="Quit")
@@ -349,6 +353,20 @@ class TrayIcon:
         # Live-reload: update engine hotwords from saved config
         del backend
         self.daemon.set_hotwords(load_config().hotwords_for_backend(self._active_backend))
+
+    def _on_open_settings(self, _item):
+        """Open the Quiet Console (Tauri shell), falling back to native dialogs."""
+        import logging
+
+        from dictate import ui_launcher
+
+        launched = ui_launcher.open_settings_window(
+            start_server=ui_launcher.ensure_server_started,
+        )
+        if not launched:
+            logging.getLogger(__name__).info(
+                "Quiet Console shell not installed; using native settings dialogs."
+            )
 
     def _on_recent_history(self, _item):
         from dictate.history_dialog import RecentHistoryDialog

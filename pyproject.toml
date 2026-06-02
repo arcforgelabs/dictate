@@ -21,6 +21,7 @@ windows = ["pynput>=1.7.0", "pyperclip>=1.9.0"]
 
 [project.scripts]
 dictate = "dictate.__main__:main_with_logging"
+dictate-ui-server = "dictate.ui_server:main"
 
 [project.gui-scripts]
 dictate-controls = "dictate.windows_control:run_control_panel"

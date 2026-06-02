@@ -162,6 +162,17 @@ and should not be packaged into the public repo default config.
 - Important transcriptions should be verified before relying on them.
 - Support and maintenance are best-effort.
 
+## Desktop UI — the Quiet Console (preview)
+
+A design-system desktop Settings window is being built alongside the tray:
+
+- [`ui/`](ui/README.md) — React/Vite front-end (the Quiet Console: seven views,
+  ⌘K palette, listening HUD, light/dark, GNOME/KDE chrome).
+- [`ui-shell/`](ui-shell/README.md) — Tauri 2 shell that hosts it on Linux.
+- `src/dictate/ui_server.py` — the loopback control server the UI talks to; the
+  tray's **Open Settings…** launches the shell (falling back to native dialogs).
+- See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
+
 ## Docs
 
 - [Windows 11 support](docs/windows-11.md)

@@ -1,0 +1,26 @@
+{
+  "name": "@arcforgelabs/dictate-ui",
+  "private": true,
+  "version": "2026.5.18-1",
+  "description": "Dictate \"Quiet Console\" front-end — the design-system Settings window, hosted by the Tauri shell.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -520,7 +520,13 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
-        self.assertIn("needs: [tests, windows-user-smoke, npm]", workflow)
+        # The package job gates on the core suites; the UI build/test job was
+        # added to that gate alongside tests/windows-user-smoke/npm.
+        self.assertRegex(
+            workflow,
+            r"needs: \[tests, windows-user-smoke, npm(?:, ui)?\]",
+        )
+        self.assertIn("windows-user-smoke", workflow)
 
     def test_npm_package_exposes_public_installer_shim(self) -> None:
         package_json = (Path(__file__).resolve().parents[1] / "package.json").read_text(

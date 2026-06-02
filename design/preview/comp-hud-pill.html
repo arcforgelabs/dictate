@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<link rel="stylesheet" href="preview.css" />
+<style>
+  body { display:flex; align-items:center; justify-content:center; background:var(--surface-2); }
+  .pill {
+    display:inline-flex; align-items:center; gap:15px;
+    padding:12px 18px; border-radius:var(--r-pill);
+    background:#19191c; color:#f3f1ec; box-shadow:var(--shadow-lg);
+    transition:opacity .4s var(--ease);
+  }
+  /* status dot — the one small living green; calm ring, not a loud fill */
+  .sig { position:relative; width:9px; height:9px; flex:0 0 auto; }
+  .sig .core { position:absolute; inset:0; border-radius:50%; background:#4fbd86; transition:background .3s, transform .25s var(--ease); }
+  .sig .ring { position:absolute; inset:0; border-radius:50%; box-shadow:0 0 0 0 rgba(79,189,134,.45); }
+  .pill.active .sig .ring { animation:sigpulse 1.4s var(--ease) infinite; }
+  @keyframes sigpulse { 0%{box-shadow:0 0 0 0 rgba(79,189,134,.45);} 70%{box-shadow:0 0 0 7px rgba(79,189,134,0);} 100%{box-shadow:0 0 0 0 rgba(79,189,134,0);} }
+  .pill.silent .sig .core { background:rgba(243,241,236,.30); transform:scale(.7); }
+
+  /* symmetric audio meter — bars grow from a center axis, bone not green */
+  .meter { display:flex; align-items:center; gap:3px; height:26px; }
+  .meter i {
+    width:3px; min-height:3px; border-radius:3px;
+    background:rgba(243,241,236,.88);
+    transition:background .35s ease;
+  }
+  .pill.silent .meter i { background:rgba(243,241,236,.22); }
+
+  .txt { font-size:13.5px; font-weight:600; min-width:74px; transition:color .3s; }
+  .pill.silent .txt { color:rgba(243,241,236,.55); }
+  .timer { font-family:var(--font-mono); font-size:11.5px; color:rgba(243,241,236,.62); font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body class="card-pad">
+<div class="pill active" id="pill">
+  <span class="sig"><span class="ring"></span><span class="core"></span></span>
+  <span class="meter" id="meter"></span>
+  <span class="txt" id="txt">Listening</span>
+  <span class="timer" id="timer">0:04</span>
+</div>
+
+<script>
+  const N = 26, MAXH = 26, MINH = 3;
+  const meter = document.getElementById('meter');
+  const pill = document.getElementById('pill');
+  const txt = document.getElementById('txt');
+  const bars = [];
+  for (let i = 0; i < N; i++) { const b = document.createElement('i'); meter.appendChild(b); bars.push(b); }
+
+  // envelope: alternating speech bursts and silences so the meter clearly
+  // shows BOTH a reactive voice signal and visible silence.
+  let t = 0;
+  function envelope(time) {
+    // 4.6s loop: ~3.1s speaking, ~1.5s silence
+    const p = time % 4.6;
+    if (p > 3.1) return 0;                    // silence window
+    const ramp = Math.min(1, p / 0.25, (3.1 - p) / 0.3); // ease in/out of speech
+    // speech amplitude: layered sines + flutter → feels voice-driven
+    const a = (Math.sin(p * 6.0) * 0.4 + Math.sin(p * 13.0 + 1) * 0.3 + Math.sin(p * 2.3) * 0.3);
+    return Math.max(0, ramp * (0.55 + 0.45 * a));
+  }
+
+  function frame() {
+    t += 0.045;
+    const amp = envelope(t);
+    const silent = amp < 0.06;
+    pill.classList.toggle('silent', silent);
+    pill.classList.toggle('active', !silent);
+    txt.textContent = silent ? 'No input' : 'Listening';
+
+    const mid = (N - 1) / 2;
+    for (let i = 0; i < N; i++) {
+      const dist = 1 - Math.abs(i - mid) / mid;          // taller toward center
+      const flutter = 0.5 + 0.5 * Math.sin(t * 9 + i * 0.7) * Math.sin(t * 3.3 + i);
+      const h = silent ? MINH : MINH + amp * dist * flutter * MAXH;
+      bars[i].style.height = Math.max(MINH, h) + 'px';
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+</script>
+</body>
+</html>

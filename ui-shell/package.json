@@ -1,0 +1,14 @@
+{
+  "name": "@arcforgelabs/dictate-ui-shell",
+  "private": true,
+  "version": "2026.5.18-1",
+  "description": "Tauri 2 shell that hosts the Dictate Quiet Console UI and bridges it to the Python engine.",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
