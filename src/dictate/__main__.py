@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -771,7 +772,7 @@ def _run_headless(
     from dictate.daemon import Daemon
 
     output = _resolve_typing_output_or_exit(type_backend)
-    Daemon(
+    daemon = Daemon(
         stt,
         output=output,
         language=language,
@@ -779,7 +780,27 @@ def _run_headless(
         lexicon_mode=lexicon_mode,
         lexicon_replacements=lexicon_replacements,
         push_to_talk_combo=push_to_talk_combo,
-    ).run()
+    )
+    _maybe_start_ui_server(daemon)
+    daemon.run()
+
+
+def _maybe_start_ui_server(daemon: object) -> object | None:
+    """Start the control server alongside the headless daemon when requested.
+
+    Opt-in via ``DICTATE_UI_SERVER`` so default headless behaviour is unchanged.
+    The packaged desktop app sets it so one engine process both dictates and
+    serves the Settings window's control API.
+    """
+    if not os.environ.get("DICTATE_UI_SERVER"):
+        return None
+    try:
+        from dictate import ui_server
+
+        return ui_server.serve()
+    except Exception:  # noqa: BLE001 — never let the control surface block dictation
+        logging.getLogger(__name__).exception("Failed to start the UI control server")
+        return None
 
 
 def _run_tray(

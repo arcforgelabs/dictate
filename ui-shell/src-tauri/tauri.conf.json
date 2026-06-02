@@ -28,9 +28,17 @@
     ],
     "category": "Utility",
     "shortDescription": "Desktop dictation — the Quiet Console.",
+    "longDescription": "Dictate types your speech straight into whatever app you're focused on. The frozen Python engine ships inside this package, so no separate install is needed; speech models download on first use.",
+    "resources": ["engine/**/*"],
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "libasound2",
+          "libportaudio2"
+        ]
       }
     }
   }

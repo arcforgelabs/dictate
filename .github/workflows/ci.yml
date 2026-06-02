@@ -148,21 +148,18 @@ jobs:
           npm --prefix ui ci || npm --prefix ui install
           npm --prefix ui run build
 
+      - name: Stage a placeholder engine resource
+        # The full PyInstaller freeze runs only in the release job; a placeholder
+        # satisfies the bundle.resources glob so the config resolves at compile.
+        run: |
+          mkdir -p ui-shell/src-tauri/engine
+          printf '#!/bin/sh\n' > ui-shell/src-tauri/engine/dictate-engine
+          chmod +x ui-shell/src-tauri/engine/dictate-engine
+
       - name: Compile the shell and run its Rust tests
         run: |
           cargo build --release --manifest-path ui-shell/src-tauri/Cargo.toml
           cargo test --release --manifest-path ui-shell/src-tauri/Cargo.toml
-
-      - name: Bundle a downloadable .deb
-        env:
-          DICTATE_BUNDLES: deb
-        run: ./scripts/build-linux-desktop.sh
-
-      - name: Upload the .deb as a build artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: dictate-desktop-deb
-          path: ui-shell/src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
   package:

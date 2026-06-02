@@ -2,3 +2,6 @@
 /target/
 /gen/
 Cargo.lock
+
+# Frozen Python engine staged in by scripts/build-linux-desktop.sh
+/engine/

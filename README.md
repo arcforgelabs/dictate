@@ -173,10 +173,20 @@ A design-system desktop Settings window is being built alongside the tray:
   tray's **Open Settings…** launches the shell (falling back to native dialogs).
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
-**Install it:** tagged releases attach a Linux **`.deb`** and **`.AppImage`** of
-the desktop UI (built by CI). Or build locally in one step with
+**Install it like a normal app:** tagged releases attach a **self-contained**
+Linux **`.deb`** and **`.AppImage`** — they bundle the frozen Python engine
+inside (PyInstaller sidecar), so there's no separate Python/pip step. Download,
+install, launch; speech models download on first use.
+
+```bash
+sudo apt install ./dictate_*_amd64.deb      # or: chmod +x Dictate_*.AppImage && ./Dictate_*.AppImage
+```
+
+The app lives in the tray (Open Settings / Quit) and does push-to-talk straight
+away. Build the package yourself in one step with
 [`scripts/build-linux-desktop.sh`](scripts/build-linux-desktop.sh) — see
-[`ui-shell/README.md`](ui-shell/README.md).
+[`ui-shell/README.md`](ui-shell/README.md). The `pip`/`install.sh` route remains
+for source/dev installs.
 
 ## Docs
 

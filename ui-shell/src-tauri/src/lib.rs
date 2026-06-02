@@ -1,20 +1,24 @@
 // Dictate — Quiet Console shell (Tauri 2).
 //
-// The shell is deliberately thin: it draws a frameless window, detects the Linux
-// desktop environment so the front-end can wear the right chrome, locates (or
-// starts) the Python `ui_server`, and injects the `{ baseUrl, token, platform }`
-// bridge into the webview before the page loads. All product logic stays in the
-// Python engine; the webview is the design-system control surface.
+// The packaged app is launch-and-go: this shell bundles the frozen Python engine
+// (`dictate-engine`, a PyInstaller sidecar under resources/engine/), starts it as
+// one headless process that both dictates and serves the control API, draws a
+// tray icon (Open Settings / Quit), and shows the Settings window — all without a
+// separate Python install. In a dev/pip environment it falls back to the
+// `dictate-engine` / `dictate-ui-server` / `dictate` binaries on PATH.
 
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Child, Command};
+use std::sync::{Mutex, OnceLock};
 use std::thread::sleep;
 use std::time::Duration;
 
 use serde::Deserialize;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 #[derive(Deserialize, Debug, Clone)]
 struct Handshake {
@@ -22,9 +26,14 @@ struct Handshake {
     token: String,
 }
 
+// The spawned engine process, killed when the app exits.
+static ENGINE_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+
+fn engine_child_slot() -> &'static Mutex<Option<Child>> {
+    ENGINE_CHILD.get_or_init(|| Mutex::new(None))
+}
+
 /// Map `$XDG_CURRENT_DESKTOP` (or similar) to the chrome variant the UI draws.
-/// GNOME-likes get the close-only Adwaita cluster; KDE/Plasma gets Breeze; any
-/// other Linux session falls back to the GNOME default per the design notes.
 pub fn classify_desktop(value: &str) -> &'static str {
     let v = value.to_ascii_lowercase();
     if v.contains("kde") || v.contains("plasma") {
@@ -40,14 +49,11 @@ pub fn classify_desktop(value: &str) -> &'static str {
     }
 }
 
-/// Resolve the current platform string for the front-end.
 fn detect_platform() -> String {
     if cfg!(target_os = "macos") {
         return "mac".to_string();
     }
     if cfg!(target_os = "windows") {
-        // Win 11 vs 10 is decided by build number; the shell defaults to win11
-        // and the front-end chrome is otherwise identical bar corners/Mica.
         return "win11".to_string();
     }
     let de = env::var("XDG_CURRENT_DESKTOP")
@@ -57,8 +63,6 @@ fn detect_platform() -> String {
     classify_desktop(&de).to_string()
 }
 
-/// `$XDG_DATA_HOME/dictate` (or `~/.local/share/dictate`) — where the Python
-/// side writes the `ui-server.json` handshake.
 fn data_dir() -> Option<PathBuf> {
     if let Ok(xdg) = env::var("XDG_DATA_HOME") {
         if !xdg.is_empty() {
@@ -70,44 +74,71 @@ fn data_dir() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".local/share/dictate"))
 }
 
-fn handshake_path() -> Option<PathBuf> {
-    data_dir().map(|d| d.join("ui-server.json"))
-}
-
 fn read_handshake() -> Option<Handshake> {
-    let path = handshake_path()?;
+    let path = data_dir()?.join("ui-server.json");
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str::<Handshake>(&raw).ok()
 }
 
-/// Start the Python control server if no live handshake is present. Tries, in
-/// order: `$DICTATE_UI_SERVER_CMD`, the `dictate-ui-server` console script, then
-/// `python3 -m dictate.ui_server`.
-fn spawn_server() {
+/// The bundled engine launcher, if this is a packaged build.
+fn bundled_engine(app: &tauri::App) -> Option<PathBuf> {
+    let res = app.path().resource_dir().ok()?;
+    let candidate = res.join("engine").join("dictate-engine");
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Start the engine: the bundled sidecar as a headless dictation daemon that
+/// also serves the control API; otherwise a PATH fallback for dev/pip installs.
+fn spawn_engine(app: &tauri::App) {
+    // 1) Packaged: one process dictates + serves.
+    if let Some(bin) = bundled_engine(app) {
+        if let Ok(child) = Command::new(&bin)
+            .arg("--no-tray")
+            .env("DICTATE_UI_SERVER", "1")
+            .spawn()
+        {
+            *engine_child_slot().lock().unwrap() = Some(child);
+            return;
+        }
+    }
+    // 2) Custom override.
     if let Ok(custom) = env::var("DICTATE_UI_SERVER_CMD") {
         if !custom.trim().is_empty() {
             let mut parts = custom.split_whitespace();
-            if let Some(bin) = parts.next() {
-                let _ = Command::new(bin).args(parts).spawn();
-                return;
+            if let Some(first) = parts.next() {
+                if let Ok(child) = Command::new(first).args(parts).spawn() {
+                    *engine_child_slot().lock().unwrap() = Some(child);
+                    return;
+                }
             }
         }
     }
-    if Command::new("dictate-ui-server").spawn().is_ok() {
+    // 3) Dev/pip: the lightweight control server (a separate `dictate` tray, if
+    //    installed, handles dictation), then the full engine as a last resort.
+    if let Ok(child) = Command::new("dictate-ui-server").spawn() {
+        *engine_child_slot().lock().unwrap() = Some(child);
         return;
     }
-    let _ = Command::new("python3")
-        .args(["-m", "dictate.ui_server"])
-        .spawn();
+    if let Ok(child) = Command::new("dictate")
+        .arg("--no-tray")
+        .env("DICTATE_UI_SERVER", "1")
+        .spawn()
+    {
+        *engine_child_slot().lock().unwrap() = Some(child);
+    }
 }
 
-/// Return a live handshake, spawning the server and polling briefly if needed.
-fn ensure_server() -> Option<Handshake> {
+/// Return a live handshake, starting the engine and polling briefly if needed.
+fn ensure_engine(app: &tauri::App) -> Option<Handshake> {
     if let Some(h) = read_handshake() {
         return Some(h);
     }
-    spawn_server();
-    for _ in 0..50 {
+    spawn_engine(app);
+    for _ in 0..80 {
         sleep(Duration::from_millis(100));
         if let Some(h) = read_handshake() {
             return Some(h);
@@ -116,9 +147,15 @@ fn ensure_server() -> Option<Handshake> {
     None
 }
 
+fn kill_engine() {
+    if let Some(mut child) = engine_child_slot().lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 /// JS injected before page load: the bridge object + the shell/platform markers
-/// the stylesheet keys off. `platform` is always present; `baseUrl`/`token` only
-/// when the server was reachable (otherwise the UI runs in its mock mode).
+/// the stylesheet keys off.
 fn build_init_script(platform: &str, bridge: Option<&Handshake>) -> String {
     let dictate = match bridge {
         Some(h) => format!(
@@ -141,12 +178,20 @@ fn json_str(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+fn show_settings(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .setup(|app| {
             let platform = detect_platform();
-            let bridge = ensure_server();
+            let bridge = ensure_engine(app);
             let init = build_init_script(&platform, bridge.as_ref());
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -159,10 +204,56 @@ pub fn run() {
                 .initialization_script(&init)
                 .build()?;
 
+            // Tray icon: the always-there surface. Closing the window hides to
+            // the tray; Quit stops the engine and exits.
+            let open = MenuItem::with_id(app, "open", "Open Settings", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Dictate", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            TrayIconBuilder::with_id("main")
+                .tooltip("Dictate")
+                .icon(app.default_window_icon().cloned().unwrap())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => show_settings(app),
+                    "quit" => {
+                        kill_engine();
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_settings(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // Closing the window hides it to the tray instead of quitting.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = window.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = handle.hide();
+                    }
+                });
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the Dictate UI shell");
+        .build(tauri::generate_context!())
+        .expect("error while building the Dictate UI shell")
+        .run(|_app, event| {
+            if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+                kill_engine();
+            }
+        });
 }
 
 #[cfg(test)]

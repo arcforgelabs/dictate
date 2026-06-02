@@ -34,6 +34,12 @@ echo "▶ building the front-end (ui/ -> dist/)"
 npm --prefix ui ci 2>/dev/null || npm --prefix ui install
 npm --prefix ui run build
 
+echo "▶ freezing the Python engine sidecar (PyInstaller)"
+./packaging/build-engine.sh
+echo "▶ staging the engine into the Tauri bundle resources"
+rm -rf ui-shell/src-tauri/engine
+cp -r packaging/dist/dictate-engine ui-shell/src-tauri/engine
+
 echo "▶ ensuring the Tauri CLI is available"
 if ! npm --prefix ui-shell exec -- tauri --version >/dev/null 2>&1; then
   npm --prefix ui-shell install

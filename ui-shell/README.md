@@ -31,14 +31,21 @@ sandbox does not have:
 
 ### Download (no build needed)
 
-Tagged releases ship a **`.deb`** and an **`.AppImage`** built by CI — grab them
-from the repo's GitHub **Releases** page and install:
+Tagged releases ship a **self-contained** `.deb` and `.AppImage` built by CI.
+They **bundle the frozen Python engine** (a PyInstaller `dictate-engine` sidecar
+under the app's resources), so there is no separate Python/pip install — download,
+install, launch. Speech models download on first use.
 
 ```bash
 sudo apt install ./dictate_*_amd64.deb        # Debian/Ubuntu
 # or
 chmod +x Dictate_*.AppImage && ./Dictate_*.AppImage   # any distro
 ```
+
+On launch the shell starts the bundled engine as one headless process that both
+dictates (push-to-talk) and serves the control API, shows a tray icon
+(**Open Settings** / **Quit**), and opens the Settings window. Closing the window
+hides to the tray.
 
 ### Build it yourself (one command)
 
