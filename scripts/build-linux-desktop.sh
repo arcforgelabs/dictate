@@ -34,11 +34,17 @@ echo "▶ building the front-end (ui/ -> dist/)"
 npm --prefix ui ci 2>/dev/null || npm --prefix ui install
 npm --prefix ui run build
 
-echo "▶ freezing the Python engine sidecar (PyInstaller)"
+echo "▶ freezing the Python engine sidecar (PyInstaller, onefile)"
+# onefile: the AppDir then holds a single self-extracting binary, so linuxdeploy
+# (AppImage) doesn't trip over PyInstaller's mangled _internal/*.so tree. The
+# .deb/.rpm are happy with it too (one file instead of ~1200).
+export DICTATE_ONEFILE=1
 ./packaging/build-engine.sh
 echo "▶ staging the engine into the Tauri bundle resources"
 rm -rf ui-shell/src-tauri/engine
-cp -r packaging/dist/dictate-engine ui-shell/src-tauri/engine
+mkdir -p ui-shell/src-tauri/engine
+cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine
+chmod +x ui-shell/src-tauri/engine/dictate-engine
 
 echo "▶ ensuring the Tauri CLI is available"
 if ! npm --prefix ui-shell exec -- tauri --version >/dev/null 2>&1; then

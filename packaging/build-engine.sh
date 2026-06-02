@@ -26,14 +26,19 @@ else
   "$VPY" -m pip install -e "$ROOT[x11,wayland]" pyinstaller --quiet
 fi
 
-echo "▶ freezing the engine (PyInstaller)"
+echo "▶ freezing the engine (PyInstaller${DICTATE_ONEFILE:+, onefile})"
 rm -rf "$HERE/dist" "$HERE/build"
 ( cd "$HERE" && "$VPY" -m PyInstaller dictate-engine.spec --noconfirm \
     --distpath dist --workpath build --log-level WARN )
 
-BIN="$HERE/dist/dictate-engine/dictate-engine"
+# onefile -> dist/dictate-engine ; onedir -> dist/dictate-engine/dictate-engine
+if [ "${DICTATE_ONEFILE:-}" = "1" ]; then
+  BIN="$HERE/dist/dictate-engine"
+else
+  BIN="$HERE/dist/dictate-engine/dictate-engine"
+fi
 [ -x "$BIN" ] || { echo "✗ freeze did not produce $BIN" >&2; exit 1; }
 
 echo "▶ smoke-testing the frozen binary"
 "$BIN" --version >/dev/null
-echo "✓ engine frozen: $HERE/dist/dictate-engine/  ($(du -sh "$HERE/dist/dictate-engine" | cut -f1))"
+echo "✓ engine frozen: $BIN  ($(du -sh "$BIN" | cut -f1))"
