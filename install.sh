@@ -18,6 +18,7 @@ VERIFY=1
 PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
 STARTUP=1
+INSTALL_UI=1
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # Prefer the distro Python so --system-site-packages can see modules such as
@@ -28,11 +29,14 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--session-backend auto|x11|wayland]
+Usage: $0 [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
-Installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate,
-seeds the default config on first install, creates app launcher/autostart entries,
-and prepares the faster-whisper turbo model unless disabled.
+Installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate and
+~/.local/bin/dictate-ui-server, seeds the default config on first install,
+creates app launcher/autostart entries, prepares the faster-whisper turbo model,
+and installs the desktop "Quiet Console" UI shell when a build toolchain is
+present (unless disabled). All steps degrade gracefully when prerequisites are
+missing.
 EOF
 }
 
@@ -71,6 +75,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-startup)
       STARTUP=0
+      ;;
+    --no-ui)
+      INSTALL_UI=0
       ;;
     --session-backend)
       shift
@@ -112,9 +119,11 @@ uv venv "$INSTALL_DIR/venv" --python "$PYTHON_BIN" --system-site-packages --quie
 echo "Installing dictate from $PIP_TARGET ..."
 uv pip install "$PIP_TARGET" --python "$INSTALL_DIR/venv/bin/python" --quiet
 
-echo "Linking binary ..."
+echo "Linking binaries ..."
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/venv/bin/dictate" "$BIN_DIR/dictate"
+# Expose the control server so the desktop shell can launch it on PATH.
+ln -sf "$INSTALL_DIR/venv/bin/dictate-ui-server" "$BIN_DIR/dictate-ui-server"
 
 echo "Installing icon ..."
 mkdir -p "$ICON_DIR"
@@ -153,6 +162,56 @@ Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
+fi
+
+print_ui_hint() {
+  cat <<EOF
+  The Quiet Console desktop UI is optional — the tray app works without it
+  (native dialogs as fallback). To add it later:
+    - download a .deb / AppImage from the GitHub release, or
+    - build it from this checkout: scripts/build-linux-desktop.sh
+  See ui-shell/README.md for details.
+EOF
+}
+
+install_desktop_ui() {
+  local shell_src="$SCRIPT_DIR/ui-shell"
+  local target="$BIN_DIR/dictate-ui-shell"
+
+  if command -v dictate-ui-shell >/dev/null 2>&1; then
+    echo "Desktop UI shell already installed: $(command -v dictate-ui-shell)"
+    return 0
+  fi
+  if [ ! -d "$shell_src" ]; then
+    echo "Desktop UI shell sources not present; skipping the optional UI."
+    print_ui_hint
+    return 0
+  fi
+  if ! command -v cargo >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 \
+     || ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+    echo "Desktop UI build toolchain not found (needs cargo, npm, webkit2gtk-4.1-dev)."
+    print_ui_hint
+    return 0
+  fi
+
+  echo "Building the desktop UI shell (this can take a few minutes) ..."
+  npm --prefix "$SCRIPT_DIR/ui" ci >/dev/null 2>&1 \
+    || npm --prefix "$SCRIPT_DIR/ui" install >/dev/null 2>&1 \
+    || { echo "UI front-end install failed; skipping the optional shell."; print_ui_hint; return 0; }
+  if ! npm --prefix "$SCRIPT_DIR/ui" run build >/dev/null 2>&1; then
+    echo "UI front-end build failed; skipping the optional shell."; print_ui_hint; return 0
+  fi
+  if ! ( cd "$shell_src" && cargo build --release --manifest-path src-tauri/Cargo.toml ); then
+    echo "Desktop UI shell build failed; the engine + tray remain fully functional."
+    print_ui_hint
+    return 0
+  fi
+  install -m 755 "$shell_src/src-tauri/target/release/dictate-ui-shell" "$target"
+  echo "Installed desktop UI shell: $target"
+}
+
+if [ "$INSTALL_UI" -eq 1 ]; then
+  install_desktop_ui
 fi
 
 if [ "$SEED_DEFAULT_CONFIG" -eq 1 ]; then
