@@ -321,7 +321,11 @@ class UiBackend:
         if when.tzinfo is None:
             when = when.replace(tzinfo=timezone.utc)
         local = when.astimezone()
-        clock = local.strftime("%-I:%M %p") if hasattr(local, "strftime") else created_at
+        # Built manually rather than strftime("%-I") — the %- padding flag is a
+        # glibc extension and raises on Windows.
+        hour12 = local.hour % 12 or 12
+        meridiem = "PM" if local.hour >= 12 else "AM"
+        clock = f"{hour12}:{local.minute:02d} {meridiem}"
         return f"{clock} · {self._relative(when)}"
 
     def _relative(self, when: datetime) -> str:

@@ -24,10 +24,8 @@ class FindShellBinaryTests(unittest.TestCase):
             self.assertEqual(ui_launcher.shell_binary_candidates()[0], Path("/custom/shell"))
 
     def test_build_launch_command(self) -> None:
-        self.assertEqual(
-            ui_launcher.build_launch_command(Path("/usr/bin/dictate-ui-shell")),
-            ["/usr/bin/dictate-ui-shell"],
-        )
+        binary = Path("/usr/bin/dictate-ui-shell")
+        self.assertEqual(ui_launcher.build_launch_command(binary), [str(binary)])
 
 
 class OpenSettingsWindowTests(unittest.TestCase):
@@ -44,13 +42,14 @@ class OpenSettingsWindowTests(unittest.TestCase):
     def test_spawns_and_starts_server_when_present(self) -> None:
         spawned: list[list[str]] = []
         started: list[bool] = []
+        binary = Path("/usr/bin/dictate-ui-shell")
         ok = ui_launcher.open_settings_window(
-            find_binary=lambda: Path("/usr/bin/dictate-ui-shell"),
+            find_binary=lambda: binary,
             spawn=lambda cmd: spawned.append(cmd),
             start_server=lambda: started.append(True),
         )
         self.assertTrue(ok)
-        self.assertEqual(spawned, [["/usr/bin/dictate-ui-shell"]])
+        self.assertEqual(spawned, [[str(binary)]])
         self.assertEqual(started, [True])
 
     def test_server_failure_does_not_block_launch(self) -> None:
