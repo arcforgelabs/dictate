@@ -45,8 +45,17 @@ if ! npm --prefix ui-shell exec -- tauri --version >/dev/null 2>&1; then
   npm --prefix ui-shell install
 fi
 
-echo "▶ building the Tauri bundle ($BUNDLES)"
-( cd ui-shell && npm run tauri -- build --bundles "$BUNDLES" )
+# The .deb is the reliable primary artifact; the AppImage (linuxdeploy) is
+# fussier in CI, so build it best-effort and never let it sink the .deb.
+if printf '%s' "$BUNDLES" | grep -q deb; then
+  echo "▶ building the .deb bundle"
+  ( cd ui-shell && npm run tauri -- build --bundles deb )
+fi
+if printf '%s' "$BUNDLES" | grep -q appimage; then
+  echo "▶ building the AppImage bundle (best-effort)"
+  ( cd ui-shell && npm run tauri -- build --bundles appimage ) \
+    || echo "⚠ AppImage bundling failed (linuxdeploy); shipping the .deb only"
+fi
 
 echo
 echo "✓ artifacts:"
