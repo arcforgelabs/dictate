@@ -53,7 +53,7 @@ if printf '%s' "$BUNDLES" | grep -q deb; then
 fi
 if printf '%s' "$BUNDLES" | grep -q appimage; then
   echo "▶ building the AppImage bundle (best-effort)"
-  ( cd ui-shell && npm run tauri -- build --bundles appimage ) \
+  ( cd ui-shell && npm run tauri -- build --bundles appimage --verbose ) \
     || echo "⚠ AppImage bundling failed (linuxdeploy); shipping the .deb only"
 fi
 
