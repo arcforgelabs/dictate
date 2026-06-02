@@ -29,21 +29,45 @@ sandbox does not have:
   `wget`, `file`, `libssl-dev`
 - The Tauri CLI: `npm i` in this folder (installs `@tauri-apps/cli`)
 
-On a provisioned machine:
+### Download (no build needed)
+
+Tagged releases ship a **`.deb`** and an **`.AppImage`** built by CI — grab them
+from the repo's GitHub **Releases** page and install:
 
 ```bash
-# 1. build the front-end the shell embeds
-npm --prefix ../ui install && npm --prefix ../ui run build
-
-# 2. dev run (hot-reloads the UI) or a release bundle
-cd ui-shell
-npm install
-npm run dev          # or: npm run build  -> .deb / AppImage in src-tauri/target
-
-# Rust-only unit tests (DE detection, bridge script) — no webkit needed to read,
-# but the tauri crate's build still pulls system deps, so run on a full machine:
-cargo test --manifest-path src-tauri/Cargo.toml
+sudo apt install ./dictate_*_amd64.deb        # Debian/Ubuntu
+# or
+chmod +x Dictate_*.AppImage && ./Dictate_*.AppImage   # any distro
 ```
+
+### Build it yourself (one command)
+
+From the repo root, after the one-time setup below:
+
+```bash
+scripts/build-linux-desktop.sh
+# -> ui-shell/src-tauri/target/release/bundle/{deb,appimage}/...
+```
+
+One-time setup (needs root for the apt step):
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+    libayatana-appindicator3-dev librsvg2-dev build-essential \
+    curl wget file libssl-dev libxdo-dev
+curl https://sh.rustup.rs -sSf | sh -s -- -y      # Rust toolchain
+```
+
+### Dev loop / Rust tests
+
+```bash
+npm --prefix ../ui run build           # build the embedded front-end once
+cd ui-shell && npm install && npm run dev   # hot-reloading dev window
+cargo test --manifest-path src-tauri/Cargo.toml   # DE detection + bridge tests
+```
+
+CI compiles the shell and runs `cargo test` on every push (`desktop-shell` job),
+and the release workflow produces and attaches the `.deb` + AppImage.
 
 ## Why it isn't compiled here
 

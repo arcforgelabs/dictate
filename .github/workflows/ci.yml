@@ -113,6 +113,46 @@ jobs:
           python -m pip install -e ".[x11]"
           ./scripts/ui-server-smoke.sh "$(command -v python)"
 
+  desktop-shell:
+    name: Desktop shell (compile + Rust tests, Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev build-essential curl wget file libssl-dev libxdo-dev
+
+      - name: Install Rust toolchain
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo
+        uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ui-shell/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('ui-shell/src-tauri/Cargo.toml') }}
+
+      - name: Build the front-end the shell embeds
+        run: |
+          npm --prefix ui ci || npm --prefix ui install
+          npm --prefix ui run build
+
+      - name: Compile the shell and run its Rust tests
+        run: |
+          cargo build --release --manifest-path ui-shell/src-tauri/Cargo.toml
+          cargo test --release --manifest-path ui-shell/src-tauri/Cargo.toml
+
   package:
     name: Package artifact check
     runs-on: ubuntu-latest

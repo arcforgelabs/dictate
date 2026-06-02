@@ -173,6 +173,11 @@ A design-system desktop Settings window is being built alongside the tray:
   tray's **Open Settings…** launches the shell (falling back to native dialogs).
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
+**Install it:** tagged releases attach a Linux **`.deb`** and **`.AppImage`** of
+the desktop UI (built by CI). Or build locally in one step with
+[`scripts/build-linux-desktop.sh`](scripts/build-linux-desktop.sh) — see
+[`ui-shell/README.md`](ui-shell/README.md).
+
 ## Docs
 
 - [Windows 11 support](docs/windows-11.md)
