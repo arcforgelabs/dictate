@@ -14,6 +14,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Which bundle types to produce (deb,appimage). Override for a faster/leaner CI
+# artifact, e.g. DICTATE_BUNDLES=deb scripts/build-linux-desktop.sh
+BUNDLES="${DICTATE_BUNDLES:-deb,appimage}"
+
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ missing '$1' — see the header of this script for setup."; exit 1; }; }
 
 echo "▶ preflight"
@@ -35,8 +39,8 @@ if ! npm --prefix ui-shell exec -- tauri --version >/dev/null 2>&1; then
   npm --prefix ui-shell install
 fi
 
-echo "▶ building the Tauri bundle (.deb + AppImage)"
-( cd ui-shell && npm run tauri -- build --bundles deb,appimage )
+echo "▶ building the Tauri bundle ($BUNDLES)"
+( cd ui-shell && npm run tauri -- build --bundles "$BUNDLES" )
 
 echo
 echo "✓ artifacts:"
