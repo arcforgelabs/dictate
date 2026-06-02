@@ -1,0 +1,123 @@
+# Desktop packaging & CI — runbook
+
+How the Linux desktop app (the "Quiet Console") is built, shipped, and updated —
+and the non-obvious things that bit us, so the next person/agent doesn't relearn
+them. Pairs with [release-versioning.md](release-versioning.md).
+
+## Architecture
+
+The desktop app is **two pieces that ship as one package**:
+
+- **`ui-shell/`** — a Tauri 2 shell (Rust) that draws the frameless window + tray
+  and hosts the web UI built from **`ui/`** (React/Vite). See `ui-shell/README.md`.
+- **The Python engine** — the real product (STT, audio, push-to-talk, typing). It
+  is **PyInstaller-frozen** (`packaging/`) into a single `dictate-engine` binary
+  and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
+
+On launch the shell spawns the engine once as a headless process that **both**
+dictates (`--no-tray`) and serves the control API (`DICTATE_UI_SERVER=1`,
+implemented in `src/dictate/ui_server.py`). The webview talks to that server over
+loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.json`.
+
+Models are **not** bundled — they download on first use, exactly as in a `pip`
+install.
+
+## Build / release flow
+
+```
+scripts/build-linux-desktop.sh
+  ├─ npm --prefix ui run build                 # web UI -> ui/dist
+  ├─ DICTATE_ONEFILE=1 packaging/build-engine.sh  # freeze engine -> one binary
+  ├─ stage engine -> ui-shell/src-tauri/engine/dictate-engine
+  └─ tauri build --bundles deb,rpm   (required)  + appimage (best-effort)
+```
+
+- **CI (`.github/workflows/ci.yml`, job `desktop-shell`)** compiles the shell and
+  runs its Rust tests on every push (with a placeholder engine — no freeze).
+- **Release (`.github/workflows/release.yml`, job `linux-desktop`)** runs the full
+  build on a `v20*` tag and attaches `.deb`/`.rpm`/AppImage to the GitHub release.
+- **Manual (`.github/workflows/desktop-bundle.yml`, `workflow_dispatch`)** builds
+  the bundle and uploads artifacts + the full log — **use this to iterate on
+  packaging without cutting releases.** Trigger: `gh workflow run desktop-bundle.yml`.
+
+## Gotchas (the expensive lessons)
+
+### Freeze the engine **onefile**, not onedir
+`linuxdeploy` (the AppImage builder) walks every ELF in the AppDir and tries to
+"deploy dependencies". A PyInstaller **onedir** engine ships ~1,200 libs in
+`_internal/` with mangled names depending on mangled siblings via `$ORIGIN` rpath;
+linuxdeploy doesn't honour `$ORIGIN` and aborts with
+`ERROR: Could not find dependency: libnettle-<hash>.so`. A **onefile** freeze puts
+a single self-extracting ELF in the AppDir, so there's nothing for linuxdeploy to
+trip over. `.deb`/`.rpm` don't do this walk, so they work with either layout. We
+use onefile everywhere (set in `build-linux-desktop.sh`; `dictate-engine.spec`
+honours `DICTATE_ONEFILE`). Cost: ~1–2 s extraction at launch — fine for a tray app.
+
+### Tauri icons must be RGBA PNG
+`tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if
+any configured icon isn't RGBA. `assets/dictate.png` is mode `LA` (grey+alpha);
+regenerate `ui-shell/src-tauri/icons/*.png` as RGBA (Pillow: `.convert("RGBA")`).
+
+### AppImage in CI needs FUSE-free env (and is best-effort)
+linuxdeploy/appimagetool can't FUSE-mount in headless CI. Set
+`APPIMAGE_EXTRACT_AND_RUN=1`, `NO_STRIP=true`, `ARCH=x86_64`. Even then it's the
+fragile format, so the build treats `.deb`/`.rpm` as **required** and AppImage as
+**best-effort** — an AppImage failure must never sink the native packages.
+
+### Release pipeline must be resilient
+- **npm publish is best-effort.** It used to run before `gh release create` in the
+  same `bash -e` step, so an npm error (the `@arcforgelabs` scope/token not
+  configured) aborted the whole job and skipped the GitHub release + installers.
+  It now warns and continues. (See release-versioning.md for the token setup.)
+- **`gh release create` is idempotent** — `upload --clobber` if the release exists,
+  so re-running after a bundle fix doesn't fail on a duplicate.
+
+### Windows CI is part of the matrix — avoid POSIX-isms
+- `strftime("%-I"/"%-M")`: the `%-` pad flag is glibc-only and raises
+  `ValueError: Invalid format string` on Windows. Build clock strings manually.
+- `str(Path("/a/b"))` is `\a\b` on Windows; test assertions must compare against
+  `str(Path(...))`, not hard-coded forward-slash strings.
+- Tests run with stdlib **unittest** (`python -m unittest discover -s tests`), not
+  pytest.
+
+### Version bump touches many files
+`scripts/release_check.py` only validates `pyproject.toml`, root `package.json`,
+and `version.py`, but the version string is also embedded in (and asserted by
+tests in) more places. When bumping CalVer, change **all** of:
+`pyproject.toml`, `package.json`, `src/dictate/version.py`, `src/dictate/doctor.py`,
+`install.ps1`, `update.ps1`, `install-windows.ps1`, `scripts/windows-user-smoke.ps1`,
+`ui/package.json`, `ui-shell/package.json`, `ui-shell/src-tauri/Cargo.toml`,
+`ui-shell/src-tauri/tauri.conf.json`, plus the asserting tests in
+`tests/test_version.py` and `tests/test_windows_platform.py`. **Do not** touch the
+parse/compare fixtures in `tests/test_update_status.py` (they use old versions as
+generic logic examples). `python scripts/release_check.py --tag vX` must pass.
+
+### You can't build the Tauri bundle in the dev sandbox
+The design/dev sandbox has Node + Python (so `ui/`, the freeze, and the Python
+suites are fully buildable/testable) but **no Rust/cargo, no `webkit2gtk-4.1-dev`,
+`static.crates.io` is firewalled, and sudo needs a password.** So: verify the
+PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
+**on CI** via `desktop-bundle.yml`. Don't burn time trying to `cargo build` locally.
+
+## Install, update, conflicts
+
+- **Canonical install** is the `.deb`/`.rpm`/AppImage. `apt`/`dnf` handle updates
+  cleanly (dpkg/rpm replace the old version and drop files no longer in the
+  package). AppImage is replace-the-file.
+- **`install.sh` (source/dev) and the package both ship a daemon** and would fight
+  over the push-to-talk key. `install.sh` now warns when a package is installed;
+  `uninstall.sh` stops a running source daemon and removes the `dictate-ui-server`
+  symlink + logs, **preserving `~/.config/dictate` and history by default**
+  (`--remove-user-data` to wipe).
+- Same-version reinstall (e.g. swapping an onedir `.deb` for a onefile one with the
+  same version string) needs `sudo apt install --reinstall ./<file>.deb` — apt
+  skips an equal version otherwise. Download the asset first; `apt install
+  ./bare-name.deb` fails with "Unsupported file" if the path doesn't exist.
+
+## Open / known follow-ups
+
+- **npm publishing**: the `arcforgelabs` org exists, but CI needs an **automation
+  token** in the `NPM_TOKEN` secret (Bitwarden holds login + 2FA, not a token).
+  Until set, npm publish just warns.
+- **Autostart**: the package installs an app-menu entry but no login autostart
+  (enable via Settings → "Launch on sign-in", or ship `/etc/xdg/autostart`).

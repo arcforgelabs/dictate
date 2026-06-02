@@ -193,6 +193,7 @@ for source/dev installs.
 - [Windows 11 support](docs/windows-11.md)
 - [Recent History spec](docs/recent-dictation-history-spec.md)
 - [Release/versioning](docs/release-versioning.md)
+- [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Development streams](docs/development-streams.md)
 - [Security policy](SECURITY.md)
 
