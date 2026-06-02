@@ -121,6 +121,9 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish npm package
+        # Best-effort: the npm shim is a convenience, not the primary artifact.
+        # A publish failure (e.g. scope/token not configured) must not block the
+        # GitHub release and the downloadable .deb/AppImage that follow.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -128,8 +131,10 @@ jobs:
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "npm package ${PACKAGE_NAME}@${PACKAGE_VERSION} already exists; skipping publish"
+          elif npm publish --access public --tag latest; then
+            echo "Published ${PACKAGE_NAME}@${PACKAGE_VERSION} to npm"
           else
-            npm publish --access public --tag latest
+            echo "::warning::npm publish failed (scope/token not configured); continuing release without npm"
           fi
 
       - name: Create GitHub release
