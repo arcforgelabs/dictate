@@ -19,8 +19,8 @@ exists.
 - Submission last modified: `2026-06-03`
 - Current draft package: `ArcForgeDictate_2026.6.3.0_x64.msix`
 - Current draft package status: validated in Partner Center.
-- Current draft gate status: all gates complete except Age ratings, where the
-  IARC questionnaire is answered and waiting for explicit Terms of Use approval.
+- Current draft gate status: all gates complete; the IARC questionnaire and
+  Terms of Use approval are saved.
 - Seller ID: `94852860`
 - Tenant ID: `040ca04b-6b25-40a6-8b72-385e983e33af`
 - Client ID: `1b26108f-d69b-4229-8282-c6fb937b4c03`

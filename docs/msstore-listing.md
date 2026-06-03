@@ -195,8 +195,7 @@ recent transcript history for copy/paste recovery.
   - Packages: complete; `ArcForgeDictate_2026.6.3.0_x64.msix` validated.
   - Store listings: complete for English (United States).
   - Submission options: complete, with publishing held until manual `Publish now`.
-  - Age ratings: in progress; IARC questionnaire is answered and needs explicit
-    approval of the IARC Terms of Use checkbox before saving.
+  - Age ratings: complete; IARC questionnaire and Terms of Use approval saved.
 - Confirm privacy policy page is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
 - Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
