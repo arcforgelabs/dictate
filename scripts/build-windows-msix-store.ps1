@@ -138,6 +138,12 @@ if (-not (Test-Path $Engine)) {
 Write-Host "smoke-testing the frozen binary"
 & $Engine --version | Out-Null
 
+Write-Host "staging the engine into Tauri resources for compile-time resource validation"
+$TauriEngineDir = Join-Path $Root "ui-shell\src-tauri\engine"
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TauriEngineDir
+New-Item -ItemType Directory -Force -Path $TauriEngineDir | Out-Null
+Copy-Item $Engine (Join-Path $TauriEngineDir "dictate-engine.exe")
+
 Write-Host "building the Tauri shell executable without an installer"
 npm --prefix ui-shell install
 npm --prefix ui-shell exec -- tauri --version | Out-Null
