@@ -46,6 +46,16 @@ v2026.5.18
 v2026.5.18-1
 ```
 
+Windows MSI installers cannot use the public CalVer string directly because
+WiX/MSI requires numeric `major.minor.patch[.build]`, with major and minor at
+most 255. Keep `tauri.conf.json`'s public app `version` as `YYYY.M.D[-N]`, but
+map `bundle.windows.wix.version` to `YY.M.D.N` for MSI packaging:
+
+```text
+2026.6.3   -> 26.6.3.0
+2026.6.3-1 -> 26.6.3.1
+```
+
 Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.
 
 The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN install/update scripts. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready.

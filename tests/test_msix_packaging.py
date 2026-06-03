@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 import xml.etree.ElementTree as ET
@@ -7,6 +8,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def msi_safe_version(public_version: str) -> str:
+    date_part, separator, sequence = public_version.partition("-")
+    year, month, day = [int(part) for part in date_part.split(".")]
+    patch_sequence = int(sequence) if separator else 0
+    return f"{year - 2000}.{month}.{day}.{patch_sequence}"
 
 
 class MsixPackagingTests(unittest.TestCase):
@@ -61,6 +69,23 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn("dictate-engine.exe", script)
         self.assertIn("winapp tool makeappx pack", script)
         self.assertRegex(script, re.compile(r"build --no-bundle"))
+
+    def test_windows_msi_uses_installer_safe_version(self) -> None:
+        config = json.loads((ROOT / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(
+            encoding="utf-8"
+        ))
+
+        app_version = config["version"]
+        wix_version = config["bundle"]["windows"]["wix"]["version"]
+        self.assertEqual(app_version, "2026.6.3")
+        self.assertEqual(wix_version, msi_safe_version(app_version))
+        self.assertEqual(msi_safe_version("2026.6.3-1"), "26.6.3.1")
+
+        parts = [int(part) for part in wix_version.split(".")]
+        self.assertLessEqual(parts[0], 255)
+        self.assertLessEqual(parts[1], 255)
+        for part in parts[2:]:
+            self.assertLessEqual(part, 65535)
 
 
 if __name__ == "__main__":
