@@ -94,8 +94,10 @@ class WireDaemonEventsTests(unittest.TestCase):
         daemon = Daemon()
         status_calls: list[str | None] = []
         recording_calls: list[bool] = []
+        history_calls: list[bool] = []
         daemon.status_callback = status_calls.append
         daemon.recording_callback = recording_calls.append
+        daemon.history_callback = lambda: history_calls.append(True)
         broker = _Broker()
 
         ui_launcher._wire_daemon_events(daemon, broker)
@@ -106,6 +108,7 @@ class WireDaemonEventsTests(unittest.TestCase):
 
         self.assertEqual(status_calls, ["ready"])
         self.assertEqual(recording_calls, [True])
+        self.assertEqual(history_calls, [True])
         self.assertEqual(
             broker.events,
             [

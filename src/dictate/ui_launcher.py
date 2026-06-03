@@ -147,6 +147,7 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
     """Fan daemon callbacks out to the UI broker while preserving existing hooks."""
     prev_status = getattr(daemon, "status_callback", None)
     prev_recording = getattr(daemon, "recording_callback", None)
+    prev_history = getattr(daemon, "history_callback", None)
 
     def on_status(message: str | None) -> None:
         if prev_status is not None:
@@ -166,4 +167,13 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
 
     daemon.status_callback = on_status
     daemon.recording_callback = on_recording
-    daemon.history_callback = lambda: broker.publish("history-changed")
+
+    def on_history() -> None:
+        if prev_history is not None:
+            try:
+                prev_history()
+            except Exception:  # noqa: BLE001
+                logger.exception("prior history callback failed")
+        broker.publish("history-changed")
+
+    daemon.history_callback = on_history
