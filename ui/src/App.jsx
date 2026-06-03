@@ -43,6 +43,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
+  const [updateStatus, setUpdateStatus] = useState({ checked: false, checking: false });
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
 
@@ -158,6 +159,27 @@ export default function App() {
     if (ipc.isLive()) { ipc.runDoctor().then(cb).catch(() => cb(mockDoctor())); }
     else cb(mockDoctor());
   };
+  const checkUpdates = () => {
+    setUpdateStatus((u) => ({ ...u, checking: true, error: null }));
+    if (!ipc.isLive()) {
+      const status = { checked: true, checking: false, currentVersion: version, latestVersion: version, updateAvailable: false };
+      setUpdateStatus(status);
+      toast("You're on the latest version");
+      return;
+    }
+    ipc.checkUpdates()
+      .then((status) => {
+        const next = { ...(status || {}), checking: false };
+        setUpdateStatus(next);
+        if (next.updateAvailable && next.latestVersion) toast(`Dictate ${next.latestVersion} is available`);
+        else if (next.checked) toast("You're on the latest version");
+        else toast("Could not check for updates", { bad: true });
+      })
+      .catch((e) => {
+        setUpdateStatus((u) => ({ ...u, checked: false, checking: false, error: e.message || "Could not check for updates" }));
+        toast("Could not check for updates", { bad: true });
+      });
+  };
   const mockDoctor = () => ({
     ok: true,
     checks: [
@@ -232,7 +254,7 @@ export default function App() {
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
     recording, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
-    runDoctor, version,
+    runDoctor, version, updateStatus, checkUpdates,
   };
 
   const NAV = [

@@ -34,6 +34,7 @@ from urllib.parse import urlparse, parse_qs
 from dictate import api_keys as api_keys_mod
 from dictate import config as config_mod
 from dictate import startup as startup_mod
+from dictate import update_status as update_status_mod
 from dictate.history import HistoryStore
 from dictate.hotkey import (
     DEFAULT_PUSH_TO_TALK_COMBO,
@@ -210,6 +211,9 @@ class UiBackend:
     )
     secret_store_description: Callable[[], str] = api_keys_mod.secret_store_description
     secret_store_available: Callable[[], bool] = api_keys_mod.secret_store_available
+    check_update_status: Callable[[], update_status_mod.UpdateStatus] = (
+        update_status_mod.check_update_status
+    )
     startup_enabled: Callable[[], bool] = startup_mod.startup_enabled
     set_startup_enabled: Callable[[bool], None] = startup_mod.set_startup_enabled
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -472,6 +476,17 @@ class UiBackend:
         ]
         return {"checks": checks, "ok": all(c["ok"] for c in checks)}
 
+    def get_update_status(self) -> dict[str, Any]:
+        status = self.check_update_status()
+        return {
+            "currentVersion": status.current_version,
+            "latestVersion": status.latest_version,
+            "updateAvailable": status.update_available,
+            "checked": status.checked,
+            "error": status.error,
+            "url": status.url,
+        }
+
     @staticmethod
     def _safe(fn: Callable[[], Any], default: Any) -> Any:
         try:
@@ -619,6 +634,8 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.clear_provider_key(body.get("backend", "")))
         if path == "/api/doctor" and method == "POST":
             return _Response(200, backend.run_doctor())
+        if path == "/api/update-status" and method == "GET":
+            return _Response(200, backend.get_update_status())
         if path == "/api/events" and method == "GET":
             return _Response(200, sse=self.server.broker.subscribe())  # type: ignore[attr-defined]
         raise ApiError(404, f"no route for {method} {path}")

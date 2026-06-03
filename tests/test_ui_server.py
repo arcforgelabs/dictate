@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dictate.api_keys import ApiKeyStatus
 from dictate.history import HistoryStore
+from dictate.update_status import UpdateStatus
 from dictate.ui_server import (
     DEFAULT_PREFS,
     EventBroker,
@@ -33,6 +34,13 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         validate_api_key_format=lambda backend, key: None,
         secret_store_description=lambda: "the desktop Secret Service keyring",
         secret_store_available=lambda: True,
+        check_update_status=lambda: UpdateStatus(
+            current_version="2026.6.3",
+            latest_version="2026.6.4",
+            update_available=True,
+            checked=True,
+            url="https://example.test/releases",
+        ),
         startup_enabled=lambda: True,
         set_startup_enabled=lambda enabled: None,
     )
@@ -229,6 +237,17 @@ class UiBackendDoctorTests(unittest.TestCase):
             self.assertTrue(report["ok"])
 
 
+class UiBackendUpdateStatusTests(unittest.TestCase):
+    def test_update_status_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            status = _backend(d).get_update_status()
+            self.assertEqual(status["currentVersion"], "2026.6.3")
+            self.assertEqual(status["latestVersion"], "2026.6.4")
+            self.assertTrue(status["updateAvailable"])
+            self.assertTrue(status["checked"])
+            self.assertEqual(status["url"], "https://example.test/releases")
+
+
 class HttpIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -263,6 +282,13 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertEqual(body["model"]["backend"], "faster-whisper")
+
+    def test_authorized_update_status(self) -> None:
+        with self._get("/api/update-status") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["updateAvailable"])
+        self.assertEqual(body["latestVersion"], "2026.6.4")
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

@@ -80,6 +80,9 @@ export const ipc = {
   async runDoctor() {
     return call("POST", "/api/doctor");
   },
+  async checkUpdates() {
+    return call("GET", "/api/update-status");
+  },
 
   // Server-sent events: live recording / status pushes from the daemon.
   subscribe(onEvent) {

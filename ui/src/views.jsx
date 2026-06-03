@@ -307,6 +307,14 @@ function StartupView() {
 function AdvancedView() {
   const s = useStore();
   const [checks, setChecks] = useState(null);
+  const updateHelp = (() => {
+    const u = s.updateStatus || {};
+    if (u.checking) return `Version ${s.version} · checking`;
+    if (u.updateAvailable && u.latestVersion) return `Version ${s.version} · ${u.latestVersion} available`;
+    if (u.checked) return `Version ${s.version} · up to date`;
+    if (u.error) return `Version ${s.version} · unable to check`;
+    return `Version ${s.version} · not checked`;
+  })();
   const runDoctor = () => {
     setChecks(null);
     s.runDoctor((report) => {
@@ -348,8 +356,10 @@ function AdvancedView() {
       <div className="section">
         <div className="lead"><h3 className="t-heading">About</h3></div>
         <div className="card pad">
-          <Row icon="download" label="Dictate" help={`Version ${s.version} · up to date`}>
-            <button className="btn sm" onClick={() => s.toast("You're on the latest version")}>Check for updates</button></Row>
+          <Row icon="download" label="Dictate" help={updateHelp}>
+            <button className="btn sm" onClick={s.checkUpdates} disabled={!!s.updateStatus?.checking} style={{ opacity: s.updateStatus?.checking ? .6 : 1 }}>
+              {s.updateStatus?.checking ? "Checking..." : "Check for updates"}
+            </button></Row>
         </div>
       </div>
 
