@@ -39,17 +39,22 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
   - Submission: `Submission 1`
   - Submission ID: `1152921505701159461`
   - Last modified: `2026-06-03`
-  - Draft gates currently not started: Pricing and availability, Properties,
-    Age ratings, Packages, Store listings, Submission options.
+  - Current draft state:
+    - Pricing and availability: complete.
+    - Properties: complete.
+    - Packages: complete; `ArcForgeDictate_2026.6.3.0_x64.msix` is validated.
+    - Store listings: complete for English (United States).
+    - Submission options: complete and configured to hold publishing until
+      manual `Publish now`.
+    - Age ratings: in progress; IARC questionnaire is answered and awaiting
+      explicit approval of the IARC Terms of Use checkbox.
 - Public GitHub release upload is guarded so unsigned Windows installers become internal artifacts only.
 - `docs/msstore-listing.md` contains draft Store listing copy, privacy/certification notes, asset checklist, and submission checklist.
 - `https://arcforge.au/privacy` is live and includes Dictate microphone/transcription disclosures.
 - Public docs now label the hosted PowerShell bootstrap as developer/source only.
-- Remaining external steps: run the Windows Store MSIX workflow, validate the
-  resulting package in Partner Center, complete the manual draft submission
-  fields, then add signing and full package/listing upload automation. If MSIX
-  validation fails, create a separate MSI/EXE Store product for the Tauri
-  installer path.
+- Remaining external steps: approve/save the IARC age-rating terms, decide when
+  to manually submit for certification, then add signing and full package/listing
+  upload automation for future submissions.
 
 ## Sources
 
@@ -138,6 +143,8 @@ Acceptance:
 
 - Dictate exists as a product in Partner Center.
 - First draft submission reaches a state where package upload/listing validation can run.
+- Current first draft package/listing validation is complete; only age-rating
+  terms approval remains before manual certification submission can be attempted.
 
 ## Phase 3: Signing Strategy
 

@@ -17,6 +17,7 @@ claims conservative and aligned with the current app behavior.
 - Package SID: `S-1-15-2-414942928-860362531-3808921871-2325232450-2546095560-3460849545-2812936032`
 - Manual draft submission: `Submission 1`
 - Submission ID: `1152921505701159461`
+- Submitted package: `ArcForgeDictate_2026.6.3.0_x64.msix`
 - Category: `Productivity`
 - Pricing: Free
 - Discoverability: Public after certification
@@ -112,6 +113,15 @@ Required before submission:
 - At least one desktop screenshot
 - Prefer four or more screenshots before public launch
 
+Current Partner Center state:
+
+- The first draft listing has one uploaded Desktop screenshot generated from
+  the live Vite UI preview at `1400 x 900`.
+- The screenshot source used for the draft was
+  `/tmp/arc-forge-dictate-store-screenshot-1400x900.png`.
+- The package icons are being used for Store logos unless separate art is added
+  later.
+
 Suggested screenshots:
 
 1. Settings window with provider/model controls visible.
@@ -178,9 +188,15 @@ recent transcript history for copy/paste recovery.
 - Validate the MSIX package in Partner Center.
 - Create a separate MSI/EXE product only if the MSIX package path fails
   validation.
-- Complete the `Submission 1` draft gates currently shown by Partner Center:
-  Pricing and availability, Properties, Age ratings, Packages, Store listings,
-  and Submission options.
+- Complete the `Submission 1` draft gates currently shown by Partner Center.
+  Current state on `2026-06-03`:
+  - Pricing and availability: complete.
+  - Properties: complete.
+  - Packages: complete; `ArcForgeDictate_2026.6.3.0_x64.msix` validated.
+  - Store listings: complete for English (United States).
+  - Submission options: complete, with publishing held until manual `Publish now`.
+  - Age ratings: in progress; IARC questionnaire is answered and needs explicit
+    approval of the IARC Terms of Use checkbox before saving.
 - Confirm privacy policy page is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
 - Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
