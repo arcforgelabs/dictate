@@ -39,7 +39,10 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
   - Submission: `Submission 1`
   - Submission ID: `1152921505701159461`
   - Last modified: `2026-06-03`
-  - Current draft state:
+  - Current submission state:
+    - Partner Center status: in certification.
+    - Certification pipeline stage: pre-processing.
+    - Publishing hold: product starts publishing only after manual `Publish now`.
     - Pricing and availability: complete.
     - Properties: complete.
     - Packages: complete; `ArcForgeDictate_2026.6.3.0_x64.msix` is validated.
@@ -51,9 +54,9 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
 - `docs/msstore-listing.md` contains draft Store listing copy, privacy/certification notes, asset checklist, and submission checklist.
 - `https://arcforge.au/privacy` is live and includes Dictate microphone/transcription disclosures.
 - Public docs now label the hosted PowerShell bootstrap as developer/source only.
-- Remaining external steps: decide when to manually submit for certification,
-  then add signing and full package/listing upload automation for future
-  submissions.
+- Remaining external steps: wait for Microsoft certification, decide when to
+  click `Publish now` if certification passes, then add signing and full
+  package/listing upload automation for future submissions.
 
 ## Sources
 
@@ -143,7 +146,7 @@ Acceptance:
 - Dictate exists as a product in Partner Center.
 - First draft submission reaches a state where package upload/listing validation can run.
 - Current first draft package/listing validation and age rating are complete;
-  manual certification submission can now be attempted.
+  the first Store submission is now in certification.
 
 ## Phase 3: Signing Strategy
 
