@@ -1,0 +1,57 @@
+name: Windows desktop bundle (manual)
+
+# Manual builder for the Windows desktop bundle. This lets us iterate on the
+# .msi / NSIS installer path before cutting a release tag or touching Store
+# submission automation.
+on:
+  workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Bundle types to build (msi,nsis | msi | nsis)"
+        required: false
+        default: "msi,nsis"
+
+jobs:
+  bundle:
+    name: Build Windows desktop bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Install Windows bundling dependencies
+        shell: pwsh
+        run: choco install wixtoolset nsis -y --no-progress
+
+      - name: Build the Windows desktop bundle
+        shell: pwsh
+        env:
+          DICTATE_BUNDLES: ${{ inputs.bundles }}
+        run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-bundle.log"
+
+      - name: Upload artifacts (.msi / setup .exe)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-desktop-bundle
+          path: |
+            ui-shell/src-tauri/target/release/bundle/msi/*.msi
+            ui-shell/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-bundle-log
+          path: ${{ runner.temp }}\windows-bundle.log
+          if-no-files-found: warn

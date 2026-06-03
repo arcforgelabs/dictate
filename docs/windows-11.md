@@ -16,13 +16,17 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 
 ## Install
 
-Hosted one-liner from PowerShell:
+The target public channel is Microsoft Store distribution. Until the Store
+listing is ready, Windows installer artifacts from GitHub releases are for
+internal validation only.
+
+Developer/source bootstrap from PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
 
-The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. If Node.js is already installed, this is equivalent:
+The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. It is a developer/bootstrap path, not the public Windows install target. If Node.js is already installed, this is equivalent:
 
 ```powershell
 npx @arcforgelabs/dictate install
@@ -70,7 +74,7 @@ GitHub-hosted Windows user smoke test:
 .\scripts\windows-user-smoke.ps1
 ```
 
-This CI gate installs Dictate through the hosted bootstrap path from a deterministic source zip, verifies the Start Menu shortcut, default startup shortcut, Installed Apps registry entry, config seeding, `dictate --version`, `dictate doctor --quick`, `dictate doctor --fix`, hosted update, and uninstall cleanup. It does not test a real microphone, visible tray interaction, or Windows Search indexing.
+This CI gate installs Dictate through the hosted developer bootstrap path from a deterministic source zip, verifies the Start Menu shortcut, default startup shortcut, Installed Apps registry entry, config seeding, `dictate --version`, `dictate doctor --quick`, `dictate doctor --fix`, hosted update, and uninstall cleanup. It does not test a real microphone, visible tray interaction, or Windows Search indexing.
 
 Update or uninstall from a repo root:
 
@@ -141,6 +145,6 @@ Open `Dictate` from the Start Menu for the tray app, then open settings from the
 
 ## Known Gaps
 
-- No signed Windows installer package yet; the hosted PowerShell bootstrap and repo-local PowerShell installer are the supported paths for now.
+- Microsoft Store submission and signed Windows installer validation are pending; the hosted PowerShell bootstrap and repo-local PowerShell installer are developer/source paths.
 - Global hotkey reliability depends on `pynput` permissions and the active desktop/session.
 - NeMo Canary on Windows is not part of the supported baseline.

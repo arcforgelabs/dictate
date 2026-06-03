@@ -52,8 +52,12 @@ The npm package is published as `@arcforgelabs/dictate` and powers the hosted CD
 
 The previous personal-scope package, `@iamsamuelrodda/dictate`, should remain available long enough for existing users to update. After the first `@arcforgelabs/dictate` package is visible on npm and the hosted install smoke passes, deprecate the personal package with a migration notice pointing users to `@arcforgelabs/dictate`.
 
-The current public install path is:
+The current developer/bootstrap install path is:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
+
+Do not present this as the normal public Windows install path. The Windows
+release target is Microsoft Store distribution, with signed direct-download
+artifacts only as a secondary fallback.

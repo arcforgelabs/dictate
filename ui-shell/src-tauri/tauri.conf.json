@@ -18,7 +18,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage"],
+    "targets": ["deb", "rpm", "appimage", "msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -30,6 +30,8 @@
     "shortDescription": "Desktop dictation — the Quiet Console.",
     "longDescription": "Dictate types your speech straight into whatever app you're focused on. The frozen Python engine ships inside this package, so no separate install is needed; speech models download on first use.",
     "resources": ["engine/**/*"],
+    "publisher": "Arc Forge Labs",
+    "copyright": "Copyright (c) Arc Forge Labs",
     "linux": {
       "deb": {
         "depends": [
@@ -48,6 +50,19 @@
           "alsa-lib",
           "portaudio"
         ]
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "allowDowngrades": false,
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": "en-US"
       }
     }
   }

@@ -216,3 +216,80 @@ jobs:
           fi
           printf '%s\n' "${ARTIFACTS[@]}"
           gh release upload "${{ steps.version.outputs.tag }}" "${ARTIFACTS[@]}" --clobber
+
+  windows-desktop:
+    name: Windows desktop bundle (.msi + installer .exe)
+    runs-on: windows-latest
+    needs: [release]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release tag
+        id: version
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$env:GITHUB_REF_NAME"
+
+      - name: Checkout release tag
+        shell: pwsh
+        run: git checkout --detach "${{ steps.version.outputs.tag }}"
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Install Windows bundling dependencies
+        shell: pwsh
+        run: choco install wixtoolset nsis -y --no-progress
+
+      - name: Build the Windows desktop bundle
+        shell: pwsh
+        run: .\scripts\build-windows-desktop.ps1
+
+      - name: Check whether Windows artifacts are signed
+        id: signed
+        shell: pwsh
+        run: |
+          try {
+            .\scripts\assert-windows-artifacts-signed.ps1
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "upload=true"
+          } catch {
+            Write-Warning $_.Exception.Message
+            Write-Warning "Skipping public GitHub release upload for unsigned Windows artifacts."
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "upload=false"
+          }
+
+      - name: Upload unsigned Windows artifacts for internal validation
+        if: steps.signed.outputs.upload != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-windows-desktop-bundle
+          path: |
+            ui-shell/src-tauri/target/release/bundle/msi/*.msi
+            ui-shell/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Attach signed Windows desktop artifacts to the release
+        if: steps.signed.outputs.upload == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifacts = Get-ChildItem "ui-shell\src-tauri\target\release\bundle" -Recurse -File |
+            Where-Object { $_.Extension -in ".msi", ".exe" } |
+            Select-Object -ExpandProperty FullName
+          if (-not $artifacts) {
+            throw "No Windows desktop artifacts were produced."
+          }
+          $artifacts | ForEach-Object { Write-Host $_ }
+          gh release upload "${{ steps.version.outputs.tag }}" $artifacts --clobber

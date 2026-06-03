@@ -1,6 +1,6 @@
-# Desktop packaging & CI — runbook
+# Desktop packaging & CI - runbook
 
-How the Linux desktop app (the "Quiet Console") is built, shipped, and updated —
+How the desktop app (the "Quiet Console") is built, shipped, and updated -
 and the non-obvious things that bit us, so the next person/agent doesn't relearn
 them. Pairs with [release-versioning.md](release-versioning.md).
 
@@ -8,9 +8,9 @@ them. Pairs with [release-versioning.md](release-versioning.md).
 
 The desktop app is **two pieces that ship as one package**:
 
-- **`ui-shell/`** — a Tauri 2 shell (Rust) that draws the frameless window + tray
+- **`ui-shell/`** - a Tauri 2 shell (Rust) that draws the frameless window + tray
   and hosts the web UI built from **`ui/`** (React/Vite). See `ui-shell/README.md`.
-- **The Python engine** — the real product (STT, audio, push-to-talk, typing). It
+- **The Python engine** - the real product (STT, audio, push-to-talk, typing). It
   is **PyInstaller-frozen** (`packaging/`) into a single `dictate-engine` binary
   and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
 
@@ -19,7 +19,7 @@ dictates (`--no-tray`) and serves the control API (`DICTATE_UI_SERVER=1`,
 implemented in `src/dictate/ui_server.py`). The webview talks to that server over
 loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.json`.
 
-Models are **not** bundled — they download on first use, exactly as in a `pip`
+Models are **not** bundled - they download on first use, exactly as in a `pip`
 install.
 
 ## Build / release flow
@@ -40,6 +40,72 @@ scripts/build-linux-desktop.sh
   the bundle and uploads artifacts + the full log — **use this to iterate on
   packaging without cutting releases.** Trigger: `gh workflow run desktop-bundle.yml`.
 
+## Windows build / release flow
+
+The Windows path mirrors the Linux bundle architecture, but stages
+`dictate-engine.exe` and builds Tauri's Windows bundle targets:
+
+```
+scripts/build-windows-desktop.ps1
+  ├─ npm --prefix ui run build
+  ├─ create packaging\.build-venv-windows
+  ├─ pip install -e ".[windows]" pyinstaller
+  ├─ DICTATE_ONEFILE=1 pyinstaller packaging\dictate-engine.spec
+  ├─ stage engine -> ui-shell\src-tauri\engine\dictate-engine.exe
+  └─ tauri build --bundles msi,nsis
+```
+
+- **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
+  full Windows build on a `v20*` tag. It attaches `.msi`/installer `.exe` assets
+  to the GitHub release only when Authenticode signatures validate; unsigned
+  artifacts are uploaded as internal workflow artifacts instead.
+- **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
+  builds the Windows bundle and uploads artifacts + the full log without cutting
+  a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
+- These artifacts are for internal validation until Microsoft Store submission
+  and signing are ready. The target public Windows channel is tracked in
+  [goal.md](goal.md).
+- The Tauri shell looks for `dictate-engine.exe` on Windows and for
+  `dictate-engine` elsewhere. It also reads the UI handshake from
+  `%LOCALAPPDATA%\dictate`, matching `src/dictate/platform_paths.py`.
+- `scripts/assert-windows-artifacts-signed.ps1` is the public-release guardrail:
+  direct-download Windows installers must be signed before they are attached to a
+  GitHub release.
+
+## Windows Store MSIX flow
+
+The reserved Partner Center product is `Arc Forge Dictate`
+(`9P5S7747V0BP`) and its type is **MSIX or PWA app**. Tauri's built-in Windows
+bundler still emits MSI/NSIS installers, so Store MSIX packaging uses
+Microsoft's `winapp` CLI and a repo-owned manifest:
+
+```
+scripts/build-windows-msix-store.ps1
+  ├─ npm --prefix ui run build
+  ├─ create packaging\.build-venv-windows
+  ├─ pip install -e ".[windows]" pyinstaller
+  ├─ DICTATE_ONEFILE=1 pyinstaller packaging\dictate-engine.spec
+  ├─ tauri build --no-bundle
+  ├─ stage dictate-ui-shell.exe + engine\dictate-engine.exe
+  ├─ render packaging\msix\Package.appxmanifest.in
+  └─ winapp tool makeappx pack
+```
+
+- **Manual (`.github/workflows/windows-msix-store-bundle.yml`,
+  `workflow_dispatch`)** builds `packaging/msix/out/*.msix` for Partner Center
+  package validation. Trigger: `gh workflow run windows-msix-store-bundle.yml`.
+- The manifest identity is pinned to Partner Center:
+  `ArcForgeLabs.ArcForgeDictate` and
+  `CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C`.
+- The MSIX package stages the frozen engine next to the shell executable under
+  `engine\`; the Tauri shell checks both Tauri's resource directory and the
+  executable directory for that sidecar.
+- Microsoft Store distribution should sign the final accepted package. Any local
+  MSIX signing certificate is for internal install testing only.
+- If this MSIX path fails Partner Center package validation, the fallback is to
+  create a separate Partner Center **EXE or MSI app** product and submit the
+  signed Tauri installer through Microsoft's MSI/EXE Store flow.
+
 ## Gotchas (the expensive lessons)
 
 ### Freeze the engine **onefile**, not onedir
@@ -51,7 +117,7 @@ linuxdeploy doesn't honour `$ORIGIN` and aborts with
 a single self-extracting ELF in the AppDir, so there's nothing for linuxdeploy to
 trip over. `.deb`/`.rpm` don't do this walk, so they work with either layout. We
 use onefile everywhere (set in `build-linux-desktop.sh`; `dictate-engine.spec`
-honours `DICTATE_ONEFILE`). Cost: ~1–2 s extraction at launch — fine for a tray app.
+honours `DICTATE_ONEFILE`). Cost: ~1-2 s extraction at launch - fine for a tray app.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if

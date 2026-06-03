@@ -68,11 +68,17 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertTrue(args.fix)
         self.assertTrue(args.update_paths)
 
-    def test_windows_doctor_update_paths_include_hosted_installer(self) -> None:
+    def test_windows_doctor_update_paths_label_hosted_installer_as_developer_bootstrap(self) -> None:
         with patch("dictate.doctor.sys.platform", "win32"):
             updates = _update_paths()
 
-        self.assertTrue(any("cdn.jsdelivr.net/npm/@arcforgelabs/dictate" in item for item in updates))
+        self.assertTrue(
+            any(
+                "Developer bootstrap install/update" in item
+                and "cdn.jsdelivr.net/npm/@arcforgelabs/dictate" in item
+                for item in updates
+            )
+        )
         self.assertTrue(any("install-windows.ps1" in item for item in updates))
         self.assertTrue(any("install-windows-wizard.ps1" in item for item in updates))
         self.assertTrue(any("update-windows.ps1" in item for item in updates))

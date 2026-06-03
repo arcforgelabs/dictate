@@ -5,14 +5,21 @@ Desktop dictation that types into the focused app.
 `dictate` runs as a small tray app. Press your configured push-to-talk shortcut,
 speak, and it transcribes into whatever app you are already using.
 
-Current status: early desktop app. Linux and Windows 11 installs, tray controls,
-startup integration, recent history, model selection, API key storage, update,
-and uninstall paths are implemented. Signed Windows installer packaging is still
-future work.
+Current status: early desktop app. Linux installs, Windows 11 source installs,
+tray controls, startup integration, recent history, model selection, API key
+storage, update, and uninstall paths are implemented. Windows Store/signed
+installer packaging is being prepared; see `docs/goal.md`.
 
 ## Install
 
 Windows 11 normal install:
+
+The target public channel is Microsoft Store distribution. Until that listing is
+ready, use the GitHub release installer artifacts for internal validation only.
+The PowerShell bootstrap installer below is a developer/source path, not the
+normal public install route.
+
+Windows developer/source install from the hosted bootstrap:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
@@ -34,7 +41,7 @@ Generic Linux source install:
 
 Open **Dictate** from the app launcher after install.
 
-Windows source install, from the repo/source directory:
+Windows developer/source install, from the repo/source directory:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
@@ -43,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
 The local `.ps1` installer scripts must be run from a checkout or extracted
 source directory. They will not work from `C:\Windows\System32`.
 
-Node/npm users can also run:
+Node/npm users can also run the developer bootstrap:
 
 ```powershell
 npx @arcforgelabs/dictate install
@@ -65,7 +72,7 @@ Startup can be changed from Settings.
 
 ## Update And Uninstall
 
-Windows installed from the hosted installer:
+Windows developer/bootstrap install:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1 | iex"
@@ -194,6 +201,9 @@ for source/dev installs.
 - [Recent History spec](docs/recent-dictation-history-spec.md)
 - [Release/versioning](docs/release-versioning.md)
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
+- [Microsoft Store automation](docs/msstore-automation.md)
+- [Microsoft Store listing draft](docs/msstore-listing.md)
+- [Windows release goal](docs/goal.md)
 - [Development streams](docs/development-streams.md)
 - [Security policy](SECURITY.md)
 

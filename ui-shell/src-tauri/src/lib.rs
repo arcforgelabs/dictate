@@ -64,6 +64,23 @@ fn detect_platform() -> String {
 }
 
 fn data_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        if let Ok(local) = env::var("LOCALAPPDATA") {
+            if !local.is_empty() {
+                return Some(PathBuf::from(local).join("dictate"));
+            }
+        }
+        if let Ok(roaming) = env::var("APPDATA") {
+            if !roaming.is_empty() {
+                return Some(PathBuf::from(roaming).join("dictate"));
+            }
+        }
+        if let Ok(profile) = env::var("USERPROFILE") {
+            if !profile.is_empty() {
+                return Some(PathBuf::from(profile).join("AppData/Local/dictate"));
+            }
+        }
+    }
     if let Ok(xdg) = env::var("XDG_DATA_HOME") {
         if !xdg.is_empty() {
             return Some(PathBuf::from(xdg).join("dictate"));
@@ -82,12 +99,38 @@ fn read_handshake() -> Option<Handshake> {
 
 /// The bundled engine launcher, if this is a packaged build.
 fn bundled_engine(app: &tauri::App) -> Option<PathBuf> {
-    let res = app.path().resource_dir().ok()?;
-    let candidate = res.join("engine").join("dictate-engine");
-    if candidate.exists() {
-        Some(candidate)
+    for base in engine_resource_dirs(app) {
+        for name in engine_binary_names() {
+            let candidate = base.join("engine").join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn engine_resource_dirs(app: &tauri::App) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        dirs.push(res);
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let parent = parent.to_path_buf();
+            if !dirs.iter().any(|dir| dir == &parent) {
+                dirs.push(parent);
+            }
+        }
+    }
+    dirs
+}
+
+fn engine_binary_names() -> &'static [&'static str] {
+    if cfg!(target_os = "windows") {
+        &["dictate-engine.exe", "dictate-engine"]
     } else {
-        None
+        &["dictate-engine"]
     }
 }
 
@@ -294,5 +337,14 @@ mod tests {
         let script = build_init_script("gnome", None);
         assert!(script.contains("window.__DICTATE__ = { platform: \"gnome\" }"));
         assert!(!script.contains("baseUrl"));
+    }
+
+    #[test]
+    fn engine_binary_candidates_match_platform() {
+        if cfg!(target_os = "windows") {
+            assert_eq!(engine_binary_names()[0], "dictate-engine.exe");
+        } else {
+            assert_eq!(engine_binary_names(), &["dictate-engine"]);
+        }
     }
 }

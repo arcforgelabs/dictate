@@ -23,8 +23,10 @@ Windows 11 desktop stream:
 - Windows app-data paths for config, history, and logs.
 - Windows Settings/About UI.
 - Windows CI smoke tests for install, update, app registration, startup, and uninstall.
-- Hosted and repo-local PowerShell install paths.
-- Future signed installer work.
+- Hosted and repo-local PowerShell install paths for developer/source installs.
+- Tauri `.msi`/NSIS installer build path for internal validation.
+- Microsoft Store distribution as the target public Windows channel.
+- Future signing and Store submission automation.
 
 Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:installer`, and `area:packaging`.
 
@@ -38,6 +40,9 @@ Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:install
 Keep shared STT, audio, config, history, and CLI behavior on `master` unless the change is explicitly platform-specific.
 
 Windows installation is intentionally implemented as a packaging edge around the shared app. The PowerShell installer should stay thin: create the environment, install `.[windows]`, seed config, write launchers, create shortcuts, and run diagnostics. Shared behavior should stay in `src/dictate`.
+
+The public Windows release target is tracked in [goal.md](goal.md). Store API
+automation wiring is tracked in [msstore-automation.md](msstore-automation.md).
 
 ## GitHub Project Organization
 
