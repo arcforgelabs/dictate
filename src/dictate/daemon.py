@@ -39,6 +39,7 @@ class Daemon:
         push_to_talk_combo: str = "ctrl_r",
         status_callback: Callable[[str | None], None] | None = None,
         recording_callback: Callable[[bool], None] | None = None,
+        history_callback: Callable[[], None] | None = None,
         recorder: AudioRecorder | None = None,
     ):
         self.active = True
@@ -47,6 +48,7 @@ class Daemon:
         self.history_store = history_store or HistoryStore()
         self.status_callback = status_callback
         self.recording_callback = recording_callback
+        self.history_callback = history_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -281,6 +283,8 @@ class Daemon:
             self.history_store.append(result.text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  History save failed: {exc}", file=sys.stderr)
+        else:
+            self._notify_history_changed()
 
         try:
             self.output.send(result.text)
@@ -306,6 +310,14 @@ class Daemon:
             self.recording_callback(recording)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Recording callback failed: {exc}", file=sys.stderr)
+
+    def _notify_history_changed(self) -> None:
+        if self.history_callback is None:
+            return
+        try:
+            self.history_callback()
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  History callback failed: {exc}", file=sys.stderr)
 
     def _queue_latest_audio(self, audio: np.ndarray) -> None:
         self._audio_queue.put_nowait(audio)

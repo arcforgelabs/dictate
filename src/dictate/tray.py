@@ -361,7 +361,7 @@ class TrayIcon:
         from dictate import ui_launcher
 
         launched = ui_launcher.open_settings_window(
-            start_server=ui_launcher.ensure_server_started,
+            start_server=lambda: ui_launcher.ensure_server_started(self.daemon),
         )
         if not launched:
             logging.getLogger(__name__).info(

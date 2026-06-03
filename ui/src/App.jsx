@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, ArcMark } from "./icons.jsx";
 import { Dot, Kbd } from "./primitives.jsx";
-import { StoreCtx, MODELS, modelById, DEMO_PHRASES, nowLabel } from "./store.jsx";
+import { StoreCtx, MODELS, modelById, DEMO_PHRASES } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -93,7 +93,7 @@ export default function App() {
   }, []);
 
   const mapHistory = (st) =>
-    (st.history || []).map((h) => ({ id: h.id, text: h.text, time: h.time }));
+    (st.history || []).map((h) => ({ id: h.id, text: h.text, createdAt: h.createdAt }));
 
   // ---- toasts ----
   const dismiss = (id) => setToasts((ts) => ts.filter((t) => t.id !== id));
@@ -137,7 +137,8 @@ export default function App() {
     if (ipc.isLive()) ipc.removeHotword(w).then((r) => r && setHotwords(r.hotwords)).catch(() => {});
   };
 
-  const pushHistory = (text) => setHistory((h) => [{ id: "h" + Date.now(), time: nowLabel() + " · just now", text }, ...h].slice(0, 6));
+  const pushHistory = (text) =>
+    setHistory((h) => [{ id: "h" + Date.now(), createdAt: new Date().toISOString(), text }, ...h].slice(0, 20));
   const clearHistory = () => {
     setHistory((prev) => {
       if (prev.length) toast("History cleared", { undo: () => setHistory(prev) });
@@ -204,12 +205,12 @@ export default function App() {
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); };
   }, [live]);
 
-  // ---- fit-to-viewport scaler (a real 1060×728 Tauri window stays at 1.0) ----
+  // ---- fit-to-viewport scaler (a real 1100×768 Tauri window stays at 1.0) ----
   const winRef = useRef(null);
   useEffect(() => {
     const fit = () => {
       const el = winRef.current; if (!el) return;
-      const pad = 32, W = 1060, H = 728;
+      const pad = 32, W = 1100, H = 768;
       const sc = Math.min(1, (window.innerWidth - pad) / W, (window.innerHeight - pad) / H);
       el.style.transform = `scale(${sc})`;
     };

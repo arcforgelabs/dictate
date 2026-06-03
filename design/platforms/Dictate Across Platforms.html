@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dictate — Across Platforms</title>
+<link rel="stylesheet" href="chrome.css" />
+<style>
+  html,body{margin:0;height:100%;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="window.jsx"></script>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+
+// a window centred on a neutral "desktop" so its corners + elevation read
+function Frame({ platform, dark }) {
+  return (
+    <div className={"desk " + (dark ? "dark" : "light")} data-theme={dark ? "dark" : undefined}>
+      <DictateWindow platform={platform} />
+    </div>
+  );
+}
+
+function FrameworkNote() {
+  return (
+    <div className="notewrap">
+      <div className="note">
+        <h3>Recommended runtime</h3>
+        <div className="lede">Dictate is one small window, a tray icon, a global shortcut and a keystroke
+          injector. Pick the lightest thing that ships the existing HTML faithfully on every OS.</div>
+        <div className="pick">
+          <span className="t-label">Pick</span>
+          <b>Tauri&nbsp;2</b>
+          <span className="why">System WebView · ~6&nbsp;MB binary · low idle RAM — matches "quiet, recessive utility."</span>
+        </div>
+        <dl>
+          <dt>WebView</dt>
+          <dd>Windows → <span className="m">WebView2</span> (Chromium) · Linux → <span className="m">WebKitGTK</span>.
+            The DS is plain CSS, so both render clean. <span className="mut">Fonts are bundled locally — neither engine substitutes.</span></dd>
+          <dt>Push-to-talk</dt>
+          <dd><span className="m">global-shortcut</span> plugin captures the hold key system-wide.</dd>
+          <dt>Type at cursor</dt>
+          <dd>Synthesise keystrokes with <span className="m">enigo</span> (SendInput / X11).
+            <span className="mut"> On Wayland fall back to clipboard-paste or the input portal.</span></dd>
+          <dt>Tray &amp; HUD</dt>
+          <dd>Built-in tray; the listening pill is a small always-on-top, transparent, click-through window.</dd>
+          <dt>API keys</dt>
+          <dd><span className="m">keyring</span> → Credential Manager (Win) · Secret Service / libsecret (Linux).</dd>
+        </dl>
+        <div className="foot">Electron stays viable if you need Chromium-identical rendering — at ~10× the
+          binary and idle RAM, counter to the ethos. Native Qt/GTK would fork the design twice; not worth it for one window.</div>
+      </div>
+    </div>
+  );
+}
+
+function ChromeNote() {
+  return (
+    <div className="notewrap">
+      <div className="note">
+        <h3>Window chrome, per platform</h3>
+        <div className="lede">The body never changes — same tokens, type, the one green dot. Only the frame
+          adapts to each OS's muscle memory. Custom-drawn on Windows &amp; Linux; native on macOS.</div>
+        <dl>
+          <dt>macOS</dt>
+          <dd>Native traffic lights · 11px corners. <span className="mut">No custom bar — transparent titlebar, inset the lights, let the OS draw them.</span></dd>
+          <dt>Windows 11</dt>
+          <dd>Custom headerbar · min · max · close (46×32, close-hover <span className="m">#c42b1c</span>) · DWM rounded corners + Mica backdrop.</dd>
+          <dt>Windows 10</dt>
+          <dd>Custom headerbar · square corners · flat flush captions · close-hover <span className="m">#e81123</span>.</dd>
+          <dt>GNOME · Adwaita</dt>
+          <dd>Client-side decoration · round close only (min/max hidden by default) · 13px corners; draw your own shadow.</dd>
+          <dt>KDE · Breeze</dt>
+          <dd>Client-side decoration · min · max · close, round-hover · 6px corners; the compositor adds the drop shadow.</dd>
+        </dl>
+        <div className="foot">One control component, platform-detected at launch, plus <span className="m">prefers-color-scheme</span>
+          for light/dark. The arc-mark inherits <span className="m">--fg</span>, so it's ink on light and bone on dark with no second asset.</div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="light" title="One window, native manners" subtitle="Same Dictate interior — the frame learns each platform's conventions. Light.">
+        <DCArtboard id="mac"   label="macOS · native traffic lights"     width={704} height={520}><Frame platform="mac" /></DCArtboard>
+        <DCArtboard id="win11" label="Windows 11 · Mica, squared caps"   width={704} height={520}><Frame platform="win11" /></DCArtboard>
+        <DCArtboard id="win10" label="Windows 10 · flat, square corners" width={704} height={520}><Frame platform="win10" /></DCArtboard>
+        <DCArtboard id="gnome" label="GNOME · Adwaita CSD"               width={704} height={520}><Frame platform="gnome" /></DCArtboard>
+        <DCArtboard id="kde"   label="KDE · Breeze CSD"                  width={704} height={520}><Frame platform="kde" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="dark" title="Dark" subtitle="Warm near-black, deeper shadows, the green lifts to #4fbd86. Same tokens carry over.">
+        <DCArtboard id="mac-d"   label="macOS · dark"        width={704} height={520}><Frame platform="mac"   dark /></DCArtboard>
+        <DCArtboard id="win11-d" label="Windows 11 · dark"   width={704} height={520}><Frame platform="win11" dark /></DCArtboard>
+        <DCArtboard id="gnome-d" label="GNOME · Adwaita dark" width={704} height={520}><Frame platform="gnome" dark /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="ship" title="Shipping it" subtitle="How to build this faithfully on Windows + Linux.">
+        <DCArtboard id="fw"     label="Framework"          width={704} height={500}><FrameworkNote /></DCArtboard>
+        <DCArtboard id="chrome" label="Chrome rules / OS"  width={704} height={500}><ChromeNote /></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

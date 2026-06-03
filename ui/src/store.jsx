@@ -29,9 +29,26 @@ export const DEMO_PHRASES = [
 
 export function nowLabel() {
   const d = new Date();
+  return clockLabel(d);
+}
+
+export function clockLabel(ts) {
+  const d = ts instanceof Date ? ts : new Date(ts);
   let h = d.getHours();
   const m = String(d.getMinutes()).padStart(2, "0");
   const ap = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
   return `${h}:${m} ${ap}`;
+}
+
+export function formatHistoryTime(createdAt) {
+  const t = typeof createdAt === "number" ? createdAt : Date.parse(createdAt);
+  if (Number.isNaN(t)) return "";
+  const secs = Math.floor((Date.now() - t) / 1000);
+  let rel;
+  if (secs < 45) rel = "just now";
+  else if (secs < 3600) rel = `${Math.max(1, Math.floor(secs / 60))}m ago`;
+  else if (secs < 86400) rel = `${Math.floor(secs / 3600)}h ago`;
+  else rel = `${Math.floor(secs / 86400)}d ago`;
+  return `${clockLabel(t)} · ${rel}`;
 }

@@ -89,7 +89,7 @@ standard Linux dev box and carries `#[cfg(test)]` unit tests for its pure logic
 
 | Path | Role |
 |---|---|
-| `src-tauri/tauri.conf.json` | Frameless 1060×728 window, embeds `../ui/dist`, CSP for loopback IPC |
+| `src-tauri/tauri.conf.json` | Frameless 1100×768 window, embeds `../ui/dist`, CSP for loopback IPC |
 | `src-tauri/src/lib.rs` | DE detection, server handshake/spawn, bridge injection, window build |
 | `src-tauri/src/main.rs` | Thin entrypoint |
 | `src-tauri/capabilities/default.json` | Window-control + OS permissions |

@@ -8,6 +8,14 @@ from unittest.mock import patch
 from dictate import ui_launcher
 
 
+class _Broker:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def publish(self, event_type: str, **payload: object) -> None:
+        self.events.append((event_type, payload))
+
+
 class FindShellBinaryTests(unittest.TestCase):
     def test_returns_first_existing_candidate(self) -> None:
         a, b = Path("/opt/dictate-ui-shell"), Path("/usr/bin/dictate-ui-shell")
@@ -76,6 +84,84 @@ class OpenSettingsWindowTests(unittest.TestCase):
             start_server=lambda: None,
         )
         self.assertFalse(ok)
+
+
+class WireDaemonEventsTests(unittest.TestCase):
+    def test_chains_existing_callbacks_and_publishes_events(self) -> None:
+        class Daemon:
+            pass
+
+        daemon = Daemon()
+        status_calls: list[str | None] = []
+        recording_calls: list[bool] = []
+        daemon.status_callback = status_calls.append
+        daemon.recording_callback = recording_calls.append
+        broker = _Broker()
+
+        ui_launcher._wire_daemon_events(daemon, broker)
+
+        daemon.status_callback("ready")
+        daemon.recording_callback(True)
+        daemon.history_callback()
+
+        self.assertEqual(status_calls, ["ready"])
+        self.assertEqual(recording_calls, [True])
+        self.assertEqual(
+            broker.events,
+            [
+                ("status", {"message": "ready"}),
+                ("recording", {"active": True}),
+                ("history-changed", {}),
+            ],
+        )
+
+
+class EnsureServerStartedTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        ui_launcher._server_handle = None
+        ui_launcher._server_broker = None
+        ui_launcher._wired_daemon_id = None
+
+    def test_existing_server_can_be_wired_to_daemon_later(self) -> None:
+        class Daemon:
+            pass
+
+        broker = _Broker()
+        handle = object()
+        ui_launcher._server_handle = handle
+        ui_launcher._server_broker = broker
+        daemon = Daemon()
+        daemon.status_callback = None
+        daemon.recording_callback = None
+
+        self.assertIs(ui_launcher.ensure_server_started(daemon), handle)
+
+        daemon.history_callback()
+        self.assertEqual(broker.events, [("history-changed", {})])
+        self.assertEqual(ui_launcher._wired_daemon_id, id(daemon))
+
+    def test_new_server_uses_shared_history_store_when_daemon_is_available(self) -> None:
+        class Daemon:
+            pass
+
+        daemon = Daemon()
+        daemon.history_store = object()
+
+        class UiBackend:
+            def __init__(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+        broker = _Broker()
+
+        with (
+            patch("dictate.ui_server.EventBroker", return_value=broker),
+            patch("dictate.ui_server.UiBackend", UiBackend),
+            patch("dictate.ui_server.serve", return_value=object()) as serve,
+        ):
+            ui_launcher.ensure_server_started(daemon)
+
+        backend = serve.call_args.kwargs["backend"]
+        self.assertIs(backend.kwargs["history_store"], daemon.history_store)
 
 
 if __name__ == "__main__":

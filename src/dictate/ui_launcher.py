@@ -116,14 +116,54 @@ def _default_spawn(command: list[str]) -> subprocess.Popen:
 
 # Process-wide handle so we start the in-process server at most once.
 _server_handle: object | None = None
+_server_broker: object | None = None
+_wired_daemon_id: int | None = None
 
 
-def ensure_server_started() -> object:
+def ensure_server_started(daemon: object | None = None) -> object:
     """Start the in-process ``ui_server`` once and return its handle."""
-    global _server_handle
+    global _server_broker, _server_handle, _wired_daemon_id
     if _server_handle is not None:
+        if daemon is not None and _server_broker is not None and _wired_daemon_id != id(daemon):
+            _wire_daemon_events(daemon, _server_broker)
+            _wired_daemon_id = id(daemon)
         return _server_handle
     from dictate import ui_server
 
-    _server_handle = ui_server.serve()
+    broker = ui_server.EventBroker()
+    backend = ui_server.UiBackend(
+        history_store=getattr(daemon, "history_store", None),
+        broker=broker,
+    )
+    _server_handle = ui_server.serve(backend=backend, broker=broker)
+    _server_broker = broker
+    if daemon is not None:
+        _wire_daemon_events(daemon, broker)
+        _wired_daemon_id = id(daemon)
     return _server_handle
+
+
+def _wire_daemon_events(daemon: object, broker: object) -> None:
+    """Fan daemon callbacks out to the UI broker while preserving existing hooks."""
+    prev_status = getattr(daemon, "status_callback", None)
+    prev_recording = getattr(daemon, "recording_callback", None)
+
+    def on_status(message: str | None) -> None:
+        if prev_status is not None:
+            try:
+                prev_status(message)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior status callback failed")
+        broker.publish("status", message=message)
+
+    def on_recording(active: bool) -> None:
+        if prev_recording is not None:
+            try:
+                prev_recording(active)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior recording callback failed")
+        broker.publish("recording", active=bool(active))
+
+    daemon.status_callback = on_status
+    daemon.recording_callback = on_recording
+    daemon.history_callback = lambda: broker.publish("history-changed")

@@ -795,9 +795,9 @@ def _maybe_start_ui_server(daemon: object) -> object | None:
     if not os.environ.get("DICTATE_UI_SERVER"):
         return None
     try:
-        from dictate import ui_server
+        from dictate import ui_launcher
 
-        return ui_server.serve()
+        return ui_launcher.ensure_server_started(daemon)
     except Exception:  # noqa: BLE001 — never let the control surface block dictation
         logging.getLogger(__name__).exception("Failed to start the UI control server")
         return None

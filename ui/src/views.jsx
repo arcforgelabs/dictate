@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon, Brand } from "./icons.jsx";
 import { Combo, Chip, Dot, Toggle, Seg, Row } from "./primitives.jsx";
-import { useStore, MODELS, modelById } from "./store.jsx";
+import { useStore, MODELS, modelById, formatHistoryTime } from "./store.jsx";
 
 /* ============================== STATUS ============================== */
 function StatusView() {
@@ -10,7 +10,7 @@ function StatusView() {
   const m = modelById(s.model);
   const rec = s.recording;
   return (
-    <div className="view">
+    <div className="view dash">
       <div className="view-head"><div className="crumb">Status</div></div>
 
       <div className={"hero" + (rec ? " live" : "")}>
@@ -30,42 +30,50 @@ function StatusView() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <button className="btn primary"
-          onPointerDown={s.dictateStart} onPointerUp={s.dictateStop} onPointerLeave={s.dictateStop}>
-          <Icon name="mic" size={17} />{rec ? "Listening — release to insert" : "Hold to try dictation"}
-        </button>
-        <span className="t-meta">or hold <Combo keys={s.shortcut} /> anywhere</span>
-      </div>
-
-      <div className="target">
-        <div className="bar"><span className="dots"><i /><i /><i /></span><span>Untitled — Notes</span></div>
-        <div className="area">
-          {s.targetText ? <span>{s.targetText}</span> : <span className="ph">Your dictated text appears here…</span>}
-          {(rec || s.typing) && <span className="caret" />}
+      <div className="dash-grid">
+        <div className="dash-col">
+          <div className="section">
+            <div className="lead">
+              <h3 className="t-heading">Try it</h3>
+            </div>
+            <button className="btn primary block"
+              onPointerDown={s.dictateStart} onPointerUp={s.dictateStop} onPointerLeave={s.dictateStop}>
+              <Icon name="mic" size={17} />{rec ? "Listening — release to insert" : "Hold to try dictation"}
+            </button>
+            <div className="target">
+              <div className="bar"><span className="dots"><i /><i /><i /></span><span>Untitled — Notes</span></div>
+              <div className="area">
+                {s.targetText ? <span>{s.targetText}</span> : <span className="ph">Your dictated text appears here…</span>}
+                {(rec || s.typing) && <span className="caret" />}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="grid2">
-        <button className="minic" onClick={() => s.setView("model")}>
-          <div className="top"><Icon name="sliders" size={18} /><Icon name="chev" size={15} style={{ color: "var(--faint)" }} /></div>
-          <div className="k">Model</div>
-          <div className="v">{m.name.split(" · ")[0]}{m.local ? <Chip live>LOCAL</Chip> : <Chip>{m.provider.toUpperCase()}</Chip>}</div>
-        </button>
-        <button className="minic" onClick={() => s.setView("ptt")}>
-          <div className="top"><Icon name="keyboard" size={18} /><Icon name="chev" size={15} style={{ color: "var(--faint)" }} /></div>
-          <div className="k">Push-to-talk</div>
-          <div className="v"><Combo keys={s.shortcut} /><Chip>{s.activation === "hold" ? "HOLD" : "TOGGLE"}</Chip></div>
-        </button>
-      </div>
+        <div className="dash-col">
+          <button className="minic modelcard" onClick={() => s.setView("model")}>
+            <div className="top"><span className="t-label">Transcription model</span><Icon name="chev" size={15} style={{ color: "var(--faint)" }} /></div>
+            <div className="modelrow">
+              <span className="brand">{m.brand ? <Brand name={m.brand} /> : <Icon name="cpu" size={18} />}</span>
+              <span className="mname">
+                <span className="v">{m.name.split(" · ")[0]}{m.local ? <Chip live>LOCAL</Chip> : <Chip>{m.provider.toUpperCase()}</Chip>}</span>
+                <span className="t-meta">{m.desc}</span>
+              </span>
+            </div>
+          </button>
 
-      <div className="card pad">
-        <Row icon="device" label="Microphone" help="Audio input device">
-          <button className="select">{s.device}<Icon name="chevd" size={14} style={{ color: "var(--muted)" }} /></button>
-        </Row>
-        <Row icon="power" label="Launch on sign-in" help="Start Dictate automatically">
-          <Toggle on={s.startup} onChange={s.setStartup} />
-        </Row>
+          <div className="card pad">
+            <Row icon="device" label="Microphone" help="Audio input device">
+              <button className="select">{s.device}<Icon name="chevd" size={14} style={{ color: "var(--muted)" }} /></button>
+            </Row>
+            <Row icon="keyboard" label="Push-to-talk" help="Hold to talk, or toggle on and off">
+              <Seg options={[{ v: "hold", l: "Hold" }, { v: "toggle", l: "Toggle" }]} value={s.activation} onChange={s.setActivation} />
+            </Row>
+            <Row icon="power" label="Launch on sign-in" help="Start Dictate automatically">
+              <Toggle on={s.startup} onChange={s.setStartup} />
+            </Row>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -236,6 +244,11 @@ function HotwordsView() {
 /* ============================== HISTORY ============================== */
 function HistoryView() {
   const s = useStore();
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
   const copy = (it) => { try { navigator.clipboard && navigator.clipboard.writeText(it.text); } catch (e) {} s.toast("Copied to clipboard"); };
   return (
     <div className="view">
@@ -258,7 +271,7 @@ function HistoryView() {
               <span className="ic" style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--surface-2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
                 <span className="t-mono" style={{ fontSize: 10.5 }}>{i + 1}</span></span>
               <div className="main">
-                <div className="t-mono" style={{ color: "var(--subtle)", fontSize: 10.5 }}>{it.time}</div>
+                <div className="t-mono" style={{ color: "var(--subtle)", fontSize: 10.5 }}>{formatHistoryTime(it.createdAt)}</div>
                 <div style={{ fontSize: 13.5, marginTop: 3, lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.text}</div>
               </div>
               <div className="ctrl"><button className="btn ghost sm" onClick={() => copy(it)}><Icon name="copy" size={15} />Copy</button></div>

@@ -62,7 +62,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* ===== stage / window ===== */
 #root{position:fixed;inset:0;display:grid;place-items:center;background:
   radial-gradient(120% 120% at 50% 0%, var(--bg) 0%, var(--bg-2) 100%);overflow:hidden;}
-.win{position:relative;width:1060px;height:728px;background:var(--surface);border:1px solid var(--border);
+.win{position:relative;width:1100px;height:768px;background:var(--surface);border:1px solid var(--border);
   border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;display:flex;flex-direction:column;
   transform-origin:center center;}
 .titlebar{height:44px;flex:0 0 44px;display:flex;align-items:center;justify-content:space-between;
@@ -112,6 +112,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;}
 .view{max-width:680px;margin:0 auto;padding:36px 40px 56px;display:flex;flex-direction:column;gap:24px;
   animation:fadeUp .32s var(--ease-out);}
+.view.dash{max-width:900px;}
+.dash-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:22px;align-items:start;}
+.dash-col{display:flex;flex-direction:column;gap:16px;min-width:0;}
+@media (max-width:720px){.dash-grid{grid-template-columns:1fr;}}
 @keyframes fadeUp{from{transform:translateY(9px);}to{transform:none;}}
 .view-head{display:flex;flex-direction:column;gap:6px;}
 .view-head .row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
@@ -154,6 +158,16 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .minic .top{display:flex;align-items:center;justify-content:space-between;color:var(--muted);margin-bottom:3px;}
 .minic .k{font-size:12px;color:var(--muted);}
 .minic .v{font-size:15.5px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+
+/* status model card (richer than a mini-stat) */
+.modelcard{gap:13px;padding:17px 18px 18px;}
+.modelcard .top .t-label{color:var(--subtle);}
+.modelrow{display:flex;align-items:flex-start;gap:13px;}
+.modelrow .brand{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  background:var(--surface-2);border:1px solid var(--border);flex:0 0 auto;}
+.modelrow .mname{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.modelrow .mname .v{font-size:15px;}
+.modelrow .mname .t-meta{line-height:1.42;}
 
 /* ===== controls ===== */
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;

@@ -196,7 +196,7 @@ pub fn run() {
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Dictate")
-                .inner_size(1060.0, 728.0)
+                .inner_size(1100.0, 768.0)
                 .min_inner_size(900.0, 620.0)
                 .decorations(false)
                 .transparent(true)

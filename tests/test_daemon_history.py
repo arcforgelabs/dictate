@@ -85,13 +85,27 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].text, "hello world")
 
+    def test_successful_result_notifies_history_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon, _store, _output = self._make_daemon(tmp)
+            calls: list[bool] = []
+            daemon.history_callback = lambda: calls.append(True)
+
+            result = TranscriptionResult(status="ok", duration_s=1.0, text="hello world")
+            daemon._handle_result(result)
+
+            self.assertEqual(calls, [True])
+
     def test_non_success_result_does_not_append(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, store, _output = self._make_daemon(tmp)
+            calls: list[bool] = []
+            daemon.history_callback = lambda: calls.append(True)
             for status in ("empty", "too_short", "no_speech", "error"):
                 result = TranscriptionResult(status=status, duration_s=0.5, text="", error="fail")
                 daemon._handle_result(result)
             self.assertEqual(store.load(), [])
+            self.assertEqual(calls, [])
 
     def test_history_saved_even_if_output_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
