@@ -164,7 +164,7 @@ $Dist = Join-Path $MsixRoot "dist"
 $Assets = Join-Path $Dist "Assets"
 $OutDir = Join-Path $MsixRoot "out"
 $ManifestTemplate = Join-Path $MsixRoot "Package.appxmanifest.in"
-$Manifest = Join-Path $Dist "Package.appxmanifest"
+$Manifest = Join-Path $Dist "AppxManifest.xml"
 $Output = Join-Path $OutDir "ArcForgeDictate_${MsixVersion}_${Architecture}.msix"
 
 Write-Host "staging MSIX loose layout"

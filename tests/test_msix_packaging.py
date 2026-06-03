@@ -49,6 +49,7 @@ class MsixPackagingTests(unittest.TestCase):
 
         self.assertIn("9P5S7747V0BP", script)
         self.assertIn("Package.appxmanifest.in", script)
+        self.assertIn('Join-Path $Dist "AppxManifest.xml"', script)
         self.assertIn("dictate-ui-shell.exe", script)
         self.assertIn("dictate-engine.exe", script)
         self.assertIn("winapp tool makeappx pack", script)
