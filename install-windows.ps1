@@ -274,11 +274,103 @@ function Register-InstalledApp {
     Write-Host "==> Registered Dictate in Windows Installed Apps"
 }
 
+function Normalize-PathForCompare {
+    param([string]$Path)
+    if (-not $Path) {
+        return ""
+    }
+    try {
+        return [System.IO.Path]::GetFullPath($Path).TrimEnd("\").ToLowerInvariant()
+    } catch {
+        return $Path.TrimEnd("\").ToLowerInvariant()
+    }
+}
+
+function Remove-StaleUserInstallSurface {
+    param([string]$CurrentInstallLocation)
+
+    $currentInstall = Normalize-PathForCompare -Path $CurrentInstallLocation
+    $shell = $null
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+    } catch {
+        Write-Host "==> Could not inspect Windows shortcuts for stale Dictate entries"
+    }
+
+    $profilesRoot = Join-Path $env:SystemDrive "Users"
+    if (Test-Path $profilesRoot) {
+        Get-ChildItem -Path $profilesRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin @("Public", "Default", "Default User", "All Users") } |
+            ForEach-Object {
+                $profile = $_.FullName
+                $programsDir = Join-Path $profile "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+                $startupDir = Join-Path $programsDir "Startup"
+                $legacyShortcut = Join-Path $programsDir "Dictate Controls.lnk"
+                if (Test-Path -LiteralPath $legacyShortcut) {
+                    Remove-Item -Force -LiteralPath $legacyShortcut -ErrorAction SilentlyContinue
+                    Write-Host "==> Removed stale Dictate shortcut: $legacyShortcut"
+                }
+
+                foreach ($shortcutPath in @(
+                    (Join-Path $programsDir "Dictate.lnk"),
+                    (Join-Path $startupDir "Dictate.lnk")
+                )) {
+                    if (-not (Test-Path -LiteralPath $shortcutPath)) {
+                        continue
+                    }
+                    $removeShortcut = $false
+                    if ($shell) {
+                        $shortcut = $shell.CreateShortcut($shortcutPath)
+                        $workingDirectory = Normalize-PathForCompare -Path $shortcut.WorkingDirectory
+                        $argumentTarget = ""
+                        if ($shortcut.Arguments -match '"([^"]+dictate-tray\.vbs)"') {
+                            $argumentTarget = $matches[1]
+                        }
+                        if (
+                            ($workingDirectory -and ($workingDirectory -ne $currentInstall)) -or
+                            ($argumentTarget -and (-not (Test-Path -LiteralPath $argumentTarget)))
+                        ) {
+                            $removeShortcut = $true
+                        }
+                    } else {
+                        $removeShortcut = $true
+                    }
+                    if ($removeShortcut) {
+                        Remove-Item -Force -LiteralPath $shortcutPath -ErrorAction SilentlyContinue
+                        Write-Host "==> Removed stale Dictate shortcut: $shortcutPath"
+                    }
+                }
+
+                $hostedSource = Join-Path $profile "AppData\Local\Dictate\source"
+                $hostedRoot = Join-Path $profile "AppData\Local\Dictate"
+                if (
+                    (Test-Path -LiteralPath (Join-Path $hostedSource "install-windows.ps1")) -and
+                    ((Normalize-PathForCompare -Path $hostedSource) -ne $currentInstall)
+                ) {
+                    Remove-Item -Recurse -Force -LiteralPath $hostedRoot -ErrorAction SilentlyContinue
+                    Write-Host "==> Removed stale Dictate managed source: $hostedRoot"
+                }
+            }
+    }
+
+    Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | ForEach-Object {
+        $keyPath = Join-Path $_.PSPath "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate"
+        if (Test-Path $keyPath) {
+            $entry = Get-ItemProperty -Path $keyPath
+            if ((Normalize-PathForCompare -Path $entry.InstallLocation) -ne $currentInstall) {
+                Remove-Item -Recurse -Force -Path $keyPath -ErrorAction SilentlyContinue
+                Write-Host "==> Removed stale Dictate Installed Apps entry"
+            }
+        }
+    }
+}
+
 $pythonCommand = Resolve-Python
 $venvDir = Join-Path $PSScriptRoot ".venv"
 $scriptsDir = Join-Path $venvDir "Scripts"
 $venvPython = Join-Path $scriptsDir "python.exe"
 
+Remove-StaleUserInstallSurface -CurrentInstallLocation $PSScriptRoot
 Ensure-VcRuntime
 
 if ($RecreateVenv -and (Test-Path $venvDir)) {

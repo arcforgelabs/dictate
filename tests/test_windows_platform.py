@@ -201,6 +201,23 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("Register-InstalledApp", script)
         self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
 
+    def test_windows_installer_prunes_stale_user_install_surfaces(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("function Remove-StaleUserInstallSurface", script)
+        self.assertIn("Remove-StaleUserInstallSurface -CurrentInstallLocation $PSScriptRoot", script)
+        self.assertIn(r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs", script)
+        self.assertIn('Join-Path $startupDir "Dictate.lnk"', script)
+        self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
+        self.assertIn(r"AppData\Local\Dictate\source", script)
+        self.assertIn("install-windows.ps1", script)
+        self.assertIn("Registry::HKEY_USERS", script)
+        self.assertIn(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
+        self.assertIn("Removed stale Dictate Installed Apps entry", script)
+        self.assertIn("Removed stale Dictate managed source", script)
+
     def test_linux_installer_creates_searchable_launcher_icon_and_autostart(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
 
