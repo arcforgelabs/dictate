@@ -1,9 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Dictate">
   <rect width="256" height="256" rx="48" fill="#050505"/>
-  <g fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="86" y="38" width="84" height="118" rx="42"/>
-    <path d="M58 112a70 70 0 0 0 140 0"/>
-    <path d="M128 182v34"/>
-    <path d="M88 216h80"/>
+  <g transform="translate(38 24) scale(2.142857)" fill="none">
+    <rect x="47" y="16" width="26" height="48" rx="13" fill="#fff"/>
+    <path d="M28 48 A32 32 0 0 0 92 48" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
   </g>
 </svg>
