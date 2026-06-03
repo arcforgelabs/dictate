@@ -10,7 +10,7 @@ function useInstaller(opts = {}) {
   const [pct, setPct] = useState(0);
   const [advanced, setAdvanced] = useState(false);
   const [settings, setSettings] = useState({
-    location: "C:\\Program Files\\Dictate",
+    location: "%LOCALAPPDATA%\\Dictate\\source",
     desktopShortcut: shortcutDefault,
     launchOnLogin: launchDefault
   });

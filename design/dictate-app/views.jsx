@@ -347,7 +347,7 @@ function AdvancedView() {
       <div className="section">
         <div className="lead"><h3 className="t-heading">About</h3></div>
         <div className="card pad">
-          <Row icon="download" label="Dictate" help="Version 2026.2.25 · up to date">
+          <Row icon="download" label="Dictate" help="Version 2026.6.2 · up to date">
             <button className="btn sm" onClick={() => s.toast("You're on the latest version")}>Check for updates</button></Row>
         </div>
       </div>

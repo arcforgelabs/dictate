@@ -138,7 +138,7 @@ function Foundations() {
             <div className="glyphs">Hh Gg Rr 0123 — listen, type</div>
             <div className="nm"><span className="t">Hanken Grotesk</span><span className="r">400 · 500 · 600 · 700 · 800</span></div></div>
           <div className="ds-font"><div className="big" style={{ fontFamily: "var(--font-mono)" }}>Aa</div>
-            <div className="glyphs" style={{ fontFamily: "var(--font-mono)" }}>Ctrl+R · int8 · 0:03</div>
+            <div className="glyphs" style={{ fontFamily: "var(--font-mono)" }}>Right Ctrl · int8 · 0:03</div>
             <div className="nm"><span className="t">JetBrains Mono</span><span className="r">400 · 500 · 600</span></div></div>
         </div>
         <SubHead meta="7 roles">Scale</SubHead>

@@ -68,7 +68,7 @@ function InstallerA({ theme, onTheme }) {
           <div className="t-body muted" style={{ marginTop: 6, maxWidth: 320 }}>
             Type with your voice in any app on this PC.
           </div>
-          <div className="t-mono" style={{ marginTop: 11, color: "var(--subtle)" }}>v2026.2.25 · 48 MB · local-first</div>
+          <div className="t-mono" style={{ marginTop: 11, color: "var(--subtle)" }}>v2026.6.2 · local-first</div>
           <button className="btn primary" style={{ marginTop: 20, minWidth: 200 }} onClick={begin}>
             <Icon name="download" size={17} /> Install
           </button>

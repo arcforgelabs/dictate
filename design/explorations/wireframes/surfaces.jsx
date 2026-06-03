@@ -108,7 +108,7 @@ function OnbPtt() {
     <OnbStep step={3} total={3} eyebrow="Step 3 of 3" title="Set your push-to-talk key" primary="Finish setup" back>
       <p className="onb-lede">Press the keys you want to hold while speaking.</p>
       <div className="capture">
-        <div className="capture-keys"><Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd></div>
+        <div className="capture-keys"><Kbd>Right Ctrl</Kbd></div>
         <div className="t-meta">Listening for keys… press a combination</div>
       </div>
       <Row label="Activation" help="Hold or toggle"
@@ -120,7 +120,7 @@ function OnbPtt() {
 /* ============================ RECENT HISTORY ============================ */
 function HistoryPanel() {
   const items = [
-    ["1", "2:04 PM · just now", "Can you push the release branch and tag it v2026.2.25 before the standup at ten."],
+    ["1", "2:04 PM · just now", "Can you push the release branch and tag it v2026.6.2 before the standup at ten."],
     ["2", "1:51 PM · 13m ago", "Reminder to follow up with the Stalwart team about the OAuth scopes."],
     ["3", "11:32 AM · 2h ago", "Draft a short note thanking the beta testers and ask for crash reports."],
   ];
@@ -160,7 +160,7 @@ function TrayMenu() {
       </div>
       <div className="tray-menu">
         <div className="tray-head"><Dot live /><span>Dictate · Ready</span><span className="t-mono" style={{ marginLeft: "auto", color: "var(--subtle)" }}>turbo</span></div>
-        <div className="tray-row"><Icon name="mic" size={16} /><span>Dictate once</span><span className="tray-k"><Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd></span></div>
+        <div className="tray-row"><Icon name="mic" size={16} /><span>Dictate once</span><span className="tray-k"><Kbd>Right Ctrl</Kbd></span></div>
         <div className="tray-row"><Icon name="clock" size={16} /><span>Recent history…</span></div>
         <div className="tray-div" />
         <div className="tray-row"><Icon name="sliders" size={16} /><span>Model</span><Icon name="chev" size={14} style={{ marginLeft: "auto", color: "var(--subtle)" }} /></div>

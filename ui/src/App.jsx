@@ -10,7 +10,7 @@ import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.5.18-1";
+const DEFAULT_VERSION = "2026.6.2";
 
 export default function App() {
   const [view, setView] = useState("status");
@@ -22,7 +22,14 @@ export default function App() {
   const [device2, setDevice2State] = useState("auto");
   const [compute] = useState("int8");
   const [hotwords, setHotwords] = useState(["AcmeWidget", "OpenClaw", "Stalwart"]);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => {
+    const now = Date.now();
+    return [
+      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the beta testers and ask them for crash reports." },
+      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the sync to Thursday and keep Friday clear for the demo build." },
+      { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon." },
+    ];
+  });
   const [theme, setThemeState] = useState("light");
   const [startup, setStartupState] = useState(true);
   const [trayOnly, setTrayOnlyState] = useState(true);
@@ -212,7 +219,7 @@ export default function App() {
       const el = winRef.current; if (!el) return;
       const pad = 32, W = 1100, H = 768;
       const sc = Math.min(1, (window.innerWidth - pad) / W, (window.innerHeight - pad) / H);
-      el.style.transform = `scale(${sc})`;
+      el.style.transform = `translate(-50%, -50%) scale(${sc})`;
     };
     fit(); window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);

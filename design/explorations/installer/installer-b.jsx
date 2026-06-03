@@ -84,7 +84,7 @@ function InstallerB({ theme, onTheme, solo, publisher = "Arc Forge", showPublish
             <span className="mid">·</span>
             <span>Verified publisher</span>
             <span className="spacer" />
-            <span className="sz">48 MB</span>
+            <span className="sz">local-first</span>
           </div>
       }
         <div className="ifoot">

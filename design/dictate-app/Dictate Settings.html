@@ -29,9 +29,9 @@ function App() {
   const [view, setView] = useState("status");
   const [model, setModel] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
-  const [shortcut, setShortcut] = useState(["Ctrl", "R"]);
+  const [shortcut, setShortcut] = useState(["Right Ctrl"]);
   const [activation, setActivation] = useState("hold");
-  const [device] = useState("Built-in microphone");
+  const [device] = useState("Default device");
   const [device2, setDevice2] = useState("auto");
   const [compute] = useState("int8");
   const [hotwords, setHotwords] = useState(["AcmeWidget", "OpenClaw", "Stalwart"]);
@@ -205,7 +205,7 @@ function App() {
             <div className="rail-foot">
               <button className="iconbtn" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
                 <Icon name={theme === "dark" ? "sun" : "moon"} size={17} /></button>
-              <span className="t-mono" style={{ color: "var(--subtle)" }}>v2026.2.25</span>
+              <span className="t-mono" style={{ color: "var(--subtle)" }}>v2026.6.2</span>
             </div>
           </aside>
 

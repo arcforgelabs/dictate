@@ -62,7 +62,7 @@ function Components() {
         <SubHead icon="keyboard">Keys & inputs</SubHead>
         <div className="ds-grid c3">
           <Demo center foot="Keycaps" token=".kbd · Combo" desc="Shortcuts in mono">
-            <Combo keys={["Ctrl", "R"]} lg /><Kbd>⌘K</Kbd>
+            <Combo keys={["Right Ctrl"]} lg /><Kbd>⌘K</Kbd>
           </Demo>
           <Demo center foot="Text field" token=".input" desc="Keys, hotwords, search">
             <div className="input" style={{ width: "100%" }}><Icon name="key" size={16} style={{ color: "var(--muted)" }} />
@@ -70,7 +70,7 @@ function Components() {
           </Demo>
           <Demo center foot="Key capture" token=".capture" desc="Live rebinding target">
             <div className="capture armed" style={{ width: "100%", padding: 18 }}>
-              <div className="keys"><Combo keys={["Ctrl", "R"]} lg /></div>
+              <div className="keys"><Combo keys={["Right Ctrl"]} lg /></div>
               <div className="t-meta">Listening for keys…</div></div>
           </Demo>
         </div>
@@ -146,7 +146,7 @@ function Components() {
               <h2 className="t-title" style={{ marginTop: 3 }}>Ready to dictate</h2>
               <div className="sub">Hold your shortcut, speak, and release — text types into the app you’re using.</div>
             </div>
-            <div className="keyhint"><span className="t-label">Hold</span><Combo keys={["Ctrl", "R"]} lg /></div>
+            <div className="keyhint"><span className="t-label">Hold</span><Combo keys={["Right Ctrl"]} lg /></div>
           </div>
         </Demo>
 
@@ -184,7 +184,7 @@ function Components() {
         <div className="ds-grid c2">
           <Demo col foot="Doctor checks" token=".check" desc="Animated, honest self-test">
             <div className="card tight" style={{ width: "100%" }}><div className="checks">
-              {[["Microphone access", "Default device responding"], ["Model loads", "faster-whisper · turbo"], ["Shortcut registered", "Ctrl + R"]].map(([l, s]) => (
+              {[["Microphone access", "Default device responding"], ["Model loads", "faster-whisper · turbo"], ["Shortcut registered", "Right Ctrl"]].map(([l, s]) => (
                 <div className="check" key={l}><span className="st ok"><Icon name="check" size={13} /></span>
                   <div className="main"><div>{l}</div><div className="sub">{s}</div></div></div>
               ))}

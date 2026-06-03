@@ -26,7 +26,7 @@ function DirA() {
               <div className="row-main"><div className="row-label" style={{ fontSize: 13 }}>Appearance</div></div>
               <div className="seg"><span className="seg-i on">Light</span><span className="seg-i">Dark</span></div>
             </div>
-            <div className="t-mono" style={{ color: "var(--subtle)" }}>v2026.2.25</div>
+            <div className="t-mono" style={{ color: "var(--subtle)" }}>v2026.6.2</div>
           </div>
         </aside>
 
@@ -47,7 +47,7 @@ function DirA() {
               <div className="hero-sub">Hold your shortcut, speak, release. Text types into the focused app.</div>
             </div>
             <div className="hero-kbd"><span className="t-meta" style={{ marginBottom: 6 }}>Hold</span>
-              <div><Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd></div>
+              <div><Kbd>Right Ctrl</Kbd></div>
             </div>
           </div>
 
@@ -61,7 +61,7 @@ function DirA() {
             <div className="card mini">
               <div className="mini-top"><Icon name="keyboard" size={18} /><Btn ghost sm>Change</Btn></div>
               <div className="mini-label">Push-to-talk</div>
-              <div className="mini-val"><Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd></div>
+              <div className="mini-val"><Kbd>Right Ctrl</Kbd></div>
               <Chip>HOLD</Chip>
             </div>
           </div>
@@ -98,7 +98,7 @@ function DirB() {
           <div className="hero-mic sm"><Icon name="mic" size={22} /></div>
           <div style={{ flex: 1 }}>
             <div className="hero-line"><Dot live /><strong>Ready to dictate</strong></div>
-            <div className="t-meta">faster-whisper · turbo &nbsp;·&nbsp; hold <Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd></div>
+            <div className="t-meta">faster-whisper · turbo &nbsp;·&nbsp; hold <Kbd>Right Ctrl</Kbd></div>
           </div>
           <span className="icon-btn"><Icon name="gear" size={18} /></span>
         </div>
@@ -125,7 +125,7 @@ function DirB() {
               <div className="row-main"><div className="row-label">Shortcut</div>
                 <div className="row-help">Hold to record, release to insert</div></div>
               <div className="row-ctrl" style={{ gap: 8, display: "flex", alignItems: "center" }}>
-                <Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd><Btn ghost sm>Rebind</Btn></div>
+                <Kbd>Right Ctrl</Kbd><Btn ghost sm>Rebind</Btn></div>
             </div>
             <Row label="Activation" help="Hold the key, or tap to toggle"
               control={<div className="seg"><span className="seg-i on">Hold</span><span className="seg-i">Toggle</span></div>} last />
@@ -158,7 +158,7 @@ function DirB() {
 function DirC() {
   const cards = [
     ["sliders", "Model", "faster-whisper · turbo", "LOCAL", true],
-    ["keyboard", "Push-to-talk", "Ctrl + R · Hold", null, false],
+    ["keyboard", "Push-to-talk", "Right Ctrl · Hold", null, false],
     ["device", "Microphone", "Default device", null, false],
     ["hash", "Hotwords", "3 words saved", null, false],
     ["clock", "Recent history", "3 dictations", null, false],
@@ -173,7 +173,7 @@ function DirC() {
           <div style={{ flex: 1 }}>
             <h2>Good to go</h2>
             <div className="hero-line" style={{ marginTop: 4 }}><Dot live />
-              <span className="t-meta">Ready · hold <Kbd>Ctrl</Kbd><span className="plus">+</span><Kbd>R</Kbd> to dictate</span></div>
+              <span className="t-meta">Ready · hold <Kbd>Right Ctrl</Kbd> to dictate</span></div>
           </div>
           <span className="icon-btn"><Icon name="gear" size={18} /></span>
         </div>
@@ -193,7 +193,7 @@ function DirC() {
         </div>
 
         <div className="c-foot">
-          <span className="t-meta">Dictate v2026.2.25 · up to date</span>
+          <span className="t-meta">Dictate v2026.6.2 · up to date</span>
           <Btn ghost sm icon="status">Run doctor</Btn>
         </div>
       </div>

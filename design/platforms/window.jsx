@@ -116,7 +116,7 @@ function Interior() {
         </nav>
         <div className="rail-foot">
           <span className="iconbtn"><Ic n="moon" size={16} /></span>
-          <span className="ver">v2026.2.25</span>
+          <span className="ver">v2026.6.2</span>
         </div>
       </aside>
 
@@ -136,7 +136,7 @@ function Interior() {
             </div>
             <div className="keyhint">
               <span className="t-label">Hold</span>
-              <Combo keys={["Ctrl", "R"]} lg />
+              <Combo keys={["Right Ctrl"]} lg />
             </div>
           </div>
 
@@ -149,7 +149,7 @@ function Interior() {
             <div className="minic">
               <div className="top"><Ic n="keyboard" size={16} /><Ic n="chev" size={13} /></div>
               <div className="k">Push-to-talk</div>
-              <div className="v"><Combo keys={["Ctrl", "R"]} /><span className="chip">HOLD</span></div>
+              <div className="v"><Combo keys={["Right Ctrl"]} /><span className="chip">HOLD</span></div>
             </div>
           </div>
 
