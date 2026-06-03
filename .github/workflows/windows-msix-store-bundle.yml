@@ -20,11 +20,11 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: |
-            ui/package-lock.json
-            ui-shell/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
 
       - name: Install winapp CLI
         shell: pwsh
