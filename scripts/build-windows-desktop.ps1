@@ -90,11 +90,8 @@ New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
 
 Write-Host "ensuring the Tauri CLI is available"
-try {
-    npm --prefix ui-shell exec -- tauri --version | Out-Null
-} catch {
-    npm --prefix ui-shell install
-}
+npm --prefix ui-shell install
+npm --prefix ui-shell exec -- tauri --version | Out-Null
 
 Write-Host "building Windows packages ($Bundles)"
 Push-Location (Join-Path $Root "ui-shell")

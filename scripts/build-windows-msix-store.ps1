@@ -139,13 +139,10 @@ Write-Host "smoke-testing the frozen binary"
 & $Engine --version | Out-Null
 
 Write-Host "building the Tauri shell executable without an installer"
+npm --prefix ui-shell install
+npm --prefix ui-shell exec -- tauri --version | Out-Null
 Push-Location (Join-Path $Root "ui-shell")
 try {
-    try {
-        npm --prefix . exec -- tauri --version | Out-Null
-    } catch {
-        npm install
-    }
     npm run tauri -- build --no-bundle
 } finally {
     Pop-Location
