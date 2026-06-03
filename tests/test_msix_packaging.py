@@ -42,6 +42,13 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn("internetClient", capabilities)
         self.assertIn("microphone", device_capabilities)
 
+        capabilities_node = root.find("m:Capabilities", ns)
+        self.assertIsNotNone(capabilities_node)
+        assert capabilities_node is not None
+        child_names = [child.tag.rsplit("}", 1)[-1] for child in capabilities_node]
+        first_device = child_names.index("DeviceCapability")
+        self.assertNotIn("Capability", child_names[first_device + 1 :])
+
     def test_msix_builder_uses_store_product_identity_and_makeappx(self) -> None:
         script = (ROOT / "scripts" / "build-windows-msix-store.ps1").read_text(
             encoding="utf-8"
