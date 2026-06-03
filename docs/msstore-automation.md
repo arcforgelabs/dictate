@@ -21,7 +21,7 @@ exists.
 - Current draft package status: validated in Partner Center.
 - Current submission status: in certification.
 - Current certification stage: pre-processing.
-- Current publishing mode: held until manual `Publish now`.
+- Current publishing mode: publish as soon as certification passes.
 - Current gate status: all gates complete; the IARC questionnaire and Terms of
   Use approval are saved.
 - Seller ID: `94852860`
