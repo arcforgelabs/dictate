@@ -7,7 +7,8 @@ Design System** (warm paper greyscale, Hanken Grotesk + JetBrains Mono, one livi
 This README is the map. Open the file listed under each section to see the thing itself.
 
 > **Engineers start here:** [`WORK-BRIEF.md`](WORK-BRIEF.md) — the consolidated "what to do
-> next": known bugs + recommended fixes, design updates to port, and ship work, in priority order.
+> next". The last brief's bug-fix, status-port, and packaging work has all **shipped**; the
+> brief now covers the new brand mark and the small ports that remain.
 
 ---
 
@@ -20,8 +21,12 @@ These are the current, maintained artifacts. Start here.
 | **`dictate-app/Dictate Settings.html`** | The Settings app prototype — the primary deliverable. Hi-fi, interactive, light/dark, 7 views, ⌘K palette, listening HUD, toasts. | ✅ Current |
 | **`dictate-ds/Dictate Design System.html`** | The living design-system doc — tokens, type, color, components. The binding visual reference. | ✅ Current |
 | **`platforms/Dictate Across Platforms.html`** | Cross-platform chrome study — the same window wearing macOS / Win11 / Win10 / GNOME / KDE frames, light + dark. | ✅ Current |
-| **`platforms/BUILD-DIRECTIONS.md`** | Engineering handoff for shipping it (Tauri 2, per-OS window chrome, capabilities). Companion to the study above. | ✅ Current |
-| **`dictate-app/Recent History — Backend Fix Handoff.md`** | Patch handoff for the `arcforgelabs/dictate` repo: fixes live history not updating + frozen timestamps. | ✅ Current |
+| **`logos.html`** | Brand-mark exploration — directions for a new, more distinctive logo and the chosen **"cradle mic"** mark (now in `dictate-app/icons.jsx`). | ✅ Current |
+
+> The two engineering handoffs that used to live here (`platforms/BUILD-DIRECTIONS.md` and
+> `dictate-app/Recent History — Backend Fix Handoff.md`) have been **retired** — their work
+> shipped. The canonical engineering references now live in the repo's `docs/desktop-packaging.md`,
+> `docs/recent-dictation-history-spec.md`, and `LESSONS.md`.
 
 ### The app's structure (`dictate-app/`)
 
@@ -35,7 +40,7 @@ most changes.
 | `overlays.jsx` | Listening HUD, ⌘K command palette, toast stack |
 | `primitives.jsx` | Shared atoms (Combo, Chip, Toggle, Seg, Row, Wave…) |
 | `store.jsx` | Model catalog, demo phrases, live time-label helpers |
-| `icons.jsx` | Line-icon set + brand glyphs + arc-mark |
+| `icons.jsx` | Line-icon set + brand glyphs + the brand mark (`ArcMark`, now the new "cradle mic") |
 | `styles.css` | All styling, light + dark tokens |
 
 ---
@@ -59,8 +64,8 @@ Each exploration folder is self-contained (its HTML + JSX modules live together)
 | Path | What it is |
 |---|---|
 | `fonts/` | Local font hard-copies (Hanken Grotesk + JetBrains Mono variable TTFs) |
-| `assets/arc-mark.svg` | The Dictate brand mark (currentColor) |
-| `screenshots/` | Working capture scratch — not a deliverable |
+| `assets/arc-mark.svg` | The **legacy** forge-"A" mark (currentColor). The shipping mark is now the "cradle mic" in `dictate-app/icons.jsx` — see `WORK-BRIEF.md` §1 for propagation. |
+| `logo-marks.jsx` | The logo direction marks rendered by `logos.html` |
 | `uploads/` | User-provided files |
 
 > The design system itself (tokens, fonts, full component recreations) lives in a separate

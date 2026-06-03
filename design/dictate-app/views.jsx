@@ -54,7 +54,6 @@ function StatusView() {
               <span className="brand">{m.brand ? <Brand name={m.brand} /> : <Icon name="cpu" size={18} />}</span>
               <span className="mname">
                 <span className="v">{m.name.split(" · ")[0]}{m.local ? <Chip live>LOCAL</Chip> : <Chip>{m.provider.toUpperCase()}</Chip>}</span>
-                <span className="t-meta">{m.desc}</span>
               </span>
             </div>
           </button>

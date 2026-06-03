@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dictate — Logo Directions</title>
+<style>
+  @font-face{
+    font-family:"Hanken Grotesk";
+    src:url("fonts/HankenGrotesk-Variable.ttf") format("truetype");
+    font-weight:100 900;font-style:normal;font-display:swap;
+  }
+  @font-face{
+    font-family:"JetBrains Mono";
+    src:url("fonts/JetBrainsMono-Variable.ttf") format("truetype");
+    font-weight:100 800;font-style:normal;font-display:swap;
+  }
+  :root{
+    --ink:#16150f;
+    --paper:#efece6;
+    --dark:#0c0c0d;
+    --bone:#f3f1ec;
+    --line:rgba(22,21,15,.12);
+    --muted:rgba(22,21,15,.55);
+    --subtle:rgba(22,21,15,.40);
+    --ui:"Hanken Grotesk",system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:var(--ui);color:var(--ink);}
+
+  /* ---- artboard card ---- */
+  .card{
+    width:380px;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:18px;
+    overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .hero{
+    height:188px;
+    display:flex;align-items:center;justify-content:center;
+    background:
+      linear-gradient(0deg,rgba(22,21,15,.015),rgba(22,21,15,.015)),
+      #fff;
+    border-bottom:1px solid var(--line);
+    color:var(--ink);
+  }
+  .hero svg{width:118px;height:118px;display:block;}
+
+  .meta{padding:20px 24px 6px;}
+  .idx{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--subtle);letter-spacing:.04em;}
+  .name{font-size:21px;font-weight:800;letter-spacing:-.025em;margin:3px 0 0;}
+  .idea{font-size:12.5px;line-height:1.5;color:var(--muted);margin:5px 0 0;max-width:30ch;}
+
+  /* small sizes strip */
+  .sizes{
+    display:flex;align-items:flex-end;gap:22px;
+    padding:14px 24px 18px;
+    color:var(--ink);
+  }
+  .sz{display:flex;flex-direction:column;align-items:center;gap:7px;}
+  .sz .cap{font-family:var(--mono);font-size:9px;color:var(--subtle);letter-spacing:.05em;}
+  .sz svg{display:block;}
+
+  /* dark lockup */
+  .lockup{
+    margin:0 18px 18px;
+    background:var(--dark);
+    border-radius:13px;
+    height:74px;
+    display:flex;align-items:center;gap:14px;
+    padding:0 22px;
+    color:var(--bone);
+  }
+  .lockup svg{width:30px;height:30px;display:block;flex:none;}
+  .wordmark{font-size:24px;font-weight:800;letter-spacing:-.03em;}
+  .wordmark .dot{color:var(--bone);}
+
+  /* light lockup small */
+  .lite{
+    display:flex;align-items:center;gap:12px;
+    padding:0 24px 22px;color:var(--ink);
+  }
+  .lite svg{width:24px;height:24px;display:block;flex:none;}
+  .lite .wm{font-size:19px;font-weight:800;letter-spacing:-.03em;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="logo-marks.jsx"></script>
+<script type="text/babel">
+const { useState } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "cradleRadius": 32,
+  "cradleArm": 0,
+  "cradleSlot": 16
+}/*EDITMODE-END*/;
+
+const DIRECTIONS = [
+  { id:"caret",   idx:"01", name:"Caret",      idea:"A bold cursor bar and a floating voice dot — speech meeting the blinking insertion point. Doubles as a custom ‘i’." },
+  { id:"capsule", idx:"02", name:"Capsule",    idea:"The microphone reduced to its purest object: a single capsule resting on a baseline. Honest and physical." },
+  { id:"wave",    idx:"03", name:"Waveform",   idea:"Three rounded bars — sound made geometric. Instantly legible as audio, calm rather than spiky." },
+  { id:"pulse",   idx:"04", name:"Pulse",      idea:"A dot inside a ring — the one breathing pulse that signals a live agent. The product’s only loop, as a mark." },
+  { id:"speech",  idx:"05", name:"Aside",      idea:"A solid speech form with a tail: the spoken word, turned into text. Friendly without being a chat cliché." },
+  { id:"aperture",idx:"06", name:"Aperture",   idea:"A listening orb with a vertical slot cut through — a mic grille and a cursor in one quiet disc." },
+];
+
+const CAPSULE_RIFFS = [
+  { id:"capsule",    kind:"capsule",    idx:"02·a", name:"Baseline",  idea:"The original — capsule resting on a line. The reference to riff against." },
+  { id:"cap-stem",   kind:"cap-stem",   idx:"02·b", name:"Desk mic",  idea:"Capsule, stem and foot — the classic table-mic silhouette, fully geometric." },
+  { id:"cap-cradle", kind:"cap-cradle", idx:"02·c", name:"Cradle",    idea:"The capsule held in a soft U-arc, like a mic in its shockmount." },
+  { id:"cap-grille", kind:"cap-grille", idx:"02·d", name:"Grille",    idea:"Two slots cut into the capsule give it the read of a real microphone grille." },
+  { id:"cap-ring",   kind:"cap-ring",   idx:"02·e", name:"Halo",      idea:"Mic floating inside a listening ring — object plus the live pulse, combined." },
+];
+
+const WAVE_RIFFS = [
+  { id:"wave",      kind:"wave",      idx:"03·a", name:"Three-bar",  idea:"The original asymmetric trio — calm, legible audio." },
+  { id:"wave5",     kind:"wave5",     idx:"03·b", name:"Five-bar",   idea:"A symmetric envelope — steadier and more balanced as a centered mark." },
+  { id:"wave-min",  kind:"wave-min",  idx:"03·c", name:"Two-bar",    idea:"Stripped to two strokes. The most reductive, most ownable cut." },
+  { id:"wave-orb",  kind:"wave-orb",  idx:"03·d", name:"In orb",     idea:"Waveform sealed inside the listening ring — sound contained in the quiet disc." },
+  { id:"wave-dots", kind:"wave-dots", idx:"03·e", name:"Dot matrix", idea:"The equalizer rebuilt from dots — softer, more particle than bar." },
+];
+
+const UNCONSTRAINED = [
+  { id:"vp",            kind:"vp",            idx:"u1", name:"Voiceprint",     idea:"A full audio-clip waveform. Unmistakably a recording — the richest, most literal read of speech." },
+  { id:"mic-studio",    kind:"mic-studio",   idx:"u2", name:"Studio mic",     idea:"The microphone drawn in full — grille, cradle, stem, foot. A crafted object rather than a glyph." },
+  { id:"wave-radial",   kind:"wave-radial",  idx:"u3", name:"Radial wave",    idea:"The orb as a sun-burst equalizer. Listening, breathing and sound in one radial form." },
+  { id:"s2t",           kind:"s2t",          idx:"u4", name:"Speech → text",  idea:"Rising sound that resolves into a cursor and its voice dot — the whole product in one mark." },
+  { id:"mono-d",        kind:"mono-d",       idx:"u5", name:"Monogram D",     idea:"A bold D whose stem is a mic capsule. A true wordmark anchor for Dictate." },
+  { id:"pulse-layered", kind:"pulse-layered",idx:"u6", name:"Live orb",       idea:"The breathing pulse, layered — a core dot, a ring, and broken sound rings around it." },
+];
+
+const RADIAL_VARIATIONS = [
+  { id:"wave-radial", kind:"wave-radial", idx:"u3·a", name:"Original",            idea:"Twelve spokes of alternating length — the sun-burst equalizer as first drawn." },
+  { id:"wr-fine",     kind:"wr-fine",     idx:"u3·b", name:"Fine burst",          idea:"Twenty-four thin spokes — a denser, more delicate halo around the core." },
+  { id:"wr-ring",     kind:"wr-ring",     idx:"u3·c", name:"Ring + rays",         idea:"Bars radiating from a solid listening ring — orb and sound clearly separated." },
+  { id:"wr-voice",    kind:"wr-voice",    idx:"u3·d", name:"Circular voiceprint", idea:"A waveform envelope wrapped into a full circle — a recording, made round." },
+  { id:"wr-inward",   kind:"wr-inward",   idx:"u3·e", name:"Grille",              idea:"Spokes pointing inward to a core — reads as a mic grille or an aperture iris." },
+  { id:"wr-pulse",    kind:"wr-pulse",    idx:"u3·f", name:"Pulse burst",         idea:"A core dot, a ring, and short outer ticks — the breathing pulse, radiating." },
+];
+
+function Card({ d }){
+  const k = d.kind || d.id;
+  return (
+    <div className="card">
+      <div className="hero"><Mark kind={k} uid={d.id+"-hero"} /></div>
+      <div className="meta">
+        <div className="idx">{d.idx}</div>
+        <h3 className="name">{d.name}</h3>
+        <p className="idea">{d.idea}</p>
+      </div>
+      <div className="sizes">
+        <div className="sz"><Mark kind={k} uid={d.id+"-44"} size={44}/><span className="cap">44</span></div>
+        <div className="sz"><Mark kind={k} uid={d.id+"-28"} size={28}/><span className="cap">28 · TRAY</span></div>
+        <div className="sz"><Mark kind={k} uid={d.id+"-18"} size={18}/><span className="cap">18 · FAVICON</span></div>
+      </div>
+      <div className="lockup">
+        <Mark kind={k} uid={d.id+"-lock"} />
+        <span className="wordmark">Dictate</span>
+      </div>
+      <div className="lite">
+        <Mark kind={k} uid={d.id+"-lite"} />
+        <span className="wm">Dictate</span>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const cradle = { R: t.cradleRadius, armH: t.cradleArm, slot: t.cradleSlot };
+  return (
+    <CradleCtx.Provider value={cradle}>
+    <DesignCanvas>
+      <DCSection id="dirs" title="Logo directions" subtitle="Six marks · 2–3 solid geometries each · black & white">
+        {DIRECTIONS.map(d=>(
+          <DCArtboard key={d.id} id={d.id} label={d.idx+" · "+d.name} width={380} height={520}>
+            <Card d={d}/>
+          </DCArtboard>
+        ))}
+      </DCSection>
+      <DCSection id="cap" title="02 · Capsule — riffs" subtitle="Variations on the microphone object">
+        {CAPSULE_RIFFS.map(d=>(
+          <DCArtboard key={d.id} id={"r-"+d.id} label={d.idx+" · "+d.name} width={380} height={520}>
+            <Card d={d}/>
+          </DCArtboard>
+        ))}
+      </DCSection>
+      <DCSection id="wav" title="03 · Waveform — riffs" subtitle="Variations on sound made geometric">
+        {WAVE_RIFFS.map(d=>(
+          <DCArtboard key={d.id} id={"r-"+d.id} label={d.idx+" · "+d.name} width={380} height={520}>
+            <Card d={d}/>
+          </DCArtboard>
+        ))}
+      </DCSection>
+      <DCSection id="unc" title="Unconstrained" subtitle="No geometry budget — richer marks on the mic + waveform themes">
+        {UNCONSTRAINED.map(d=>(
+          <DCArtboard key={d.id} id={"u-"+d.id} label={d.idx+" · "+d.name} width={380} height={520}>
+            <Card d={d}/>
+          </DCArtboard>
+        ))}
+      </DCSection>
+      <DCSection id="u3v" title="u3 · Radial wave — variations" subtitle="Riffs on the sun-burst orb">
+        {RADIAL_VARIATIONS.map(d=>(
+          <DCArtboard key={d.id} id={"v3-"+d.id} label={d.idx+" · "+d.name} width={380} height={520}>
+            <Card d={d}/>
+          </DCArtboard>
+        ))}
+      </DCSection>
+    </DesignCanvas>
+    <TweaksPanel>
+      <TweakSection label="Cradle (02·c)" />
+      <TweakSlider label="Arc radius" value={t.cradleRadius} min={12} max={36} step={1} unit="px"
+                   onChange={(v)=>setTweak('cradleRadius', v)} />
+      <TweakSlider label="Arm height" value={t.cradleArm} min={0} max={44} step={1} unit="px"
+                   onChange={(v)=>setTweak('cradleArm', v)} />
+      <TweakSlider label="Slot depth" value={t.cradleSlot} min={0} max={34} step={1} unit="px"
+                   onChange={(v)=>setTweak('cradleSlot', v)} />
+    </TweaksPanel>
+    </CradleCtx.Provider>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
