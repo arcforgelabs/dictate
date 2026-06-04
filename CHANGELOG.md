@@ -35,6 +35,9 @@
 - Kept Dictate ClawSweeper automation conservative: review/comment only, with
   scheduled/background runs and auto-close policy disabled while the integration
   is being proven.
+- Updated pinned official GitHub Actions to Node 24-compatible majors while
+  preserving SHA pinning: `actions/checkout` v6, `actions/setup-python` v6, and
+  `actions/setup-node` v5.
 
 ### Verified
 
@@ -57,6 +60,9 @@
 - Microsoft Store MSIX publish workflow `status` mode passed on run
   `26930465947`; it authenticated, configured Microsoft Store Developer CLI, and
   read the current pending submission as `Certification`.
+- Microsoft Store MSIX publish workflow `status` mode passed again on run
+  `26930602624`; it performed a read-only status check and reported the pending
+  submission as `Certification`.
 
 ### Notes
 
