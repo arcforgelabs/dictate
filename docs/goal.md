@@ -238,6 +238,139 @@ Acceptance:
 - CI can query the Dictate product.
 - Later CI can create/submit a package update.
 
+# Dictate / ClawSweeper Integration Goal
+
+## Target Outcome
+
+`arcforgelabs/dictate` should be a first-class ClawSweeper target while remaining
+an open-source public app repository. The ClawSweeper implementation itself stays
+private in `arcforgelabs/clawsweeper`, with Arc Forge-specific personalization
+kept in config, docs, and workflow defaults rather than pushed upstream.
+
+The integration target is:
+
+1. Dictate is listed as an explicit ClawSweeper target.
+2. The Arc Forge ClawSweeper GitHub App can read and comment on Dictate.
+3. Dictate dispatches issue, PR, and command-comment events to
+   `arcforgelabs/clawsweeper`.
+4. Dictate dispatches always identify the target branch as `master`.
+5. ClawSweeper can also recover safely when a dispatch omits `target_branch` by
+   resolving the target repository's default branch.
+6. ClawSweeper writes durable review state into the private
+   `arcforgelabs/clawsweeper-state` repository.
+7. ClawSweeper posts or updates one durable review comment on the Dictate issue
+   or PR.
+8. Automation remains conservative for Dictate: review/comment only, no
+   automatic issue or PR closing while the integration is being proven.
+
+## Current Repo Status
+
+- `arcforgelabs/dictate` is public and uses `master` as its default branch.
+- `arcforgelabs/clawsweeper` is private and uses `main` as its default branch.
+- Dictate has `.github/workflows/clawsweeper-dispatch.yml`.
+- The dispatcher sends events to `arcforgelabs/clawsweeper`, not upstream
+  OpenClaw infrastructure.
+- The dispatcher sets:
+  - `CLAWSWEEPER_DISPATCH_REPO=arcforgelabs/clawsweeper`
+  - `TARGET_BRANCH=master`
+  - fallback App client ID `Iv23li0ZukB8Rb86dvTp`
+- Dictate GitHub Actions secret `CLAWSWEEPER_APP_PRIVATE_KEY` is configured.
+- Dictate GitHub Actions variable `CLAWSWEEPER_APP_CLIENT_ID` is configured as
+  `Iv23li0ZukB8Rb86dvTp`.
+- The ClawSweeper receiver preserves `target_branch` through comment-router
+  re-review dispatches.
+- The ClawSweeper sweep workflow resolves the target repository default branch
+  when a dispatch omits `target_branch`, avoiding hardcoded `main` failures for
+  Dictate.
+- ClawSweeper scheduled/background runs remain disabled with
+  `CLAWSWEEPER_ENABLE_SCHEDULES=0` while manual smokes are the control surface.
+
+## Implemented Changes
+
+Dictate:
+
+- Added `.github/workflows/clawsweeper-dispatch.yml`.
+- Fixed the ClawSweeper App client ID used by the dispatcher.
+- Kept the workflow safe for `pull_request_target`: it does not checkout or run
+  untrusted PR code; it only creates GitHub App tokens and dispatches events.
+
+ClawSweeper:
+
+- Added `arcforgelabs/dictate` to the Arc Forge target list.
+- Preserved `target_branch` in comment-router follow-on dispatches.
+- Added validation for comment-router target branch overrides.
+- Changed both exact-item and normal sweep checkout paths to resolve the target
+  repository default branch when `target_branch` is omitted.
+- Added regression tests for target branch preservation and default branch
+  resolution.
+
+## Verification
+
+Local verification in `~/repos/clawsweeper`:
+
+- `pnpm run build:all`
+- `node --test test/repair/config.test.ts test/repair/comment-router-core.test.ts test/clawsweeper.test.ts`
+- Result: 362 tests passed.
+
+GitHub Actions verification:
+
+- Dictate dispatcher run succeeded from a Dictate issue comment.
+- ClawSweeper `repair comment router` run succeeded on current ClawSweeper
+  commit `3a52455594`.
+- ClawSweeper exact review run `26925824791` succeeded on
+  `arcforgelabs/dictate#8`.
+- That run completed:
+  - target branch resolution
+  - target read token creation
+  - target write token creation
+  - Dictate checkout
+  - exact item review
+  - private state setup
+  - event result publish and safe-close application gate
+  - synced verdict routing
+  - command-router ledger commit
+  - target completion reaction
+- Dictate issue `#8` remained open and received an updated durable ClawSweeper
+  review comment at `2026-06-04 02:16 UTC`.
+
+Earlier smoke runs exposed two integration bugs and are intentionally retained as
+evidence:
+
+- A stale App client ID caused token creation failure.
+- A hardcoded `main` fallback caused Dictate checkout failure.
+
+Both were fixed before the final successful smoke.
+
+## Security And Boundary Notes
+
+- The ClawSweeper GitHub App private key is not committed to the repo.
+- The key is stored as a GitHub Actions secret, and the Bitwarden-held PEM was
+  only piped into `gh secret set`.
+- Dictate remains public; ClawSweeper and ClawSweeper state remain private.
+- The dispatcher uses GitHub App tokens with scoped repository access.
+- New ClawSweeper personalization should stay in Arc Forge config, workflow
+  defaults, target policy, and docs.
+- Upstream OpenClaw improvements should be pulled into a review branch, then
+  ported selectively into the private Arc Forge fork.
+- Arc Forge-specific behavior should not be contributed upstream unless it is
+  generalized first.
+
+## Operating Plan
+
+1. Keep `CLAWSWEEPER_ENABLE_SCHEDULES=0` until at least several manual Dictate
+   smokes pass without branch, credential, or state-sync regressions.
+2. Use Dictate issue or PR comments such as `@clawsweeper review` for manual
+   integration checks.
+3. Treat a successful end-to-end smoke as requiring all of:
+   - Dictate dispatcher success.
+   - Private ClawSweeper receiver success.
+   - Dictate checkout success.
+   - Private state write success.
+   - Durable Dictate review comment update.
+4. Do not enable auto-close for Dictate until the review/comment path has proven
+   stable and the close policy has been reviewed separately.
+5. Review ClawSweeper target policy before enabling scheduled fanout for Dictate.
+
 ## Phase 6: Product Readiness Checks
 
 Before public submission:
