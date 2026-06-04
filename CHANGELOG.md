@@ -38,6 +38,8 @@
 - Updated pinned official GitHub Actions to Node 24-compatible majors while
   preserving SHA pinning: `actions/checkout` v6, `actions/setup-python` v6, and
   `actions/setup-node` v5.
+- Updated the UI development toolchain to remediate public Dependabot alerts:
+  `vite` v8, `vitest` v4, and `@vitejs/plugin-react` v6.
 
 ### Verified
 
@@ -63,6 +65,11 @@
 - Microsoft Store MSIX publish workflow `status` mode passed again on run
   `26930602624`; it performed a read-only status check and reported the pending
   submission as `Certification`.
+- Microsoft Store MSIX publish workflow `status` mode passed again on run
+  `26930886850`; it performed a read-only status check on the latest commit and
+  reported the pending submission as `Certification`.
+- UI package audit passed with zero vulnerabilities after the Vite/Vitest
+  security update.
 
 ### Notes
 
