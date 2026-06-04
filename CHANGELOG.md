@@ -54,11 +54,14 @@
   `arcforgelabs/dictate#8`.
 - A third sequential Dictate ClawSweeper smoke passed on run `26930384789`
   against `arcforgelabs/dictate#8`.
+- Microsoft Store MSIX publish workflow `status` mode passed on run
+  `26930465947`; it authenticated, configured Microsoft Store Developer CLI, and
+  read the current pending submission as `Certification`.
 
 ### Notes
 
 - Microsoft Partner Center submission `Submission 1` for `Arc Forge Dictate`
-  was manually submitted and was in certification during this work.
+  was manually submitted and remained in certification during this work.
 - The Microsoft Store product identity is:
   - Store ID: `9P5S7747V0BP`
   - Package identity name: `ArcForgeLabs.ArcForgeDictate`

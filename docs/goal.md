@@ -11,7 +11,8 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 ## Remaining Work
 
 1. Wait for Microsoft Partner Center certification and automatic Store
-   publishing for the first `Arc Forge Dictate` submission.
+   publishing for the first `Arc Forge Dictate` submission. Store CLI status run
+   `26930465947` confirmed the pending submission is still in `Certification`.
 2. Run a real Windows install/runtime smoke after package download or Store
    availability.
 3. Configure a real Windows signing certificate in GitHub Actions before
@@ -43,6 +44,8 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 - ClawSweeper is currently review/comment only for Dictate.
 - Recent manual ClawSweeper smokes passed for Dictate and Arc Forge Console:
   `26925824791`, `26929644423`, `26930314117`, and `26930384789`.
+- Microsoft Store Developer CLI status mode passed on run `26930465947` and
+  reported the pending submission status as `Certification`.
 
 ## References
 
