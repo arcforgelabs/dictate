@@ -12,6 +12,32 @@ For `~/repos/dictate`, the clean Windows release target should be:
 
 Microsoft's current guidance is blunt: Store-distributed apps are signed by Microsoft and avoid SmartScreen download warnings. Non-Store `.exe`/`.msi` files can still show SmartScreen warnings on first downloads even when signed, because reputation is tied to publisher and file hash.
 
+## Execution Status
+
+As of 2026-06-04, the repository-side Windows, Store MSIX, Store API smoke, and
+ClawSweeper integration work in this goal is implemented and verified on the
+current `master` commit `7a525fb`.
+
+Completed and verified:
+
+- CI and secret scan passed on commit `7a525fb`.
+- Manual Windows desktop bundle workflow passed on commit `7a525fb`.
+- Manual Store MSIX workflow passed on commit `7a525fb`.
+- Microsoft Store API smoke workflow passed on commit `7a525fb`.
+- Dictate/ClawSweeper end-to-end smoke passed against Dictate issue `#8`.
+
+Remaining non-repo gates:
+
+- Microsoft Partner Center certification/publishing for the first Store
+  submission.
+- A human Windows install/runtime smoke on a real Windows desktop after package
+  download.
+- Direct-download code signing before `.msi` or `.exe` installers are attached
+  to a public GitHub release.
+- Future Store package/listing upload automation after the first manual
+  submission has completed and the API path is confirmed for the MSIX/PWA
+  product.
+
 ## Current Repo Status
 
 - Windows Tauri bundle targets are configured for `.msi` and NSIS.
@@ -23,6 +49,18 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
 - Manual CI has `windows-msix-store-bundle.yml` for Partner Center MSIX package
   validation.
 - Microsoft Store API smoke automation exists in `msstore-api-smoke.yml` and `scripts/msstore-submit.py`.
+- Current verification run IDs:
+  - CI: `26926784768`, success.
+  - Secret Scan: `26926784777`, success.
+  - Windows desktop bundle: `26927985488`, success.
+  - Windows Store MSIX bundle: `26927986863`, success.
+  - Microsoft Store API smoke: `26927988050`, success.
+- Current workflow artifact proof:
+  - `windows-desktop-bundle` contains
+    `Dictate_2026.6.5_x64_en-US.msi` and
+    `Dictate_2026.6.5_x64-setup.exe`.
+  - `windows-store-msix` contains
+    `ArcForgeDictate_2026.6.5.0_x64.msix`.
 - GitHub Actions repository variables are set for Store tenant ID, client ID, and seller ID.
 - GitHub Actions repository secret `MSSTORE_CLIENT_SECRET` is set from Bitwarden.
 - Microsoft Store API token acquisition has been verified locally with the configured credentials.
@@ -56,8 +94,8 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
 - `https://arcforge.au/privacy` is live and includes Dictate microphone/transcription disclosures.
 - Public docs now label the hosted PowerShell bootstrap as developer/source only.
 - Remaining external steps: wait for Microsoft certification and automatic
-  publishing if it passes, then add signing and full package/listing upload
-  automation for future submissions.
+  publishing if it passes, complete a Windows install/runtime smoke, then add
+  signing and full package/listing upload automation for future submissions.
 
 ## Sources
 
@@ -72,9 +110,10 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
 
 ## Phase 1: Make Dictate Buildable As A Windows Desktop App
 
-Current issue: `dictate` only targets Linux bundles in Tauri.
+Status: complete for repository and CI packaging. A human install/runtime smoke
+on a real Windows desktop is still a non-repo QA gate.
 
-Target changes:
+Implemented changes:
 
 1. Add Windows bundle targets in `ui-shell/src-tauri/tauri.conf.json`.
    - Add `msi` and/or `nsis`.
@@ -82,31 +121,38 @@ Target changes:
    - Add Windows metadata where useful: publisher, installer name, upgrade code if using MSI.
 
 2. Add a Windows build script.
-   - Likely `scripts/build-windows-desktop.ps1`.
+   - `scripts/build-windows-desktop.ps1`.
    - Build frontend.
    - Build the Python engine with PyInstaller on Windows.
    - Stage `dictate-engine.exe` into `ui-shell/src-tauri/engine/`.
    - Run `tauri build --bundles msi,nsis` or equivalent.
 
-4. Add a Store MSIX build script.
+3. Add a Store MSIX build script.
    - Use `tauri build --no-bundle`.
    - Stage `dictate-ui-shell.exe` and `engine\dictate-engine.exe`.
    - Render the Partner Center package identity into `Package.appxmanifest`.
    - Pack with Microsoft `winapp` CLI.
 
-3. Confirm the Tauri shell launches the Windows engine correctly.
+4. Confirm the Tauri shell launches the Windows engine correctly.
    - Check path resolution for `.exe`.
    - Make sure process spawn works on Windows.
    - Make sure microphone/audio access behavior is sane.
 
 Acceptance:
 
-- On `windows-latest`, CI produces at least one installable Windows artifact.
+- On `windows-latest`, CI produces at least one installable Windows artifact:
+  complete, verified by workflow run `26927985488`.
 - On `windows-latest`, CI can produce a Store-targeted `.msix` artifact for the
-  reserved Partner Center product.
-- Local/manual Windows install opens the app and can start the backend engine.
+  reserved Partner Center product: complete, verified by workflow run
+  `26927986863`.
+- Local/manual Windows install opens the app and can start the backend engine:
+  pending human QA on a Windows desktop.
 
 ## Phase 2: Create A Store-Compatible Package Strategy
+
+Status: complete for the first Store submission strategy and repository package
+builder. The first Partner Center submission remains outside the repo while
+Microsoft certification is in progress.
 
 There are two practical Microsoft Store routes:
 
@@ -122,17 +168,19 @@ Recommended first target: MSIX if feasible, because it aligns best with "officia
 
 Steps:
 
-1. Reserve the app name in Partner Center.
+1. Reserve the app name in Partner Center. Complete.
    - Product name: `Arc Forge Dictate`.
    - Publisher: Arc Forge Labs / Arc Forge developer account.
    - This must be done in Partner Center first; API cannot create the initial app record.
 
-2. Create the first submission manually.
+2. Create the first submission manually. Complete; `Submission 1` is in
+   certification.
    - Microsoft's older Store submission API requires the first submission and age ratings to be completed in Partner Center before future API submissions.
    - This also avoids getting blocked by listing/compliance questions.
-   - `Submission 1` now exists in Partner Center and must be completed manually.
+   - `Submission 1` exists in Partner Center and has been completed manually.
 
-3. Prepare Store assets.
+3. Prepare Store assets. Complete for the first submitted listing; screenshots
+   and package/listing assets should still be refreshed for future submissions.
    - App icon.
    - Screenshots.
    - Description.
@@ -151,6 +199,9 @@ Acceptance:
 
 ## Phase 3: Signing Strategy
 
+Status: complete for Store distribution strategy and public-release guardrails.
+Direct-download signing implementation remains pending.
+
 For Store distribution:
 
 1. Let Microsoft sign the Store-distributed package after certification.
@@ -166,12 +217,17 @@ For direct download fallback:
 
 Acceptance:
 
-- Store users get the clean path.
-- Direct-download users see a verified publisher even if SmartScreen reputation is still warming up.
+- Store users get the clean path: pending Microsoft certification/publishing.
+- Direct-download users see a verified publisher even if SmartScreen reputation
+  is still warming up: pending signing provider and signing workflow.
+- Unsigned Windows artifacts are not attached to public GitHub releases:
+  complete, guarded by `scripts/assert-windows-artifacts-signed.ps1` and the
+  `windows-desktop` release job.
 
 ## Phase 4: GitHub Actions Release Pipeline
 
-Add a Windows release job beside the existing Linux job.
+Status: complete for build jobs and unsigned-artifact protection. Public release
+upload of Windows artifacts intentionally waits for signing.
 
 Target workflow:
 
@@ -198,11 +254,17 @@ Target workflow:
 
 Acceptance:
 
-- GitHub release contains Windows artifacts.
-- Artifact names are stable and versioned.
-- No secrets are printed in logs.
+- GitHub release contains Windows artifacts: pending signing; unsigned artifacts
+  are uploaded only as internal workflow artifacts.
+- Artifact names are stable and versioned: complete, verified by workflow run
+  `26927985488`.
+- No secrets are printed in logs: complete for current workflows; CI and Secret
+  Scan passed on `7a525fb`.
 
 ## Phase 5: Programmatic Store Submission
+
+Status: complete for credential wiring and read-only smoke. Mutating submission
+automation remains pending until the first manual submission is finished.
 
 We already created the required Microsoft side pieces:
 
@@ -212,35 +274,40 @@ We already created the required Microsoft side pieces:
 - Partner Center app role: `Manager(Windows)`
 - Secrets stored in Bitwarden, not repo.
 
-Next steps:
+Implemented automation:
 
-1. Store the non-secret IDs in GitHub Actions variables or repo config.
-2. Store the client secret in GitHub Actions secrets.
-3. Add a small submit script, probably:
-   - `scripts/msstore-submit.ps1` or
-   - `scripts/msstore-submit.py`
+1. Store the non-secret IDs in GitHub Actions variables or repo config:
+   complete.
+2. Store the client secret in GitHub Actions secrets: complete.
+3. Add a small submit script: complete with `scripts/msstore-submit.py`.
 
-4. Token flow:
+4. Token flow: complete for read-only smoke.
    - Use Entra client credentials.
    - Use the Store/Partner Center API resource expected by the chosen API path.
 
-5. Submission flow:
+5. Submission flow: guarded and intentionally not used for the in-certification
+   manual submission.
    - Get product/current draft.
    - Upload package or update draft metadata.
    - Validate.
    - Submit.
 
-6. Keep manual/Partner Center edits separate from API-created submissions. Microsoft warns that mixing API and manual edits on the same API-created submission can break the submission state.
+6. Keep manual/Partner Center edits separate from API-created submissions:
+   active rule. Microsoft warns that mixing API and manual edits on the same
+   API-created submission can break the submission state.
 
 Acceptance:
 
-- CI can authenticate to Microsoft Store API without exposing secrets.
-- CI can query the Dictate product.
-- Later CI can create/submit a package update.
+- CI can authenticate to Microsoft Store API without exposing secrets:
+  complete, verified by workflow run `26927988050`.
+- CI can query the Dictate product: complete through the legacy MSIX/UWP Store
+  services API, verified by workflow run `26927988050`.
+- Later CI can create/submit a package update: pending after first manual
+  submission is accepted and API path is confirmed.
 
-# Dictate / ClawSweeper Integration Goal
+## Dictate / ClawSweeper Integration Goal
 
-## Target Outcome
+### ClawSweeper Target Outcome
 
 `arcforgelabs/dictate` should be a first-class ClawSweeper target while remaining
 an open-source public app repository. The ClawSweeper implementation itself stays
@@ -263,7 +330,7 @@ The integration target is:
 8. Automation remains conservative for Dictate: review/comment only, no
    automatic issue or PR closing while the integration is being proven.
 
-## Current Repo Status
+### ClawSweeper Current Repo Status
 
 - `arcforgelabs/dictate` is public and uses `master` as its default branch.
 - `arcforgelabs/clawsweeper` is private and uses `main` as its default branch.
@@ -285,7 +352,7 @@ The integration target is:
 - ClawSweeper scheduled/background runs remain disabled with
   `CLAWSWEEPER_ENABLE_SCHEDULES=0` while manual smokes are the control surface.
 
-## Implemented Changes
+### ClawSweeper Implemented Changes
 
 Dictate:
 
@@ -304,7 +371,7 @@ ClawSweeper:
 - Added regression tests for target branch preservation and default branch
   resolution.
 
-## Verification
+### ClawSweeper Verification
 
 Local verification in `~/repos/clawsweeper`:
 
@@ -341,7 +408,7 @@ evidence:
 
 Both were fixed before the final successful smoke.
 
-## Security And Boundary Notes
+### ClawSweeper Security And Boundary Notes
 
 - The ClawSweeper GitHub App private key is not committed to the repo.
 - The key is stored as a GitHub Actions secret, and the Bitwarden-held PEM was
@@ -355,7 +422,7 @@ Both were fixed before the final successful smoke.
 - Arc Forge-specific behavior should not be contributed upstream unless it is
   generalized first.
 
-## Operating Plan
+### ClawSweeper Operating Plan
 
 1. Keep `CLAWSWEEPER_ENABLE_SCHEDULES=0` until at least several manual Dictate
    smokes pass without branch, credential, or state-sync regressions.
@@ -373,44 +440,67 @@ Both were fixed before the final successful smoke.
 
 ## Phase 6: Product Readiness Checks
 
-Before public submission:
+Status: mostly complete for repository and first-submission readiness. The open
+items are Windows runtime QA, Microsoft certification, and direct-download
+signing.
+
+Readiness state:
 
 1. Installer identity:
    - App name is stable.
    - Publisher is Arc Forge.
    - Version format is Store-compatible.
+   - Status: complete for Store MSIX and current Windows artifacts.
 
 2. Privacy/compliance:
    - Privacy policy covers microphone/audio handling.
    - If audio stays local, say that accurately.
    - If any model/API/cloud transcription is used, disclose it.
+   - Status: complete for first Store submission; keep refreshed as model/API
+     behavior changes.
 
 3. Runtime:
    - WebView2 handling is correct.
    - Python engine is bundled, not downloaded at install time.
    - No dev install commands in the public user path.
+   - Status: package build complete; human Windows runtime smoke pending.
 
 4. Security:
    - No secrets in packaged files.
    - No unsigned helper executables for direct-download path.
    - No `ExecutionPolicy Bypass | iwr | iex` public install path.
+   - Status: CI and Secret Scan passed; public release upload is guarded for
+     unsigned Windows installers.
 
 5. UX:
    - One-click install.
    - Normal uninstall entry.
    - First run does not require terminal.
    - App handles missing microphone permission cleanly.
+   - Status: package path ready; real Windows desktop smoke pending.
 
 ## Recommended Order
+
+Completed:
 
 1. Implement Windows Tauri packaging in `dictate`.
 2. Add Windows CI artifact build.
 3. Reserve Dictate in Partner Center.
 4. Create first manual Store submission.
-5. Run and validate the MSIX package for the reserved MSIX/PWA product; create a
-   separate MSI/EXE Store product only if that path fails.
-6. Add signing for direct-download artifacts.
-7. Add Store API automation after first manual submission is accepted.
-8. Move old PowerShell install instructions into "developer install only".
+5. Run and validate MSIX package generation for the reserved MSIX/PWA product.
+6. Move old PowerShell install instructions into "developer install only".
+7. Add read-only Store API smoke automation.
+8. Add Dictate/ClawSweeper integration and verify it end to end.
+
+Remaining:
+
+1. Wait for Microsoft certification and automatic Store publishing.
+2. Run a real Windows install/runtime smoke from the produced `.msi`, `.exe`, or
+   Store package.
+3. Add signing for direct-download artifacts.
+4. Add mutating Store package/listing upload automation after the first manual
+   submission is accepted.
+5. Revisit whether a separate MSI/EXE Store product is useful only if the MSIX
+   path fails or cannot meet the product requirements.
 
 The key decision is this: if the goal is "no weird Windows warning flags for normal users," Microsoft Store should be the primary release path. Signed website downloads are still worth doing, but they cannot guarantee a clean first-download SmartScreen experience.
