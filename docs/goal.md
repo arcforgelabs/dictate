@@ -51,7 +51,7 @@ Remaining non-repo gates:
 - Manual CI has `windows-msix-store-bundle.yml` for Partner Center MSIX package
   validation.
 - Microsoft Store API smoke automation exists in `msstore-api-smoke.yml` and `scripts/msstore-submit.py`.
-- Current verification run IDs:
+- Recent verification run IDs:
   - CI: `26928859512`, success.
   - Secret Scan: `26928859524`, success.
   - Windows desktop bundle: `26927985488`, success.
