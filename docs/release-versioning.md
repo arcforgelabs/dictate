@@ -68,7 +68,7 @@ Pushing a `v20*` tag is the only deployment trigger. The release workflow runs t
 
 The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN install/update scripts. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready.
 
-The previous personal-scope package, `@iamsamuelrodda/dictate`, should remain available long enough for existing users to update. After the first `@arcforgelabs/dictate` package is visible on npm and the hosted install smoke passes, deprecate the personal package with a migration notice pointing users to `@arcforgelabs/dictate`.
+The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
 
 The current developer/bootstrap install path is:
 

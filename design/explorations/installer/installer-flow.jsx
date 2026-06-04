@@ -93,7 +93,7 @@ function AdvancedPanel({ settings, setS }) {
 function LegalLine() {
   return (
     <div className="ilegal">
-      By installing you agree to the <a href="https://github.com/dictate-app/dictate/blob/main/LICENSE"
+      By installing you agree to the <a href="https://github.com/arcforgelabs/dictate/blob/master/LICENSE"
       target="_blank" rel="noopener">terms and license</a>.
     </div>);
 
