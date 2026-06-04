@@ -16,14 +16,16 @@ Microsoft's current guidance is blunt: Store-distributed apps are signed by Micr
 
 As of 2026-06-04, the repository-side Windows, Store MSIX, Store API smoke, and
 ClawSweeper integration work in this goal is implemented and verified on the
-current `master` commit `7a525fb`.
+current `master` line. The Windows/MSIX package verification ran on the same
+code line before this doc-only refresh; the follow-up CI and Secret Scan passed
+after the doc refresh.
 
 Completed and verified:
 
-- CI and secret scan passed on commit `7a525fb`.
-- Manual Windows desktop bundle workflow passed on commit `7a525fb`.
-- Manual Store MSIX workflow passed on commit `7a525fb`.
-- Microsoft Store API smoke workflow passed on commit `7a525fb`.
+- CI and secret scan passed after the doc refresh.
+- Manual Windows desktop bundle workflow passed.
+- Manual Store MSIX workflow passed.
+- Microsoft Store API smoke workflow passed.
 - Dictate/ClawSweeper end-to-end smoke passed against Dictate issue `#8`.
 
 Remaining non-repo gates:
@@ -50,8 +52,8 @@ Remaining non-repo gates:
   validation.
 - Microsoft Store API smoke automation exists in `msstore-api-smoke.yml` and `scripts/msstore-submit.py`.
 - Current verification run IDs:
-  - CI: `26926784768`, success.
-  - Secret Scan: `26926784777`, success.
+  - CI: `26928859512`, success.
+  - Secret Scan: `26928859524`, success.
   - Windows desktop bundle: `26927985488`, success.
   - Windows Store MSIX bundle: `26927986863`, success.
   - Microsoft Store API smoke: `26927988050`, success.
@@ -259,7 +261,7 @@ Acceptance:
 - Artifact names are stable and versioned: complete, verified by workflow run
   `26927985488`.
 - No secrets are printed in logs: complete for current workflows; CI and Secret
-  Scan passed on `7a525fb`.
+  Scan passed on the current doc refresh.
 
 ## Phase 5: Programmatic Store Submission
 
