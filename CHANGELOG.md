@@ -37,7 +37,7 @@
   is being proven.
 - Updated pinned official GitHub Actions to Node 24-compatible majors while
   preserving SHA pinning: `actions/checkout` v6, `actions/setup-python` v6, and
-  `actions/setup-node` v5.
+  `actions/setup-node` v5, and `actions/upload-artifact` v5.
 - Updated the UI development toolchain to remediate public Dependabot alerts:
   `vite` v8, `vitest` v4, and `@vitejs/plugin-react` v6.
 

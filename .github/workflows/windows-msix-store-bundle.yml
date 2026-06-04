@@ -53,7 +53,7 @@ jobs:
         run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe" 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-msix.log"
 
       - name: Upload Store MSIX artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-store-msix
           path: packaging/msix/out/*.msix
@@ -61,7 +61,7 @@ jobs:
 
       - name: Upload MSIX build log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-msix-log
           path: ${{ runner.temp }}\windows-msix.log
