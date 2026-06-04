@@ -158,9 +158,10 @@ jobs:
           fi
 
   linux-desktop:
-    name: Linux desktop bundle (.deb + AppImage)
+    name: Linux desktop bundle (.deb + .rpm)
     runs-on: ubuntu-latest
     needs: [release]
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -194,17 +195,14 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Build the desktop bundle (freezes engine + builds .deb/AppImage)
-        # APPIMAGE_EXTRACT_AND_RUN: linuxdeploy/appimagetool can't FUSE-mount in
-        # CI; extract-and-run avoids it. NO_STRIP avoids strip failures on the
-        # bundled engine's prebuilt native libs.
+      - name: Build the desktop bundle (freezes engine + builds .deb/.rpm)
         env:
-          APPIMAGE_EXTRACT_AND_RUN: "1"
+          DICTATE_BUNDLES: "deb,rpm"
           NO_STRIP: "true"
           ARCH: "x86_64"
         run: ./scripts/build-linux-desktop.sh
 
-      - name: Attach .deb and AppImage to the release
+      - name: Attach .deb and .rpm to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

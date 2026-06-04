@@ -3,14 +3,21 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from datetime import date
 
 from dictate.version import PACKAGE_VERSION, RELEASE_VERSION
 
 
 class VersionTests(unittest.TestCase):
     def test_release_and_package_versions_are_calver(self) -> None:
-        self.assertEqual(RELEASE_VERSION, "2026.6.4")
-        self.assertEqual(PACKAGE_VERSION, "2026.6.4")
+        self.assertRegex(RELEASE_VERSION, r"^\d{4}\.\d{1,2}\.\d{1,2}(?:-\d+)?$")
+        date_part, _, sequence = RELEASE_VERSION.partition("-")
+        year, month, day = [int(part) for part in date_part.split(".")]
+
+        self.assertEqual(date(year, month, day).isoformat(), f"{year:04d}-{month:02d}-{day:02d}")
+        self.assertEqual(PACKAGE_VERSION, RELEASE_VERSION)
+        if sequence:
+            self.assertGreaterEqual(int(sequence), 1)
 
     def test_calver_script_generates_release_and_pep440_versions(self) -> None:
         date_part, separator, sequence = RELEASE_VERSION.partition("-")
