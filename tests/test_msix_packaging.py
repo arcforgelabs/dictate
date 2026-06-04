@@ -6,6 +6,8 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from dictate.version import RELEASE_VERSION
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,9 +79,11 @@ class MsixPackagingTests(unittest.TestCase):
 
         app_version = config["version"]
         wix_version = config["bundle"]["windows"]["wix"]["version"]
-        self.assertEqual(app_version, "2026.6.3")
+        self.assertEqual(app_version, RELEASE_VERSION)
         self.assertEqual(wix_version, msi_safe_version(app_version))
-        self.assertEqual(msi_safe_version("2026.6.3-1"), "26.6.3.1")
+        date_part = RELEASE_VERSION.partition("-")[0]
+        year, month, day = [int(part) for part in date_part.split(".")]
+        self.assertEqual(msi_safe_version(f"{date_part}-1"), f"{year - 2000}.{month}.{day}.1")
 
         parts = [int(part) for part in wix_version.split(".")]
         self.assertLessEqual(parts[0], 255)

@@ -11,6 +11,7 @@ from pathlib import Path
 from dictate.api_keys import ApiKeyStatus
 from dictate.history import HistoryStore
 from dictate.update_status import UpdateStatus
+from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
     DEFAULT_PREFS,
     EventBroker,
@@ -35,8 +36,8 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         secret_store_description=lambda: "the desktop Secret Service keyring",
         secret_store_available=lambda: True,
         check_update_status=lambda: UpdateStatus(
-            current_version="2026.6.3",
-            latest_version="2026.6.4",
+            current_version=RELEASE_VERSION,
+            latest_version=RELEASE_VERSION,
             update_available=True,
             checked=True,
             url="https://example.test/releases",
@@ -241,8 +242,8 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
     def test_update_status_shape(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             status = _backend(d).get_update_status()
-            self.assertEqual(status["currentVersion"], "2026.6.3")
-            self.assertEqual(status["latestVersion"], "2026.6.4")
+            self.assertEqual(status["currentVersion"], RELEASE_VERSION)
+            self.assertEqual(status["latestVersion"], RELEASE_VERSION)
             self.assertTrue(status["updateAvailable"])
             self.assertTrue(status["checked"])
             self.assertEqual(status["url"], "https://example.test/releases")
@@ -288,7 +289,7 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["updateAvailable"])
-        self.assertEqual(body["latestVersion"], "2026.6.4")
+        self.assertEqual(body["latestVersion"], RELEASE_VERSION)
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

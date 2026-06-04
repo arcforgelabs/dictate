@@ -146,17 +146,14 @@ fragile format, so the build treats `.deb`/`.rpm` as **required** and AppImage a
 - Tests run with stdlib **unittest** (`python -m unittest discover -s tests`), not
   pytest.
 
-### Version bump touches many files
-`scripts/release_check.py` only validates `pyproject.toml`, root `package.json`,
-and `version.py`, but the version string is also embedded in (and asserted by
-tests in) more places. When bumping CalVer, change **all** of:
-`pyproject.toml`, `package.json`, `src/dictate/version.py`, `src/dictate/doctor.py`,
-`install.ps1`, `update.ps1`, `install-windows.ps1`, `scripts/windows-user-smoke.ps1`,
-`ui/package.json`, `ui-shell/package.json`, `ui-shell/src-tauri/Cargo.toml`,
-`ui-shell/src-tauri/tauri.conf.json`, plus the asserting tests in
-`tests/test_version.py` and `tests/test_windows_platform.py`. **Do not** touch the
+### Version bump is scripted
+Use `python scripts/sync_release_version.py X` to update package metadata,
+hosted installer pins, Tauri versions, and the MSI-safe WiX version from one
+CalVer value. Use `--date YYYY-MM-DD --sequence N` to generate the version from
+the release date instead of passing `X` directly. **Do not** touch the
 parse/compare fixtures in `tests/test_update_status.py` (they use old versions as
-generic logic examples). `python scripts/release_check.py --tag vX` must pass.
+generic logic examples). `python scripts/sync_release_version.py X --check` and
+`python scripts/release_check.py --tag vX` must both pass.
 
 ### You can't build the Tauri bundle in the dev sandbox
 The design/dev sandbox has Node + Python (so `ui/`, the freeze, and the Python

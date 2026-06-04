@@ -39,6 +39,14 @@ python scripts/calver.py --date 2026-05-18 --sequence 1
 python scripts/calver.py --date 2026-05-18 --format pep440
 ```
 
+Synchronize release metadata before tagging with:
+
+```bash
+python scripts/sync_release_version.py --date 2026-05-18
+python scripts/sync_release_version.py --date 2026-05-18 --sequence 1
+python scripts/sync_release_version.py 2026.5.18 --check
+```
+
 Release tags and GitHub milestones should use the public version with a leading `v`, for example:
 
 ```text
@@ -52,8 +60,8 @@ most 255. Keep `tauri.conf.json`'s public app `version` as `YYYY.M.D[-N]`, but
 map `bundle.windows.wix.version` to `YY.M.D.N` for MSI packaging:
 
 ```text
-2026.6.3   -> 26.6.3.0
-2026.6.3-1 -> 26.6.3.1
+2026.6.4   -> 26.6.4.0
+2026.6.4-1 -> 26.6.4.1
 ```
 
 Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.

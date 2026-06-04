@@ -10,7 +10,7 @@ import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.6.2";
+const DEFAULT_VERSION = "2026.6.4";
 
 export default function App() {
   const [view, setView] = useState("status");
