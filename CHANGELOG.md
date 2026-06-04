@@ -72,6 +72,12 @@
   reported the pending submission as `Certification`.
 - UI package audit passed with zero vulnerabilities after the Vite/Vitest
   security update.
+- Dictate CI passed on run `26931280731` after the Node 24 workflow runtime
+  opt-in.
+- Dictate Secret Scan passed on run `26931280721` after the Node 24 workflow
+  runtime opt-in.
+- GitHub Dependabot reported zero open alerts after the UI development
+  toolchain update.
 
 ### Notes
 
