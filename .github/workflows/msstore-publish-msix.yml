@@ -1,0 +1,106 @@
+name: Microsoft Store MSIX publish (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "draft uploads a package without committing; publish commits the current draft; status only checks state"
+        required: true
+        default: "status"
+        type: choice
+        options:
+          - status
+          - draft
+          - publish
+      product_id:
+        description: "Partner Center product ID"
+        required: true
+        default: "9P5S7747V0BP"
+
+permissions:
+  contents: read
+
+jobs:
+  msstore:
+    name: Microsoft Store MSIX ${{ inputs.mode }}
+    runs-on: windows-latest
+    env:
+      MSSTORE_PRODUCT_ID: ${{ inputs.product_id }}
+      MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
+      MSSTORE_CLIENT_ID: ${{ vars.MSSTORE_CLIENT_ID }}
+      MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+      MSSTORE_SELLER_ID: ${{ vars.MSSTORE_SELLER_ID }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: inputs.mode == 'draft'
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Microsoft Store credentials
+        shell: pwsh
+        run: |
+          foreach ($name in "MSSTORE_TENANT_ID", "MSSTORE_CLIENT_ID", "MSSTORE_CLIENT_SECRET", "MSSTORE_SELLER_ID", "MSSTORE_PRODUCT_ID") {
+            if (-not [Environment]::GetEnvironmentVariable($name)) {
+              throw "Missing $name"
+            }
+          }
+          python scripts/msstore-submit.py legacy-auth-check
+          python scripts/msstore-submit.py legacy-app
+
+      - name: Install Microsoft Store Developer CLI
+        shell: pwsh
+        run: |
+          winget install Microsoft.DotNet.DesktopRuntime.9 --silent --accept-package-agreements --accept-source-agreements
+          winget install "Microsoft Store Developer CLI" --silent --accept-package-agreements --accept-source-agreements
+          $paths = @(
+            "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
+            "$env:ProgramFiles\Microsoft Store Developer CLI",
+            "$env:ProgramFiles\msstore"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              Add-Content -Path $env:GITHUB_PATH -Value $path
+            }
+          }
+
+      - name: Configure Microsoft Store Developer CLI
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId "$env:MSSTORE_TENANT_ID" `
+            --sellerId "$env:MSSTORE_SELLER_ID" `
+            --clientId "$env:MSSTORE_CLIENT_ID" `
+            --clientSecret "$env:MSSTORE_CLIENT_SECRET"
+
+      - name: Show current Store submission status
+        shell: pwsh
+        run: msstore submission status "$env:MSSTORE_PRODUCT_ID"
+
+      - name: Build Store MSIX
+        if: inputs.mode == 'draft'
+        shell: pwsh
+        run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe"
+
+      - name: Upload package to draft without committing
+        if: inputs.mode == 'draft'
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem "packaging\msix\out" -Filter "*.msix" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msix) {
+            throw "No MSIX package was produced."
+          }
+          msstore publish . --inputFile "$($msix.FullName)" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
+          msstore submission status "$env:MSSTORE_PRODUCT_ID"
+
+      - name: Commit current Store draft
+        if: inputs.mode == 'publish'
+        shell: pwsh
+        run: |
+          msstore submission publish "$env:MSSTORE_PRODUCT_ID"
+          msstore submission poll "$env:MSSTORE_PRODUCT_ID"

@@ -35,6 +35,8 @@ exists.
 - MSIX manifest template: `packaging/msix/Package.appxmanifest.in`
 - MSIX build script: `scripts/build-windows-msix-store.ps1`
 - Manual MSIX workflow: `.github/workflows/windows-msix-store-bundle.yml`
+- Manual MSIX publish workflow:
+  `.github/workflows/msstore-publish-msix.yml`
 - Output pattern: `packaging/msix/out/ArcForgeDictate_<version>_x64.msix`
 
 The MSIX manifest is pinned to the reserved Partner Center identity. The builder
@@ -91,6 +93,31 @@ gh workflow run msstore-api-smoke.yml -f product_id=9P5S7747V0BP -f query=legacy
 gh workflow run msstore-api-smoke.yml -f query=legacy-apps
 ```
 
+Use `.github/workflows/msstore-publish-msix.yml` for the guarded package update
+path after the first manual submission is accepted.
+
+Read-only status:
+
+```bash
+gh workflow run msstore-publish-msix.yml -f mode=status -f product_id=9P5S7747V0BP
+```
+
+Upload a newly built MSIX into the current draft without committing it:
+
+```bash
+gh workflow run msstore-publish-msix.yml -f mode=draft -f product_id=9P5S7747V0BP
+```
+
+Commit the current draft to Microsoft certification:
+
+```bash
+gh workflow run msstore-publish-msix.yml -f mode=publish -f product_id=9P5S7747V0BP
+```
+
+Do not run `mode=draft` or `mode=publish` against `Submission 1` while it is in
+certification. The workflow exists for future API-managed updates after the
+first manual submission is accepted.
+
 ## Local Smoke
 
 Set the same environment variables locally, then run:
@@ -112,9 +139,9 @@ Dictate:
 
 1. Complete `Submission 1` manually in Partner Center.
 2. Use the API smoke workflow to confirm credentials and product access.
-3. Add package/listing upload automation only after the MSIX/PWA product accepts
-   the package, or after a separate MSI/EXE product is created for Tauri
-   installer output.
+3. Use `msstore-publish-msix.yml` for future API-managed package updates after
+   the MSIX/PWA product accepts the first manual submission, or after a separate
+   MSI/EXE product is created for Tauri installer output.
 4. Use API-created submissions consistently for future automated updates.
 
 Current state: `Submission 1` is already in certification. Do not create or
@@ -156,3 +183,8 @@ The current helper supports:
 - `status`
 - `metadata`
 - guarded `submit --confirm-submit`
+
+The manual publish workflow uses Microsoft Store Developer CLI because Microsoft
+documents `msstore publish --inputFile <msix> --appId <productId> --noCommit`
+for MSIX package upload and `msstore submission publish <productId>` for the
+separate commit step.

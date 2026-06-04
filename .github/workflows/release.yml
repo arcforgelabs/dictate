@@ -221,6 +221,9 @@ jobs:
     needs: [release]
     permissions:
       contents: write
+    env:
+      HAS_WINDOWS_SIGNING_PFX: ${{ secrets.WINDOWS_SIGNING_PFX_B64 != '' }}
+      HAS_WINDOWS_SIGNING_CERT_PATH: ${{ vars.WINDOWS_SIGNING_CERT_PATH != '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -253,6 +256,16 @@ jobs:
       - name: Build the Windows desktop bundle
         shell: pwsh
         run: .\scripts\build-windows-desktop.ps1
+
+      - name: Sign Windows desktop artifacts
+        if: env.HAS_WINDOWS_SIGNING_PFX == 'true' || env.HAS_WINDOWS_SIGNING_CERT_PATH == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          WINDOWS_SIGNING_CERT_PATH: ${{ vars.WINDOWS_SIGNING_CERT_PATH }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: .\scripts\sign-windows-artifacts.ps1
 
       - name: Check whether Windows artifacts are signed
         id: signed

@@ -14,12 +14,17 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
    publishing for the first `Arc Forge Dictate` submission.
 2. Run a real Windows install/runtime smoke after package download or Store
    availability.
-3. Add signing for direct-download Windows artifacts before attaching `.msi` or
-   `.exe` installers to public GitHub releases.
-4. Add mutating Microsoft Store package/listing upload automation after the
-   first manual submission is accepted and the API path is confirmed.
-5. Keep ClawSweeper scheduled/background runs disabled for Dictate until several
-   manual smokes pass without branch, credential, or state-sync regressions.
+3. Configure a real Windows signing certificate in GitHub Actions before
+   attaching `.msi` or `.exe` installers to public GitHub releases. The signing
+   script and release workflow path exist, but no signing certificate secret is
+   currently configured.
+4. Use the guarded Microsoft Store MSIX publish workflow for future package
+   updates after the first manual submission is accepted. The workflow can check
+   status, upload a generated MSIX as an uncommitted draft, or explicitly commit
+   the draft.
+5. Keep ClawSweeper scheduled/background runs disabled for Dictate until the
+   maintainer decides scheduled fanout should begin. Manual smokes are passing;
+   `CLAWSWEEPER_ENABLE_SCHEDULES` remains `0`.
 6. Review and explicitly approve any future Dictate ClawSweeper auto-close
    policy before enabling it.
 
@@ -36,6 +41,8 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 - Dictate is a public open-source repository.
 - Arc Forge ClawSweeper and its durable state repository remain private.
 - ClawSweeper is currently review/comment only for Dictate.
+- Recent manual ClawSweeper smokes passed for Dictate and Arc Forge Console:
+  `26925824791`, `26929644423`, `26930314117`, and `26930384789`.
 
 ## References
 

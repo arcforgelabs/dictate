@@ -71,6 +71,11 @@ scripts/build-windows-desktop.ps1
 - `scripts/assert-windows-artifacts-signed.ps1` is the public-release guardrail:
   direct-download Windows installers must be signed before they are attached to a
   GitHub release.
+- `scripts/sign-windows-artifacts.ps1` signs `.msi` and `.exe` artifacts when a
+  signing certificate is configured. CI supports either a base64 PFX in
+  `WINDOWS_SIGNING_PFX_B64` plus `WINDOWS_SIGNING_PFX_PASSWORD`, or a runner-local
+  `WINDOWS_SIGNING_CERT_PATH`. Without those credentials, Windows release
+  artifacts remain internal workflow artifacts.
 
 ## Windows Store MSIX flow
 
@@ -94,6 +99,11 @@ scripts/build-windows-msix-store.ps1
 - **Manual (`.github/workflows/windows-msix-store-bundle.yml`,
   `workflow_dispatch`)** builds `packaging/msix/out/*.msix` for Partner Center
   package validation. Trigger: `gh workflow run windows-msix-store-bundle.yml`.
+- **Manual (`.github/workflows/msstore-publish-msix.yml`, `workflow_dispatch`)**
+  uses Microsoft Store Developer CLI for current-state checks, draft package
+  upload, or explicit publish/commit. Use `mode=status` for read-only checks,
+  `mode=draft` to upload a generated MSIX without committing, and `mode=publish`
+  only after the draft should be submitted to Microsoft.
 - The manifest identity is pinned to Partner Center:
   `ArcForgeLabs.ArcForgeDictate` and
   `CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C`.

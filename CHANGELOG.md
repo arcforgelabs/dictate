@@ -7,10 +7,16 @@
 - Added Windows desktop packaging support for Dictate, including Tauri MSI/NSIS
   bundle targets and a Windows build script that stages the Python engine before
   bundling.
+- Added an opt-in Windows Authenticode signing script and release workflow step
+  for direct-download `.msi` and `.exe` artifacts. Public release upload still
+  requires signature validation, and unsigned artifacts remain internal.
 - Added Microsoft Store MSIX packaging for the reserved Partner Center product
   identity `ArcForgeLabs.ArcForgeDictate`.
 - Added Microsoft Store API smoke automation with repository variables for
   non-secret IDs and `MSSTORE_CLIENT_SECRET` stored as a GitHub Actions secret.
+- Added a guarded manual Microsoft Store MSIX publish workflow. It can check
+  status, upload a generated MSIX as an uncommitted draft, or explicitly commit
+  a draft after the first manual submission is accepted.
 - Added Dictate as a first-class Arc Forge ClawSweeper target with a Dictate
   dispatcher workflow for issue, pull request, and command-comment events.
 - Added ClawSweeper default-branch fallback handling so dispatches that omit
@@ -42,6 +48,12 @@
 - Microsoft Store API smoke workflow passed on run `26927988050`.
 - Dictate ClawSweeper smoke passed on run `26925824791` against
   `arcforgelabs/dictate#8`.
+- Arc Forge Console ClawSweeper smoke passed on run `26929644423` against
+  `arcforgelabs/arc-forge-console#136`.
+- A second Dictate ClawSweeper smoke passed on run `26930314117` against
+  `arcforgelabs/dictate#8`.
+- A third sequential Dictate ClawSweeper smoke passed on run `26930384789`
+  against `arcforgelabs/dictate#8`.
 
 ### Notes
 
@@ -54,3 +66,7 @@
 - Store submission mutation automation remains intentionally pending until the
   first manual submission is accepted and the package/listing API path is
   confirmed for this MSIX/PWA product.
+- No Windows signing certificate secret is configured in GitHub Actions yet;
+  configure `WINDOWS_SIGNING_PFX_B64` and `WINDOWS_SIGNING_PFX_PASSWORD`, or a
+  trusted runner-local `WINDOWS_SIGNING_CERT_PATH`, before expecting public
+  direct-download Windows installers.
