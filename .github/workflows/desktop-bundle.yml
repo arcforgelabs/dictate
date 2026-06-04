@@ -11,6 +11,9 @@ on:
         required: false
         default: "deb,appimage"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   bundle:
     name: Build desktop bundle

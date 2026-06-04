@@ -5,6 +5,9 @@ name: Windows Store MSIX bundle (manual)
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   bundle:
     name: Build Windows Store MSIX

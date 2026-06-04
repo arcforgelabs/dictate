@@ -21,6 +21,9 @@ on:
           - status
           - metadata
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   smoke:
     name: Store API smoke

@@ -38,6 +38,8 @@
 - Updated pinned official GitHub Actions to Node 24-compatible majors while
   preserving SHA pinning: `actions/checkout` v6, `actions/setup-python` v6, and
   `actions/setup-node` v5, and `actions/upload-artifact` v5.
+- Opted workflows into GitHub's Node 24 JavaScript action runtime ahead of the
+  June 2026 runner default change.
 - Updated the UI development toolchain to remediate public Dependabot alerts:
   `vite` v8, `vitest` v4, and `@vitejs/plugin-react` v6.
 

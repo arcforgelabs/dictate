@@ -17,6 +17,9 @@ on:
         required: true
         default: "9P5S7747V0BP"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
 
