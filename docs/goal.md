@@ -11,8 +11,9 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 ## Remaining Work
 
 1. Wait for Microsoft Partner Center certification and automatic Store
-   publishing for the first `Arc Forge Dictate` submission. Store CLI status run
-   `26930886850` confirmed the pending submission is still in `Certification`.
+   publishing after the privacy URL correction was resubmitted on `2026-06-05`.
+   Store CLI status run `26988971067` confirmed the pending submission is back
+   in `Certification`.
 2. Run a real Windows install/runtime smoke after package download or Store
    availability.
 3. Configure a real Windows signing certificate in GitHub Actions before
@@ -50,6 +51,16 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
   and reported the pending submission status as `Certification`.
 - Microsoft Store Developer CLI status mode passed again on run `26930886850`
   and reported the pending submission status as `Certification`.
+- Microsoft Partner Center certification report
+  `a0cf5c57-d578-48d9-b707-68a7a207ff6a` completed on `2026-06-04` with status
+  `Attention needed` because the submitted privacy URL pointed to the general
+  Arc Forge privacy page rather than the dedicated Dictate privacy policy.
+- Microsoft Store Developer CLI status mode passed on run `26988691332` and
+  reported the pending submission status as `CertificationFailed`.
+- The Partner Center privacy policy URL was corrected to
+  `https://arcforge.au/privacy/dictate` and resubmitted on `2026-06-05`.
+- Microsoft Store Developer CLI status mode passed on run `26988971067` and
+  reported the pending submission status as `Certification`.
 - UI Dependabot alerts for `vitest`, `vite`, and `esbuild` were remediated by
   upgrading the UI development toolchain; `npm audit` now reports zero
   vulnerabilities in the UI package.

@@ -85,7 +85,7 @@ Update or uninstall from a repo root:
 
 Use `-RemoveUserData` with the uninstaller only when config, logs, history, and downloaded model data should also be removed.
 
-The setup wizard links to Dictate documentation and Arc Forge terms at <https://arcforge.au/terms>. Dictate is built to be useful, but support and maintenance are best-effort. Verify important transcriptions, keep control of connected provider accounts, report issues, and consider paid support if Dictate saves you time and you have the means.
+The setup wizard links to Dictate documentation, the dedicated Dictate privacy policy at <https://arcforge.au/privacy/dictate>, and Arc Forge terms at <https://arcforge.au/terms>. Dictate is built to be useful, but support and maintenance are best-effort. Verify important transcriptions, keep control of connected provider accounts, report issues, and consider paid support if Dictate saves you time and you have the means.
 
 Manual install:
 

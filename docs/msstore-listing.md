@@ -31,13 +31,14 @@ claims conservative and aligned with the current app behavior.
 - Website: `https://arcforge.au`
 - Support URL: `https://github.com/arcforgelabs/dictate/issues`
 - Terms URL: `https://arcforge.au/terms`
-- Privacy policy URL: `https://arcforge.au/privacy`
+- Privacy policy URL: `https://arcforge.au/privacy/dictate`
 
 Privacy policy status:
 
-- The Arc Forge privacy page is live and covers Dictate microphone/audio
+- The dedicated Dictate privacy page is live and covers microphone/audio
   capture, local transcript history, downloaded speech models, optional hosted
-  transcription providers, API key storage, logs, and deletion/removal paths.
+  transcription providers, API key storage, logs, download/update metadata,
+  user-submitted support data, and deletion/removal paths.
 
 ## Short Description
 
@@ -121,6 +122,18 @@ Current Partner Center state:
   `/tmp/arc-forge-dictate-store-screenshot-1400x900.png`.
 - The package icons are being used for Store logos unless separate art is added
   later.
+- Certification report `a0cf5c57-d578-48d9-b707-68a7a207ff6a` completed on
+  `2026-06-04` with status `Attention needed` under policy `10.5.1 Personal
+  Information - Privacy Policy`. Microsoft rejected the prior privacy URL
+  `https://arcforge.au/privacy` because it did not display an app privacy
+  policy.
+- Store CLI status run `26988691332` passed on `2026-06-05` and reported
+  `Submission Status = CertificationFailed`.
+- The Partner Center privacy policy URL was corrected to
+  `https://arcforge.au/privacy/dictate` and the submission was resubmitted on
+  `2026-06-05`.
+- Store CLI status run `26988971067` passed on `2026-06-05` and reported
+  `Submission Status = Certification`.
 
 Suggested screenshots:
 
@@ -197,10 +210,12 @@ recent transcript history for copy/paste recovery.
   - Submission options: complete, with publishing set to start as soon as
     certification passes.
   - Age ratings: complete; IARC questionnaire and Terms of Use approval saved.
-  - Product submission: in certification.
-  - Certification stage: pre-processing.
+  - Product submission: in certification after privacy URL correction and
+    resubmission on `2026-06-05`.
+  - Certification stage: Store CLI status run `26988971067` reported
+    `Certification`.
   - Publishing mode: product starts publishing as soon as certification passes.
-- Confirm privacy policy page is still live.
+- Confirm `https://arcforge.au/privacy/dictate` is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
 - Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
   direct-download fallback only.

@@ -28,6 +28,9 @@
 - Moved public install messaging toward Microsoft Store as the primary Windows
   distribution path, with website/GitHub download artifacts treated as a signed
   secondary path.
+- Updated Microsoft Store readiness docs to use the dedicated Dictate privacy
+  policy URL, `https://arcforge.au/privacy/dictate`, after Partner Center
+  rejected the prior general privacy URL.
 - Reclassified hosted PowerShell bootstrap instructions as developer/source
   install guidance rather than the normal public Windows install path.
 - Preserved the deprecated personal npm package path only as a compatibility
@@ -78,6 +81,18 @@
   runtime opt-in.
 - GitHub Dependabot reported zero open alerts after the UI development
   toolchain update.
+- Microsoft Partner Center certification report
+  `a0cf5c57-d578-48d9-b707-68a7a207ff6a` completed on `2026-06-04` with status
+  `Attention needed` under policy `10.5.1 Personal Information - Privacy
+  Policy`.
+- Microsoft Store MSIX publish workflow `status` mode passed on run
+  `26988691332`; it reported the pending submission status as
+  `CertificationFailed`.
+- The Partner Center privacy policy URL was corrected to
+  `https://arcforge.au/privacy/dictate` and `Submission 1` was resubmitted on
+  `2026-06-05`.
+- Microsoft Store MSIX publish workflow `status` mode passed on run
+  `26988971067`; it reported the pending submission status as `Certification`.
 
 ### Notes
 
