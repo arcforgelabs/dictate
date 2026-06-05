@@ -17,13 +17,13 @@ from dictate.hotkey import (
 )
 
 PRESET_COMBOS: tuple[tuple[str, str], ...] = (
-    ("Right Ctrl", "ctrl_r"),
-    ("Left Ctrl", "ctrl_l"),
+    ("Ctrl (R)", "ctrl_r"),
+    ("Ctrl (L)", "ctrl_l"),
     ("Ctrl + Space", "ctrl+space"),
     ("Ctrl + Shift", "ctrl+shift"),
-    ("Left Ctrl + Space", "ctrl_l+space"),
-    ("Right Alt", "alt_r"),
-    ("Left Alt", "alt_l"),
+    ("Ctrl (L) + Space", "ctrl_l+space"),
+    ("Alt (R)", "alt_r"),
+    ("Alt (L)", "alt_l"),
 )
 
 

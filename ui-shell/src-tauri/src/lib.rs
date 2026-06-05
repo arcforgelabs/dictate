@@ -9,6 +9,7 @@
 
 use std::env;
 use std::fs;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
@@ -24,6 +25,7 @@ use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 struct Handshake {
     url: String,
     token: String,
+    pid: Option<u32>,
 }
 
 // The spawned engine process, killed when the app exits.
@@ -91,10 +93,66 @@ fn data_dir() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".local/share/dictate"))
 }
 
+fn handshake_path() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join("ui-server.json"))
+}
+
 fn read_handshake() -> Option<Handshake> {
-    let path = data_dir()?.join("ui-server.json");
+    let path = handshake_path()?;
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str::<Handshake>(&raw).ok()
+}
+
+fn remove_handshake() {
+    if let Some(path) = handshake_path() {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn handshake_port(url: &str) -> Option<u16> {
+    let without_scheme = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
+    let authority = without_scheme.split('/').next()?;
+    let (host, port) = authority.rsplit_once(':')?;
+    if host != "127.0.0.1" && host != "localhost" {
+        return None;
+    }
+    port.parse().ok()
+}
+
+fn process_exists(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return std::path::Path::new("/proc").join(pid.to_string()).exists();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+fn handshake_is_live(handshake: &Handshake) -> bool {
+    if let Some(pid) = handshake.pid {
+        if !process_exists(pid) {
+            return false;
+        }
+    }
+    let Some(port) = handshake_port(&handshake.url) else {
+        return false;
+    };
+    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
+}
+
+fn read_live_handshake() -> Option<Handshake> {
+    let h = read_handshake()?;
+    if handshake_is_live(&h) {
+        return Some(h);
+    }
+    remove_handshake();
+    None
 }
 
 /// The bundled engine launcher, if this is a packaged build.
@@ -177,13 +235,13 @@ fn spawn_engine(app: &tauri::App) {
 
 /// Return a live handshake, starting the engine and polling briefly if needed.
 fn ensure_engine(app: &tauri::App) -> Option<Handshake> {
-    if let Some(h) = read_handshake() {
+    if let Some(h) = read_live_handshake() {
         return Some(h);
     }
     spawn_engine(app);
     for _ in 0..80 {
         sleep(Duration::from_millis(100));
-        if let Some(h) = read_handshake() {
+        if let Some(h) = read_live_handshake() {
             return Some(h);
         }
     }
@@ -324,6 +382,7 @@ mod tests {
         let h = Handshake {
             url: "http://127.0.0.1:8765".into(),
             token: "secret".into(),
+            pid: None,
         };
         let script = build_init_script("kde", Some(&h));
         assert!(script.contains("http://127.0.0.1:8765"));
@@ -345,6 +404,26 @@ mod tests {
             assert_eq!(engine_binary_names()[0], "dictate-engine.exe");
         } else {
             assert_eq!(engine_binary_names(), &["dictate-engine"]);
+        }
+    }
+
+    #[test]
+    fn extracts_loopback_handshake_port() {
+        assert_eq!(handshake_port("http://127.0.0.1:8765"), Some(8765));
+        assert_eq!(handshake_port("http://localhost:38769/api/state"), Some(38769));
+        assert_eq!(handshake_port("https://example.com:443"), None);
+        assert_eq!(handshake_port("not a url"), None);
+    }
+
+    #[test]
+    fn rejects_missing_linux_pid() {
+        if cfg!(target_os = "linux") {
+            let h = Handshake {
+                url: "http://127.0.0.1:9".into(),
+                token: "secret".into(),
+                pid: Some(u32::MAX),
+            };
+            assert!(!handshake_is_live(&h));
         }
     }
 }

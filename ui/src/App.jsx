@@ -16,7 +16,7 @@ export default function App() {
   const [view, setView] = useState("status");
   const [model, setModelState] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
-  const [shortcut, setShortcutState] = useState(["Right Ctrl"]);
+  const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
   const [device2, setDevice2State] = useState("auto");
@@ -214,7 +214,7 @@ export default function App() {
   };
   const dictateOnce = () => { if (recRef.current || live) return; setRecording(true); setTimeout(dictateStop, 1300); };
 
-  // ---- global keyboard: ⌘K palette + push-to-talk demo (Right Ctrl) ----
+  // ---- global keyboard: ⌘K palette + push-to-talk demo (Ctrl (R)) ----
   useEffect(() => {
     const down = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
@@ -318,7 +318,7 @@ function providerLabel(brand) {
   return { openai: "OpenAI", xai: "xAI", gemini: "Gemini" }[brand] || brand;
 }
 
-// Display keys (["Ctrl","Shift","R"] / ["Right Ctrl"]) -> engine combo token.
+// Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) -> engine combo token.
 function comboToToken(arr) {
   const map = { "Ctrl": "ctrl", "Ctrl (R)": "ctrl_r", "Right Ctrl": "ctrl_r", "Ctrl (L)": "ctrl_l",
     "Alt": "alt", "Shift": "shift", "Super": "super" };

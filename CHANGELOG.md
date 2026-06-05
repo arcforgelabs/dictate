@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-06-05
+
+### Fixed
+
+- Fixed the Linux Tauri shell startup path so stale `ui-server.json` handshakes
+  are ignored and removed instead of preventing the shell from spawning a live
+  engine.
+- Updated side-specific shortcut labels to use Linux-style names such as
+  `Ctrl (R)` while preserving the existing `ctrl_r` engine token.
+
+### Changed
+
+- Switched the local Linux workstation config from `faster-whisper/turbo` to
+  `faster-whisper/base` on CPU to reduce release-to-text latency when CUDA is
+  unavailable.
+
+### Verified
+
+- Confirmed the local Linux daemon is active under `dictate-local.service`,
+  using `faster-whisper/base` with the `ctrl_r` push-to-talk combo.
+- Ran focused hotkey and UI server unit tests with the repo virtualenv:
+  `PYTHONPATH=src .venv/bin/python -m unittest tests.test_hotkey
+  tests.test_ui_server tests.test_headless_ui_server`.
+
 ## 2026-06-04
 
 ### Added

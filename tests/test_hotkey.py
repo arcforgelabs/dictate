@@ -66,7 +66,7 @@ class HotkeyTests(unittest.TestCase):
         self.assertEqual(_normalize_evdev_keycode("KEY_RIGHTCTRL"), "ctrl_r")
 
     def test_display_name_is_human_readable(self) -> None:
-        self.assertEqual(format_hotkey_combo("ctrl_r"), "Right Ctrl")
+        self.assertEqual(format_hotkey_combo("ctrl_r"), "Ctrl (R)")
         self.assertEqual(format_hotkey_combo("ctrl+space"), "Ctrl + Space")
 
 
