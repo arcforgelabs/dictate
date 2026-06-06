@@ -107,6 +107,9 @@ export const ipc = {
   async checkUpdates() {
     return call("GET", "/api/update-status");
   },
+  async startUpdate() {
+    return call("POST", "/api/update");
+  },
 
   // Server-sent events: live recording / status pushes from the daemon.
   subscribe(onEvent) {

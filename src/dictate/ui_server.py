@@ -214,6 +214,9 @@ class UiBackend:
     check_update_status: Callable[[], update_status_mod.UpdateStatus] = (
         update_status_mod.check_update_status
     )
+    start_update_flow: Callable[[], update_status_mod.UpdateFlow] = (
+        update_status_mod.start_update_flow
+    )
     startup_enabled: Callable[[], bool] = startup_mod.startup_enabled
     set_startup_enabled: Callable[[bool], None] = startup_mod.set_startup_enabled
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -487,6 +490,18 @@ class UiBackend:
             "url": status.url,
         }
 
+    def start_update(self) -> dict[str, Any]:
+        try:
+            flow = self.start_update_flow()
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(500, f"could not start update: {exc}") from exc
+        return {
+            "mode": flow.mode,
+            "started": flow.started,
+            "url": flow.url,
+            "message": flow.message,
+        }
+
     @staticmethod
     def _safe(fn: Callable[[], Any], default: Any) -> Any:
         try:
@@ -636,6 +651,8 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.run_doctor())
         if path == "/api/update-status" and method == "GET":
             return _Response(200, backend.get_update_status())
+        if path == "/api/update" and method == "POST":
+            return _Response(200, backend.start_update())
         if path == "/api/events" and method == "GET":
             return _Response(200, sse=self.server.broker.subscribe())  # type: ignore[attr-defined]
         raise ApiError(404, f"no route for {method} {path}")

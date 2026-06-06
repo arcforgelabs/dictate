@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dictate.api_keys import ApiKeyStatus
 from dictate.history import HistoryStore
-from dictate.update_status import UpdateStatus
+from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
     DEFAULT_PREFS,
@@ -41,6 +41,12 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
             update_available=True,
             checked=True,
             url="https://example.test/releases",
+        ),
+        start_update_flow=lambda: UpdateFlow(
+            mode="release",
+            started=False,
+            url="https://example.test/releases",
+            message="Open the latest Linux package.",
         ),
         startup_enabled=lambda: True,
         set_startup_enabled=lambda enabled: None,
@@ -248,6 +254,14 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertTrue(status["checked"])
             self.assertEqual(status["url"], "https://example.test/releases")
 
+    def test_start_update_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            flow = _backend(d).start_update()
+            self.assertEqual(flow["mode"], "release")
+            self.assertFalse(flow["started"])
+            self.assertEqual(flow["url"], "https://example.test/releases")
+            self.assertEqual(flow["message"], "Open the latest Linux package.")
+
 
 class HttpIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -265,6 +279,14 @@ class HttpIntegrationTests(unittest.TestCase):
         req = urllib.request.Request(self.base + path)
         if token:
             req.add_header("Authorization", f"Bearer {token}")
+        return urllib.request.urlopen(req, timeout=5)
+
+    def _post(self, path: str, payload=None, token: str | None = "test-token"):
+        data = json.dumps(payload or {}).encode()
+        req = urllib.request.Request(self.base + path, data=data, method="POST")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
         return urllib.request.urlopen(req, timeout=5)
 
     def test_health_is_unauthenticated(self) -> None:
@@ -290,6 +312,14 @@ class HttpIntegrationTests(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["updateAvailable"])
         self.assertEqual(body["latestVersion"], RELEASE_VERSION)
+
+    def test_authorized_update_start(self) -> None:
+        with self._post("/api/update") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body["mode"], "release")
+        self.assertFalse(body["started"])
+        self.assertEqual(body["url"], "https://example.test/releases")
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

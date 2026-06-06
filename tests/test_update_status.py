@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 import urllib.error
 from unittest.mock import patch
 
-from dictate.update_status import check_update_status, is_newer_version, parse_calver
+from dictate.update_status import (
+    RELEASES_URL,
+    check_update_status,
+    is_newer_version,
+    parse_calver,
+    start_update_flow,
+)
 
 
 class _FakeResponse:
@@ -76,6 +84,38 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertFalse(status.checked)
         self.assertIsNotNone(status.error)
         self.assertFalse(status.update_available)
+
+    def test_linux_source_update_runs_validated_update_script(self) -> None:
+        calls = []
+
+        def fake_popen(command, cwd):  # noqa: ANN001
+            calls.append((command, cwd))
+            return object()
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "update.sh").write_text("#!/usr/bin/env bash\n")
+            (root / "pyproject.toml").write_text("[project]\nname='dictate'\n")
+            (root / "src" / "dictate").mkdir(parents=True)
+            with patch("dictate.update_status.sys.platform", "linux"):
+                with patch("dictate.update_status._candidate_source_roots", return_value=[root]):
+                    with patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen):
+                        flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "command")
+        self.assertTrue(flow.started)
+        self.assertEqual(calls, [(["bash", str(root / "update.sh")], str(root))])
+
+    def test_linux_package_update_falls_back_to_releases(self) -> None:
+        with patch("dictate.update_status.sys.platform", "linux"):
+            with patch("dictate.update_status._candidate_source_roots", return_value=[]):
+                with patch("dictate.update_status.subprocess.Popen") as popen:
+                    flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "release")
+        self.assertFalse(flow.started)
+        self.assertEqual(flow.url, RELEASES_URL)
+        popen.assert_not_called()
 
 
 if __name__ == "__main__":

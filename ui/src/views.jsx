@@ -317,6 +317,7 @@ function StartupView() {
 function AdvancedView() {
   const s = useStore();
   const [checks, setChecks] = useState(null);
+  const canStartUpdate = !!s.updateStatus?.updateAvailable && !s.updateStatus?.checking;
   const updateHelp = (() => {
     const u = s.updateStatus || {};
     if (u.checking) return `Version ${s.version} · checking`;
@@ -367,9 +368,16 @@ function AdvancedView() {
         <div className="lead"><h3 className="t-heading">About</h3></div>
         <div className="card pad">
           <Row icon="download" label="Dictate" help={updateHelp}>
-            <button className="btn sm" onClick={s.checkUpdates} disabled={!!s.updateStatus?.checking} style={{ opacity: s.updateStatus?.checking ? .6 : 1 }}>
-              {s.updateStatus?.checking ? "Checking..." : "Check for updates"}
-            </button></Row>
+            <div className="row-actions">
+              <button className="btn sm" onClick={s.checkUpdates} disabled={!!s.updateStatus?.checking} style={{ opacity: s.updateStatus?.checking ? .6 : 1 }}>
+                {s.updateStatus?.checking ? "Checking..." : "Check for updates"}
+              </button>
+              {canStartUpdate ? (
+                <button className="btn primary sm" onClick={s.startUpdate} disabled={!!s.updateStatus?.updating} style={{ opacity: s.updateStatus?.updating ? .6 : 1 }}>
+                  {s.updateStatus?.updating ? "Starting..." : "Update"}
+                </button>
+              ) : null}
+            </div></Row>
         </div>
       </div>
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 import re
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 
@@ -25,6 +28,14 @@ class UpdateStatus:
     checked: bool = False
     error: str | None = None
     url: str | None = None
+
+
+@dataclass(frozen=True)
+class UpdateFlow:
+    mode: str
+    started: bool
+    url: str | None = None
+    message: str | None = None
 
 
 def parse_calver(value: str | None) -> tuple[int, int, int, int] | None:
@@ -57,6 +68,68 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
         )
     except Exception as exc:  # noqa: BLE001
         return UpdateStatus(current_version=RELEASE_VERSION, checked=False, error=str(exc))
+
+
+def start_update_flow() -> UpdateFlow:
+    """Start the safest available update path for this install.
+
+    Linux packages do not currently have an in-app package manager integration,
+    so packaged installs return the releases URL for the UI to open. Source
+    checkouts can run the repository's own update.sh after validating the root.
+    """
+    if sys.platform.startswith("linux"):
+        source_root = _find_source_root()
+        if source_root is not None:
+            command = ["bash", str(source_root / "update.sh")]
+            subprocess.Popen(command, cwd=str(source_root))  # noqa: S603
+            return UpdateFlow(
+                mode="command",
+                started=True,
+                message="Started the Linux source updater.",
+            )
+        return UpdateFlow(
+            mode="release",
+            started=False,
+            url=RELEASES_URL,
+            message="Open the latest Linux package from GitHub releases.",
+        )
+
+    return UpdateFlow(
+        mode="release",
+        started=False,
+        url=RELEASES_URL,
+        message="Open the latest release for this platform.",
+    )
+
+
+def _candidate_source_roots() -> list[Path]:
+    roots = [
+        Path.cwd(),
+        Path(__file__).resolve().parents[2],
+    ]
+    executable = Path(sys.executable).resolve()
+    roots.extend(executable.parents[:4])
+
+    unique: list[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _find_source_root() -> Path | None:
+    for root in _candidate_source_roots():
+        if _is_source_root(root):
+            return root
+    return None
+
+
+def _is_source_root(root: Path) -> bool:
+    return (
+        (root / "update.sh").is_file()
+        and (root / "pyproject.toml").is_file()
+        and (root / "src" / "dictate").is_dir()
+    )
 
 
 def _fetch_latest_release(*, timeout: float) -> tuple[str, str | None]:

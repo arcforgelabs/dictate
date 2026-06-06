@@ -135,6 +135,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .row .lbl{font-size:14px;font-weight:600;}
 .row .help{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4;}
 .row .ctrl{flex:0 0 auto;display:flex;align-items:center;gap:10px;}
+.row-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
 
 /* status hero */
 .hero{display:flex;align-items:center;gap:20px;padding:22px;background:var(--surface);border:1px solid var(--border);

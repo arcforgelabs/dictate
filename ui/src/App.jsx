@@ -43,7 +43,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
-  const [updateStatus, setUpdateStatus] = useState({ checked: false, checking: false });
+  const [updateStatus, setUpdateStatus] = useState({ checked: false, checking: false, updating: false });
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
 
@@ -191,6 +191,27 @@ export default function App() {
         toast("Could not check for updates", { bad: true });
       });
   };
+  const startUpdate = () => {
+    setUpdateStatus((u) => ({ ...u, updating: true, error: null }));
+    if (!ipc.isLive()) {
+      window.open("https://github.com/arcforgelabs/dictate/releases", "_blank", "noopener,noreferrer");
+      setUpdateStatus((u) => ({ ...u, updating: false }));
+      toast("Opened latest release");
+      return;
+    }
+    ipc.startUpdate()
+      .then((flow) => {
+        setUpdateStatus((u) => ({ ...u, updating: false }));
+        if (flow?.url) {
+          window.open(flow.url, "_blank", "noopener,noreferrer");
+        }
+        toast(flow?.message || (flow?.started ? "Update started" : "Opened latest release"));
+      })
+      .catch((e) => {
+        setUpdateStatus((u) => ({ ...u, updating: false, error: e.message || "Could not start update" }));
+        toast("Could not start update", { bad: true });
+      });
+  };
   const mockDoctor = () => ({
     ok: true,
     checks: [
@@ -265,7 +286,7 @@ export default function App() {
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
     recording, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
-    runDoctor, version, updateStatus, checkUpdates,
+    runDoctor, version, updateStatus, checkUpdates, startUpdate,
   };
 
   const NAV = [

@@ -178,15 +178,14 @@ fn bundled_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
 
 fn engine_resource_dirs<R: Runtime, M: Manager<R>>(app: &M) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Ok(res) = app.path().resource_dir() {
-        dirs.push(res);
-    }
     if let Ok(exe) = env::current_exe() {
         if let Some(parent) = exe.parent() {
-            let parent = parent.to_path_buf();
-            if !dirs.iter().any(|dir| dir == &parent) {
-                dirs.push(parent);
-            }
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        if !dirs.iter().any(|dir| dir == &res) {
+            dirs.push(res);
         }
     }
     dirs

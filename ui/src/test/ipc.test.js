@@ -93,4 +93,24 @@ describe("ipc bridge", () => {
       }),
     );
   });
+
+  it("starts the update flow through the authenticated backend route", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ mode: "release", url: "https://example.test/releases" }),
+    });
+
+    await expect(ipc.startUpdate()).resolves.toEqual({
+      mode: "release",
+      url: "https://example.test/releases",
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/update",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t" },
+      }),
+    );
+  });
 });
