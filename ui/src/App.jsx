@@ -113,9 +113,20 @@ export default function App() {
 
   // ---- persisting mutations (optimistic local + IPC when live) ----
   const persist = (payload) => { if (ipc.isLive()) ipc.patchConfig(payload).catch(() => toast("Could not save change", { bad: true })); };
+  const persistOrThrow = (payload) => ipc.isLive() ? ipc.patchConfig(payload) : Promise.resolve(null);
 
   const setModel = (id) => { setModelState(id); const m = modelById(id); persist({ model: { backend: m.backend, model: id.split("/").slice(1).join("/") } }); };
-  const setShortcut = (arr) => { setShortcutState(arr); persist({ shortcut: { combo: comboToToken(arr), activation } }); };
+  const setShortcut = async (arr) => {
+    const previous = shortcut;
+    setShortcutState(arr);
+    try {
+      await persistOrThrow({ shortcut: { combo: comboToToken(arr), activation } });
+    } catch (e) {
+      setShortcutState(previous);
+      toast("Could not save change", { bad: true });
+      throw e;
+    }
+  };
   const setActivation = (v) => { setActivationState(v); persist({ shortcut: { activation: v } }); };
   const setTheme = (v) => { setThemeState(v); persist({ prefs: { theme: v } }); };
   const setStartup = (v) => { setStartupState(v); persist({ startup: v }); };

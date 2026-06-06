@@ -176,7 +176,18 @@ function PttView() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [armed]);
-  const save = () => { if (caught) { s.setShortcut(caught); s.toast("Shortcut updated"); } setArmed(false); setCaught(null); };
+  const save = async () => {
+    if (caught) {
+      try {
+        await s.setShortcut(caught);
+        s.toast("Shortcut updated");
+      } catch (e) {
+        // The store already restored the previous shortcut and showed the error.
+      }
+    }
+    setArmed(false);
+    setCaught(null);
+  };
 
   return (
     <div className="view">

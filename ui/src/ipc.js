@@ -17,20 +17,41 @@ function bridge() {
   return cfg && cfg.baseUrl && cfg.token ? cfg : null;
 }
 
+async function refreshBridge() {
+  const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+  const invoke = t && t.core && t.core.invoke;
+  if (!invoke) return null;
+  let next;
+  try {
+    next = await invoke("refresh_bridge");
+  } catch (e) {
+    return null;
+  }
+  if (!next || !next.baseUrl || !next.token) return null;
+  window.__DICTATE__ = { ...(injected() || {}), ...next };
+  return bridge();
+}
+
 export function isLive() {
   return !!bridge();
 }
 
-async function call(method, path, body) {
+async function call(method, path, body, retry = true) {
   const cfg = bridge();
   if (!cfg) throw new Error("not-live");
   const headers = { Authorization: `Bearer ${cfg.token}` };
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(cfg.baseUrl + path, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(cfg.baseUrl + path, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    if (retry && await refreshBridge()) return call(method, path, body, false);
+    throw e;
+  }
   let data = null;
   try {
     data = await res.json();
@@ -38,6 +59,9 @@ async function call(method, path, body) {
     data = null;
   }
   if (!res.ok) {
+    if (retry && res.status === 401 && await refreshBridge()) {
+      return call(method, path, body, false);
+    }
     const message = (data && data.error) || `${res.status} ${res.statusText}`;
     throw new Error(message);
   }

@@ -16,16 +16,24 @@ use std::sync::{Mutex, OnceLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 #[derive(Deserialize, Debug, Clone)]
 struct Handshake {
     url: String,
     token: String,
     pid: Option<u32>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgePayload {
+    base_url: String,
+    token: String,
+    platform: String,
 }
 
 // The spawned engine process, killed when the app exits.
@@ -156,7 +164,7 @@ fn read_live_handshake() -> Option<Handshake> {
 }
 
 /// The bundled engine launcher, if this is a packaged build.
-fn bundled_engine(app: &tauri::App) -> Option<PathBuf> {
+fn bundled_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     for base in engine_resource_dirs(app) {
         for name in engine_binary_names() {
             let candidate = base.join("engine").join(name);
@@ -168,7 +176,7 @@ fn bundled_engine(app: &tauri::App) -> Option<PathBuf> {
     None
 }
 
-fn engine_resource_dirs(app: &tauri::App) -> Vec<PathBuf> {
+fn engine_resource_dirs<R: Runtime, M: Manager<R>>(app: &M) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(res) = app.path().resource_dir() {
         dirs.push(res);
@@ -194,7 +202,7 @@ fn engine_binary_names() -> &'static [&'static str] {
 
 /// Start the engine: the bundled sidecar as a headless dictation daemon that
 /// also serves the control API; otherwise a PATH fallback for dev/pip installs.
-fn spawn_engine(app: &tauri::App) {
+fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
     // 1) Packaged: one process dictates + serves.
     if let Some(bin) = bundled_engine(app) {
         if let Ok(child) = Command::new(&bin)
@@ -234,7 +242,7 @@ fn spawn_engine(app: &tauri::App) {
 }
 
 /// Return a live handshake, starting the engine and polling briefly if needed.
-fn ensure_engine(app: &tauri::App) -> Option<Handshake> {
+fn ensure_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<Handshake> {
     if let Some(h) = read_live_handshake() {
         return Some(h);
     }
@@ -265,7 +273,10 @@ fn build_init_script(platform: &str, bridge: Option<&Handshake>) -> String {
             json_str(&h.token),
             json_str(platform),
         ),
-        None => format!("window.__DICTATE__ = {{ platform: {} }};", json_str(platform)),
+        None => format!(
+            "window.__DICTATE__ = {{ platform: {} }};",
+            json_str(platform)
+        ),
     };
     format!(
         "{dictate}\n\
@@ -279,7 +290,18 @@ fn json_str(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+#[tauri::command]
+fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
+    let platform = detect_platform();
+    ensure_engine(&app).map(|h| BridgePayload {
+        base_url: h.url,
+        token: h.token,
+        platform,
+    })
+}
+
 fn show_settings(app: &tauri::AppHandle) {
+    let _ = ensure_engine(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -290,6 +312,7 @@ fn show_settings(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
+        .invoke_handler(tauri::generate_handler![refresh_bridge])
         .setup(|app| {
             let platform = detect_platform();
             let bridge = ensure_engine(app);
@@ -410,7 +433,10 @@ mod tests {
     #[test]
     fn extracts_loopback_handshake_port() {
         assert_eq!(handshake_port("http://127.0.0.1:8765"), Some(8765));
-        assert_eq!(handshake_port("http://localhost:38769/api/state"), Some(38769));
+        assert_eq!(
+            handshake_port("http://localhost:38769/api/state"),
+            Some(38769)
+        );
         assert_eq!(handshake_port("https://example.com:443"), None);
         assert_eq!(handshake_port("not a url"), None);
     }
