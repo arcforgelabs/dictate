@@ -35,7 +35,9 @@ scripts/build-linux-desktop.sh
 - **CI (`.github/workflows/ci.yml`, job `desktop-shell`)** compiles the shell and
   runs its Rust tests on every push (with a placeholder engine — no freeze).
 - **Release (`.github/workflows/release.yml`, job `linux-desktop`)** runs the full
-  build on a `v20*` tag and attaches `.deb`/`.rpm`/AppImage to the GitHub release.
+  build after the manually dispatched release workflow verifies the requested
+  `v20*` tag is reachable from the default branch, then attaches
+  `.deb`/`.rpm`/AppImage to the GitHub release.
 - **Manual (`.github/workflows/desktop-bundle.yml`, `workflow_dispatch`)** builds
   the bundle and uploads artifacts + the full log — **use this to iterate on
   packaging without cutting releases.** Trigger: `gh workflow run desktop-bundle.yml`.
@@ -56,7 +58,9 @@ scripts/build-windows-desktop.ps1
 ```
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
-  full Windows build on a `v20*` tag. It attaches `.msi`/installer `.exe` assets
+  full Windows build after the manually dispatched release workflow verifies the
+  requested `v20*` tag is reachable from the default branch. It attaches
+  `.msi`/installer `.exe` assets
   to the GitHub release only when Authenticode signatures validate; unsigned
   artifacts are uploaded as internal workflow artifacts instead.
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
