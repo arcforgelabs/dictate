@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-06-06
+
+### Fixed
+
+- Fixed the Linux Settings launcher flow so reopening Dictate focuses the
+  existing hidden Settings window instead of starting a disconnected shell.
+- Added a Linux update action for the Settings About screen: source checkouts
+  can run `update.sh`, while packaged installs open the GitHub release flow.
+- Hardened the Tauri shell bridge refresh path so stale UI handshakes are
+  recovered after the engine restarts.
+
+### Verified
+
+- Rebuilt and installed the local Linux Tauri shell through the Tauri CLI
+  release path, confirming Settings assets load correctly and the second-launch
+  single-instance path stays at one shell process.
+- Verified the live local engine reports `2026.6.5` before this release bump
+  and responds to `/api/update-status`.
+
 ## 2026-06-05
 
 ### Fixed
