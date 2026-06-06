@@ -310,6 +310,9 @@ fn show_settings(app: &tauri::AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_settings(app);
+        }))
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![refresh_bridge])
         .setup(|app| {
