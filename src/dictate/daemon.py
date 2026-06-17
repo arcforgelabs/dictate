@@ -24,6 +24,7 @@ from dictate.stt import SpeechToText
 
 SAMPLE_RATE = 16000
 FINAL_AUDIO_QUEUE_SIZE = 4
+FINAL_WINDOW_QUEUE_SIZE = 64
 _FINAL_CHUNK_EMPTY = object()
 
 
@@ -68,10 +69,11 @@ class Daemon:
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
         self._audio_queue: queue.Queue[AudioChunk | None] = queue.Queue(maxsize=FINAL_AUDIO_QUEUE_SIZE)
-        self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=1)
+        self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=FINAL_WINDOW_QUEUE_SIZE)
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
         self._recording_parts: dict[int, list[str]] = {}
+        self._failed_recordings: dict[int, str] = {}
         self._active_recording_id: int | None = None
         self._queue_lock = threading.Lock()
 
@@ -173,7 +175,9 @@ class Daemon:
             try:
                 self._recording_generation += 1
                 self._active_recording_id = self._recording_generation
-                self._recording_parts[self._active_recording_id] = []
+                with self._queue_lock:
+                    self._recording_parts[self._active_recording_id] = []
+                    self._failed_recordings.pop(self._active_recording_id, None)
                 self.recorder.start(
                     on_chunk=self._queue_partial_audio,
                     recording_id=self._active_recording_id,
@@ -290,6 +294,8 @@ class Daemon:
     def _handle_final_chunk(self, chunk: AudioChunk) -> None:
         audio = chunk.samples
         try:
+            if self._is_recording_failed(chunk.recording_id):
+                return
             if audio.size > 0:
                 duration = len(audio) / SAMPLE_RATE
                 print(
@@ -309,6 +315,8 @@ class Daemon:
     def _handle_partial_chunk(self, chunk: AudioChunk) -> None:
         audio = chunk.samples
         if audio.size == 0:
+            return
+        if self._is_recording_failed(chunk.recording_id):
             return
         duration = len(audio) / SAMPLE_RATE
         print(
@@ -340,6 +348,8 @@ class Daemon:
 
     def _handle_recording_result(self, recording_id: int, result: TranscriptionResult) -> None:
         try:
+            if self._is_recording_failed(recording_id):
+                return
             if result.notice:
                 self._surface_status(result.notice)
 
@@ -386,7 +396,7 @@ class Daemon:
             )
             print(f"\r  Typed: {assembled_text}", file=sys.stderr)
         finally:
-            self._recording_parts.pop(recording_id, None)
+            self._clear_recording_state(recording_id)
 
     def _surface_status(self, message: str) -> None:
         print(f"\r  {message}", file=sys.stderr)
@@ -424,17 +434,12 @@ class Daemon:
             return
         if not self.recorder.is_recording:
             return
-        dropped = self._drain_partial_audio_queue()
-        if dropped:
-            self._notify_transcript(
-                {
-                    "phase": "partial",
-                    "stale": True,
-                    "reason": "dropped-backlog",
-                    "count": dropped,
-                }
-            )
-        self._partial_audio_queue.put_nowait(chunk)
+        if self._is_recording_failed(chunk.recording_id):
+            return
+        try:
+            self._partial_audio_queue.put_nowait(chunk)
+        except queue.Full:
+            self._fail_recording_session(chunk.recording_id, "Transcription backlog exceeded")
 
     def _queue_final_audio(self, audio: np.ndarray) -> None:
         chunk = AudioChunk(
@@ -449,15 +454,7 @@ class Daemon:
         try:
             self._audio_queue.put_nowait(chunk)
         except queue.Full:
-            self._surface_status("Transcription busy; final audio dropped")
-            self._surface_transcript(
-                phase="final",
-                text="",
-                sequence=chunk.sequence,
-                recording_id=chunk.recording_id,
-                stale=True,
-                reason="dropped-overload",
-            )
+            self._fail_recording_session(chunk.recording_id, "Transcription busy; final audio dropped")
 
     def _queue_final_marker(self, recording_id: int) -> None:
         self._queue_final_chunk(
@@ -529,20 +526,27 @@ class Daemon:
     def _record_transcript_piece(self, recording_id: int, result: TranscriptionResult) -> None:
         if result.status != "ok" or not result.text:
             return
-        self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
+        if self._is_recording_failed(recording_id):
+            return
+        with self._queue_lock:
+            self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
 
     def _assembled_recording_text(self, recording_id: int) -> str:
-        parts = self._recording_parts.get(recording_id, [])
+        with self._queue_lock:
+            parts = list(self._recording_parts.get(recording_id, []))
         return " ".join(part for part in (piece.strip() for piece in parts) if part)
 
     def _finalize_recording_session(self, recording_id: int) -> None:
+        if self._is_recording_failed(recording_id):
+            self._clear_recording_state(recording_id)
+            return
         assembled_text = self._assembled_recording_text(recording_id)
         if not assembled_text:
-            self._recording_parts.pop(recording_id, None)
+            self._clear_recording_state(recording_id)
             print("\r  No audio captured", file=sys.stderr)
             return
 
-        self._recording_parts.pop(recording_id, None)
+        self._clear_recording_state(recording_id)
         try:
             self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
@@ -564,3 +568,30 @@ class Daemon:
             stale=False,
         )
         print(f"\r  Typed: {assembled_text}", file=sys.stderr)
+
+    def _fail_recording_session(self, recording_id: int, reason: str) -> None:
+        with self._queue_lock:
+            if recording_id in self._failed_recordings:
+                return
+            self._failed_recordings[recording_id] = reason
+            self._recording_parts.pop(recording_id, None)
+        if self._active_recording_id == recording_id:
+            self._active_recording_id = None
+        self._surface_status(reason)
+        self._surface_transcript(
+            phase="final",
+            text="",
+            sequence=None,
+            recording_id=recording_id,
+            stale=True,
+            reason="dropped-overload",
+        )
+
+    def _clear_recording_state(self, recording_id: int) -> None:
+        with self._queue_lock:
+            self._recording_parts.pop(recording_id, None)
+            self._failed_recordings.pop(recording_id, None)
+
+    def _is_recording_failed(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            return recording_id in self._failed_recordings

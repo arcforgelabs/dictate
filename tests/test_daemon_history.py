@@ -209,42 +209,80 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertFalse(shutdown_thread.is_alive())
             self.assertIsInstance(daemon._audio_queue.get_nowait(), AudioChunk)
 
-    def test_queue_latest_audio_drops_stale_pending_recording(self) -> None:
+    def test_queue_latest_audio_preserves_window_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
             first = np.ones(4, dtype=np.float32)
             second = np.full(4, 2, dtype=np.float32)
-
             daemon.recorder._recording = True
+            daemon._active_recording_id = 8
+            daemon._recording_parts[8] = []
+
             daemon._queue_latest_audio(first)
             daemon._queue_latest_audio(second)
 
-            queued = daemon._partial_audio_queue.get_nowait()
-            np.testing.assert_array_equal(queued.samples, second)
-            self.assertFalse(queued.final)
+            queued_first = daemon._partial_audio_queue.get_nowait()
+            queued_second = daemon._partial_audio_queue.get_nowait()
+            np.testing.assert_array_equal(queued_first.samples, first)
+            np.testing.assert_array_equal(queued_second.samples, second)
+            self.assertFalse(queued_first.final)
+            self.assertFalse(queued_second.final)
             with self.assertRaises(queue.Empty):
                 daemon._partial_audio_queue.get_nowait()
 
-    def test_queue_partial_audio_emits_stale_notice_when_latest_wins(self) -> None:
+    def test_queue_partial_audio_emits_stale_notice_when_overloaded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
             notices: list[dict[str, object]] = []
             daemon.transcript_callback = notices.append
+            daemon.status_callback = lambda _message: None
+            daemon._partial_audio_queue = queue.Queue(maxsize=1)
             daemon.recorder._recording = True
+            daemon._active_recording_id = 8
+            daemon._recording_parts[8] = []
 
             daemon._queue_latest_audio(np.ones(4, dtype=np.float32))
             daemon._queue_latest_audio(np.full(4, 2, dtype=np.float32))
 
             self.assertTrue(any(event.get("stale") for event in notices))
-            self.assertEqual(daemon._partial_audio_queue.get_nowait().sequence, 0)
+            self.assertNotIn(8, daemon._recording_parts)
 
-    def test_final_audio_is_preserved_when_final_queue_is_busy(self) -> None:
+    def test_partial_window_overload_fails_session_instead_of_omitting_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon, store, output = self._make_daemon(tmp)
+            statuses: list[str | None] = []
+            transcripts: list[dict[str, object]] = []
+            daemon.status_callback = statuses.append
+            daemon.transcript_callback = transcripts.append
+            daemon._partial_audio_queue = queue.Queue(maxsize=1)
+            daemon.recorder._recording = True
+            daemon._active_recording_id = 7
+            daemon._recording_parts[7] = []
+
+            daemon._queue_partial_audio(
+                AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=7)
+            )
+            daemon._queue_partial_audio(
+                AudioChunk(samples=np.full(4, 2, dtype=np.float32), final=False, recording_id=7)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=7)
+            )
+
+            self.assertTrue(any("backlog exceeded" in (message or "") for message in statuses))
+            self.assertTrue(any(event.get("stale") for event in transcripts))
+            self.assertNotIn(7, daemon._recording_parts)
+            self.assertFalse(store.load())
+            output.send.assert_not_called()
+
+    def test_final_audio_overload_cleans_up_recording_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
             transcript_events: list[dict[str, object]] = []
             status_events: list[str | None] = []
             daemon.transcript_callback = transcript_events.append
             daemon.status_callback = status_events.append
+            daemon._recording_parts[9] = ["hello"]
 
             for recording_id in range(1, 5):
                 daemon._queue_final_chunk(
@@ -256,12 +294,13 @@ class DaemonHistoryTests(unittest.TestCase):
                 )
 
             daemon._queue_final_chunk(
-                AudioChunk(samples=np.full(4, 5, dtype=np.float32), final=True, recording_id=5)
+                AudioChunk(samples=np.full(4, 5, dtype=np.float32), final=True, recording_id=9)
             )
 
             self.assertEqual(daemon._audio_queue.qsize(), 4)
             self.assertTrue(any("dropped" in (message or "") for message in status_events))
             self.assertTrue(any(event.get("reason") == "dropped-overload" for event in transcript_events))
+            self.assertNotIn(9, daemon._recording_parts)
             self.assertEqual(
                 [daemon._audio_queue.get_nowait().recording_id for _ in range(4)],
                 [1, 2, 3, 4],
