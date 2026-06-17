@@ -78,6 +78,7 @@ class Daemon:
         self._recording_chunk_counts: dict[int, int] = {}
         self._recording_final_chunks: set[int] = set()
         self._streaming_recordings: set[int] = set()
+        self._recording_stt_ids: dict[int, int] = {}
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -181,21 +182,28 @@ class Daemon:
             try:
                 self._recording_generation += 1
                 self._active_recording_id = self._recording_generation
-                streaming_enabled = self._supports_streaming_chunks()
+                with self._engine_lock:
+                    stt = self.engine.stt
+                    streaming_enabled = bool(stt.capabilities.supports_streaming_chunks)
+                    stt_id = id(stt)
                 with self._queue_lock:
                     self._recording_parts[self._active_recording_id] = []
                     self._recording_chunk_counts[self._active_recording_id] = 0
                     self._recording_final_chunks.discard(self._active_recording_id)
+                    self._recording_stt_ids[self._active_recording_id] = stt_id
                     if streaming_enabled:
                         self._streaming_recordings.add(self._active_recording_id)
                     else:
                         self._streaming_recordings.discard(self._active_recording_id)
                     self._terminal_recordings.discard(self._active_recording_id)
-                self.recorder.start(
-                    on_chunk=self._queue_recording_chunk if streaming_enabled else None,
-                    recording_id=self._active_recording_id,
-                )
-            except AudioCaptureError as exc:
+                try:
+                    self.recorder.start(
+                        on_chunk=self._queue_recording_chunk if streaming_enabled else None,
+                        recording_id=self._active_recording_id,
+                    )
+                except TypeError:
+                    self.recorder.start()
+            except (AudioCaptureError, TypeError) as exc:
                 if self._active_recording_id is not None:
                     self._clear_recording_state(self._active_recording_id)
                 self._active_recording_id = None
@@ -315,6 +323,13 @@ class Daemon:
             if self._is_recording_failed(chunk.recording_id):
                 return
             if audio.size > 0:
+                if not self._recording_backend_matches_current(chunk.recording_id):
+                    self._fail_recording_session(
+                        chunk.recording_id,
+                        "Transcription backend changed; recording discarded",
+                        transcript_reason="stale-backend",
+                    )
+                    return
                 duration = len(audio) / SAMPLE_RATE
                 print(
                     f"\r  Transcribing {duration:.1f}s...   ",
@@ -324,9 +339,20 @@ class Daemon:
                 )
                 with self._engine_lock:
                     result = self.engine.transcribe(audio, language=self.language)
+                if result.notice:
+                    self._surface_status(result.notice)
+                if result.status == "error":
+                    self._fail_recording_session(
+                        chunk.recording_id,
+                        f"Transcription failed: {result.error or 'unknown transcription error'}",
+                        transcript_reason="transcription-error",
+                    )
+                    return
                 if result.status == "ok" and result.text:
                     self._record_transcript_piece(chunk.recording_id, result)
-            self._finalize_recording_session(chunk.recording_id)
+            else:
+                result = None
+            self._finalize_recording_session(chunk.recording_id, result)
         finally:
             del audio
 
@@ -335,6 +361,13 @@ class Daemon:
         if audio.size == 0:
             return
         if self._is_recording_failed(chunk.recording_id):
+            return
+        if not self._recording_backend_matches_current(chunk.recording_id):
+            self._fail_recording_session(
+                chunk.recording_id,
+                "Transcription backend changed; recording discarded",
+                transcript_reason="stale-backend",
+            )
             return
         duration = len(audio) / SAMPLE_RATE
         print(
@@ -346,6 +379,15 @@ class Daemon:
         try:
             with self._engine_lock:
                 result = self.engine.transcribe(audio, language=self.language)
+            if result.notice:
+                self._surface_status(result.notice)
+            if result.status == "error":
+                self._fail_recording_session(
+                    chunk.recording_id,
+                    f"Transcription failed: {result.error or 'unknown transcription error'}",
+                    transcript_reason="transcription-error",
+                )
+                return
             if result.status == "ok" and result.text:
                 self._record_transcript_piece(chunk.recording_id, result)
                 assembled_text = self._assembled_recording_text(chunk.recording_id)
@@ -448,6 +490,8 @@ class Daemon:
 
     def _queue_recording_chunk(self, chunk: AudioChunk) -> None:
         with self._queue_lock:
+            if chunk.recording_id in self._terminal_recordings:
+                return
             self._recording_chunk_counts[chunk.recording_id] = (
                 self._recording_chunk_counts.get(chunk.recording_id, 0) + 1
             )
@@ -563,14 +607,18 @@ class Daemon:
             parts = list(self._recording_parts.get(recording_id, []))
         return " ".join(part for part in (piece.strip() for piece in parts) if part)
 
-    def _finalize_recording_session(self, recording_id: int) -> None:
+    def _finalize_recording_session(
+        self,
+        recording_id: int,
+        final_result: TranscriptionResult | None = None,
+    ) -> None:
         if self._is_recording_failed(recording_id):
             self._clear_recording_state(recording_id)
             return
         assembled_text = self._assembled_recording_text(recording_id)
         if not assembled_text:
             self._clear_recording_state(recording_id)
-            print("\r  No audio captured", file=sys.stderr)
+            self._surface_empty_final_status(final_result)
             return
 
         self._clear_recording_state(recording_id)
@@ -596,7 +644,13 @@ class Daemon:
         )
         print(f"\r  Typed: {assembled_text}", file=sys.stderr)
 
-    def _fail_recording_session(self, recording_id: int, reason: str) -> None:
+    def _fail_recording_session(
+        self,
+        recording_id: int,
+        reason: str,
+        *,
+        transcript_reason: str = "dropped-overload",
+    ) -> None:
         with self._queue_lock:
             if recording_id in self._terminal_recordings:
                 return
@@ -605,6 +659,7 @@ class Daemon:
             self._recording_chunk_counts.pop(recording_id, None)
             self._recording_final_chunks.discard(recording_id)
             self._streaming_recordings.discard(recording_id)
+            self._recording_stt_ids.pop(recording_id, None)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
         self._surface_status(reason)
@@ -614,7 +669,7 @@ class Daemon:
             sequence=None,
             recording_id=recording_id,
             stale=True,
-            reason="dropped-overload",
+            reason=transcript_reason,
         )
 
     def _clear_recording_state(self, recording_id: int) -> None:
@@ -623,6 +678,7 @@ class Daemon:
             self._recording_chunk_counts.pop(recording_id, None)
             self._recording_final_chunks.discard(recording_id)
             self._streaming_recordings.discard(recording_id)
+            self._recording_stt_ids.pop(recording_id, None)
 
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:
@@ -638,6 +694,28 @@ class Daemon:
 
     def _supports_streaming_chunks(self) -> bool:
         return bool(self.engine.stt.capabilities.supports_streaming_chunks)
+
+    def _recording_backend_matches_current(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            expected_stt_id = self._recording_stt_ids.get(recording_id)
+        if expected_stt_id is None:
+            return True
+        with self._engine_lock:
+            return id(self.engine.stt) == expected_stt_id
+
+    def _surface_empty_final_status(self, result: TranscriptionResult | None) -> None:
+        if result is None or result.status == "empty":
+            print("\r  No audio captured", file=sys.stderr)
+            return
+        if result.status == "too_short":
+            print("\r  Too short, skipped", file=sys.stderr)
+            return
+        if result.status == "no_speech":
+            print("\r  No speech detected", file=sys.stderr)
+            return
+        if result.status == "error":
+            self._surface_status(f"Transcription failed: {result.error or 'unknown transcription error'}")
+            return
 
     def _should_queue_stop_audio(self, recording_id: int, audio: np.ndarray) -> bool:
         if audio.size == 0:
