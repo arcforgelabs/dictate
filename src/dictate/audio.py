@@ -11,6 +11,7 @@ from typing import Any, Protocol
 import numpy as np
 
 DEFAULT_MAX_RECORDING_SECONDS = 120
+DEFAULT_TRANSCRIPTION_WINDOW_SECONDS = 2.0
 
 
 class AudioCaptureError(RuntimeError):
@@ -47,16 +48,20 @@ class SoundDeviceRecorder:
         self,
         sample_rate: int = 16000,
         max_recording_seconds: int = DEFAULT_MAX_RECORDING_SECONDS,
+        transcription_window_seconds: float = DEFAULT_TRANSCRIPTION_WINDOW_SECONDS,
     ):
         self.sample_rate = sample_rate
         self.max_recording_seconds = max(1, int(max_recording_seconds))
         self._max_samples = self.sample_rate * self.max_recording_seconds
+        self._window_samples = max(1, int(self.sample_rate * float(transcription_window_seconds)))
         self._lock = threading.Lock()
         self._buffer = np.zeros(self._max_samples, dtype=np.float32)
         self._write_pos = 0
         self._sample_count = 0
         self._truncated = False
         self._chunk_sequence = 0
+        self._window_buffer = np.zeros(self._window_samples, dtype=np.float32)
+        self._window_count = 0
         self._on_chunk: Callable[[AudioChunk], None] | None = None
         self._stream: Any | None = None
         self._recording = False
@@ -75,6 +80,7 @@ class SoundDeviceRecorder:
         self._sample_count = 0
         self._truncated = False
         self._chunk_sequence = 0
+        self._window_count = 0
         self._on_chunk = on_chunk
 
         try:
@@ -103,8 +109,10 @@ class SoundDeviceRecorder:
             return np.array([], dtype=np.float32)
 
         self._recording = False
+        callback = self._on_chunk
         self._on_chunk = None
 
+        tail_chunk: AudioChunk | None = None
         if self._stream is not None:
             try:
                 self._stream.stop()
@@ -115,10 +123,19 @@ class SoundDeviceRecorder:
                 self._stream = None
 
         with self._lock:
+            if callback is not None and self._sample_count > 0:
+                tail = self._window_buffer[: self._window_count].copy()
+                tail_chunk = AudioChunk(
+                    samples=tail,
+                    final=True,
+                    sequence=self._chunk_sequence,
+                )
+                self._chunk_sequence += 1
+                self._window_count = 0
             if self._sample_count == 0:
                 self._sample_count = 0
-                return np.array([], dtype=np.float32)
-            if self._sample_count < self._max_samples:
+                audio = np.array([], dtype=np.float32)
+            elif self._sample_count < self._max_samples:
                 audio = self._buffer[: self._sample_count].copy()
             else:
                 audio = np.concatenate(
@@ -129,7 +146,12 @@ class SoundDeviceRecorder:
                 ).astype(np.float32, copy=False)
             self._sample_count = 0
             self._write_pos = 0
-            return audio
+        if callback is not None and tail_chunk is not None:
+            try:
+                callback(tail_chunk)
+            except Exception:  # noqa: BLE001
+                pass
+        return audio
 
     def record_until(
         self,
@@ -150,29 +172,63 @@ class SoundDeviceRecorder:
         if status:
             # Non-fatal audio status flags are surfaced by sounddevice here.
             pass
+        callback: Callable[[AudioChunk], None] | None
+        chunk_events: list[AudioChunk] = []
+        samples = np.asarray(indata, dtype=np.float32).reshape(-1)
+        if samples.size == 0:
+            return
         with self._lock:
-            remaining = self._max_samples - self._sample_count
-            if remaining <= 0:
-                self._truncated = True
-                return
-            chunk = np.asarray(indata[:remaining], dtype=np.float32).reshape(-1).copy()
-            if chunk.size == 0:
-                return
-            self._write_chunk(chunk)
-            self._sample_count += len(chunk)
-            if len(chunk) < len(indata):
-                self._truncated = True
+            self._write_capture(samples)
+            self._append_window_samples(samples, chunk_events)
             callback = self._on_chunk
-            if callback is not None:
-                chunk_event = AudioChunk(samples=chunk.copy(), final=False, sequence=self._chunk_sequence)
-                self._chunk_sequence += 1
-            else:
-                chunk_event = None
-        if callback is not None and chunk_event is not None:
-            try:
-                callback(chunk_event)
-            except Exception:  # noqa: BLE001
-                pass
+        if callback is not None:
+            for chunk_event in chunk_events:
+                try:
+                    callback(chunk_event)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _write_capture(self, samples: np.ndarray) -> None:
+        if samples.size >= self._max_samples:
+            self._buffer[:] = samples[-self._max_samples :]
+            self._write_pos = 0
+            self._sample_count = self._max_samples
+            self._truncated = True
+            return
+
+        self._write_chunk(samples)
+        self._sample_count = min(self._max_samples, self._sample_count + len(samples))
+        if self._sample_count == self._max_samples and len(samples) > 0:
+            self._truncated = True
+
+    def _append_window_samples(self, samples: np.ndarray, chunk_events: list[AudioChunk]) -> None:
+        if self._on_chunk is None:
+            return
+        offset = 0
+        while offset < len(samples):
+            if self._window_count == self._window_samples:
+                self._emit_window_chunk(chunk_events, final=False)
+            needed = self._window_samples - self._window_count
+            take = min(needed, len(samples) - offset)
+            end = offset + take
+            self._window_buffer[self._window_count : self._window_count + take] = samples[offset:end]
+            self._window_count += take
+            offset = end
+            if self._window_count == self._window_samples:
+                self._emit_window_chunk(chunk_events, final=False)
+
+    def _emit_window_chunk(self, chunk_events: list[AudioChunk], *, final: bool) -> None:
+        if self._window_count == 0:
+            return
+        chunk_events.append(
+            AudioChunk(
+                samples=self._window_buffer[: self._window_count].copy(),
+                final=final,
+                sequence=self._chunk_sequence,
+            )
+        )
+        self._chunk_sequence += 1
+        self._window_count = 0
 
     def _write_chunk(self, chunk: np.ndarray) -> None:
         """Copy a chunk into the bounded ring buffer."""

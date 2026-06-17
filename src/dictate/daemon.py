@@ -23,6 +23,7 @@ from dictate.outputs import TextOutput
 from dictate.stt import SpeechToText
 
 SAMPLE_RATE = 16000
+_FINAL_CHUNK_EMPTY = object()
 
 
 class Daemon:
@@ -69,6 +70,9 @@ class Daemon:
         self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=1)
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
+        self._recording_parts: list[str] = []
+        self._pending_final_audio: AudioChunk | None = None
+        self._queue_lock = threading.Lock()
 
     def pause(self) -> None:
         """Stop listening for hotkey."""
@@ -167,6 +171,9 @@ class Daemon:
 
             try:
                 self._recording_generation += 1
+                self._recording_parts = []
+                with self._queue_lock:
+                    self._pending_final_audio = None
                 self.recorder.start(on_chunk=self._queue_partial_audio)
             except AudioCaptureError as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
@@ -178,15 +185,13 @@ class Daemon:
     def _finalize_recording(self) -> None:
         with self._recording_lock:
             try:
-                audio = self.recorder.stop()
+                self.recorder.stop()
             except AudioCaptureError as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 self._notify_recording(False)
                 return
 
             self._notify_recording(False)
-            if audio.size > 0:
-                self._queue_final_audio(audio)
 
     def _on_hotkey_press(self) -> None:
         try:
@@ -247,22 +252,34 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
-        queue_empty = object()
         while not self._stop.is_set():
             try:
-                final_chunk = self._audio_queue.get_nowait()
+                chunk = self._partial_audio_queue.get_nowait()
             except queue.Empty:
-                final_chunk = queue_empty
-            if final_chunk is queue_empty:
-                try:
-                    chunk = self._partial_audio_queue.get(timeout=0.1)
-                except queue.Empty:
+                final_chunk = self._take_next_final_chunk()
+                if final_chunk is _FINAL_CHUNK_EMPTY:
+                    try:
+                        chunk = self._partial_audio_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+                    self._handle_partial_chunk(chunk)
                     continue
-                self._handle_partial_chunk(chunk)
+                if final_chunk is None or final_chunk.samples.size == 0:
+                    break
+                self._handle_final_chunk(final_chunk)
                 continue
-            if final_chunk is None or final_chunk.samples.size == 0:
-                break
-            self._handle_final_chunk(final_chunk)
+            self._handle_partial_chunk(chunk)
+
+    def _take_next_final_chunk(self) -> AudioChunk | None | object:
+        with self._queue_lock:
+            if self._pending_final_audio is not None:
+                chunk = self._pending_final_audio
+                self._pending_final_audio = None
+                return chunk
+        try:
+            return self._audio_queue.get_nowait()
+        except queue.Empty:
+            return _FINAL_CHUNK_EMPTY
 
     def _handle_final_chunk(self, chunk: AudioChunk) -> None:
         audio = chunk.samples
@@ -295,12 +312,15 @@ class Daemon:
             with self._engine_lock:
                 result = self.engine.transcribe(audio, language=self.language)
             if result.status == "ok" and result.text:
-                self._surface_transcript(
-                    phase="partial",
-                    text=result.text,
-                    sequence=chunk.sequence,
-                    stale=False,
-                )
+                self._record_transcript_piece(result)
+                assembled_text = self._assembled_recording_text()
+                if assembled_text:
+                    self._surface_transcript(
+                        phase="partial",
+                        text=assembled_text,
+                        sequence=chunk.sequence,
+                        stale=False,
+                    )
         finally:
             del audio
 
@@ -308,38 +328,42 @@ class Daemon:
         if result.notice:
             self._surface_status(result.notice)
 
-        if result.status == "empty":
-            print("\r  No audio captured", file=sys.stderr)
-            return
-
-        if result.status == "too_short":
-            print("\r  Too short, skipped", file=sys.stderr)
-            return
-
-        if result.status == "no_speech":
-            print("\r  No speech detected", file=sys.stderr)
-            return
-
         if result.status == "error":
             message = result.error or "unknown transcription error"
             self._surface_status(f"Transcription failed: {message}")
-            return
 
+        if result.status == "ok" and result.text:
+            self._record_transcript_piece(result)
+
+        assembled_text = self._assembled_recording_text()
+        if not assembled_text:
+            if result.status == "empty":
+                print("\r  No audio captured", file=sys.stderr)
+                return
+            if result.status == "too_short":
+                print("\r  Too short, skipped", file=sys.stderr)
+                return
+            if result.status == "no_speech":
+                print("\r  No speech detected", file=sys.stderr)
+                return
+            if result.status == "error":
+                return
+            return
         try:
-            self.history_store.append(result.text)
+            self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  History save failed: {exc}", file=sys.stderr)
         else:
             self._notify_history_changed()
 
         try:
-            self.output.send(result.text)
+            self.output.send(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Output backend failed ({self.output.name}): {exc}", file=sys.stderr)
             return
 
-        self._surface_transcript(phase="final", text=result.text, sequence=None, stale=False)
-        print(f"\r  Typed: {result.text}", file=sys.stderr)
+        self._surface_transcript(phase="final", text=assembled_text, sequence=None, stale=False)
+        print(f"\r  Typed: {assembled_text}", file=sys.stderr)
 
     def _surface_status(self, message: str) -> None:
         print(f"\r  {message}", file=sys.stderr)
@@ -370,6 +394,9 @@ class Daemon:
         self._queue_partial_audio(AudioChunk(samples=audio, final=False))
 
     def _queue_partial_audio(self, chunk: AudioChunk) -> None:
+        if chunk.final:
+            self._queue_final_chunk(chunk)
+            return
         if not self.recorder.is_recording:
             return
         dropped = self._drain_partial_audio_queue()
@@ -385,15 +412,21 @@ class Daemon:
         self._partial_audio_queue.put_nowait(chunk)
 
     def _queue_final_audio(self, audio: np.ndarray) -> None:
-        self._drain_partial_audio_queue()
         chunk = AudioChunk(samples=audio, final=True, sequence=self._recording_generation)
-        try:
-            self._audio_queue.put_nowait(chunk)
-        except queue.Full:
-            self._handle_final_chunk(chunk)
+        self._queue_final_chunk(chunk)
+
+    def _queue_final_chunk(self, chunk: AudioChunk) -> None:
+        with self._queue_lock:
+            if self._audio_queue.full():
+                self._pending_final_audio = chunk
+                self._surface_status("Transcription busy; queued final audio")
+                return
+        self._audio_queue.put_nowait(chunk)
 
     def _queue_stop_signal(self) -> None:
         self._drain_partial_audio_queue()
+        with self._queue_lock:
+            self._pending_final_audio = None
         try:
             self._audio_queue.put_nowait(None)
         except queue.Full:
@@ -445,3 +478,11 @@ class Daemon:
             self.transcript_callback(event)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Transcript callback failed: {exc}", file=sys.stderr)
+
+    def _record_transcript_piece(self, result: TranscriptionResult) -> None:
+        if result.status != "ok" or not result.text:
+            return
+        self._recording_parts.append(result.text.strip())
+
+    def _assembled_recording_text(self) -> str:
+        return " ".join(part for part in (piece.strip() for piece in self._recording_parts) if part)
