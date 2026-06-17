@@ -35,6 +35,7 @@ class SttCapabilities:
     supports_prompt_bias: bool = False
     supports_language_hint: bool = True
     supports_word_timestamps: bool = False
+    supports_streaming_chunks: bool = False
 
 
 class SpeechToText:

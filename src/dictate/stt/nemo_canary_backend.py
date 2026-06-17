@@ -28,6 +28,7 @@ class NeMoCanarySpeechToText(SpeechToText):
         supports_hotwords=False,
         supports_prompt_bias=True,
         supports_language_hint=True,
+        supports_streaming_chunks=True,
     )
 
     def __init__(

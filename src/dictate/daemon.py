@@ -75,6 +75,9 @@ class Daemon:
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
         self._recording_parts: dict[int, list[str]] = {}
+        self._recording_chunk_counts: dict[int, int] = {}
+        self._recording_final_chunks: set[int] = set()
+        self._streaming_recordings: set[int] = set()
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -178,16 +181,23 @@ class Daemon:
             try:
                 self._recording_generation += 1
                 self._active_recording_id = self._recording_generation
+                streaming_enabled = self._supports_streaming_chunks()
                 with self._queue_lock:
                     self._recording_parts[self._active_recording_id] = []
+                    self._recording_chunk_counts[self._active_recording_id] = 0
+                    self._recording_final_chunks.discard(self._active_recording_id)
+                    if streaming_enabled:
+                        self._streaming_recordings.add(self._active_recording_id)
+                    else:
+                        self._streaming_recordings.discard(self._active_recording_id)
                     self._terminal_recordings.discard(self._active_recording_id)
                 self.recorder.start(
-                    on_chunk=self._queue_partial_audio,
+                    on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                     recording_id=self._active_recording_id,
                 )
             except AudioCaptureError as exc:
                 if self._active_recording_id is not None:
-                    self._recording_parts.pop(self._active_recording_id, None)
+                    self._clear_recording_state(self._active_recording_id)
                 self._active_recording_id = None
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 return
@@ -199,7 +209,7 @@ class Daemon:
         with self._recording_lock:
             recording_id = self._active_recording_id
             try:
-                self.recorder.stop()
+                audio = self.recorder.stop()
             except AudioCaptureError as exc:
                 self._active_recording_id = None
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
@@ -207,7 +217,12 @@ class Daemon:
                 return
 
             if recording_id is not None:
-                self._queue_final_marker(recording_id)
+                if self._should_queue_stop_audio(recording_id, audio):
+                    self._queue_final_chunk(
+                        AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id)
+                    )
+                elif self._should_queue_final_marker(recording_id):
+                    self._queue_final_marker(recording_id)
                 self._active_recording_id = None
             self._notify_recording(False)
 
@@ -431,6 +446,15 @@ class Daemon:
             AudioChunk(samples=audio, final=False, recording_id=self._active_recording_id or 0)
         )
 
+    def _queue_recording_chunk(self, chunk: AudioChunk) -> None:
+        with self._queue_lock:
+            self._recording_chunk_counts[chunk.recording_id] = (
+                self._recording_chunk_counts.get(chunk.recording_id, 0) + 1
+            )
+            if chunk.final:
+                self._recording_final_chunks.add(chunk.recording_id)
+        self._queue_partial_audio(chunk)
+
     def _queue_partial_audio(self, chunk: AudioChunk) -> None:
         if chunk.final:
             self._queue_final_chunk(chunk)
@@ -578,6 +602,9 @@ class Daemon:
                 return
             self._remember_terminal_recording_locked(recording_id)
             self._recording_parts.pop(recording_id, None)
+            self._recording_chunk_counts.pop(recording_id, None)
+            self._recording_final_chunks.discard(recording_id)
+            self._streaming_recordings.discard(recording_id)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
         self._surface_status(reason)
@@ -593,6 +620,9 @@ class Daemon:
     def _clear_recording_state(self, recording_id: int) -> None:
         with self._queue_lock:
             self._recording_parts.pop(recording_id, None)
+            self._recording_chunk_counts.pop(recording_id, None)
+            self._recording_final_chunks.discard(recording_id)
+            self._streaming_recordings.discard(recording_id)
 
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:
@@ -605,3 +635,20 @@ class Daemon:
             expired = self._terminal_recording_order.popleft()
             if expired not in self._terminal_recording_order:
                 self._terminal_recordings.discard(expired)
+
+    def _supports_streaming_chunks(self) -> bool:
+        return bool(self.engine.stt.capabilities.supports_streaming_chunks)
+
+    def _should_queue_stop_audio(self, recording_id: int, audio: np.ndarray) -> bool:
+        if audio.size == 0:
+            return False
+        with self._queue_lock:
+            return self._recording_chunk_counts.get(recording_id, 0) == 0
+
+    def _should_queue_final_marker(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            return (
+                recording_id in self._streaming_recordings
+                and self._recording_chunk_counts.get(recording_id, 0) > 0
+                and recording_id not in self._recording_final_chunks
+            )

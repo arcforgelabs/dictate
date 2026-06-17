@@ -30,6 +30,7 @@ class FasterWhisperSpeechToText(SpeechToText):
         supports_hotwords=True,
         supports_prompt_bias=False,
         supports_language_hint=True,
+        supports_streaming_chunks=True,
     )
 
     def __init__(

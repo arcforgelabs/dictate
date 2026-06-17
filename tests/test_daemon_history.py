@@ -52,9 +52,17 @@ class _FakeApiStt(_FakeStt):
     backend_name = "openai"
     api_key = "stored-in-memory"
 
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def transcribe(self, audio, *args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        self.calls.append(len(audio))
+        return "hosted final"
+
 
 class _ChunkingStt(_FakeStt):
-    capabilities = SttCapabilities()
+    capabilities = SttCapabilities(supports_streaming_chunks=True)
 
     def __init__(self, mapping: dict[int, str]) -> None:
         self.mapping = mapping
@@ -78,6 +86,13 @@ class _FakeRecorder:
     def stop(self) -> np.ndarray:
         self.is_recording = False
         return np.ones(16, dtype=np.float32)
+
+
+class _NoCallbackRecorder(_FakeRecorder):
+    def start(self, on_chunk=None, recording_id=None) -> None:  # noqa: ANN001
+        self.is_recording = True
+        self.on_chunk = None
+        self.recording_id = recording_id
 
 
 class DaemonHistoryTests(unittest.TestCase):
@@ -174,6 +189,71 @@ class DaemonHistoryTests(unittest.TestCase):
             daemon._finalize_recording()
 
             self.assertEqual(messages, [True, False])
+
+    def test_hosted_backend_does_not_receive_partial_chunk_transcription(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _FakeApiStt()
+            recorder = _FakeRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            daemon._start_recording()
+            self.assertIsNone(recorder.on_chunk)
+            daemon._finalize_recording()
+
+            chunk = daemon._audio_queue.get_nowait()
+            self.assertTrue(chunk.final)
+            self.assertEqual(stt.calls, [])
+            daemon._handle_final_chunk(chunk)
+            self.assertEqual(stt.calls, [16])
+            output.send.assert_called_once_with("hosted final")
+
+    def test_recorder_without_chunk_callbacks_commits_stop_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16: "legacy final"})
+            recorder = _NoCallbackRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            daemon._start_recording()
+            daemon._finalize_recording()
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(stt.calls, [16])
+            output.send.assert_called_once_with("legacy final")
+            self.assertEqual(store.load()[0].text, "legacy final")
+
+    def test_tail_final_chunk_does_not_queue_second_empty_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({2: "tail"})
+            recorder = _FakeRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            daemon._start_recording()
+            assert recorder.on_chunk is not None
+            recorder.on_chunk(AudioChunk(samples=np.ones(2, dtype=np.float32), final=True, recording_id=1))
+            daemon._finalize_recording()
+
+            self.assertEqual(daemon._audio_queue.qsize(), 1)
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+            self.assertTrue(daemon._audio_queue.empty())
+            output.send.assert_called_once_with("tail")
 
     def test_shutdown_disables_hotkey_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
