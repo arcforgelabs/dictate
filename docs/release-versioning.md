@@ -64,9 +64,18 @@ map `bundle.windows.wix.version` to `YY.M.D.N` for MSI packaging:
 2026.6.4-1 -> 26.6.4.1
 ```
 
-Pushing a `v20*` tag is the only deployment trigger. The release workflow runs the Linux/Windows test matrix, the hosted Windows user install smoke test, release metadata validation, Python artifact checks, and npm package validation before publishing.
+After creating a `v20*` CalVer tag on a commit that has reached the default
+branch, start `.github/workflows/release.yml` manually with the `release_tag`
+input. The release workflow first verifies that the requested tag resolves to a
+commit reachable from the default branch, then runs the Linux/Windows test
+matrix, the hosted Windows user install smoke test, release metadata validation,
+Python artifact checks, and npm package validation before publishing.
 
-The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN install/update scripts. Configure npm trusted publishing for this repository and `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret with publish rights. Do not push a release tag until that npm publisher path is ready.
+The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN
+install/update scripts. Configure npm trusted publishing for this repository and
+`.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret
+with publish rights. Do not dispatch the release workflow for a tag until that
+npm publisher path is ready.
 
 The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
 
