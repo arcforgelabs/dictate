@@ -23,6 +23,14 @@ function StatusView() {
           </div>
           <h2 className="t-title">{rec ? "Listening…" : "Ready to dictate"}</h2>
           <div className="sub">Hold your shortcut, speak, and release — text types straight into the app you're using.</div>
+          {s.transcript?.text ? (
+            <div className="t-meta" style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span className="t-label" style={{ color: "var(--fg)" }}>
+                {s.transcript.phase === "final" ? "Final transcript" : "Live transcript"}
+              </span>
+              <span>{s.transcript.text}</span>
+            </div>
+          ) : null}
         </div>
         <div className="keyhint">
           <span className="t-label">Hold</span>

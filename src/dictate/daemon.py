@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from dictate.audio import AudioCaptureError, AudioRecorder, SoundDeviceRecorder
+from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
 from dictate.engine import DictationEngine, TranscriptionResult
 from dictate.history import HistoryStore
 from dictate.hotkey import format_hotkey_combo, normalize_push_to_talk_combo
@@ -40,6 +40,7 @@ class Daemon:
         status_callback: Callable[[str | None], None] | None = None,
         recording_callback: Callable[[bool], None] | None = None,
         history_callback: Callable[[], None] | None = None,
+        transcript_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
     ):
         self.active = True
@@ -49,6 +50,7 @@ class Daemon:
         self.status_callback = status_callback
         self.recording_callback = recording_callback
         self.history_callback = history_callback
+        self.transcript_callback = transcript_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -63,8 +65,10 @@ class Daemon:
 
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
-        self._audio_queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self._audio_queue: queue.Queue[AudioChunk | None] = queue.Queue(maxsize=2)
+        self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=1)
         self._hotkey_backend: HotkeyBackend | None = None
+        self._recording_generation = 0
 
     def pause(self) -> None:
         """Stop listening for hotkey."""
@@ -162,7 +166,8 @@ class Daemon:
                 return
 
             try:
-                self.recorder.start()
+                self._recording_generation += 1
+                self.recorder.start(on_chunk=self._queue_partial_audio)
             except AudioCaptureError as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 return
@@ -181,7 +186,7 @@ class Daemon:
 
             self._notify_recording(False)
             if audio.size > 0:
-                self._queue_latest_audio(audio)
+                self._queue_final_audio(audio)
 
     def _on_hotkey_press(self) -> None:
         try:
@@ -242,21 +247,62 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
+        queue_empty = object()
         while not self._stop.is_set():
-            audio = self._audio_queue.get()
-            if audio is None:
+            try:
+                final_chunk = self._audio_queue.get_nowait()
+            except queue.Empty:
+                final_chunk = queue_empty
+            if final_chunk is queue_empty:
+                try:
+                    chunk = self._partial_audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                self._handle_partial_chunk(chunk)
+                continue
+            if final_chunk is None or final_chunk.samples.size == 0:
                 break
+            self._handle_final_chunk(final_chunk)
 
-            duration = len(audio) / SAMPLE_RATE
-            print(
-                f"\r  Transcribing {duration:.1f}s...   ",
-                end="",
-                file=sys.stderr,
-                flush=True,
-            )
+    def _handle_final_chunk(self, chunk: AudioChunk) -> None:
+        audio = chunk.samples
+        duration = len(audio) / SAMPLE_RATE
+        print(
+            f"\r  Transcribing {duration:.1f}s...   ",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
             with self._engine_lock:
                 result = self.engine.transcribe(audio, language=self.language)
             self._handle_result(result)
+        finally:
+            del audio
+
+    def _handle_partial_chunk(self, chunk: AudioChunk) -> None:
+        audio = chunk.samples
+        if audio.size == 0:
+            return
+        duration = len(audio) / SAMPLE_RATE
+        print(
+            f"\r  Transcribing {duration:.1f}s...   ",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            with self._engine_lock:
+                result = self.engine.transcribe(audio, language=self.language)
+            if result.status == "ok" and result.text:
+                self._surface_transcript(
+                    phase="partial",
+                    text=result.text,
+                    sequence=chunk.sequence,
+                    stale=False,
+                )
+        finally:
+            del audio
 
     def _handle_result(self, result: TranscriptionResult) -> None:
         if result.notice:
@@ -292,6 +338,7 @@ class Daemon:
             print(f"\r  Output backend failed ({self.output.name}): {exc}", file=sys.stderr)
             return
 
+        self._surface_transcript(phase="final", text=result.text, sequence=None, stale=False)
         print(f"\r  Typed: {result.text}", file=sys.stderr)
 
     def _surface_status(self, message: str) -> None:
@@ -320,15 +367,81 @@ class Daemon:
             print(f"\r  History callback failed: {exc}", file=sys.stderr)
 
     def _queue_latest_audio(self, audio: np.ndarray) -> None:
-        self._audio_queue.put_nowait(audio)
+        self._queue_partial_audio(AudioChunk(samples=audio, final=False))
+
+    def _queue_partial_audio(self, chunk: AudioChunk) -> None:
+        if not self.recorder.is_recording:
+            return
+        dropped = self._drain_partial_audio_queue()
+        if dropped:
+            self._notify_transcript(
+                {
+                    "phase": "partial",
+                    "stale": True,
+                    "reason": "dropped-backlog",
+                    "count": dropped,
+                }
+            )
+        self._partial_audio_queue.put_nowait(chunk)
+
+    def _queue_final_audio(self, audio: np.ndarray) -> None:
+        self._drain_partial_audio_queue()
+        chunk = AudioChunk(samples=audio, final=True, sequence=self._recording_generation)
+        try:
+            self._audio_queue.put_nowait(chunk)
+        except queue.Full:
+            self._handle_final_chunk(chunk)
 
     def _queue_stop_signal(self) -> None:
-        self._drain_pending_audio_queue()
-        self._audio_queue.put_nowait(None)
+        self._drain_partial_audio_queue()
+        try:
+            self._audio_queue.put_nowait(None)
+        except queue.Full:
+            self._drain_final_audio_queue()
+            self._audio_queue.put_nowait(None)
 
-    def _drain_pending_audio_queue(self) -> None:
+    def _drain_partial_audio_queue(self) -> int:
+        dropped = 0
+        while True:
+            try:
+                self._partial_audio_queue.get_nowait()
+                dropped += 1
+            except queue.Empty:
+                return dropped
+
+    def _drain_final_audio_queue(self) -> int:
+        dropped = 0
         while True:
             try:
                 self._audio_queue.get_nowait()
+                dropped += 1
             except queue.Empty:
-                return
+                return dropped
+
+    def _surface_transcript(
+        self,
+        *,
+        phase: str,
+        text: str,
+        sequence: int | None,
+        stale: bool,
+        reason: str | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "phase": phase,
+            "text": text,
+            "stale": stale,
+        }
+        if sequence is not None:
+            payload["sequence"] = sequence
+        if reason is not None:
+            payload["reason"] = reason
+        self._notify_transcript(payload)
+
+    def _notify_transcript(self, event: dict[str, object]) -> None:
+        if self.transcript_callback is None:
+            return
+        try:
+            self.transcript_callback(event)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Transcript callback failed: {exc}", file=sys.stderr)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import queue
 import sys
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
+from dictate.audio import AudioChunk
 from dictate.history import HistoryStore
 
 # Stub out heavy dependencies so tests work without faster-whisper / numpy / pynput.
@@ -53,8 +55,9 @@ class _FakeRecorder:
     def __init__(self) -> None:
         self.is_recording = False
 
-    def start(self) -> None:
+    def start(self, on_chunk=None) -> None:  # noqa: ANN001
         self.is_recording = True
+        self.on_chunk = on_chunk
 
     def stop(self) -> np.ndarray:
         self.is_recording = False
@@ -173,7 +176,9 @@ class DaemonHistoryTests(unittest.TestCase):
     def test_shutdown_does_not_block_with_pending_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
-            daemon._audio_queue.put_nowait(np.ones(16, dtype=np.float32))
+            daemon._audio_queue.put_nowait(
+                AudioChunk(samples=np.ones(16, dtype=np.float32), final=True)
+            )
 
             shutdown_thread = threading.Thread(target=daemon.shutdown)
             shutdown_thread.start()
@@ -186,19 +191,71 @@ class DaemonHistoryTests(unittest.TestCase):
                 shutdown_thread.join(timeout=0.5)
 
             self.assertFalse(shutdown_thread.is_alive())
-            self.assertIsNone(daemon._audio_queue.get_nowait())
+            self.assertIsInstance(daemon._audio_queue.get_nowait(), AudioChunk)
 
-    def test_queue_latest_audio_preserves_pending_recordings_fifo(self) -> None:
+    def test_queue_latest_audio_drops_stale_pending_recording(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
             first = np.ones(4, dtype=np.float32)
             second = np.full(4, 2, dtype=np.float32)
 
+            daemon.recorder._recording = True
             daemon._queue_latest_audio(first)
             daemon._queue_latest_audio(second)
 
-            np.testing.assert_array_equal(daemon._audio_queue.get_nowait(), first)
-            np.testing.assert_array_equal(daemon._audio_queue.get_nowait(), second)
+            queued = daemon._partial_audio_queue.get_nowait()
+            np.testing.assert_array_equal(queued.samples, second)
+            self.assertFalse(queued.final)
+            with self.assertRaises(queue.Empty):
+                daemon._partial_audio_queue.get_nowait()
+
+    def test_queue_partial_audio_emits_stale_notice_when_latest_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon, _store, _output = self._make_daemon(tmp)
+            notices: list[dict[str, object]] = []
+            daemon.transcript_callback = notices.append
+            daemon.recorder._recording = True
+
+            daemon._queue_latest_audio(np.ones(4, dtype=np.float32))
+            daemon._queue_latest_audio(np.full(4, 2, dtype=np.float32))
+
+            self.assertTrue(any(event.get("stale") for event in notices))
+            self.assertEqual(daemon._partial_audio_queue.get_nowait().sequence, 0)
+
+    def test_final_audio_is_preserved_when_final_queue_is_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon, _store, _output = self._make_daemon(tmp)
+            handled: list[np.ndarray] = []
+            daemon._handle_final_chunk = lambda chunk: handled.append(chunk.samples.copy())
+
+            daemon._audio_queue.put_nowait(
+                AudioChunk(samples=np.ones(4, dtype=np.float32), final=True)
+            )
+            daemon._audio_queue.put_nowait(
+                AudioChunk(samples=np.full(4, 2, dtype=np.float32), final=True)
+            )
+
+            daemon._queue_final_audio(np.full(4, 3, dtype=np.float32))
+
+            np.testing.assert_array_equal(handled[0], np.full(4, 3, dtype=np.float32))
+
+    def test_sounddevice_recorder_caps_buffered_audio(self) -> None:
+        from dictate.audio import SoundDeviceRecorder
+
+        seen: list[AudioChunk] = []
+        recorder = SoundDeviceRecorder(sample_rate=4, max_recording_seconds=2)
+        recorder._recording = True
+        recorder._on_chunk = seen.append
+
+        recorder._audio_callback(np.ones((6, 1), dtype=np.float32), 6, None, None)
+        recorder._audio_callback(np.ones((6, 1), dtype=np.float32), 6, None, None)
+        audio = recorder.stop()
+
+        self.assertTrue(recorder._truncated)
+        self.assertEqual(audio.shape[0], 8)
+        self.assertEqual(len(seen), 2)
+        self.assertFalse(seen[0].final)
+        self.assertEqual(seen[1].sequence, 1)
 
     def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -90,6 +90,15 @@ class EventBrokerTests(unittest.TestCase):
         self.assertEqual(event["type"], "recording")
         self.assertTrue(event["active"])
 
+    def test_publish_transcript_events(self) -> None:
+        broker = EventBroker()
+        q = broker.subscribe()
+        broker.publish("transcript", phase="partial", text="hello", stale=False)
+        event = q.get_nowait()
+        self.assertEqual(event["type"], "transcript")
+        self.assertEqual(event["phase"], "partial")
+        self.assertEqual(event["text"], "hello")
+
     def test_unsubscribe_stops_delivery(self) -> None:
         broker = EventBroker()
         q = broker.subscribe()

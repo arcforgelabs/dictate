@@ -37,6 +37,7 @@ export default function App() {
   const [sound, setSoundState] = useState(false);
   const [ambient, setAmbientState] = useState(true);
   const [recording, setRecording] = useState(false);
+  const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
   const [palette, setPalette] = useState(false);
@@ -68,7 +69,11 @@ export default function App() {
     }).catch(() => {});
     const unsub = ipc.subscribe((ev) => {
       if (ev.type === "recording") setRecording(!!ev.active);
-      else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));
+      else if (ev.type === "transcript") {
+        if (!ev.stale && typeof ev.text === "string") {
+          setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
+        }
+      } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));
     });
     return () => { cancelled = true; unsub && unsub(); };
   }, []);
@@ -284,7 +289,7 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, typing, targetText, dictateStart, dictateStop, dictateOnce,
+    recording, transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate,
   };

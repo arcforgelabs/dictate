@@ -148,6 +148,7 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
     prev_status = getattr(daemon, "status_callback", None)
     prev_recording = getattr(daemon, "recording_callback", None)
     prev_history = getattr(daemon, "history_callback", None)
+    prev_transcript = getattr(daemon, "transcript_callback", None)
 
     def on_status(message: str | None) -> None:
         if prev_status is not None:
@@ -167,6 +168,16 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
 
     daemon.status_callback = on_status
     daemon.recording_callback = on_recording
+
+    def on_transcript(event: dict[str, object]) -> None:
+        if prev_transcript is not None:
+            try:
+                prev_transcript(event)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior transcript callback failed")
+        broker.publish("transcript", **event)
+
+    daemon.transcript_callback = on_transcript
 
     def on_history() -> None:
         if prev_history is not None:

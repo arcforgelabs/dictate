@@ -95,25 +95,30 @@ class WireDaemonEventsTests(unittest.TestCase):
         status_calls: list[str | None] = []
         recording_calls: list[bool] = []
         history_calls: list[bool] = []
+        transcript_calls: list[dict[str, object]] = []
         daemon.status_callback = status_calls.append
         daemon.recording_callback = recording_calls.append
         daemon.history_callback = lambda: history_calls.append(True)
+        daemon.transcript_callback = transcript_calls.append
         broker = _Broker()
 
         ui_launcher._wire_daemon_events(daemon, broker)
 
         daemon.status_callback("ready")
         daemon.recording_callback(True)
+        daemon.transcript_callback({"phase": "partial", "text": "hello", "stale": False})
         daemon.history_callback()
 
         self.assertEqual(status_calls, ["ready"])
         self.assertEqual(recording_calls, [True])
         self.assertEqual(history_calls, [True])
+        self.assertEqual(transcript_calls, [{"phase": "partial", "text": "hello", "stale": False}])
         self.assertEqual(
             broker.events,
             [
                 ("status", {"message": "ready"}),
                 ("recording", {"active": True}),
+                ("transcript", {"phase": "partial", "text": "hello", "stale": False}),
                 ("history-changed", {}),
             ],
         )
