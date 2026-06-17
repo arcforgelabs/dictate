@@ -25,6 +25,7 @@ class AudioChunk:
     samples: np.ndarray
     final: bool = False
     sequence: int = 0
+    recording_id: int = 0
 
 
 class AudioRecorder(Protocol):
@@ -34,7 +35,11 @@ class AudioRecorder(Protocol):
     def is_recording(self) -> bool:
         ...
 
-    def start(self, on_chunk: Callable[[AudioChunk], None] | None = None) -> None:
+    def start(
+        self,
+        on_chunk: Callable[[AudioChunk], None] | None = None,
+        recording_id: int | None = None,
+    ) -> None:
         ...
 
     def stop(self) -> np.ndarray:
@@ -60,6 +65,7 @@ class SoundDeviceRecorder:
         self._sample_count = 0
         self._truncated = False
         self._chunk_sequence = 0
+        self._recording_id = 0
         self._window_buffer = np.zeros(self._window_samples, dtype=np.float32)
         self._window_count = 0
         self._on_chunk: Callable[[AudioChunk], None] | None = None
@@ -70,7 +76,11 @@ class SoundDeviceRecorder:
     def is_recording(self) -> bool:
         return self._recording
 
-    def start(self, on_chunk: Callable[[AudioChunk], None] | None = None) -> None:
+    def start(
+        self,
+        on_chunk: Callable[[AudioChunk], None] | None = None,
+        recording_id: int | None = None,
+    ) -> None:
         """Start recording."""
         if self._recording:
             return
@@ -80,6 +90,7 @@ class SoundDeviceRecorder:
         self._sample_count = 0
         self._truncated = False
         self._chunk_sequence = 0
+        self._recording_id = 0 if recording_id is None else int(recording_id)
         self._window_count = 0
         self._on_chunk = on_chunk
 
@@ -123,12 +134,13 @@ class SoundDeviceRecorder:
                 self._stream = None
 
         with self._lock:
-            if callback is not None and self._sample_count > 0:
+            if callback is not None and self._window_count > 0:
                 tail = self._window_buffer[: self._window_count].copy()
                 tail_chunk = AudioChunk(
                     samples=tail,
                     final=True,
                     sequence=self._chunk_sequence,
+                    recording_id=self._recording_id,
                 )
                 self._chunk_sequence += 1
                 self._window_count = 0
@@ -225,6 +237,7 @@ class SoundDeviceRecorder:
                 samples=self._window_buffer[: self._window_count].copy(),
                 final=final,
                 sequence=self._chunk_sequence,
+                recording_id=self._recording_id,
             )
         )
         self._chunk_sequence += 1

@@ -70,9 +70,10 @@ class _FakeRecorder:
     def __init__(self) -> None:
         self.is_recording = False
 
-    def start(self, on_chunk=None) -> None:  # noqa: ANN001
+    def start(self, on_chunk=None, recording_id=None) -> None:  # noqa: ANN001
         self.is_recording = True
         self.on_chunk = on_chunk
+        self.recording_id = recording_id
 
     def stop(self) -> np.ndarray:
         self.is_recording = False
@@ -240,20 +241,33 @@ class DaemonHistoryTests(unittest.TestCase):
     def test_final_audio_is_preserved_when_final_queue_is_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             daemon, _store, _output = self._make_daemon(tmp)
-            daemon._audio_queue.put_nowait(
-                AudioChunk(samples=np.ones(4, dtype=np.float32), final=True)
+            transcript_events: list[dict[str, object]] = []
+            status_events: list[str | None] = []
+            daemon.transcript_callback = transcript_events.append
+            daemon.status_callback = status_events.append
+
+            for recording_id in range(1, 5):
+                daemon._queue_final_chunk(
+                    AudioChunk(
+                        samples=np.full(4, recording_id, dtype=np.float32),
+                        final=True,
+                        recording_id=recording_id,
+                    )
+                )
+
+            daemon._queue_final_chunk(
+                AudioChunk(samples=np.full(4, 5, dtype=np.float32), final=True, recording_id=5)
             )
-            daemon._audio_queue.put_nowait(
-                AudioChunk(samples=np.full(4, 2, dtype=np.float32), final=True)
+
+            self.assertEqual(daemon._audio_queue.qsize(), 4)
+            self.assertTrue(any("dropped" in (message or "") for message in status_events))
+            self.assertTrue(any(event.get("reason") == "dropped-overload" for event in transcript_events))
+            self.assertEqual(
+                [daemon._audio_queue.get_nowait().recording_id for _ in range(4)],
+                [1, 2, 3, 4],
             )
-            pending = AudioChunk(samples=np.full(4, 3, dtype=np.float32), final=True)
 
-            daemon._queue_final_audio(pending.samples)
-
-            self.assertIsNotNone(daemon._pending_final_audio)
-            np.testing.assert_array_equal(daemon._pending_final_audio.samples, pending.samples)
-
-    def test_final_result_commits_assembled_streamed_chunks(self) -> None:
+    def test_exact_window_recording_commits_assembled_streamed_text_and_stays_live(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = HistoryStore(path=Path(tmp) / "h.json")
             output = MagicMock()
@@ -263,15 +277,55 @@ class DaemonHistoryTests(unittest.TestCase):
 
             daemon = Daemon(stt, output=output, history_store=store)
             daemon.engine.min_duration_s = 0
-            daemon._recording_parts = []
-
-            daemon._handle_partial_chunk(AudioChunk(samples=np.ones(4, dtype=np.float32), final=False))
-            daemon._handle_final_chunk(AudioChunk(samples=np.ones(2, dtype=np.float32), final=True))
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=1)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=1)
+            )
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.full(2, 2, dtype=np.float32), final=False, recording_id=2)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=2)
+            )
 
             entries = store.load()
-            self.assertEqual(entries[0].text, "hello world")
-            output.send.assert_called_once_with("hello world")
+            self.assertEqual([entry.text for entry in entries], ["world", "hello"])
+            self.assertEqual([call.args[0] for call in output.send.call_args_list], ["hello", "world"])
             self.assertEqual(stt.calls, [4, 2])
+            self.assertFalse(daemon._stop.is_set())
+
+    def test_overlapping_recordings_keep_their_transcripts_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({4: "hello", 2: "world"})
+            from dictate.daemon import Daemon
+
+            daemon = Daemon(stt, output=output, history_store=store, recorder=_FakeRecorder())
+            daemon.engine.min_duration_s = 0
+
+            daemon._start_recording()
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=1)
+            )
+            daemon.recorder.is_recording = False
+            daemon._start_recording()
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.full(2, 2, dtype=np.float32), final=False, recording_id=2)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=1)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=2)
+            )
+
+            entries = store.load()
+            self.assertEqual([entry.text for entry in entries], ["world", "hello"])
+            self.assertEqual([call.args[0] for call in output.send.call_args_list], ["hello", "world"])
 
     def test_sounddevice_recorder_emits_windowed_chunks_and_tail(self) -> None:
         from dictate.audio import SoundDeviceRecorder
