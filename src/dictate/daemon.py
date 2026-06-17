@@ -5,6 +5,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from collections import deque
 from collections.abc import Callable
 
 import numpy as np
@@ -25,6 +26,7 @@ from dictate.stt import SpeechToText
 SAMPLE_RATE = 16000
 FINAL_AUDIO_QUEUE_SIZE = 4
 FINAL_WINDOW_QUEUE_SIZE = 64
+TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
 
 
@@ -73,7 +75,8 @@ class Daemon:
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
         self._recording_parts: dict[int, list[str]] = {}
-        self._failed_recordings: dict[int, str] = {}
+        self._terminal_recordings: set[int] = set()
+        self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
         self._queue_lock = threading.Lock()
 
@@ -177,7 +180,7 @@ class Daemon:
                 self._active_recording_id = self._recording_generation
                 with self._queue_lock:
                     self._recording_parts[self._active_recording_id] = []
-                    self._failed_recordings.pop(self._active_recording_id, None)
+                    self._terminal_recordings.discard(self._active_recording_id)
                 self.recorder.start(
                     on_chunk=self._queue_partial_audio,
                     recording_id=self._active_recording_id,
@@ -571,9 +574,9 @@ class Daemon:
 
     def _fail_recording_session(self, recording_id: int, reason: str) -> None:
         with self._queue_lock:
-            if recording_id in self._failed_recordings:
+            if recording_id in self._terminal_recordings:
                 return
-            self._failed_recordings[recording_id] = reason
+            self._remember_terminal_recording_locked(recording_id)
             self._recording_parts.pop(recording_id, None)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
@@ -590,8 +593,15 @@ class Daemon:
     def _clear_recording_state(self, recording_id: int) -> None:
         with self._queue_lock:
             self._recording_parts.pop(recording_id, None)
-            self._failed_recordings.pop(recording_id, None)
 
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:
-            return recording_id in self._failed_recordings
+            return recording_id in self._terminal_recordings
+
+    def _remember_terminal_recording_locked(self, recording_id: int) -> None:
+        self._terminal_recordings.add(recording_id)
+        self._terminal_recording_order.append(recording_id)
+        while len(self._terminal_recording_order) > TERMINAL_RECORDING_CACHE_SIZE:
+            expired = self._terminal_recording_order.popleft()
+            if expired not in self._terminal_recording_order:
+                self._terminal_recordings.discard(expired)

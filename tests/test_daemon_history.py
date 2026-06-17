@@ -249,7 +249,14 @@ class DaemonHistoryTests(unittest.TestCase):
 
     def test_partial_window_overload_fails_session_instead_of_omitting_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            daemon, store, output = self._make_daemon(tmp)
+            from dictate.daemon import Daemon, TERMINAL_RECORDING_CACHE_SIZE
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({4: "stale"})
+            daemon = Daemon(stt, output=output, history_store=store)
+            daemon.engine.min_duration_s = 0
             statuses: list[str | None] = []
             transcripts: list[dict[str, object]] = []
             daemon.status_callback = statuses.append
@@ -265,13 +272,19 @@ class DaemonHistoryTests(unittest.TestCase):
             daemon._queue_partial_audio(
                 AudioChunk(samples=np.full(4, 2, dtype=np.float32), final=False, recording_id=7)
             )
+            stale_chunk = daemon._partial_audio_queue.get_nowait()
+            daemon._handle_partial_chunk(stale_chunk)
             daemon._handle_final_chunk(
                 AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=7)
             )
+            for recording_id in range(100, 100 + TERMINAL_RECORDING_CACHE_SIZE + 8):
+                daemon._fail_recording_session(recording_id, "Transcription backlog exceeded")
 
             self.assertTrue(any("backlog exceeded" in (message or "") for message in statuses))
             self.assertTrue(any(event.get("stale") for event in transcripts))
             self.assertNotIn(7, daemon._recording_parts)
+            self.assertLessEqual(len(daemon._terminal_recordings), TERMINAL_RECORDING_CACHE_SIZE)
+            self.assertEqual(stt.calls, [])
             self.assertFalse(store.load())
             output.send.assert_not_called()
 
