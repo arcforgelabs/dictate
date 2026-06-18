@@ -79,6 +79,7 @@ class Daemon:
         self._recording_final_chunks: set[int] = set()
         self._streaming_recordings: set[int] = set()
         self._recording_stt_ids: dict[int, int] = {}
+        self._recording_last_audio_status: dict[int, TranscriptionResult] = {}
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -219,8 +220,15 @@ class Daemon:
             try:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
-                self._active_recording_id = None
-                print(f"\r  Microphone error: {exc}", file=sys.stderr)
+                if recording_id is not None:
+                    self._fail_recording_session(
+                        recording_id,
+                        f"Microphone error: {exc}",
+                        transcript_reason="capture-error",
+                    )
+                else:
+                    self._active_recording_id = None
+                    print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 self._notify_recording(False)
                 return
 
@@ -323,22 +331,14 @@ class Daemon:
             if self._is_recording_failed(chunk.recording_id):
                 return
             if audio.size > 0:
-                if not self._recording_backend_matches_current(chunk.recording_id):
+                result = self._transcribe_recording_audio(chunk.recording_id, audio)
+                if result is None:
                     self._fail_recording_session(
                         chunk.recording_id,
                         "Transcription backend changed; recording discarded",
                         transcript_reason="stale-backend",
                     )
                     return
-                duration = len(audio) / SAMPLE_RATE
-                print(
-                    f"\r  Transcribing {duration:.1f}s...   ",
-                    end="",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                with self._engine_lock:
-                    result = self.engine.transcribe(audio, language=self.language)
                 if result.notice:
                     self._surface_status(result.notice)
                 if result.status == "error":
@@ -350,6 +350,8 @@ class Daemon:
                     return
                 if result.status == "ok" and result.text:
                     self._record_transcript_piece(chunk.recording_id, result)
+                else:
+                    self._remember_recording_audio_status(chunk.recording_id, result)
             else:
                 result = None
             self._finalize_recording_session(chunk.recording_id, result)
@@ -362,23 +364,15 @@ class Daemon:
             return
         if self._is_recording_failed(chunk.recording_id):
             return
-        if not self._recording_backend_matches_current(chunk.recording_id):
+        result = self._transcribe_recording_audio(chunk.recording_id, audio)
+        if result is None:
             self._fail_recording_session(
                 chunk.recording_id,
                 "Transcription backend changed; recording discarded",
                 transcript_reason="stale-backend",
             )
             return
-        duration = len(audio) / SAMPLE_RATE
-        print(
-            f"\r  Transcribing {duration:.1f}s...   ",
-            end="",
-            file=sys.stderr,
-            flush=True,
-        )
         try:
-            with self._engine_lock:
-                result = self.engine.transcribe(audio, language=self.language)
             if result.notice:
                 self._surface_status(result.notice)
             if result.status == "error":
@@ -399,6 +393,8 @@ class Daemon:
                         recording_id=chunk.recording_id,
                         stale=False,
                     )
+            else:
+                self._remember_recording_audio_status(chunk.recording_id, result)
         finally:
             del audio
 
@@ -602,6 +598,12 @@ class Daemon:
         with self._queue_lock:
             self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
 
+    def _remember_recording_audio_status(self, recording_id: int, result: TranscriptionResult) -> None:
+        if result.status not in {"too_short", "no_speech"}:
+            return
+        with self._queue_lock:
+            self._recording_last_audio_status[recording_id] = result
+
     def _assembled_recording_text(self, recording_id: int) -> str:
         with self._queue_lock:
             parts = list(self._recording_parts.get(recording_id, []))
@@ -617,6 +619,7 @@ class Daemon:
             return
         assembled_text = self._assembled_recording_text(recording_id)
         if not assembled_text:
+            final_result = final_result or self._last_recording_audio_status(recording_id)
             self._clear_recording_state(recording_id)
             self._surface_empty_final_status(final_result)
             return
@@ -660,6 +663,7 @@ class Daemon:
             self._recording_final_chunks.discard(recording_id)
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
+            self._recording_last_audio_status.pop(recording_id, None)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
         self._surface_status(reason)
@@ -679,6 +683,7 @@ class Daemon:
             self._recording_final_chunks.discard(recording_id)
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
+            self._recording_last_audio_status.pop(recording_id, None)
 
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:
@@ -695,13 +700,28 @@ class Daemon:
     def _supports_streaming_chunks(self) -> bool:
         return bool(self.engine.stt.capabilities.supports_streaming_chunks)
 
-    def _recording_backend_matches_current(self, recording_id: int) -> bool:
-        with self._queue_lock:
-            expected_stt_id = self._recording_stt_ids.get(recording_id)
-        if expected_stt_id is None:
-            return True
+    def _transcribe_recording_audio(
+        self,
+        recording_id: int,
+        audio: np.ndarray,
+    ) -> TranscriptionResult | None:
+        duration = len(audio) / SAMPLE_RATE
+        print(
+            f"\r  Transcribing {duration:.1f}s...   ",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
         with self._engine_lock:
-            return id(self.engine.stt) == expected_stt_id
+            with self._queue_lock:
+                expected_stt_id = self._recording_stt_ids.get(recording_id)
+            if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
+                return None
+            return self.engine.transcribe(audio, language=self.language)
+
+    def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:
+        with self._queue_lock:
+            return self._recording_last_audio_status.get(recording_id)
 
     def _surface_empty_final_status(self, result: TranscriptionResult | None) -> None:
         if result is None or result.status == "empty":
