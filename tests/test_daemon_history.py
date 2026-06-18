@@ -973,6 +973,72 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(stt.calls, [4, 2])
             self.assertFalse(daemon._stop.is_set())
 
+    def test_short_final_tail_after_streamed_text_is_transcribed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16000: "hello", 1600: "world"})
+            daemon = Daemon(stt, output=output, history_store=store)
+            self._seed_recording(daemon, 14)
+
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(16000, dtype=np.float32), final=False, recording_id=14)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.full(1600, 2, dtype=np.float32), final=True, recording_id=14)
+            )
+
+            self.assertEqual(stt.calls, [16000, 1600])
+            output.send.assert_called_once_with("hello world")
+            self.assertEqual(store.load()[0].text, "hello world")
+
+    def test_empty_final_marker_after_streamed_text_still_commits_prior_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16000: "hello"})
+            daemon = Daemon(stt, output=output, history_store=store)
+            self._seed_recording(daemon, 15)
+
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(16000, dtype=np.float32), final=False, recording_id=15)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=15)
+            )
+
+            self.assertEqual(stt.calls, [16000])
+            output.send.assert_called_once_with("hello")
+            self.assertEqual(store.load()[0].text, "hello")
+
+    def test_no_speech_short_final_tail_after_streamed_text_does_not_drop_prior_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16000: "hello"})
+            daemon = Daemon(stt, output=output, history_store=store)
+            self._seed_recording(daemon, 16)
+
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(16000, dtype=np.float32), final=False, recording_id=16)
+            )
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.full(1600, 2, dtype=np.float32), final=True, recording_id=16)
+            )
+
+            self.assertEqual(stt.calls, [16000, 1600])
+            output.send.assert_called_once_with("hello")
+            self.assertEqual(store.load()[0].text, "hello")
+
     def test_overlapping_recordings_keep_their_transcripts_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = HistoryStore(path=Path(tmp) / "h.json")

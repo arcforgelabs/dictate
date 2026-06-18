@@ -63,13 +63,20 @@ class DictationEngine:
     def duration_s(self, audio: np.ndarray) -> float:
         return len(audio) / self.sample_rate
 
-    def transcribe(self, audio: np.ndarray, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        *,
+        min_duration_s: float | None = None,
+    ) -> TranscriptionResult:
         """Transcribe audio and classify common non-success outcomes."""
         if audio.size == 0:
             return TranscriptionResult(status="empty", duration_s=0.0)
 
         duration = self.duration_s(audio)
-        if duration < self.min_duration_s:
+        duration_floor = self.min_duration_s if min_duration_s is None else min_duration_s
+        if duration < duration_floor:
             return TranscriptionResult(status="too_short", duration_s=duration)
 
         lexicon_plan = build_lexicon_plan(

@@ -339,7 +339,12 @@ class Daemon:
             if self._is_recording_failed(chunk.recording_id):
                 return
             if audio.size > 0:
-                result = self._transcribe_recording_audio(chunk.recording_id, audio)
+                min_duration_s = 0.0 if self._assembled_recording_text(chunk.recording_id) else None
+                result = self._transcribe_recording_audio(
+                    chunk.recording_id,
+                    audio,
+                    min_duration_s=min_duration_s,
+                )
                 if result is None:
                     self._fail_recording_session(
                         chunk.recording_id,
@@ -740,6 +745,8 @@ class Daemon:
         self,
         recording_id: int,
         audio: np.ndarray,
+        *,
+        min_duration_s: float | None = None,
     ) -> TranscriptionResult | None:
         duration = len(audio) / SAMPLE_RATE
         print(
@@ -756,7 +763,7 @@ class Daemon:
                 return None
             if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
                 return None
-            return self.engine.transcribe(audio, language=self.language)
+            return self.engine.transcribe(audio, language=self.language, min_duration_s=min_duration_s)
 
     def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:
         with self._queue_lock:
