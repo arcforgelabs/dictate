@@ -11,6 +11,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.6.6";
+const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
 export default function App() {
   const [view, setView] = useState("status");
@@ -55,6 +56,7 @@ export default function App() {
   const capRef = useRef(false); capRef.current = capturing;
   const transcriptIdRef = useRef(null);
   const terminalTranscriptIdsRef = useRef(new Set());
+  const terminalTranscriptIdOrderRef = useRef([]);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
@@ -76,10 +78,13 @@ export default function App() {
       }
       else if (ev.type === "transcript") {
         const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
-        if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) return;
+        if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) {
+          if (transcriptIdRef.current - eventId > TERMINAL_TRANSCRIPT_ID_LIMIT) resetTranscriptOrdering();
+          else return;
+        }
         if (eventId !== null && terminalTranscriptIdsRef.current.has(eventId) && ev.phase !== "final" && !ev.stale) return;
         if (eventId !== null) transcriptIdRef.current = eventId;
-        if (eventId !== null && (ev.phase === "final" || ev.stale)) terminalTranscriptIdsRef.current.add(eventId);
+        if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
         if (ev.stale) {
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
@@ -87,8 +92,26 @@ export default function App() {
         }
       } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));
     });
-    return () => { cancelled = true; unsub && unsub(); };
+    return () => { cancelled = true; resetTranscriptOrdering(); unsub && unsub(); };
   }, []);
+
+  const resetTranscriptOrdering = () => {
+    transcriptIdRef.current = null;
+    terminalTranscriptIdsRef.current.clear();
+    terminalTranscriptIdOrderRef.current = [];
+  };
+
+  const markTerminalTranscriptId = (id) => {
+    const terminalIds = terminalTranscriptIdsRef.current;
+    if (!terminalIds.has(id)) {
+      terminalIds.add(id);
+      terminalTranscriptIdOrderRef.current.push(id);
+    }
+    while (terminalTranscriptIdOrderRef.current.length > TERMINAL_TRANSCRIPT_ID_LIMIT) {
+      const expired = terminalTranscriptIdOrderRef.current.shift();
+      if (!terminalTranscriptIdOrderRef.current.includes(expired)) terminalIds.delete(expired);
+    }
+  };
 
   const hydrate = useCallback((st) => {
     if (st.model && st.model.id) setModelState(st.model.id);

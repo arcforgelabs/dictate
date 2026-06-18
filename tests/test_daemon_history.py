@@ -1048,6 +1048,37 @@ class DaemonHistoryTests(unittest.TestCase):
         self.assertFalse(recorder.truncated)
         self.assertEqual(audio.shape[0], 4)
 
+    def test_sounddevice_stop_time_callback_is_included_in_final_tail(self) -> None:
+        from dictate.audio import SoundDeviceRecorder
+
+        seen: list[AudioChunk] = []
+        recorder = SoundDeviceRecorder(
+            sample_rate=4,
+            max_recording_seconds=2,
+            transcription_window_seconds=2,
+        )
+
+        class _StopCallbackStream:
+            def stop(self) -> None:
+                recorder._audio_callback(np.full((2, 1), 2, dtype=np.float32), 2, None, None)
+
+            def close(self) -> None:
+                pass
+
+        recorder._recording = True
+        recorder._stream = _StopCallbackStream()
+        recorder._on_chunk = seen.append
+        recorder._recording_id = 4
+        recorder._audio_callback(np.ones((2, 1), dtype=np.float32), 2, None, None)
+
+        audio = recorder.stop()
+
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].final)
+        self.assertEqual(seen[0].recording_id, 4)
+        np.testing.assert_array_equal(seen[0].samples, np.array([1, 1, 2, 2], dtype=np.float32))
+        np.testing.assert_array_equal(audio, np.array([1, 1, 2, 2], dtype=np.float32))
+
     def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon

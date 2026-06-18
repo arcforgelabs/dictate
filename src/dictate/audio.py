@@ -128,8 +128,6 @@ class SoundDeviceRecorder:
             return np.array([], dtype=np.float32)
 
         self._recording = False
-        callback = self._on_chunk
-        self._on_chunk = None
 
         tail_chunk: AudioChunk | None = None
         if self._stream is not None:
@@ -142,6 +140,8 @@ class SoundDeviceRecorder:
                 self._stream = None
 
         with self._lock:
+            callback = self._on_chunk
+            self._on_chunk = None
             if callback is not None and self._window_count > 0:
                 tail = self._window_buffer[: self._window_count].copy()
                 tail_chunk = AudioChunk(
