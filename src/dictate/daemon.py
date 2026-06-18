@@ -503,6 +503,8 @@ class Daemon:
                 self._recording_final_chunks.add(chunk.recording_id)
         if not self._queue_partial_audio(chunk):
             with self._queue_lock:
+                if chunk.recording_id != 0 and not self._recording_session_known_locked(chunk.recording_id):
+                    return
                 if previous_count == 0:
                     self._recording_chunk_counts.pop(chunk.recording_id, None)
                 else:
@@ -651,6 +653,7 @@ class Daemon:
             self._surface_empty_final_status(final_result)
             return
 
+        self._mark_recording_completed(recording_id)
         self._clear_recording_state(recording_id)
         try:
             self.history_store.append(assembled_text)
@@ -711,6 +714,12 @@ class Daemon:
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
+
+    def _mark_recording_completed(self, recording_id: int) -> None:
+        with self._queue_lock:
+            if recording_id in self._terminal_recordings:
+                return
+            self._remember_terminal_recording_locked(recording_id)
 
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:

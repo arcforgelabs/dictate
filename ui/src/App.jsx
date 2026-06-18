@@ -76,10 +76,10 @@ export default function App() {
       else if (ev.type === "transcript") {
         const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
         if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) return;
+        if (eventId !== null) transcriptIdRef.current = eventId;
         if (ev.stale) {
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
-          if (eventId !== null) transcriptIdRef.current = eventId;
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
       } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));

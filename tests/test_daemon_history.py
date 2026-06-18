@@ -837,6 +837,51 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertNotIn(1, daemon._recording_final_chunks)
             self.assertNotIn(1, daemon._recording_stt_ids)
 
+    def test_failed_final_tail_enqueue_does_not_restore_failed_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            daemon = Daemon(_ChunkingStt({16: "dropped"}), output=output, history_store=store)
+            daemon._audio_queue = queue.Queue(maxsize=1)
+            daemon._audio_queue.put_nowait(AudioChunk(samples=np.ones(16, dtype=np.float32), final=True, recording_id=0))
+            self._seed_recording(daemon, 3)
+
+            daemon._queue_recording_chunk(
+                AudioChunk(samples=np.ones(16, dtype=np.float32), final=True, recording_id=3)
+            )
+
+            self.assertNotIn(3, daemon._recording_parts)
+            self.assertNotIn(3, daemon._recording_chunk_counts)
+            self.assertNotIn(3, daemon._recording_final_chunks)
+            self.assertNotIn(3, daemon._recording_stt_ids)
+            output.send.assert_not_called()
+
+    def test_successful_finalization_makes_late_chunks_silent_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16: "hello", 8: "late"})
+            transcripts: list[dict[str, object]] = []
+            daemon = Daemon(stt, output=output, history_store=store, transcript_callback=transcripts.append)
+            daemon.engine.min_duration_s = 0
+            self._seed_recording(daemon, 4)
+
+            daemon._handle_partial_chunk(AudioChunk(samples=np.ones(16, dtype=np.float32), recording_id=4))
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=4)
+            )
+            daemon._handle_partial_chunk(AudioChunk(samples=np.ones(8, dtype=np.float32), recording_id=4))
+
+            self.assertEqual(stt.calls, [16])
+            output.send.assert_called_once_with("hello")
+            self.assertEqual([event.get("stale") for event in transcripts], [False, False])
+
     def test_hosted_truncated_stop_audio_fails_instead_of_committing_partial_ring(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
@@ -986,6 +1031,22 @@ class DaemonHistoryTests(unittest.TestCase):
         self.assertFalse(seen[1].final)
         self.assertEqual(seen[2].sequence, 2)
         self.assertTrue(seen[2].final)
+
+    def test_sounddevice_recorder_exact_capacity_is_not_truncated(self) -> None:
+        from dictate.audio import SoundDeviceRecorder
+
+        recorder = SoundDeviceRecorder(
+            sample_rate=4,
+            max_recording_seconds=1,
+            transcription_window_seconds=2,
+        )
+        recorder._recording = True
+
+        recorder._audio_callback(np.ones((4, 1), dtype=np.float32), 4, None, None)
+        audio = recorder.stop()
+
+        self.assertFalse(recorder.truncated)
+        self.assertEqual(audio.shape[0], 4)
 
     def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

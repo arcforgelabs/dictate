@@ -125,4 +125,36 @@ describe("Quiet Console app (mock mode)", () => {
 
     expect(await screen.findByText("new recording words")).toBeInTheDocument();
   });
+
+  it("newer stale transcript events suppress older delayed partials", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() {
+        sources.push(this);
+      }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    sources[0].onmessage({
+      data: JSON.stringify({ type: "transcript", phase: "final", text: "", stale: true, recording_id: 3 }),
+    });
+    sources[0].onmessage({
+      data: JSON.stringify({
+        type: "transcript",
+        phase: "partial",
+        text: "older delayed words",
+        stale: false,
+        recording_id: 2,
+      }),
+    });
+
+    await waitFor(() => expect(screen.queryByText("older delayed words")).not.toBeInTheDocument());
+  });
 });

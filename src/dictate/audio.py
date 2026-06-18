@@ -209,7 +209,8 @@ class SoundDeviceRecorder:
                     pass
 
     def _write_capture(self, samples: np.ndarray) -> None:
-        if samples.size >= self._max_samples:
+        previous_sample_count = self._sample_count
+        if samples.size > self._max_samples:
             self._buffer[:] = samples[-self._max_samples :]
             self._write_pos = 0
             self._sample_count = self._max_samples
@@ -218,7 +219,7 @@ class SoundDeviceRecorder:
 
         self._write_chunk(samples)
         self._sample_count = min(self._max_samples, self._sample_count + len(samples))
-        if self._sample_count == self._max_samples and len(samples) > 0:
+        if previous_sample_count + len(samples) > self._max_samples:
             self._truncated = True
 
     def _append_window_samples(self, samples: np.ndarray, chunk_events: list[AudioChunk]) -> None:
