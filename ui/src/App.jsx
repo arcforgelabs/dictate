@@ -54,6 +54,7 @@ export default function App() {
   const actRef = useRef(activation); actRef.current = activation;
   const capRef = useRef(false); capRef.current = capturing;
   const transcriptIdRef = useRef(null);
+  const terminalTranscriptIdsRef = useRef(new Set());
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
@@ -76,7 +77,9 @@ export default function App() {
       else if (ev.type === "transcript") {
         const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
         if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) return;
+        if (eventId !== null && terminalTranscriptIdsRef.current.has(eventId) && ev.phase !== "final" && !ev.stale) return;
         if (eventId !== null) transcriptIdRef.current = eventId;
+        if (eventId !== null && (ev.phase === "final" || ev.stale)) terminalTranscriptIdsRef.current.add(eventId);
         if (ev.stale) {
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
