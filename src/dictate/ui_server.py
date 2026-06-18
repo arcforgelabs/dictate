@@ -201,6 +201,7 @@ class UiBackend:
     history_store: HistoryStore | None = None
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
+    daemon: Any | None = None
 
     # Injectable hooks (default to the real implementations).
     save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
@@ -247,8 +248,9 @@ class UiBackend:
                 "device": cfg.stt_device or "auto",
                 "compute": cfg.stt_compute_type or "int8",
             },
-            "providers": self._providers(),
+            "providers": self._providers(cfg),
             "prefs": prefs,
+            "notes": {"recording": self._note_recording_active()},
             "startup": bool(self._safe(self.startup_enabled, False)),
             "secretStore": self._safe(self.secret_store_description, "OS secret store"),
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
@@ -281,7 +283,7 @@ class UiBackend:
             if not meta.get("local"):
                 entry["keyName"] = meta.get("keyName", f"{backend} API key")
                 entry["keyPrefix"] = meta.get("keyPrefix", "")
-                entry["configured"] = self._provider_ready(backend)
+                entry["configured"] = self._provider_ready(backend, cfg)
             models.append(entry)
         # The local provider's display name keeps the "provider · model" form.
         for entry in models:
@@ -289,10 +291,10 @@ class UiBackend:
                 entry["name"] = f"faster-whisper · {entry['model']}"
         return models
 
-    def _providers(self) -> dict[str, dict[str, Any]]:
+    def _providers(self, cfg: config_mod.Config) -> dict[str, dict[str, Any]]:
         providers: dict[str, dict[str, Any]] = {}
         for backend in api_keys_mod.API_BACKENDS:
-            status = self._safe(lambda b=backend: self.api_key_status(b), None)
+            status = self._safe(lambda b=backend: self._provider_status(b, cfg), None)
             if status is None:
                 providers[backend] = {"configured": False, "status": "None"}
             else:
@@ -302,9 +304,25 @@ class UiBackend:
                 }
         return providers
 
-    def _provider_ready(self, backend: str) -> bool:
-        status = self._safe(lambda: self.api_key_status(backend), None)
+    def _provider_ready(self, backend: str, cfg: config_mod.Config | None = None) -> bool:
+        cfg = cfg or config_mod.load_config(self.config_path)
+        status = self._safe(lambda: self._provider_status(backend, cfg), None)
         return bool(status and status.ready)
+
+    def _provider_status(
+        self,
+        backend: str,
+        cfg: config_mod.Config,
+    ) -> api_keys_mod.ApiKeyStatus:
+        command = {
+            "openai": cfg.openai_api_key_command,
+            "xai": cfg.xai_api_key_command,
+            "gemini": cfg.gemini_api_key_command,
+        }.get(backend)
+        if command:
+            api_key = api_keys_mod._api_key_from_command(command, backend=backend)
+            return self.api_key_status(backend, api_key=api_key, include_command=False)
+        return self.api_key_status(backend)
 
     def get_history(self) -> list[dict[str, Any]]:
         entries = self.history_store.load()
@@ -432,6 +450,21 @@ class UiBackend:
         self.history_store._save([])  # rolling buffer reset
         return {"history": []}
 
+    def start_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        started = bool(daemon.start_note_recording())
+        return {"recording": bool(getattr(daemon, "note_recording_active", started))}
+
+    def stop_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        stopped = bool(daemon.stop_note_recording())
+        return {"recording": bool(getattr(daemon, "note_recording_active", not stopped))}
+
+    def toggle_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        active = bool(daemon.toggle_note_recording())
+        return {"recording": active}
+
     def save_provider_key(self, backend: str, api_key: str) -> dict[str, Any]:
         if backend not in api_keys_mod.API_BACKENDS:
             raise ApiError(400, f"unknown provider: {backend!r}")
@@ -508,6 +541,14 @@ class UiBackend:
             return fn()
         except Exception:  # noqa: BLE001
             return default
+
+    def _note_recording_active(self) -> bool:
+        return bool(self.daemon is not None and getattr(self.daemon, "note_recording_active", False))
+
+    def _require_daemon(self) -> Any:
+        if self.daemon is None:
+            raise ApiError(409, "note recording requires a running Dictate daemon")
+        return self.daemon
 
 
 # --------------------------------------------------------------------------- #
@@ -639,6 +680,12 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, {"history": backend.get_history()})
         if path == "/api/history" and method == "DELETE":
             return _Response(200, backend.clear_history())
+        if path == "/api/notes/start" and method == "POST":
+            return _Response(200, backend.start_note_recording())
+        if path == "/api/notes/stop" and method == "POST":
+            return _Response(200, backend.stop_note_recording())
+        if path == "/api/notes/toggle" and method == "POST":
+            return _Response(200, backend.toggle_note_recording())
         if path == "/api/api-keys" and method == "POST":
             body = self._read_json() or {}
             return _Response(

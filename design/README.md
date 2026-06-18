@@ -6,6 +6,12 @@ Design System** (warm paper greyscale, Hanken Grotesk + JetBrains Mono, one livi
 
 This README is the map. Open the file listed under each section to see the thing itself.
 
+> **Claude Design workflow:** the process lives in the `forge` (design mode) and `claude-design`
+> skills; Dictate's project mapping is in
+> [`../docs/claude-design-workflow.md`](../docs/claude-design-workflow.md). This `design/` folder
+> is the standard home for design deliverables — organised however the design agent prefers, as
+> long as it stays clear and discoverable (this README is the map).
+
 > **Engineers start here:** [`WORK-BRIEF.md`](WORK-BRIEF.md) — the consolidated "what to do
 > next". The last brief's bug-fix, status-port, and packaging work has all **shipped**; the
 > brief now covers the new brand mark and the small ports that remain.
@@ -18,7 +24,7 @@ These are the current, maintained artifacts. Start here.
 
 | Path | What it is | Status |
 |---|---|---|
-| **`dictate-app/Dictate Settings.html`** | The Settings app prototype — the primary deliverable. Hi-fi, interactive, light/dark, 7 views, ⌘K palette, listening HUD, toasts. | ✅ Current |
+| **`dictate-app/Dictate Settings.html`** | The Settings app prototype — the primary deliverable. Hi-fi, interactive, light/dark, capture workflow, ⌘K palette, listening HUD, toasts. | ✅ Current |
 | **`dictate-ds/Dictate Design System.html`** | The living design-system doc — tokens, type, color, components. The binding visual reference. | ✅ Current |
 | **`platforms/Dictate Across Platforms.html`** | Cross-platform chrome study — the same window wearing macOS / Win11 / Win10 / GNOME / KDE frames, light + dark. | ✅ Current |
 | **`logos.html`** | Brand-mark exploration — directions for a new, more distinctive logo and the chosen **"cradle mic"** mark (now in `dictate-app/icons.jsx`). | ✅ Current |
@@ -36,7 +42,7 @@ most changes.
 | File | Role |
 |---|---|
 | `Dictate Settings.html` | Entry point — app shell, state, nav, fit-to-viewport scaler |
-| `views.jsx` | The 7 setting surfaces (Status, Model, Push-to-talk, Hotwords, Recent history, Startup, Advanced) |
+| `views.jsx` | The maintained setting surfaces (Status, Model, Push-to-talk, Hotwords, Recent history, Advanced) |
 | `overlays.jsx` | Listening HUD, ⌘K command palette, toast stack |
 | `primitives.jsx` | Shared atoms (Combo, Chip, Toggle, Seg, Row, Wave…) |
 | `store.jsx` | Model catalog, demo phrases, live time-label helpers |

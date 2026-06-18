@@ -50,6 +50,8 @@ function App() {
   const [sound, setSound] = useState(false);
   const [ambient, setAmbient] = useState(true);
   const [recording, setRecording] = useState(false);
+  const [noteRecording, setNoteRecording] = useState(false);
+  const [noteText, setNoteText] = useState("");
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
   const [palette, setPalette] = useState(false);
@@ -105,6 +107,18 @@ function App() {
     setTimeout(() => typeText(phrase), 220);
   };
   const dictateOnce = () => { if (recRef.current) return; setRecording(true); setTimeout(dictateStop, 1300); };
+  const toggleNoteRecording = () => {
+    if (noteRecording) {
+      const text = "Speaker 1: Let's capture the release notes here.\nSpeaker 2: Add the follow-up task for tomorrow morning.";
+      setNoteRecording(false);
+      setNoteText(text);
+      pushHistory(text);
+      toast("Conversation recording saved");
+    } else {
+      setNoteRecording(true);
+      toast("Recording started");
+    }
+  };
 
   // ---- key / hotword helpers ----
   const addKey = p => setKeys(k => ({ ...k, [p]: true }));
@@ -149,6 +163,7 @@ function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
+    noteRecording, noteText, toggleNoteRecording,
     recording, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
   };
@@ -161,8 +176,6 @@ function App() {
     { v: "hotwords", icon: "hash", label: "Hotwords", badge: hotwords.length },
     { sec: "Activity" },
     { v: "history", icon: "history", label: "Recent history", badge: history.length || null },
-    { sec: "App" },
-    { v: "startup", icon: "power", label: "Startup" },
     { v: "advanced", icon: "gear", label: "Advanced" },
   ];
   const Current = VIEWS[view];
@@ -191,7 +204,7 @@ function App() {
               <span className="mic"><Icon name="mic" size={19} /></span>
               <span className="meta">
                 <span className="nm">Dictate <Dot live /></span>
-                <span className="t-meta">{m.name.split(" · ")[0]} · {recording ? "listening" : "ready"}</span>
+                <span className="t-meta">{m.name.split(" · ")[0]} · {noteRecording ? "recording" : recording ? "listening" : "ready"}</span>
               </span>
             </div>
             <nav className="nav">

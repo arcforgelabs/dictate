@@ -95,6 +95,15 @@ export const ipc = {
   async clearHistory() {
     return call("DELETE", "/api/history");
   },
+  async startNoteRecording() {
+    return call("POST", "/api/notes/start");
+  },
+  async stopNoteRecording() {
+    return call("POST", "/api/notes/stop");
+  },
+  async toggleNoteRecording() {
+    return call("POST", "/api/notes/toggle");
+  },
   async saveApiKey(backend, apiKey) {
     return call("POST", "/api/api-keys", { backend, apiKey });
   },

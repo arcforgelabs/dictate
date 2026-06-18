@@ -38,6 +38,8 @@ export default function App() {
   const [sound, setSoundState] = useState(false);
   const [ambient, setAmbientState] = useState(true);
   const [recording, setRecording] = useState(false);
+  const [noteRecording, setNoteRecording] = useState(false);
+  const [noteText, setNoteText] = useState("");
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
@@ -75,6 +77,15 @@ export default function App() {
       if (ev.type === "recording") {
         setRecording(!!ev.active);
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
+      }
+      else if (ev.type === "note-recording") {
+        setNoteRecording(!!ev.active);
+      }
+      else if (ev.type === "note") {
+        if (typeof ev.text === "string") {
+          setNoteText(ev.text);
+          toast("Conversation note saved");
+        }
       }
       else if (ev.type === "transcript") {
         const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
@@ -128,6 +139,7 @@ export default function App() {
         gemini: !!st.providers.gemini?.configured,
       });
     }
+    if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.prefs) {
       if (st.prefs.theme && st.prefs.theme !== "system") setThemeState(st.prefs.theme);
       setTrayOnlyState(!!st.prefs.trayOnly);
@@ -204,6 +216,25 @@ export default function App() {
       return [];
     });
     if (ipc.isLive()) ipc.clearHistory().catch(() => {});
+  };
+
+  const toggleNoteRecording = () => {
+    if (!ipc.isLive()) {
+      if (noteRecording) {
+        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+        setNoteRecording(false);
+        setNoteText(demo);
+        pushHistory(demo);
+        toast("Conversation note saved");
+      } else {
+        setNoteRecording(true);
+        toast("Note recording started");
+      }
+      return;
+    }
+    ipc.toggleNoteRecording()
+      .then((r) => setNoteRecording(!!r.recording))
+      .catch((e) => toast(e.message || "Could not toggle note recording", { bad: true }));
   };
 
   const runDoctor = (cb) => {
@@ -324,7 +355,8 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
+    recording, noteRecording, noteText, toggleNoteRecording,
+    transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate,
   };
@@ -337,8 +369,6 @@ export default function App() {
     { v: "hotwords", icon: "hash", label: "Hotwords", badge: hotwords.length },
     { sec: "Activity" },
     { v: "history", icon: "history", label: "Recent history", badge: history.length || null },
-    { sec: "App" },
-    { v: "startup", icon: "power", label: "Startup" },
     { v: "advanced", icon: "gear", label: "Advanced" },
   ];
   const Current = VIEWS[view];
@@ -355,7 +385,7 @@ export default function App() {
               <span className="mic"><Icon name="mic" size={19} /></span>
               <span className="meta">
                 <span className="nm">Dictate <Dot live /></span>
-                <span className="t-meta">{m.name.split(" · ")[0]} · {recording ? "listening" : "ready"}</span>
+                <span className="t-meta">{m.name.split(" · ")[0]} · {noteRecording ? "recording" : recording ? "listening" : "ready"}</span>
               </span>
             </div>
             <nav className="nav">

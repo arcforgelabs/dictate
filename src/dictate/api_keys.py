@@ -12,7 +12,10 @@ import subprocess
 import sys
 from ctypes import wintypes
 from dataclasses import dataclass
+from pathlib import Path
 from urllib import error, request
+
+from dictate.platform_paths import user_config_dir
 
 API_BACKENDS: tuple[str, ...] = ("openai", "xai", "gemini")
 API_BACKEND_LABELS: dict[str, str] = {
@@ -20,6 +23,7 @@ API_BACKEND_LABELS: dict[str, str] = {
     "xai": "xAI",
     "gemini": "Google Gemini",
 }
+LOCAL_API_KEYS_PATH = user_config_dir() / "api-keys.json"
 
 
 class ApiKeyStorageError(RuntimeError):
@@ -41,7 +45,7 @@ class ApiKeyStatus:
 
 
 def save_api_key(backend: str, api_key: str) -> None:
-    """Persist an API key in the OS secret store."""
+    """Persist an API key in the best available local secret store."""
     _validate_backend(backend)
     cleaned = api_key.strip()
     if not cleaned:
@@ -49,17 +53,22 @@ def save_api_key(backend: str, api_key: str) -> None:
     if _is_windows():
         _windows_save_api_key(backend, cleaned)
         return
-    _secret_tool_save_api_key(backend, cleaned)
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_save_api_key(backend, cleaned)
+        return
+    _local_file_save_api_key(backend, cleaned)
 
 
 def read_api_key(backend: str) -> str | None:
-    """Read an API key from the OS secret store, if one exists."""
+    """Read an API key from the best available local secret store, if one exists."""
     _validate_backend(backend)
     if _is_windows():
         return _windows_read_api_key(backend)
-    if shutil.which("secret-tool") is None:
-        return None
-    return _secret_tool_read_api_key(backend)
+    if shutil.which("secret-tool") is not None:
+        value = _secret_tool_read_api_key(backend)
+        if value:
+            return value
+    return _local_file_read_api_key(backend)
 
 
 def clear_api_key(backend: str) -> None:
@@ -68,7 +77,9 @@ def clear_api_key(backend: str) -> None:
     if _is_windows():
         _windows_clear_api_key(backend)
         return
-    _secret_tool_clear_api_key(backend)
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_clear_api_key(backend)
+    _local_file_clear_api_key(backend)
 
 
 def has_stored_api_key(backend: str) -> bool:
@@ -150,7 +161,7 @@ def secret_store_available() -> bool:
     """Return whether Dictate can store API keys in an OS secret store."""
     if _is_windows():
         return True
-    return shutil.which("secret-tool") is not None
+    return True
 
 
 def secret_store_description() -> str:
@@ -159,7 +170,52 @@ def secret_store_description() -> str:
         return "Windows Credential Manager"
     if shutil.which("secret-tool") is not None:
         return "the desktop Secret Service keyring"
-    return "no supported OS secret store"
+    return f"private local key file ({LOCAL_API_KEYS_PATH})"
+
+
+def _local_file_save_api_key(backend: str, api_key: str) -> None:
+    data = _local_file_load()
+    data[backend] = api_key
+    _local_file_save(data)
+
+
+def _local_file_read_api_key(backend: str) -> str | None:
+    value = _local_file_load().get(backend)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _local_file_clear_api_key(backend: str) -> None:
+    data = _local_file_load()
+    if backend in data:
+        data.pop(backend, None)
+        _local_file_save(data)
+
+
+def _local_file_load(path: Path | None = None) -> dict[str, str]:
+    path = path or LOCAL_API_KEYS_PATH
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for backend, value in raw.items():
+        if backend in API_BACKENDS and isinstance(value, str) and value.strip():
+            out[backend] = value.strip()
+    return out
+
+
+def _local_file_save(data: dict[str, str], path: Path | None = None) -> None:
+    path = path or LOCAL_API_KEYS_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def _secret_tool_save_api_key(backend: str, api_key: str) -> None:

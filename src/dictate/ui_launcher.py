@@ -124,6 +124,11 @@ def ensure_server_started(daemon: object | None = None) -> object:
     """Start the in-process ``ui_server`` once and return its handle."""
     global _server_broker, _server_handle, _wired_daemon_id
     if _server_handle is not None:
+        if daemon is not None and hasattr(_server_handle, "backend"):
+            try:
+                _server_handle.backend.daemon = daemon
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to attach daemon to UI backend")
         if daemon is not None and _server_broker is not None and _wired_daemon_id != id(daemon):
             _wire_daemon_events(daemon, _server_broker)
             _wired_daemon_id = id(daemon)
@@ -134,6 +139,7 @@ def ensure_server_started(daemon: object | None = None) -> object:
     backend = ui_server.UiBackend(
         history_store=getattr(daemon, "history_store", None),
         broker=broker,
+        daemon=daemon,
     )
     _server_handle = ui_server.serve(backend=backend, broker=broker)
     _server_broker = broker
@@ -149,6 +155,8 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
     prev_recording = getattr(daemon, "recording_callback", None)
     prev_history = getattr(daemon, "history_callback", None)
     prev_transcript = getattr(daemon, "transcript_callback", None)
+    prev_note_recording = getattr(daemon, "note_recording_callback", None)
+    prev_note = getattr(daemon, "note_callback", None)
 
     def on_status(message: str | None) -> None:
         if prev_status is not None:
@@ -169,6 +177,16 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
     daemon.status_callback = on_status
     daemon.recording_callback = on_recording
 
+    def on_note_recording(active: bool) -> None:
+        if prev_note_recording is not None:
+            try:
+                prev_note_recording(active)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior note recording callback failed")
+        broker.publish("note-recording", active=bool(active))
+
+    daemon.note_recording_callback = on_note_recording
+
     def on_transcript(event: dict[str, object]) -> None:
         if prev_transcript is not None:
             try:
@@ -178,6 +196,16 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
         broker.publish("transcript", **event)
 
     daemon.transcript_callback = on_transcript
+
+    def on_note(event: dict[str, object]) -> None:
+        if prev_note is not None:
+            try:
+                prev_note(event)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior note callback failed")
+        broker.publish("note", **event)
+
+    daemon.note_callback = on_note
 
     def on_history() -> None:
         if prev_history is not None:

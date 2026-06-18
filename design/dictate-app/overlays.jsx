@@ -36,7 +36,7 @@ function CommandPalette() {
   const items = oM(() => {
     const nav = [
       ["status", "Status", "status"], ["sliders", "Model", "model"], ["keyboard", "Push-to-talk", "ptt"],
-      ["hash", "Hotwords", "hotwords"], ["history", "Recent history", "history"], ["power", "Startup", "startup"],
+      ["hash", "Hotwords", "hotwords"], ["history", "Recent history", "history"],
       ["gear", "Advanced", "advanced"],
     ].map(([icon, label, view]) => ({ icon, label, group: "Go to", run: () => s.setView(view) }));
     const actions = [

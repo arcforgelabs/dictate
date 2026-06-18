@@ -6,20 +6,24 @@ function StatusView() {
   const s = useStore();
   const m = modelById(s.model);
   const rec = s.recording;
+  const recordingActive = !!s.noteRecording;
+  const statusLabel = recordingActive ? "Recording" : rec ? "Listening" : "Ready";
   return (
     <div className="view dash">
       <div className="view-head"><div className="crumb">Status</div></div>
 
-      <div className={"hero" + (rec ? " live" : "")}>
+      <div className={"hero" + (rec || recordingActive ? " live" : "")}>
         <div className="orb"><Icon name="mic" size={26} /></div>
         <div className="body">
           <div className="statusline">
             <Dot live />
-            <span className="t-label" style={{ color: "var(--live)" }}>{rec ? "Listening" : "Ready"}</span>
+            <span className="t-label" style={{ color: rec || recordingActive ? "var(--live)" : "var(--subtle)" }}>{statusLabel}</span>
             <span className="t-meta">·&nbsp; {s.micConnected ? "microphone connected" : "no microphone"}</span>
           </div>
-          <h2 className="t-title">{rec ? "Listening…" : "Ready to dictate"}</h2>
-          <div className="sub">Hold your shortcut, speak, and release — text types straight into the app you're using.</div>
+          <h2 className="t-title">{recordingActive ? "Recording nearby speech" : rec ? "Quick dictation is listening" : "Ready"}</h2>
+          <div className="sub">{recordingActive
+            ? "Stop recording to transcribe the raw conversation with speaker labels."
+            : "Use quick dictation to insert text, or Record to capture a longer conversation."}</div>
         </div>
         <div className="keyhint">
           <span className="t-label">Hold</span>
@@ -31,12 +35,27 @@ function StatusView() {
         <div className="dash-col">
           <div className="section">
             <div className="lead">
-              <h3 className="t-heading">Try it</h3>
+              <h3 className="t-heading">Capture</h3>
             </div>
-            <button className="btn primary block"
-              onPointerDown={s.dictateStart} onPointerUp={s.dictateStop} onPointerLeave={s.dictateStop}>
-              <Icon name="mic" size={17} />{rec ? "Listening — release to insert" : "Hold to try dictation"}
-            </button>
+            <div className="capture-actions">
+              <button className={"action-tile" + (rec ? " active" : "")}
+                onPointerDown={s.dictateStart} onPointerUp={s.dictateStop} onPointerLeave={s.dictateStop}>
+                <span className="tile-ic"><Icon name="mic" size={18} /></span>
+                <span className="tile-main">
+                  <span className="tile-title">{rec ? "Listening" : "Quick dictation"}</span>
+                  <span className="tile-sub">{rec ? "Release to insert text" : "Types into the focused app"}</span>
+                </span>
+                <Combo keys={s.shortcut} />
+              </button>
+              <button className={"action-tile" + (s.noteRecording ? " active danger" : "")}
+                onClick={s.toggleNoteRecording}>
+                <span className="tile-ic"><Icon name={s.noteRecording ? "square" : "clock"} size={18} /></span>
+                <span className="tile-main">
+                  <span className="tile-title">{s.noteRecording ? "Stop recording" : "Record conversation"} <Chip>xAI · speaker labels</Chip></span>
+                  <span className="tile-sub">{s.noteRecording ? "Transcribe and save raw notes" : "Saved to history as a transcript · audio goes to xAI"}</span>
+                </span>
+              </button>
+            </div>
             <div className="target">
               <div className="bar"><span className="dots"><i /><i /><i /></span><span>Untitled — Notes</span></div>
               <div className="area">
@@ -44,6 +63,16 @@ function StatusView() {
                 {(rec || s.typing) && <span className="caret" />}
               </div>
             </div>
+            {(s.noteRecording || s.noteText) && (
+              <div className="note-result">
+                <div className="t-label" style={{ color: s.noteRecording ? "var(--live)" : "var(--subtle)", marginBottom: 8 }}>
+                  {s.noteRecording ? "Recording" : "Latest recording"}
+                </div>
+                <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.45 }}>
+                  {s.noteRecording ? "Listening nearby. Stop to transcribe and save the raw dictation." : s.noteText}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -58,16 +87,22 @@ function StatusView() {
             </div>
           </button>
 
-          <div className="card pad">
-            <Row icon="device" label="Microphone" help="Audio input device">
-              <button className="select">{s.device}<Icon name="chevd" size={14} style={{ color: "var(--muted)" }} /></button>
-            </Row>
-            <Row icon="keyboard" label="Push-to-talk" help="Hold to talk, or toggle on and off">
-              <Seg options={[{ v: "hold", l: "Hold" }, { v: "toggle", l: "Toggle" }]} value={s.activation} onChange={s.setActivation} />
-            </Row>
-            <Row icon="power" label="Launch on sign-in" help="Start Dictate automatically">
-              <Toggle on={s.startup} onChange={s.setStartup} />
-            </Row>
+          <div className="section">
+            <div className="lead"><h3 className="t-heading">Capture</h3></div>
+            <div className="card pad">
+              <Row icon="device" label="Microphone" help="Audio input device">
+                <button className="select">{s.device}<Icon name="chevd" size={14} style={{ color: "var(--muted)" }} /></button>
+              </Row>
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="lead"><h3 className="t-heading">App</h3></div>
+            <div className="card pad">
+              <Row icon="power" label="Launch on sign-in" help="Start Dictate automatically">
+                <Toggle on={s.startup} onChange={s.setStartup} />
+              </Row>
+            </div>
           </div>
         </div>
       </div>
@@ -95,7 +130,7 @@ function ModelView() {
   return (
     <div className="view">
       <div className="view-head"><div className="crumb">Model</div><h2 className="t-title">Transcription model</h2>
-        <p className="t-meta">Pick how Dictate turns your speech into text. Hosted models need a key, kept in your system keychain.</p></div>
+        <p className="t-meta">Pick how Dictate turns speech into text. Hosted models need a key, stored locally by Dictate.</p></div>
 
       <div className="opts">
         {MODELS.map(m => {
@@ -126,7 +161,7 @@ function ModelView() {
                     <button className="btn primary sm" onClick={() => saveKey(m)}>Save &amp; select</button>
                     <button className="btn ghost sm" onClick={() => setDraftFor(null)}>Cancel</button>
                     <span className="t-meta" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                      <Icon name="shield" size={14} style={{ color: "var(--live)" }} />Stored in OS secret store</span>
+                      <Icon name="shield" size={14} style={{ color: "var(--live)" }} />Stored locally</span>
                   </div>
                 </div>
               )}

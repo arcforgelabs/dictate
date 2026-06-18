@@ -257,6 +257,21 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .input .mono{font-family:var(--font-mono);font-size:12px;letter-spacing:.02em;}
 
 /* demo target (status page) */
+.capture-actions{display:grid;grid-template-columns:1fr;gap:10px;}
+.action-tile{display:flex;align-items:center;gap:12px;width:100%;min-height:68px;padding:13px 14px;border:1px solid var(--border);
+  border-radius:var(--r-md);background:var(--surface);box-shadow:var(--shadow-sm);text-align:left;transition:var(--t-fast);}
+.action-tile:hover{background:var(--surface-2);border-color:var(--border-2);transform:translateY(-1px);box-shadow:var(--shadow-md);}
+.action-tile:active{transform:scale(.99);}
+.action-tile.active{border-color:rgba(47,143,99,.42);background:var(--live-bg);box-shadow:0 0 0 1px rgba(47,143,99,.16),var(--shadow-sm);}
+.action-tile.danger{border-color:rgba(197,64,44,.38);background:var(--danger-bg);}
+.action-tile .tile-ic{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  background:var(--surface-2);border:1px solid var(--border);color:var(--fg);flex:0 0 auto;}
+.action-tile.active .tile-ic{background:var(--surface);color:var(--live);border-color:rgba(47,143,99,.30);}
+.action-tile.danger .tile-ic{color:var(--danger);border-color:rgba(197,64,44,.28);}
+.action-tile .tile-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.action-tile .tile-title{font-size:14px;font-weight:700;color:var(--fg);display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.action-tile .tile-sub{font-size:12.5px;line-height:1.35;color:var(--muted);}
+.action-tile .kbd{flex:0 0 auto;}
 .target{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-2);overflow:hidden;}
 .target .bar{display:flex;align-items:center;gap:7px;padding:9px 12px;border-bottom:1px solid var(--hairline);
   font-size:11.5px;color:var(--muted);}
@@ -267,6 +282,9 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   animation:blink 1.1s step-end infinite;}
 .target .area .ph{color:var(--subtle);}
 @keyframes blink{50%{opacity:0;}}
+
+.note-result{margin-top:12px;padding:16px 17px;border:1px solid var(--border);border-radius:var(--r-md);
+  background:var(--surface);box-shadow:var(--shadow-sm);}
 
 /* PTT capture */
 .capture{display:flex;flex-direction:column;align-items:center;gap:12px;padding:30px;border:1.5px dashed var(--border-2);

@@ -55,6 +55,27 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
     return UiBackend(**kwargs)
 
 
+class _FakeNoteDaemon:
+    def __init__(self) -> None:
+        self.note_recording_active = False
+        self.calls: list[str] = []
+
+    def start_note_recording(self) -> bool:
+        self.calls.append("start")
+        self.note_recording_active = True
+        return True
+
+    def stop_note_recording(self) -> bool:
+        self.calls.append("stop")
+        self.note_recording_active = False
+        return True
+
+    def toggle_note_recording(self) -> bool:
+        self.calls.append("toggle")
+        self.note_recording_active = not self.note_recording_active
+        return self.note_recording_active
+
+
 class UiPrefsStoreTests(unittest.TestCase):
     def test_defaults_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -142,6 +163,25 @@ class UiBackendStateTests(unittest.TestCase):
             backend.patch_config({"model": {"backend": "openai", "model": "gpt-4o-mini-transcribe"}})
             self.assertEqual(backend.get_state()["model"]["backend"], "openai")
 
+    def test_command_configured_provider_is_reported_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(
+                d,
+                api_key_status=lambda backend, **kw: ApiKeyStatus(backend=backend, status="Ready"),
+            )
+            backend.patch_config({"model": {"backend": "xai", "model": "grok-speech-to-text"}})
+            from dictate import config as config_mod
+
+            config_mod.set_api_key_command(
+                "xai",
+                "/usr/bin/printf xai-validtokenvalidtoken",
+                path=backend.config_path,
+            )
+            state = backend.get_state()
+            self.assertTrue(state["providers"]["xai"]["configured"])
+            xai_model = next(model for model in state["models"] if model["backend"] == "xai")
+            self.assertTrue(xai_model["configured"])
+
     def test_unknown_backend_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(Exception):
@@ -199,6 +239,21 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertTrue(history[0]["time"].endswith("just now") or "ago" in history[0]["time"])
             backend.clear_history()
             self.assertEqual(backend.get_history(), [])
+
+    def test_note_controls_call_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            self.assertFalse(backend.get_state()["notes"]["recording"])
+            self.assertTrue(backend.start_note_recording()["recording"])
+            self.assertFalse(backend.stop_note_recording()["recording"])
+            self.assertTrue(backend.toggle_note_recording()["recording"])
+            self.assertEqual(daemon.calls, ["start", "stop", "toggle"])
+
+    def test_note_controls_require_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(Exception):
+                _backend(d).start_note_recording()
 
     def test_relative_label_buckets(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -329,6 +384,13 @@ class HttpIntegrationTests(unittest.TestCase):
         self.assertEqual(body["mode"], "release")
         self.assertFalse(body["started"])
         self.assertEqual(body["url"], "https://example.test/releases")
+
+    def test_note_toggle_over_http(self) -> None:
+        self.handle.backend.daemon = _FakeNoteDaemon()
+        with self._post("/api/notes/toggle") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["recording"])
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

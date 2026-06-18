@@ -69,6 +69,31 @@ class XAISpeechToText(SpeechToText):
             )
         return _extract_text(response)
 
+    def transcribe_diarized(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        hotwords: str | None = None,
+    ) -> str:
+        """Transcribe with xAI speaker diarization and return speaker-labelled text."""
+        with tempfile.TemporaryDirectory(prefix="dictate-xai-") as temp_dir:
+            wav_path = Path(temp_dir) / "audio.wav"
+            _write_wav(wav_path, audio)
+            fields: list[tuple[str, str]] = [("diarize", "true")]
+            if language:
+                fields.extend([("format", "true"), ("language", language)])
+            for keyterm in _keyterms(hotwords):
+                fields.append(("keyterm", keyterm))
+
+            response = _post_multipart(
+                url=f"{_base_url()}/stt",
+                api_key=self.api_key,
+                file_path=wav_path,
+                fields=fields,
+                timeout=_timeout_seconds(audio),
+            )
+        return _extract_diarized_text(response)
+
 
 def _api_key() -> str:
     api_key = os.environ.get("DICTATE_XAI_API_KEY") or os.environ.get("XAI_API_KEY")
@@ -195,3 +220,53 @@ def _extract_text(response: str) -> str:
     if isinstance(text, str):
         return text.strip()
     return response.strip()
+
+
+def _extract_diarized_text(response: str) -> str:
+    try:
+        data = json.loads(response)
+    except json.JSONDecodeError:
+        return response.strip()
+
+    words = data.get("words")
+    if not isinstance(words, list):
+        return _extract_text(response)
+
+    turns: list[tuple[object, list[str]]] = []
+    speaker_labels: dict[object, str] = {}
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        text = word.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        speaker = word.get("speaker", 0)
+        if speaker not in speaker_labels:
+            speaker_labels[speaker] = f"Speaker {len(speaker_labels) + 1}"
+        if not turns or turns[-1][0] != speaker:
+            turns.append((speaker, []))
+        turns[-1][1].append(text.strip())
+
+    if not turns:
+        return _extract_text(response)
+
+    lines: list[str] = []
+    for speaker, pieces in turns:
+        utterance = _join_word_pieces(pieces).strip()
+        if utterance:
+            lines.append(f"{speaker_labels[speaker]}: {utterance}")
+    return "\n".join(lines).strip() or _extract_text(response)
+
+
+def _join_word_pieces(pieces: list[str]) -> str:
+    text = ""
+    no_space_before = set(".,!?;:%)]}")
+    no_space_after = set("([{$")
+    for piece in pieces:
+        if not text:
+            text = piece
+        elif piece[:1] in no_space_before or text[-1:] in no_space_after:
+            text += piece
+        else:
+            text += f" {piece}"
+    return text

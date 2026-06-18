@@ -7,6 +7,7 @@ import sys
 import threading
 from collections import deque
 from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 
@@ -24,10 +25,12 @@ from dictate.outputs import TextOutput
 from dictate.stt import SpeechToText
 
 SAMPLE_RATE = 16000
+NOTE_MAX_RECORDING_SECONDS = 900
 FINAL_AUDIO_QUEUE_SIZE = 4
 FINAL_WINDOW_QUEUE_SIZE = 64
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
+RecordingMode = Literal["dictation", "note"]
 
 
 class Daemon:
@@ -46,6 +49,8 @@ class Daemon:
         recording_callback: Callable[[bool], None] | None = None,
         history_callback: Callable[[], None] | None = None,
         transcript_callback: Callable[[dict[str, object]], None] | None = None,
+        note_recording_callback: Callable[[bool], None] | None = None,
+        note_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
     ):
         self.active = True
@@ -56,6 +61,8 @@ class Daemon:
         self.recording_callback = recording_callback
         self.history_callback = history_callback
         self.transcript_callback = transcript_callback
+        self.note_recording_callback = note_recording_callback
+        self.note_callback = note_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -64,7 +71,10 @@ class Daemon:
             lexicon_mode=lexicon_mode,
             lexicon_replacements=lexicon_replacements,
         )
-        self.recorder = recorder or SoundDeviceRecorder(sample_rate=SAMPLE_RATE)
+        self.recorder = recorder or SoundDeviceRecorder(
+            sample_rate=SAMPLE_RATE,
+            max_recording_seconds=NOTE_MAX_RECORDING_SECONDS,
+        )
         self._engine_lock = threading.Lock()
         self._recording_lock = threading.RLock()
 
@@ -80,6 +90,7 @@ class Daemon:
         self._streaming_recordings: set[int] = set()
         self._recording_stt_ids: dict[int, int] = {}
         self._recording_last_audio_status: dict[int, TranscriptionResult] = {}
+        self._recording_modes: dict[int, RecordingMode] = {}
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -120,6 +131,39 @@ class Daemon:
             with self._recording_lock:
                 if self.recorder.is_recording:
                     self._finalize_recording()
+
+    def start_note_recording(self) -> bool:
+        """Start a conversation note recording independent of push-to-talk."""
+        return self._start_recording(mode="note")
+
+    def stop_note_recording(self) -> bool:
+        """Stop an active note recording and queue it for note transcription."""
+        with self._recording_lock:
+            recording_id = self._active_recording_id
+            if recording_id is None or self._recording_mode(recording_id) != "note":
+                return False
+            self._finalize_recording()
+            return True
+
+    def toggle_note_recording(self) -> bool:
+        """Toggle note recording and return whether note capture is active."""
+        with self._recording_lock:
+            recording_id = self._active_recording_id
+            if self.recorder.is_recording and recording_id is not None:
+                if self._recording_mode(recording_id) == "note":
+                    self._finalize_recording()
+                    return False
+                return False
+            return self._start_recording(mode="note")
+
+    @property
+    def note_recording_active(self) -> bool:
+        recording_id = self._active_recording_id
+        return bool(
+            self.recorder.is_recording
+            and recording_id is not None
+            and self._recording_mode(recording_id) == "note"
+        )
 
     def switch_speech_to_text(self, stt: SpeechToText, *, hotwords: str | None = None) -> None:
         """Swap STT backend/model at runtime."""
@@ -175,21 +219,24 @@ class Daemon:
 
         self._queue_stop_signal()
 
-    def _start_recording(self) -> None:
+    def _start_recording(self, mode: RecordingMode = "dictation") -> bool:
         with self._recording_lock:
             if self.recorder.is_recording or not self.active:
-                return
+                return False
 
             try:
                 self._recording_generation += 1
                 self._active_recording_id = self._recording_generation
                 with self._engine_lock:
                     stt = self.engine.stt
-                    streaming_enabled = bool(stt.capabilities.supports_streaming_chunks)
+                    streaming_enabled = (
+                        mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks)
+                    )
                     stt_id = id(stt)
                 with self._queue_lock:
                     self._recording_parts[self._active_recording_id] = []
                     self._recording_chunk_counts[self._active_recording_id] = 0
+                    self._recording_modes[self._active_recording_id] = mode
                     self._recording_final_chunks.discard(self._active_recording_id)
                     self._recording_stt_ids[self._active_recording_id] = stt_id
                     if streaming_enabled:
@@ -209,14 +256,19 @@ class Daemon:
                     self._clear_recording_state(self._active_recording_id)
                 self._active_recording_id = None
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
-                return
+                return False
 
-            print("\r  \033[91m● Recording...\033[0m", end="", file=sys.stderr, flush=True)
+            label = "Note recording" if mode == "note" else "Recording"
+            print(f"\r  \033[91m● {label}...\033[0m", end="", file=sys.stderr, flush=True)
             self._notify_recording(True)
+            if mode == "note":
+                self._notify_note_recording(True)
+            return True
 
     def _finalize_recording(self) -> None:
         with self._recording_lock:
             recording_id = self._active_recording_id
+            mode = self._recording_mode(recording_id) if recording_id is not None else "dictation"
             try:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
@@ -230,6 +282,8 @@ class Daemon:
                     self._active_recording_id = None
                     print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 self._notify_recording(False)
+                if recording_id is not None and mode == "note":
+                    self._notify_note_recording(False)
                 return
 
             if recording_id is not None:
@@ -241,6 +295,8 @@ class Daemon:
                             transcript_reason="truncated-audio",
                         )
                         self._notify_recording(False)
+                        if mode == "note":
+                            self._notify_note_recording(False)
                         return
                     self._queue_final_chunk(
                         AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id)
@@ -249,6 +305,8 @@ class Daemon:
                     self._queue_final_marker(recording_id)
                 self._active_recording_id = None
             self._notify_recording(False)
+            if recording_id is not None and mode == "note":
+                self._notify_note_recording(False)
 
     def _on_hotkey_press(self) -> None:
         try:
@@ -484,6 +542,14 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Recording callback failed: {exc}", file=sys.stderr)
 
+    def _notify_note_recording(self, recording: bool) -> None:
+        if self.note_recording_callback is None:
+            return
+        try:
+            self.note_recording_callback(recording)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Note recording callback failed: {exc}", file=sys.stderr)
+
     def _notify_history_changed(self) -> None:
         if self.history_callback is None:
             return
@@ -596,12 +662,14 @@ class Daemon:
         sequence: int | None,
         recording_id: int | None,
         stale: bool,
+        mode: RecordingMode = "dictation",
         reason: str | None = None,
     ) -> None:
         payload: dict[str, object] = {
             "phase": phase,
             "text": text,
             "stale": stale,
+            "mode": mode,
         }
         if sequence is not None:
             payload["sequence"] = sequence
@@ -610,6 +678,32 @@ class Daemon:
         if reason is not None:
             payload["reason"] = reason
         self._notify_transcript(payload)
+
+    def _surface_note(
+        self,
+        *,
+        text: str,
+        raw_text: str,
+        recording_id: int,
+    ) -> None:
+        payload: dict[str, object] = {
+            "text": text,
+            "raw_text": raw_text,
+            "recording_id": recording_id,
+        }
+        if self.note_callback is not None:
+            try:
+                self.note_callback(payload)
+            except Exception as exc:  # noqa: BLE001
+                print(f"\r  Note callback failed: {exc}", file=sys.stderr)
+        self._surface_transcript(
+            phase="final",
+            text=text,
+            sequence=None,
+            recording_id=recording_id,
+            stale=False,
+            mode="note",
+        )
 
     def _notify_transcript(self, event: dict[str, object]) -> None:
         if self.transcript_callback is None:
@@ -658,8 +752,12 @@ class Daemon:
             self._surface_empty_final_status(final_result)
             return
 
+        mode = self._recording_mode(recording_id)
         self._mark_recording_completed(recording_id)
         self._clear_recording_state(recording_id)
+        if mode == "note":
+            self._finalize_note_session(recording_id, assembled_text)
+            return
         try:
             self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
@@ -682,6 +780,20 @@ class Daemon:
         )
         print(f"\r  Typed: {assembled_text}", file=sys.stderr)
 
+    def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
+        note_text = raw_text.strip()
+        if not note_text:
+            self._surface_empty_final_status(None)
+            return
+        try:
+            self.history_store.append(note_text)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Note history save failed: {exc}", file=sys.stderr)
+        else:
+            self._notify_history_changed()
+        self._surface_note(text=note_text, raw_text=raw_text, recording_id=recording_id)
+        print(f"\r  Saved note: {note_text}", file=sys.stderr)
+
     def _fail_recording_session(
         self,
         recording_id: int,
@@ -699,6 +811,7 @@ class Daemon:
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
+            self._recording_modes.pop(recording_id, None)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
         self._surface_status(reason)
@@ -719,6 +832,7 @@ class Daemon:
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
+            self._recording_modes.pop(recording_id, None)
 
     def _mark_recording_completed(self, recording_id: int) -> None:
         with self._queue_lock:
@@ -729,6 +843,10 @@ class Daemon:
     def _is_recording_failed(self, recording_id: int) -> bool:
         with self._queue_lock:
             return recording_id in self._terminal_recordings
+
+    def _recording_mode(self, recording_id: int) -> RecordingMode:
+        with self._queue_lock:
+            return self._recording_modes.get(recording_id, "dictation")
 
     def _remember_terminal_recording_locked(self, recording_id: int) -> None:
         self._terminal_recordings.add(recording_id)
@@ -763,7 +881,12 @@ class Daemon:
                 return None
             if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
                 return None
-            return self.engine.transcribe(audio, language=self.language, min_duration_s=min_duration_s)
+            return self.engine.transcribe(
+                audio,
+                language=self.language,
+                min_duration_s=min_duration_s,
+                diarize=self._recording_mode(recording_id) == "note",
+            )
 
     def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:
         with self._queue_lock:

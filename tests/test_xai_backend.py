@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 import numpy as np
 
-from dictate.stt.xai_backend import XAISpeechToText, _extract_text, _keyterms, xai_api_key_available
+from dictate.stt.xai_backend import (
+    XAISpeechToText,
+    _extract_diarized_text,
+    _extract_text,
+    _keyterms,
+    xai_api_key_available,
+)
 
 
 def _print_command(value: str) -> str:
@@ -29,12 +35,52 @@ class _FakeResponse:
         return json.dumps({"text": "hello world", "duration": 1.2}).encode("utf-8")
 
 
+class _FakeDiarizedResponse:
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(
+            {
+                "text": "hello there yes",
+                "duration": 1.2,
+                "words": [
+                    {"text": "hello", "start": 0.0, "end": 0.2, "speaker": 0},
+                    {"text": "there", "start": 0.2, "end": 0.5, "speaker": 0},
+                    {"text": "yes", "start": 0.6, "end": 0.8, "speaker": 1},
+                ],
+            }
+        ).encode("utf-8")
+
+
 class XAIBackendTests(unittest.TestCase):
     def test_extract_text_from_json_response(self) -> None:
         self.assertEqual(_extract_text('{"text":"hello"}'), "hello")
 
     def test_keyterms_are_split_for_repeated_form_fields(self) -> None:
         self.assertEqual(_keyterms("AcmeWidget\nProjectNova,TeamAtlas"), ["AcmeWidget", "ProjectNova", "TeamAtlas"])
+
+    def test_extract_diarized_text_groups_speaker_turns(self) -> None:
+        response = json.dumps(
+            {
+                "text": "hello there yes",
+                "words": [
+                    {"text": "hello", "speaker": 3},
+                    {"text": "there", "speaker": 3},
+                    {"text": "yes", "speaker": 8},
+                    {"text": "!", "speaker": 8},
+                ],
+            }
+        )
+        self.assertEqual(
+            _extract_diarized_text(response),
+            "Speaker 1: hello there\nSpeaker 2: yes!",
+        )
 
     def test_transcribe_posts_audio_to_configured_endpoint(self) -> None:
         captured = {}
@@ -70,6 +116,32 @@ class XAIBackendTests(unittest.TestCase):
         self.assertEqual(body.count(b'name="keyterm"'), 2)
         self.assertIn(b"AcmeWidget", body)
         self.assertIn(b"ProjectNova", body)
+
+    def test_transcribe_diarized_requests_diarization(self) -> None:
+        captured = {}
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001
+            captured["body"] = request.data
+            return _FakeDiarizedResponse()
+
+        audio = np.zeros(1600, dtype=np.float32)
+        with patch.dict(
+            "os.environ",
+            {
+                "DICTATE_XAI_API_KEY": "test-key",
+                "DICTATE_XAI_BASE_URL": "https://example.test/v1",
+            },
+            clear=False,
+        ):
+            stt = XAISpeechToText(model_name="grok-speech-to-text")
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                text = stt.transcribe_diarized(audio, language="en", hotwords="AcmeWidget")
+
+        self.assertEqual(text, "Speaker 1: hello there\nSpeaker 2: yes")
+        body = captured["body"]
+        self.assertIn(b'name="diarize"', body)
+        self.assertIn(b"true", body)
+        self.assertEqual(body.count(b'name="keyterm"'), 1)
 
     def test_api_key_can_come_from_command(self) -> None:
         with (

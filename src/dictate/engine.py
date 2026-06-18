@@ -69,6 +69,7 @@ class DictationEngine:
         language: str | None = None,
         *,
         min_duration_s: float | None = None,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         """Transcribe audio and classify common non-success outcomes."""
         if audio.size == 0:
@@ -86,12 +87,19 @@ class DictationEngine:
             replacements=self.lexicon_replacements,
         )
         try:
-            text = self.stt.transcribe(
-                audio,
-                language=language,
-                hotwords=lexicon_plan.decode_hotwords,
-                prompt_context=lexicon_plan.prompt_context,
-            ).strip()
+            if diarize and hasattr(self.stt, "transcribe_diarized"):
+                text = self.stt.transcribe_diarized(
+                    audio,
+                    language=language,
+                    hotwords=lexicon_plan.decode_hotwords,
+                ).strip()
+            else:
+                text = self.stt.transcribe(
+                    audio,
+                    language=language,
+                    hotwords=lexicon_plan.decode_hotwords,
+                    prompt_context=lexicon_plan.prompt_context,
+                ).strip()
         except Exception as exc:  # noqa: BLE001
             if not _api_fallback_allowed(self.stt):
                 return TranscriptionResult(

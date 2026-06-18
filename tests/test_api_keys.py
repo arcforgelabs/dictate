@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import unittest
 import urllib.error
+from pathlib import Path
 from contextlib import redirect_stderr
 from io import BytesIO, StringIO
 from unittest.mock import patch
@@ -72,15 +74,27 @@ class ApiKeysTests(unittest.TestCase):
             with self.assertRaises(api_keys.ApiKeyStorageError):
                 api_keys.save_api_key("openai", "secret")
 
-    def test_no_secret_tool_reports_unavailable(self) -> None:
+    def test_no_secret_tool_uses_private_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            fallback = Path(d) / "api-keys.json"
+            with (
+                patch("dictate.api_keys._is_windows", return_value=False),
+                patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
+            ):
+                self.assertTrue(api_keys.secret_store_available())
+                api_keys.save_api_key("openai", " secret ")
+                self.assertEqual(api_keys.read_api_key("openai"), "secret")
+                self.assertEqual(fallback.stat().st_mode & 0o777, 0o600)
+                api_keys.clear_api_key("openai")
+                self.assertIsNone(api_keys.read_api_key("openai"))
+
+    def test_no_secret_tool_description_reports_local_fallback(self) -> None:
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value=None),
         ):
-            self.assertFalse(api_keys.secret_store_available())
-            self.assertIsNone(api_keys.read_api_key("openai"))
-            with self.assertRaises(api_keys.ApiKeyStorageError):
-                api_keys.save_api_key("openai", "secret")
+            self.assertIn("private local key file", api_keys.secret_store_description())
 
     def test_backend_rejects_unknown_provider(self) -> None:
         with self.assertRaises(api_keys.ApiKeyStorageError):

@@ -19,8 +19,9 @@ function navTo(container, label) {
 describe("Quiet Console app (mock mode)", () => {
   it("renders the Status view by default", () => {
     render(<App />);
-    expect(screen.getByText("Ready to dictate")).toBeInTheDocument();
-    expect(screen.getByText("Hold to try dictation")).toBeInTheDocument();
+    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+    expect(screen.getByText("Quick dictation")).toBeInTheDocument();
+    expect(screen.getByText("Record conversation")).toBeInTheDocument();
   });
 
   it("navigates to the Model view and lists all four providers", () => {
