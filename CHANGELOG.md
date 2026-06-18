@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-06-18
+
+### Added
+
+- Added chunked streaming dictation for local STT backends so longer recordings
+  are transcribed in bounded windows instead of retaining one large capture
+  until push-to-talk release.
+- Added live transcript events in the Settings UI, including partial/final
+  transcript display and stale transcript suppression.
+
+### Fixed
+
+- Bounded audio/transcription queues and terminal recording caches to prevent
+  long-running dictation sessions from growing memory without limit.
+- Preserved stop-time audio callbacks and short final tails so streamed
+  recordings do not lose the last spoken words.
+- Kept hosted STT providers on final-audio transcription unless their backend
+  explicitly opts into chunk streaming.
+
+### Verified
+
+- Ran the full Python test suite: 280 tests passed.
+- Ran the UI test suite: 29 tests passed.
+- Verified UI build, Python compile checks, npm package dry-run, and final
+  forge re-review.
+
 ## 2026-06-06
 
 ### Fixed
