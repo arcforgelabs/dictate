@@ -234,7 +234,7 @@ class Daemon:
 
             if recording_id is not None:
                 if self._should_queue_stop_audio(recording_id, audio):
-                    if self._is_non_streaming_recording_truncated(recording_id):
+                    if self._is_unstreamed_recording_truncated(recording_id):
                         self._fail_recording_session(
                             recording_id,
                             "Recording exceeded retained audio limit; final audio incomplete",
@@ -493,18 +493,26 @@ class Daemon:
         )
 
     def _queue_recording_chunk(self, chunk: AudioChunk) -> None:
-        if not self._queue_partial_audio(chunk):
-            return
         with self._queue_lock:
-            if chunk.recording_id in self._terminal_recordings:
+            if chunk.recording_id != 0 and not self._recording_session_known_locked(chunk.recording_id):
                 return
-            self._recording_chunk_counts[chunk.recording_id] = (
-                self._recording_chunk_counts.get(chunk.recording_id, 0) + 1
-            )
+            previous_count = self._recording_chunk_counts.get(chunk.recording_id, 0)
+            previous_final = chunk.recording_id in self._recording_final_chunks
+            self._recording_chunk_counts[chunk.recording_id] = previous_count + 1
             if chunk.final:
                 self._recording_final_chunks.add(chunk.recording_id)
+        if not self._queue_partial_audio(chunk):
+            with self._queue_lock:
+                if previous_count == 0:
+                    self._recording_chunk_counts.pop(chunk.recording_id, None)
+                else:
+                    self._recording_chunk_counts[chunk.recording_id] = previous_count
+                if chunk.final and not previous_final:
+                    self._recording_final_chunks.discard(chunk.recording_id)
 
     def _queue_partial_audio(self, chunk: AudioChunk) -> bool:
+        if chunk.recording_id != 0 and not self._recording_session_known(chunk.recording_id):
+            return False
         if chunk.final:
             return self._queue_final_chunk(chunk)
         if self._is_recording_failed(chunk.recording_id):
@@ -528,6 +536,8 @@ class Daemon:
         self._queue_final_chunk(chunk)
 
     def _queue_final_chunk(self, chunk: AudioChunk) -> bool:
+        if chunk.recording_id != 0 and not self._recording_session_known(chunk.recording_id):
+            return False
         try:
             self._audio_queue.put_nowait(chunk)
             return True
@@ -765,15 +775,18 @@ class Daemon:
 
     def _recording_session_known(self, recording_id: int) -> bool:
         with self._queue_lock:
-            return (
-                recording_id in self._recording_stt_ids
-                and recording_id not in self._terminal_recordings
-            )
+            return self._recording_session_known_locked(recording_id)
 
-    def _is_non_streaming_recording_truncated(self, recording_id: int) -> bool:
+    def _recording_session_known_locked(self, recording_id: int) -> bool:
+        return (
+            recording_id in self._recording_stt_ids
+            and recording_id not in self._terminal_recordings
+        )
+
+    def _is_unstreamed_recording_truncated(self, recording_id: int) -> bool:
         with self._queue_lock:
-            streaming = recording_id in self._streaming_recordings
-        return not streaming and bool(getattr(self.recorder, "truncated", False))
+            delivered_chunks = self._recording_chunk_counts.get(recording_id, 0)
+        return delivered_chunks == 0 and bool(getattr(self.recorder, "truncated", False))
 
     def _should_queue_final_marker(self, recording_id: int) -> bool:
         with self._queue_lock:

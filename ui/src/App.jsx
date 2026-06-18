@@ -53,6 +53,7 @@ export default function App() {
   const tgtRef = useRef(""); tgtRef.current = targetText;
   const actRef = useRef(activation); actRef.current = activation;
   const capRef = useRef(false); capRef.current = capturing;
+  const transcriptIdRef = useRef(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
@@ -73,9 +74,12 @@ export default function App() {
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
       }
       else if (ev.type === "transcript") {
+        const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
+        if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) return;
         if (ev.stale) {
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
+          if (eventId !== null) transcriptIdRef.current = eventId;
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
       } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));

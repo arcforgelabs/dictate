@@ -324,6 +324,30 @@ class DaemonHistoryTests(unittest.TestCase):
             output.send.assert_not_called()
             self.assertTrue(any(event.get("reason") == "stale-backend" for event in transcripts))
 
+    def test_unknown_recording_chunks_are_not_enqueued_during_later_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _FakeRecorder()
+            daemon = Daemon(_ChunkingStt({16: "stale"}), output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+            daemon._start_recording()
+            self.assertEqual(daemon._active_recording_id, 1)
+
+            daemon._queue_recording_chunk(AudioChunk(samples=np.ones(16, dtype=np.float32), recording_id=99))
+            daemon._queue_recording_chunk(
+                AudioChunk(samples=np.ones(16, dtype=np.float32), final=True, recording_id=99)
+            )
+
+            self.assertTrue(daemon._partial_audio_queue.empty())
+            self.assertTrue(daemon._audio_queue.empty())
+            self.assertNotIn(99, daemon._recording_chunk_counts)
+            self.assertNotIn(99, daemon._recording_final_chunks)
+            output.send.assert_not_called()
+
     def test_backend_switch_race_cannot_send_stale_chunk_to_hosted_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
@@ -466,7 +490,7 @@ class DaemonHistoryTests(unittest.TestCase):
             second = np.full(4, 2, dtype=np.float32)
             daemon.recorder._recording = True
             daemon._active_recording_id = 8
-            daemon._recording_parts[8] = []
+            self._seed_recording(daemon, 8)
 
             daemon._queue_latest_audio(first)
             daemon._queue_latest_audio(second)
@@ -489,7 +513,7 @@ class DaemonHistoryTests(unittest.TestCase):
             daemon._partial_audio_queue = queue.Queue(maxsize=1)
             daemon.recorder._recording = True
             daemon._active_recording_id = 8
-            daemon._recording_parts[8] = []
+            self._seed_recording(daemon, 8)
 
             daemon._queue_latest_audio(np.ones(4, dtype=np.float32))
             daemon._queue_latest_audio(np.full(4, 2, dtype=np.float32))
@@ -514,7 +538,7 @@ class DaemonHistoryTests(unittest.TestCase):
             daemon._partial_audio_queue = queue.Queue(maxsize=1)
             daemon.recorder._recording = True
             daemon._active_recording_id = 7
-            daemon._recording_parts[7] = []
+            self._seed_recording(daemon, 7)
 
             daemon._queue_partial_audio(
                 AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=7)
@@ -676,9 +700,11 @@ class DaemonHistoryTests(unittest.TestCase):
             status_events: list[str | None] = []
             daemon.transcript_callback = transcript_events.append
             daemon.status_callback = status_events.append
+            self._seed_recording(daemon, 9)
             daemon._recording_parts[9] = ["hello"]
 
             for recording_id in range(1, 5):
+                self._seed_recording(daemon, recording_id)
                 daemon._queue_final_chunk(
                     AudioChunk(
                         samples=np.full(4, recording_id, dtype=np.float32),
@@ -784,6 +810,33 @@ class DaemonHistoryTests(unittest.TestCase):
             )
             output.send.assert_called_once_with("queued during stop")
 
+    def test_final_tail_accounting_does_not_recreate_state_after_fast_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16: "tail"})
+            daemon = Daemon(stt, output=output, history_store=store, recorder=_FakeRecorder())
+            daemon.engine.min_duration_s = 0
+            daemon._start_recording()
+
+            def drain_immediately(chunk: AudioChunk) -> bool:
+                daemon._handle_final_chunk(chunk)
+                return True
+
+            daemon._queue_final_chunk = drain_immediately
+            daemon._queue_recording_chunk(
+                AudioChunk(samples=np.ones(16, dtype=np.float32), final=True, recording_id=1)
+            )
+
+            output.send.assert_called_once_with("tail")
+            self.assertNotIn(1, daemon._recording_parts)
+            self.assertNotIn(1, daemon._recording_chunk_counts)
+            self.assertNotIn(1, daemon._recording_final_chunks)
+            self.assertNotIn(1, daemon._recording_stt_ids)
+
     def test_hosted_truncated_stop_audio_fails_instead_of_committing_partial_ring(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
@@ -792,6 +845,36 @@ class DaemonHistoryTests(unittest.TestCase):
             output = MagicMock()
             output.name = "mock"
             stt = _FakeApiStt()
+            transcripts: list[dict[str, object]] = []
+            statuses: list[str | None] = []
+            daemon = Daemon(
+                stt,
+                output=output,
+                history_store=store,
+                status_callback=statuses.append,
+                transcript_callback=transcripts.append,
+                recorder=_TruncatedRecorder(),
+            )
+            daemon.engine.min_duration_s = 0
+
+            daemon._start_recording()
+            daemon._finalize_recording()
+
+            self.assertEqual(stt.calls, [])
+            self.assertTrue(daemon._audio_queue.empty())
+            self.assertTrue(any("retained audio limit" in (message or "") for message in statuses))
+            self.assertTrue(any(event.get("reason") == "truncated-audio" for event in transcripts))
+            self.assertFalse(store.load())
+            output.send.assert_not_called()
+
+    def test_streaming_capable_truncated_stop_audio_without_chunks_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ChunkingStt({16: "partial ring"})
             transcripts: list[dict[str, object]] = []
             statuses: list[str | None] = []
             daemon = Daemon(
