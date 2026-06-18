@@ -234,6 +234,14 @@ class Daemon:
 
             if recording_id is not None:
                 if self._should_queue_stop_audio(recording_id, audio):
+                    if self._is_non_streaming_recording_truncated(recording_id):
+                        self._fail_recording_session(
+                            recording_id,
+                            "Recording exceeded retained audio limit; final audio incomplete",
+                            transcript_reason="truncated-audio",
+                        )
+                        self._notify_recording(False)
+                        return
                     self._queue_final_chunk(
                         AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id)
                     )
@@ -485,6 +493,8 @@ class Daemon:
         )
 
     def _queue_recording_chunk(self, chunk: AudioChunk) -> None:
+        if not self._queue_partial_audio(chunk):
+            return
         with self._queue_lock:
             if chunk.recording_id in self._terminal_recordings:
                 return
@@ -493,20 +503,20 @@ class Daemon:
             )
             if chunk.final:
                 self._recording_final_chunks.add(chunk.recording_id)
-        self._queue_partial_audio(chunk)
 
-    def _queue_partial_audio(self, chunk: AudioChunk) -> None:
+    def _queue_partial_audio(self, chunk: AudioChunk) -> bool:
         if chunk.final:
-            self._queue_final_chunk(chunk)
-            return
-        if not self.recorder.is_recording:
-            return
+            return self._queue_final_chunk(chunk)
         if self._is_recording_failed(chunk.recording_id):
-            return
+            return False
+        if not self.recorder.is_recording and not self._recording_session_known(chunk.recording_id):
+            return False
         try:
             self._partial_audio_queue.put_nowait(chunk)
+            return True
         except queue.Full:
             self._fail_recording_session(chunk.recording_id, "Transcription backlog exceeded")
+            return False
 
     def _queue_final_audio(self, audio: np.ndarray) -> None:
         chunk = AudioChunk(
@@ -517,11 +527,13 @@ class Daemon:
         )
         self._queue_final_chunk(chunk)
 
-    def _queue_final_chunk(self, chunk: AudioChunk) -> None:
+    def _queue_final_chunk(self, chunk: AudioChunk) -> bool:
         try:
             self._audio_queue.put_nowait(chunk)
+            return True
         except queue.Full:
             self._fail_recording_session(chunk.recording_id, "Transcription busy; final audio dropped")
+            return False
 
     def _queue_final_marker(self, recording_id: int) -> None:
         self._queue_final_chunk(
@@ -595,8 +607,13 @@ class Daemon:
             return
         if self._is_recording_failed(recording_id):
             return
+        if recording_id != 0 and not self._recording_session_known(recording_id):
+            return
         with self._queue_lock:
-            self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
+            if recording_id == 0:
+                self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
+            elif recording_id in self._recording_parts:
+                self._recording_parts[recording_id].append(result.text.strip())
 
     def _remember_recording_audio_status(self, recording_id: int, result: TranscriptionResult) -> None:
         if result.status not in {"too_short", "no_speech"}:
@@ -715,6 +732,9 @@ class Daemon:
         with self._engine_lock:
             with self._queue_lock:
                 expected_stt_id = self._recording_stt_ids.get(recording_id)
+                terminal = recording_id in self._terminal_recordings
+            if recording_id != 0 and (terminal or expected_stt_id is None):
+                return None
             if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
                 return None
             return self.engine.transcribe(audio, language=self.language)
@@ -742,6 +762,18 @@ class Daemon:
             return False
         with self._queue_lock:
             return self._recording_chunk_counts.get(recording_id, 0) == 0
+
+    def _recording_session_known(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            return (
+                recording_id in self._recording_stt_ids
+                and recording_id not in self._terminal_recordings
+            )
+
+    def _is_non_streaming_recording_truncated(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            streaming = recording_id in self._streaming_recordings
+        return not streaming and bool(getattr(self.recorder, "truncated", False))
 
     def _should_queue_final_marker(self, recording_id: int) -> bool:
         with self._queue_lock:

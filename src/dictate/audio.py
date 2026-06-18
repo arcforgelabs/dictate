@@ -35,6 +35,10 @@ class AudioRecorder(Protocol):
     def is_recording(self) -> bool:
         ...
 
+    @property
+    def truncated(self) -> bool:
+        ...
+
     def start(
         self,
         on_chunk: Callable[[AudioChunk], None] | None = None,
@@ -75,6 +79,10 @@ class SoundDeviceRecorder:
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def truncated(self) -> bool:
+        return self._truncated
 
     def start(
         self,

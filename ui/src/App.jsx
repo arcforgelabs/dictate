@@ -68,9 +68,14 @@ export default function App() {
       hydrate(st);
     }).catch(() => {});
     const unsub = ipc.subscribe((ev) => {
-      if (ev.type === "recording") setRecording(!!ev.active);
+      if (ev.type === "recording") {
+        setRecording(!!ev.active);
+        if (ev.active) setTranscript({ phase: null, text: "", stale: false });
+      }
       else if (ev.type === "transcript") {
-        if (!ev.stale && typeof ev.text === "string") {
+        if (ev.stale) {
+          setTranscript({ phase: ev.phase || "final", text: "", stale: true });
+        } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
       } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));

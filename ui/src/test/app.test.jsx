@@ -1,8 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, within, cleanup, waitFor } from "@testing-library/react";
 import App from "../App.jsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  delete window.__DICTATE__;
+  delete window.EventSource;
+  vi.restoreAllMocks();
+});
 
 // Click a sidebar nav entry by its label, scoped to the rail so it never
 // collides with same-named mini-cards or badges elsewhere on the page.
@@ -57,5 +62,33 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     fireEvent.click(screen.getByText("Search settings & actions"));
     expect(screen.getByPlaceholderText(/Jump to a setting/i)).toBeInTheDocument();
+  });
+
+  it("clears live transcript text when a stale transcript event arrives", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() {
+        sources.push(this);
+      }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    sources[0].onmessage({
+      data: JSON.stringify({ type: "transcript", phase: "partial", text: "speculative words", stale: false }),
+    });
+    expect(await screen.findByText("speculative words")).toBeInTheDocument();
+
+    sources[0].onmessage({
+      data: JSON.stringify({ type: "transcript", phase: "final", text: "", stale: true }),
+    });
+
+    await waitFor(() => expect(screen.queryByText("speculative words")).not.toBeInTheDocument());
   });
 });
