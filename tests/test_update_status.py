@@ -53,13 +53,22 @@ class UpdateStatusTests(unittest.TestCase):
                 }
             )
 
-        with patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen):
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status.sys.platform", "linux"),
+        ):
             status = check_update_status()
 
         self.assertTrue(status.checked)
         self.assertEqual(status.latest_version, "2099.1.2")
         self.assertTrue(status.update_available)
         self.assertIsNone(status.error)
+        self.assertEqual(status.platform, "linux")
+        self.assertEqual(status.install_kind, "linux-package")
+        self.assertEqual(status.phase, "available")
+        self.assertIn("open_release", status.actions or [])
+        self.assertEqual(status.engine["current"], "2026.6.20")
 
     def test_check_update_status_falls_back_to_tags(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
@@ -67,7 +76,10 @@ class UpdateStatusTests(unittest.TestCase):
                 raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO())
             return _FakeResponse([{"name": "v2026.5.18"}])
 
-        with patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen):
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+        ):
             status = check_update_status()
 
         self.assertTrue(status.checked)
@@ -75,15 +87,20 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertFalse(status.update_available)
 
     def test_check_update_status_reports_error_gracefully(self) -> None:
-        with patch(
-            "dictate.update_status.urllib.request.urlopen",
-            side_effect=urllib.error.URLError("offline"),
+        with (
+            patch(
+                "dictate.update_status.urllib.request.urlopen",
+                side_effect=urllib.error.URLError("offline"),
+            ),
+            patch("dictate.update_status._find_source_root", return_value=None),
         ):
             status = check_update_status()
 
         self.assertFalse(status.checked)
         self.assertIsNotNone(status.error)
         self.assertFalse(status.update_available)
+        self.assertEqual(status.phase, "failed")
+        self.assertEqual(status.error_code, "check_failed")
 
     def test_linux_source_update_runs_validated_update_script(self) -> None:
         calls = []
@@ -115,6 +132,47 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(flow.mode, "release")
         self.assertFalse(flow.started)
         self.assertEqual(flow.url, RELEASES_URL)
+        self.assertEqual(flow.platform, "linux")
+        self.assertEqual(flow.install_kind, "linux-package")
+        self.assertEqual(flow.phase, "manual")
+        popen.assert_not_called()
+
+    def test_windows_source_update_runs_validated_update_script(self) -> None:
+        calls = []
+
+        def fake_popen(command, cwd):  # noqa: ANN001
+            calls.append((command, cwd))
+            return object()
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "update-windows.ps1").write_text("Write-Host update\n")
+            (root / "pyproject.toml").write_text("[project]\nname='dictate'\n")
+            (root / "src" / "dictate").mkdir(parents=True)
+            with patch("dictate.update_status.sys.platform", "win32"):
+                with patch("dictate.update_status._candidate_source_roots", return_value=[root]):
+                    with patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen):
+                        flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "command")
+        self.assertTrue(flow.started)
+        self.assertEqual(flow.platform, "windows")
+        self.assertEqual(flow.install_kind, "windows-source")
+        self.assertEqual(calls[0][0][-1], str(root / "update-windows.ps1"))
+        self.assertEqual(calls[0][1], str(root))
+
+    def test_windows_package_update_opens_release_guidance(self) -> None:
+        with patch("dictate.update_status.sys.platform", "win32"):
+            with patch("dictate.update_status._candidate_source_roots", return_value=[]):
+                with patch("dictate.update_status.subprocess.Popen") as popen:
+                    flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "release")
+        self.assertFalse(flow.started)
+        self.assertEqual(flow.url, RELEASES_URL)
+        self.assertEqual(flow.platform, "windows")
+        self.assertEqual(flow.install_kind, "windows-package")
+        self.assertIn("signed Windows installer", flow.message)
         popen.assert_not_called()
 
 

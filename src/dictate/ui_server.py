@@ -521,6 +521,19 @@ class UiBackend:
             "checked": status.checked,
             "error": status.error,
             "url": status.url,
+            "platform": status.platform,
+            "installKind": status.install_kind,
+            "engine": status.engine,
+            "shell": status.shell,
+            "shellStale": status.shell_stale,
+            "phase": status.phase,
+            "step": status.step,
+            "progress": status.progress,
+            "actions": status.actions or [],
+            "commands": status.commands or {},
+            "missingDeps": status.missing_deps or [],
+            "errorCode": status.error_code,
+            "errorDetail": status.error_detail,
         }
 
     def start_update(self) -> dict[str, Any]:
@@ -533,6 +546,16 @@ class UiBackend:
             "started": flow.started,
             "url": flow.url,
             "message": flow.message,
+            "platform": flow.platform,
+            "installKind": flow.install_kind,
+            "phase": flow.phase,
+            "step": flow.step,
+            "progress": flow.progress,
+            "actions": flow.actions or [],
+            "commands": flow.commands or {},
+            "missingDeps": flow.missing_deps or [],
+            "errorCode": flow.error_code,
+            "errorDetail": flow.error_detail,
         }
 
     @staticmethod

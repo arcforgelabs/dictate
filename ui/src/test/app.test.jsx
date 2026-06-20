@@ -34,6 +34,16 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("gemini-3-flash-preview")).toBeInTheDocument();
   });
 
+  it("navigates to the App update view without prototype controls", () => {
+    const { container } = render(<App />);
+    navTo(container, "App update");
+    expect(screen.getByRole("heading", { name: "App update" })).toBeInTheDocument();
+    expect(screen.getByText("Engine")).toBeInTheDocument();
+    expect(screen.getByText("App window")).toBeInTheDocument();
+    expect(screen.queryByText(/PROTOTYPE/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/JUMP TO STATE/i)).not.toBeInTheDocument();
+  });
+
   it("adds and removes a hotword", () => {
     const { container } = render(<App />);
     navTo(container, "Hotwords");

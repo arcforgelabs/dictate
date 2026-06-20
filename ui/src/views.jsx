@@ -42,6 +42,17 @@ function StatusView() {
         </div>
       </div>
 
+      {s.updateStatus?.shellStale ? (
+        <button className="update-banner" onClick={() => s.setView("update")}>
+          <span className="banner-dot"><Dot amber /></span>
+          <span className="banner-main">
+            <span className="banner-title">Engine updated — app window still old</span>
+            <span className="banner-copy">This window is still the v{s.updateStatus.shell?.current || "old"} build. Update the app to catch up.</span>
+          </span>
+          <span className="btn sm">Update</span>
+        </button>
+      ) : null}
+
       <div className="dash-grid">
         <div className="dash-col">
           <div className="section">
@@ -119,6 +130,152 @@ function StatusView() {
       </div>
     </div>
   );
+}
+
+/* ============================ APP UPDATE ============================ */
+function UpdateView() {
+  const s = useStore();
+  const u = s.updateStatus || {};
+  const engine = u.engine || { current: u.currentVersion || s.version, latest: u.latestVersion, path: "~/.local/bin/dictate" };
+  const shell = u.shell || { current: u.currentVersion || s.version, latest: u.latestVersion, path: "/usr/bin/dictate-ui-shell" };
+  const latest = u.latestVersion || engine.latest || shell.latest || s.version;
+  const shellStale = !!u.shellStale || !!shell.stale;
+  const phase = u.updating ? "working" : u.checking ? "checking" : u.phase || (u.updateAvailable || shellStale ? "available" : "current");
+  const installKind = u.installKind || "manual";
+  const isSource = installKind.endsWith("-source");
+  const hasUpdateCommand = !!u.commands?.update;
+  const hasReleaseUrl = !!u.commands?.release;
+  const primaryLabel = phase === "restart" ? "How to restart"
+    : phase === "checking" ? "Checking..."
+      : phase === "working" ? "Updating..."
+        : u.updateAvailable || shellStale ? isSource ? "Update app" : "Open release"
+          : "Check again";
+  const primaryAction = phase === "restart" ? () => s.toast("Quit and reopen Dictate to finish the update.")
+    : u.updateAvailable || shellStale ? s.startUpdate : s.checkUpdates;
+  const failed = phase === "failed" || !!u.errorCode;
+  const manual = !isSource;
+  const updateSteps = updateStepCopy(installKind);
+  const copyCommand = () => {
+    const cmd = u.commands?.update || u.commands?.release || "";
+    try { navigator.clipboard && navigator.clipboard.writeText(cmd); } catch (e) {}
+    if (cmd) s.toast(hasUpdateCommand ? "Copied update command" : "Copied release URL");
+  };
+
+  return (
+    <div className="view">
+      <div className="view-head">
+        <div className="crumb">App update</div>
+        <h2 className="t-title">App update</h2>
+        <p className="t-meta">Dictate updates in two parts — the background engine and this app window. Both should be on the same version.</p>
+      </div>
+
+      <div className="version-panel card tight">
+        <VersionRow label="Engine" path={engine.path} current={engine.current} latest={latest} stale={!!engine.stale} />
+        <VersionRow label="App window" path={shell.path} current={shell.current} latest={latest} stale={shellStale} />
+      </div>
+
+      {shellStale ? (
+        <div className="update-callout">
+          <div className="t-label">Action needed</div>
+          <h3>Engine updated, app window still old</h3>
+          <p>The engine is on v{engine.current || latest}, but this window is still the v{shell.current || "old"} build packaged in {shell.path || "the desktop shell"}. Update the app so the window matches, then restart.</p>
+        </div>
+      ) : null}
+
+      <div className="card tight update-card">
+        <div>
+          <h3 className="t-heading">{failed ? failureTitle(u, installKind) : phaseTitle(phase, manual)}</h3>
+          <p className="t-meta">{failed ? failureCopy(u, installKind) : phaseCopy(phase, installKind, latest, shell.current)}</p>
+        </div>
+
+        {failed && missingDeps(u).length ? (
+          <div className="deps">
+            <div className="t-label">Missing build dependencies</div>
+            <div className="dep-list">{missingDeps(u).map((d) => <span key={d}>{d}</span>)}</div>
+          </div>
+        ) : null}
+
+        <div className="update-steps">
+          {updateSteps.map((step, i) => (
+            <div className="step" key={step}><span>{i + 1}</span>{step}</div>
+          ))}
+        </div>
+
+        <div className="row-actions" style={{ justifyContent: "flex-start" }}>
+          <button className="btn primary" onClick={primaryAction} disabled={!!u.checking || !!u.updating}>
+            <Icon name={phase === "restart" ? "power" : "download"} size={16} />{primaryLabel}
+          </button>
+          <button className="btn" onClick={s.checkUpdates} disabled={!!u.checking}>Check again</button>
+        </div>
+
+        <details className="advanced-update">
+          <summary>{hasUpdateCommand ? "Advanced — update from a terminal" : "Release page"}</summary>
+          <div className="command-row">
+            <code>{hasUpdateCommand ? u.commands.update : hasReleaseUrl ? u.commands.release : "No local updater or release URL is available for this install."}</code>
+            {(hasUpdateCommand || hasReleaseUrl) && <button className="btn sm" onClick={copyCommand}>Copy</button>}
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
+function VersionRow({ label, path, current, latest, stale }) {
+  return (
+    <div className="version-row">
+      <div>
+        <div className="lbl">{label}</div>
+        <div className="help">{path || "Not detected"}</div>
+      </div>
+      <div className="version-values">
+        <Chip live={!stale}>{current || "unknown"}</Chip>
+        {stale && latest ? <><Icon name="chev" size={14} style={{ color: "var(--subtle)" }} /><Chip>{latest}</Chip></> : null}
+      </div>
+    </div>
+  );
+}
+
+function phaseTitle(phase, manual) {
+  if (phase === "checking") return "Checking for updates";
+  if (phase === "working") return manual ? "Opening the latest release" : "Updating the app";
+  if (phase === "restart") return "Restart to finish";
+  if (phase === "current") return "Everything is current";
+  return manual ? "Update available" : "Update the app";
+}
+
+function phaseCopy(phase, installKind, latest, current) {
+  if (phase === "checking") return "Looking for the latest Dictate release and comparing the engine with this app window.";
+  if (phase === "working") return "Dictate has started the safest updater available for this install.";
+  if (phase === "restart") return `The new v${latest} app window is installed. Restart Dictate to switch over; your settings and history are kept.`;
+  if (phase === "current") return "The engine and app window are already aligned.";
+  if (installKind.includes("windows") && !installKind.endsWith("-source")) return "Download and run the latest signed Windows installer. Dictate does not have an in-app Tauri updater wired yet.";
+  if (installKind.includes("linux") && !installKind.endsWith("-source")) return "Open the latest Linux package, then install it with your package manager or replace the AppImage.";
+  return `Brings this window from v${current || "old"} to v${latest}.`;
+}
+
+function updateStepCopy(installKind) {
+  if (installKind.endsWith("-source")) return ["Run the source updater", "Refresh the desktop app files", "Restart so the new window loads"];
+  if (installKind.includes("windows")) return ["Download the latest signed installer", "Run the installer", "Restart so the new window loads"];
+  if (installKind.includes("linux")) return ["Download the latest Linux package", "Install it with your package manager", "Restart so the new window loads"];
+  return ["Download the latest signed package", "Install the package", "Restart so the new window loads"];
+}
+
+function failureTitle(u, installKind) {
+  if (u.errorCode === "build_deps_missing" || installKind === "linux-source") return "Couldn't rebuild the app window";
+  if (u.errorCode === "webview2_missing") return "Microsoft Edge WebView2 Runtime is required";
+  return "Could not update Dictate";
+}
+
+function failureCopy(u, installKind) {
+  if (u.errorCode === "build_deps_missing" || installKind === "linux-source") return "The engine updated fine, but building the desktop window needs system packages that are not installed.";
+  if (u.errorCode === "webview2_missing") return "Install the WebView2 Runtime, then run the Dictate installer again.";
+  return u.errorDetail || u.error || "Try again, or open the latest release and install it manually.";
+}
+
+function missingDeps(u) {
+  if (Array.isArray(u.missingDeps)) return u.missingDeps;
+  if (u.errorCode === "build_deps_missing") return ["libwebkit2gtk-4.1-dev", "librsvg2-dev"];
+  return [];
 }
 
 /* =============================== MODEL =============================== */
@@ -443,6 +600,7 @@ export const VIEWS = {
   ptt: PttView,
   hotwords: HotwordsView,
   history: HistoryView,
+  update: UpdateView,
   startup: StartupView,
   advanced: AdvancedView,
 };

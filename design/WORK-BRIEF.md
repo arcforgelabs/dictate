@@ -21,7 +21,7 @@ handover. Severity: 🔴 high · 🟠 medium · 🔵 low.
 | §1 Recent-history live-update bugs | **Fixed.** `daemon.py` fires `history_callback` → `_notify_history_changed()` right after `history_store.append()`, and `recording_callback` for live state; `ui_server.py` wires the shared `EventBroker`/store; relative timestamps are computed client-side in `ui/src/views.jsx`. |
 | §2 Status two-column dashboard port | **Shipped.** The real UI lives in `ui/src/` (`App.jsx`, `views.jsx`, `styles.css`) and mirrors the prototype's `StatusView`. |
 | §3 Cross-platform packaging | **Shipped.** Tauri shell (`ui-shell/`), per-OS chrome (`ui/src/platform/TitleBar.jsx`), `packaging/`, and the canonical runbook `docs/desktop-packaging.md` + `LESSONS.md`. |
-| Recording workflow refinement | **In progress in this branch.** Status now separates Quick dictation from Record conversation, Record discloses `xAI · speaker labels`, and push-to-talk activation stays in the Push-to-talk view. Mirror files live in `design/dictate-app/`; production files live in `ui/src/`. |
+| Recording workflow refinement | **Shipped.** Status now separates Quick dictation from Record conversation, Record discloses `xAI · speaker labels`, and push-to-talk activation stays in the Push-to-talk view. Mirror files live in `design/dictate-app/`; production files live in `ui/src/`. |
 
 The prior handoff docs (`Recent History — Backend Fix Handoff.md`, `platforms/BUILD-DIRECTIONS.md`)
 were **deleted** — the work is done and the canonical engineering references now live in the
@@ -65,20 +65,18 @@ LOCAL/provider chip. Done in the prototype (`dictate-app/views.jsx` → `StatusV
 
 ---
 
-## 3. Claude Design ↔ GitHub parity 🔴
+## 3. Claude Design ↔ GitHub parity 🔵
 
-The current priority is keeping Claude Design, `design/dictate-app/`, and `ui/src/` in lockstep.
+Process lives in `forge` design mode (**Prototype Source Parity**) and the `claude-design`
+skill. Dictate's project mapping is intentionally small:
 
-Required for each production-bound UI change:
+- Claude Design project: `https://claude.ai/design/p/2309408a-2350-4da0-bb4c-c03c7cfee48a`
+- Main prototype: `dictate-app/Dictate Settings.html`
+- Repo mirror: `design/dictate-app/`
+- Production app: `ui/src/`
 
-- Claude Design project/file URL recorded in the PR.
-- Actual prototype files synced/exported into `design/dictate-app/`.
-- Production implementation ported from those files, not recreated from a screenshot.
-- Screenshot evidence committed for Claude Design review.
-- Any intentional divergence documented in the PR.
-
-For non-Claude local agents, use Claude Design **Send to Claude Code Web** and land the resulting
-branch through GitHub. For Claude Code, use `/design-sync` directly.
+Keep those surfaces in lockstep, or record the intentional divergence in
+[`../docs/claude-design-workflow.md`](../docs/claude-design-workflow.md).
 
 ## 4. Design ↔ shipped parity notes (synced — FYI, no action) 🔵
 

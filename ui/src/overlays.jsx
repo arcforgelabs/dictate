@@ -41,6 +41,7 @@ export function CommandPalette() {
     const nav = [
       ["status", "Status", "status"], ["sliders", "Model", "model"], ["keyboard", "Push-to-talk", "ptt"],
       ["hash", "Hotwords", "hotwords"], ["history", "Recent history", "history"],
+      ["download", "App update", "update"], ["power", "Startup", "startup"],
       ["gear", "Advanced", "advanced"],
     ].map(([icon, label, view]) => ({ icon, label, group: "Go to", run: () => s.setView(view) }));
     const actions = [

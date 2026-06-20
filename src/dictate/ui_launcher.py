@@ -24,7 +24,7 @@ from dictate.platform_paths import is_windows
 
 logger = logging.getLogger(__name__)
 
-# Environment overrides, then PATH, then common install + dev locations.
+# Environment overrides, then the user install, then PATH and system/dev locations.
 _ENV_BINARY = "DICTATE_UI_SHELL"
 _BINARY_NAME = "dictate-ui-shell"
 
@@ -36,15 +36,20 @@ def shell_binary_candidates() -> list[Path]:
     if override:
         candidates.append(Path(override))
 
-    on_path = shutil.which(_BINARY_NAME)
-    if on_path:
-        candidates.append(Path(on_path))
-
     home = Path.home()
     name = _BINARY_NAME + (".exe" if is_windows() else "")
     candidates.extend(
         [
             home / ".local" / "bin" / name,
+        ]
+    )
+
+    on_path = shutil.which(_BINARY_NAME)
+    if on_path:
+        candidates.append(Path(on_path))
+
+    candidates.extend(
+        [
             Path("/usr/local/bin") / name,
             Path("/usr/bin") / name,
             # dev build output, relative to the repo root (…/dictate/)

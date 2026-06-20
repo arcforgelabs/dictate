@@ -13,6 +13,7 @@
   --bg:#efece6; --bg-2:#e9e5dd; --surface:#fff; --surface-2:#f7f5f1; --surface-3:#f0ede7;
   --fg:#1b1a16; --muted:rgba(27,26,22,.56); --subtle:rgba(27,26,22,.40); --faint:rgba(27,26,22,.22);
   --border:rgba(27,26,22,.10); --border-2:rgba(27,26,22,.16); --hairline:rgba(27,26,22,.07);
+  --shell-edge:rgba(27,26,22,.30); --shell-edge-soft:rgba(27,26,22,.10); --shell-divider:rgba(27,26,22,.18);
   --primary:#1b1a16; --primary-fg:#faf8f4; --primary-hover:#322f29;
   --danger:#c5402c; --danger-bg:rgba(197,64,44,.10); --live:#2f8f63; --live-bg:rgba(47,143,99,.12);
   --shadow-sm:0 1px 2px rgba(27,26,22,.05),0 1px 1px rgba(27,26,22,.04);
@@ -29,6 +30,7 @@
   --bg:#0a0a0b; --bg-2:#050506; --surface:#19191c; --surface-2:#212126; --surface-3:#2c2c33;
   --fg:#f3f1ec; --muted:rgba(243,241,236,.60); --subtle:rgba(243,241,236,.42); --faint:rgba(243,241,236,.22);
   --border:rgba(243,241,236,.14); --border-2:rgba(243,241,236,.24); --hairline:rgba(243,241,236,.09);
+  --shell-edge:rgba(243,241,236,.32); --shell-edge-soft:rgba(0,0,0,.46); --shell-divider:rgba(243,241,236,.22);
   --primary:#f3f1ec; --primary-fg:#161618; --primary-hover:#dedbd3;
   --danger:#ff6b5b; --danger-bg:rgba(255,107,91,.13); --live:#4fbd86; --live-bg:rgba(79,189,134,.14);
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
@@ -150,6 +152,13 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .hero h2{margin-top:3px;}
 .hero .sub{font-size:13px;color:var(--muted);margin-top:7px;max-width:330px;}
 .hero .keyhint{display:flex;flex-direction:column;align-items:flex-end;gap:7px;text-align:right;flex:0 0 auto;}
+.update-banner{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;border:1px solid rgba(192,138,45,.28);
+  border-radius:var(--r-md);background:rgba(192,138,45,.09);text-align:left;box-shadow:var(--shadow-sm);}
+.update-banner:hover{border-color:rgba(192,138,45,.45);background:rgba(192,138,45,.13);}
+.banner-dot{display:flex;align-items:center;justify-content:center;}
+.banner-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.banner-title{font-size:13.5px;font-weight:700;}
+.banner-copy{font-size:12.5px;color:var(--muted);}
 
 /* mini cards grid */
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
@@ -255,6 +264,31 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .input input{flex:1;border:none;background:none;outline:none;font:inherit;font-size:13.5px;color:var(--fg);}
 .input input::placeholder{color:var(--subtle);}
 .input .mono{font-family:var(--font-mono);font-size:12px;letter-spacing:.02em;}
+
+/* app update */
+.version-panel{display:flex;flex-direction:column;gap:0;padding:0;}
+.version-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 18px;border-top:1px solid var(--hairline);}
+.version-row:first-child{border-top:none;}
+.version-row .lbl{font-size:14px;font-weight:700;}
+.version-row .help{font-size:12px;color:var(--muted);margin-top:2px;font-family:var(--font-mono);word-break:break-word;}
+.version-values{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+.update-callout{padding:17px 18px;border:1px solid rgba(192,138,45,.28);border-radius:var(--r-lg);background:rgba(192,138,45,.09);}
+.update-callout h3{font-size:17px;line-height:1.2;margin:4px 0 6px;}
+.update-callout p{font-size:13px;color:var(--muted);line-height:1.45;}
+.update-card{display:flex;flex-direction:column;gap:16px;}
+.update-card p{margin-top:5px;}
+.update-steps{display:grid;grid-template-columns:1fr;gap:8px;}
+.step{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);}
+.step span{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  background:var(--surface-2);border:1px solid var(--border);font-family:var(--font-mono);font-size:10px;color:var(--fg);}
+.deps{padding:12px;border-radius:var(--r-md);background:var(--danger-bg);border:1px solid rgba(197,64,44,.22);}
+.dep-list{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;}
+.dep-list span{font-family:var(--font-mono);font-size:11.5px;padding:4px 7px;border-radius:7px;background:var(--surface);border:1px solid var(--border);}
+.advanced-update{border-top:1px solid var(--hairline);padding-top:12px;}
+.advanced-update summary{font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;}
+.command-row{display:flex;align-items:center;gap:10px;margin-top:10px;}
+.command-row code{flex:1;min-width:0;padding:9px 10px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);
+  font-family:var(--font-mono);font-size:11.5px;color:var(--fg);overflow:auto;}
 
 /* demo target (status page) */
 .capture-actions{display:grid;grid-template-columns:1fr;gap:10px;}
@@ -405,13 +439,22 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .breeze button.x:hover{background:#c5402c;color:#fff;}
 
 /* ===========================================================================
-   Shell mode — inside the Tauri window the frameless ".win" fills the viewport
-   (no centered-card backdrop, no fit-to-viewport scaling). The transparent
-   window lets the compositor round the corners we keep on ".win".
+   Shell mode — no transparent gutter. Every visible pixel belongs to the app,
+   so users never see a fake edge that cannot be clicked through.
    =========================================================================== */
-[data-shell="tauri"]{background:transparent;}
-[data-shell="tauri"] #root{background:transparent;place-items:stretch;}
-[data-shell="tauri"] .win{position:relative;left:auto;top:auto;width:100vw;height:100vh;border:none;box-shadow:none;transform:none!important;}
+[data-shell="tauri"],
+[data-shell="tauri"] body{background:transparent;}
+[data-shell="tauri"] #root{background:transparent;place-items:stretch;padding:0;}
+[data-shell="tauri"] .win{position:relative;left:auto;top:auto;width:100vw;height:100vh;
+  border:none;box-shadow:inset 0 0 0 1px var(--shell-edge),inset 0 0 0 2px var(--shell-edge-soft);
+  transform:none!important;}
+[data-shell="tauri"] .titlebar{border-bottom-color:var(--shell-divider);}
+[data-shell="tauri"] .rail{border-right-color:var(--shell-divider);}
+[data-shell="tauri"][data-native-decorations="true"],
+[data-shell="tauri"][data-native-decorations="true"] body,
+[data-shell="tauri"][data-native-decorations="true"] #root{background:var(--bg);}
+[data-shell="tauri"][data-native-decorations="true"] .win{border-radius:0;box-shadow:none;}
+[data-shell="tauri"][data-native-decorations="true"] .titlebar{display:none;}
 
 /* Mica hint — a whisper of warmth on the Win11 headerbar only */
 .win.win11 .titlebar::after{content:"";position:absolute;inset:0;pointer-events:none;

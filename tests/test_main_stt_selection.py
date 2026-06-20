@@ -321,6 +321,14 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertIs(calls["daemon"].output, output)
         self.assertIs(calls["daemon"].engine.stt, stt)
 
+    def test_daemon_lock_exit_prevents_second_listener(self) -> None:
+        with patch("dictate.__main__.ProcessLock") as lock_cls:
+            lock_cls.return_value.acquire.return_value = False
+            with self.assertRaises(SystemExit) as raised:
+                main_module._acquire_daemon_lock_or_exit()
+
+        self.assertEqual(raised.exception.code, 0)
+
     def test_saved_lexicon_mode_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])

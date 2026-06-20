@@ -202,14 +202,28 @@ fn engine_binary_names() -> &'static [&'static str] {
 /// Start the engine: the bundled sidecar as a headless dictation daemon that
 /// also serves the control API; otherwise a PATH fallback for dev/pip installs.
 fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
+    let mut slot = engine_child_slot().lock().unwrap();
+    if let Some(child) = slot.as_mut() {
+        match child.try_wait() {
+            Ok(None) => return,
+            Ok(Some(_)) | Err(_) => {
+                *slot = None;
+            }
+        }
+    }
+
+    let shell_version = env!("CARGO_PKG_VERSION");
+    let shell_path = env::current_exe().ok();
     // 1) Packaged: one process dictates + serves.
     if let Some(bin) = bundled_engine(app) {
-        if let Ok(child) = Command::new(&bin)
-            .arg("--no-tray")
-            .env("DICTATE_UI_SERVER", "1")
-            .spawn()
-        {
-            *engine_child_slot().lock().unwrap() = Some(child);
+        let mut cmd = Command::new(&bin);
+        cmd.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
+        cmd.env("DICTATE_SHELL_VERSION", shell_version);
+        if let Some(path) = shell_path.as_ref() {
+            cmd.env("DICTATE_SHELL_PATH", path);
+        }
+        if let Ok(child) = cmd.spawn() {
+            *slot = Some(child);
             return;
         }
     }
@@ -218,8 +232,13 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         if !custom.trim().is_empty() {
             let mut parts = custom.split_whitespace();
             if let Some(first) = parts.next() {
-                if let Ok(child) = Command::new(first).args(parts).spawn() {
-                    *engine_child_slot().lock().unwrap() = Some(child);
+                let mut cmd = Command::new(first);
+                cmd.args(parts).env("DICTATE_SHELL_VERSION", shell_version);
+                if let Some(path) = shell_path.as_ref() {
+                    cmd.env("DICTATE_SHELL_PATH", path);
+                }
+                if let Ok(child) = cmd.spawn() {
+                    *slot = Some(child);
                     return;
                 }
             }
@@ -227,16 +246,23 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
     }
     // 3) Dev/pip: the lightweight control server (a separate `dictate` tray, if
     //    installed, handles dictation), then the full engine as a last resort.
-    if let Ok(child) = Command::new("dictate-ui-server").spawn() {
-        *engine_child_slot().lock().unwrap() = Some(child);
+    let mut ui_server = Command::new("dictate-ui-server");
+    ui_server.env("DICTATE_SHELL_VERSION", shell_version);
+    if let Some(path) = shell_path.as_ref() {
+        ui_server.env("DICTATE_SHELL_PATH", path);
+    }
+    if let Ok(child) = ui_server.spawn() {
+        *slot = Some(child);
         return;
     }
-    if let Ok(child) = Command::new("dictate")
-        .arg("--no-tray")
-        .env("DICTATE_UI_SERVER", "1")
-        .spawn()
-    {
-        *engine_child_slot().lock().unwrap() = Some(child);
+    let mut dictate = Command::new("dictate");
+    dictate.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
+    dictate.env("DICTATE_SHELL_VERSION", shell_version);
+    if let Some(path) = shell_path.as_ref() {
+        dictate.env("DICTATE_SHELL_PATH", path);
+    }
+    if let Ok(child) = dictate.spawn() {
+        *slot = Some(child);
     }
 }
 
@@ -264,7 +290,7 @@ fn kill_engine() {
 
 /// JS injected before page load: the bridge object + the shell/platform markers
 /// the stylesheet keys off.
-fn build_init_script(platform: &str, bridge: Option<&Handshake>) -> String {
+fn build_init_script(platform: &str, bridge: Option<&Handshake>, native_decorations: bool) -> String {
     let dictate = match bridge {
         Some(h) => format!(
             "window.__DICTATE__ = {{ baseUrl: {}, token: {}, platform: {} }};",
@@ -280,8 +306,10 @@ fn build_init_script(platform: &str, bridge: Option<&Handshake>) -> String {
     format!(
         "{dictate}\n\
          document.documentElement.setAttribute('data-shell','tauri');\n\
-         document.documentElement.setAttribute('data-platform',{});",
-        json_str(platform)
+         document.documentElement.setAttribute('data-platform',{});\n\
+         document.documentElement.setAttribute('data-native-decorations',{});",
+        json_str(platform),
+        json_str(if native_decorations { "true" } else { "false" })
     )
 }
 
@@ -318,14 +346,15 @@ pub fn run() {
         .setup(|app| {
             let platform = detect_platform();
             let bridge = ensure_engine(app);
-            let init = build_init_script(&platform, bridge.as_ref());
+            let native_decorations = env::var("DICTATE_CUSTOM_CHROME").unwrap_or_default() != "1";
+            let init = build_init_script(&platform, bridge.as_ref(), native_decorations);
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Dictate")
                 .inner_size(1100.0, 768.0)
                 .min_inner_size(900.0, 620.0)
-                .decorations(false)
-                .transparent(true)
+                .decorations(native_decorations)
+                .transparent(!native_decorations)
                 .resizable(true)
                 .initialization_script(&init)
                 .build()?;
@@ -409,17 +438,21 @@ mod tests {
             token: "secret".into(),
             pid: None,
         };
-        let script = build_init_script("kde", Some(&h));
+        let script = build_init_script("kde", Some(&h), true);
         assert!(script.contains("http://127.0.0.1:8765"));
         assert!(script.contains("secret"));
         assert!(script.contains("'data-shell','tauri'"));
+        assert!(script.contains("data-native-decorations"));
+        assert!(script.contains("\"true\""));
         assert!(script.contains("\"kde\""));
     }
 
     #[test]
     fn init_script_without_bridge_still_sets_platform() {
-        let script = build_init_script("gnome", None);
+        let script = build_init_script("gnome", None, false);
         assert!(script.contains("window.__DICTATE__ = { platform: \"gnome\" }"));
+        assert!(script.contains("data-native-decorations"));
+        assert!(script.contains("\"false\""));
         assert!(!script.contains("baseUrl"));
     }
 

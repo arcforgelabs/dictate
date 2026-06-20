@@ -10,7 +10,7 @@ import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.6.18";
+const DEFAULT_VERSION = "2026.6.20";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
 export default function App() {
@@ -47,7 +47,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
-  const [updateStatus, setUpdateStatus] = useState({ checked: false, checking: false, updating: false });
+  const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
 
@@ -244,7 +244,7 @@ export default function App() {
   const checkUpdates = () => {
     setUpdateStatus((u) => ({ ...u, checking: true, error: null }));
     if (!ipc.isLive()) {
-      const status = { checked: true, checking: false, currentVersion: version, latestVersion: version, updateAvailable: false };
+      const status = { ...mockUpdateStatus(version), checked: true, checking: false };
       setUpdateStatus(status);
       toast("You're on the latest version");
       return;
@@ -293,6 +293,23 @@ export default function App() {
       { label: "Shortcut registered", sub: shortcut.join(" + "), ok: true },
     ],
   });
+
+  function mockUpdateStatus(v) {
+    return {
+      currentVersion: v,
+      latestVersion: v,
+      updateAvailable: false,
+      checked: false,
+      platform: "linux",
+      installKind: "linux-package",
+      engine: { name: "engine", current: v, latest: v, path: "~/.local/bin/dictate", stale: false },
+      shell: { name: "shell", current: v, latest: v, path: "/usr/bin/dictate-ui-shell", stale: false },
+      shellStale: false,
+      phase: "current",
+      actions: ["check", "open_docs"],
+      commands: { release: "https://github.com/arcforgelabs/dictate/releases" },
+    };
+  }
 
   // ---- dictation demo (mock mode only; live mode is driven by SSE) ----
   const typeText = (phrase) => {
@@ -358,7 +375,7 @@ export default function App() {
     recording, noteRecording, noteText, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
-    runDoctor, version, updateStatus, checkUpdates, startUpdate,
+    runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
   };
 
   const NAV = [
@@ -369,6 +386,9 @@ export default function App() {
     { v: "hotwords", icon: "hash", label: "Hotwords", badge: hotwords.length },
     { sec: "Activity" },
     { v: "history", icon: "history", label: "Recent history", badge: history.length || null },
+    { sec: "App" },
+    { v: "update", icon: "download", label: "App update", badge: updateStatus?.shellStale ? "!" : null },
+    { v: "startup", icon: "power", label: "Startup" },
     { v: "advanced", icon: "gear", label: "Advanced" },
   ];
   const Current = VIEWS[view];

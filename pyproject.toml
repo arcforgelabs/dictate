@@ -1,6 +1,6 @@
 [project]
 name = "dictate"
-version = "2026.6.18"
+version = "2026.6.20"
 description = "Desktop dictation that types into the focused app."
 requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
@@ -32,6 +32,21 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dictate"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.worktrees",
+    "/dist",
+    "/packaging/.build-venv",
+    "/packaging/build",
+    "/packaging/dist",
+    "/ui/dist",
+    "/ui/node_modules",
+    "/ui-shell/node_modules",
+    "/ui-shell/src-tauri/engine",
+    "/ui-shell/src-tauri/gen",
+    "/ui-shell/src-tauri/target",
+]
 
 [tool.ruff]
 target-version = "py311"

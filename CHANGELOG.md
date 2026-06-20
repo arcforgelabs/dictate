@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-06-20
+
+### Added
+
+- Added an App update view that distinguishes the Python engine from the
+  desktop shell, reports install kind, shows stale shell state, and exposes the
+  correct update action for source and packaged installs.
+- Added a dedicated Record conversation entry point separate from quick
+  push-to-talk dictation.
+- Added a daemon single-instance guard so a second tray/headless listener exits
+  before it can bind the same shortcut and duplicate typed output.
+
+### Changed
+
+- Made the packaged Linux `.deb` the intended daily-driver path and cleaned up
+  source-install launcher precedence so local development installs do not
+  silently shadow packaged Dictate.
+- Switched the packaged Linux shell to native OS window decorations by default
+  for real window-manager shadows, edges, and hit testing.
+- Kept the prior frameless custom chrome available for comparison with
+  `DICTATE_CUSTOM_CHROME=1 /usr/bin/dictate-ui-shell`.
+
+### Fixed
+
+- Fixed duplicate paste/dictation caused by multiple Dictate listener processes
+  running from mixed source and packaged installs.
+- Fixed the Linux shell startup race that could spawn more than one bundled
+  engine before the first process wrote its UI handshake.
+- Removed the transparent fake-edge gutter around the shell window.
+
+### Verified
+
+- Rebuilt and installed the Linux `.deb` daily-driver package locally.
+- Ran focused Python tests for update status, UI server, launcher, startup
+  selection, and process locking.
+- Ran the UI test suite: 30 tests passed.
+- Ran the Tauri shell test suite: 7 tests passed.
+
 ## 2026-06-18
 
 ### Added

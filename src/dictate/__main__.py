@@ -51,6 +51,7 @@ from dictate.outputs import (
     detect_session_type,
     resolve_typing_backend,
 )
+from dictate.process_lock import ProcessLock, daemon_lock_path
 from dictate.stt import (
     ComputeDevice,
     ComputeType,
@@ -66,6 +67,7 @@ from dictate.stt import (
 from dictate.version import RELEASE_VERSION
 
 SAMPLE_RATE = 16000
+_DAEMON_LOCK: ProcessLock | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -228,6 +230,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         config=config,
     )
 
+    if not args.once:
+        _acquire_daemon_lock_or_exit()
+
     _run_preflight_or_exit(
         require_typing=not args.once,
         require_clipboard=args.once and args.copy,
@@ -283,6 +288,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         push_to_talk_combo=push_to_talk_combo,
     )
     return 0
+
+
+def _acquire_daemon_lock_or_exit() -> None:
+    global _DAEMON_LOCK
+    lock = ProcessLock(daemon_lock_path())
+    if not lock.acquire():
+        print(
+            "Dictate is already running. Stop the existing Dictate process before starting another listener.",
+            file=sys.stderr,
+        )
+        raise SystemExit(0)
+    _DAEMON_LOCK = lock
 
 
 def main_with_logging() -> int:

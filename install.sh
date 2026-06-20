@@ -11,6 +11,7 @@ DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 ICON_DIR="$INSTALL_DIR/share/icons"
 ICON_PATH="$ICON_DIR/dictate-simple.png"
+DESKTOP_PATH="$DESKTOP_DIR/Dictate.desktop"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dictate"
 CONFIG_PATH="$CONFIG_DIR/config.yaml"
 DEFAULT_CONFIG_SOURCE="$SCRIPT_DIR/config/default-config.yaml"
@@ -143,8 +144,8 @@ install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
 
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"
-rm -f "$DESKTOP_DIR/dictate-settings.desktop"
-cat > "$DESKTOP_DIR/dictate.desktop" <<EOF
+rm -f "$DESKTOP_DIR/dictate-settings.desktop" "$DESKTOP_DIR/dictate.desktop"
+cat > "$DESKTOP_PATH" <<EOF
 [Desktop Entry]
 Name=Dictate
 Comment=Dictate into the focused app
@@ -189,10 +190,6 @@ install_desktop_ui() {
   local shell_src="$SCRIPT_DIR/ui-shell"
   local target="$BIN_DIR/dictate-ui-shell"
 
-  if command -v dictate-ui-shell >/dev/null 2>&1; then
-    echo "Desktop UI shell already installed: $(command -v dictate-ui-shell)"
-    return 0
-  fi
   if [ ! -d "$shell_src" ]; then
     echo "Desktop UI shell sources not present; skipping the optional UI."
     print_ui_hint

@@ -41,12 +41,31 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
             update_available=True,
             checked=True,
             url="https://example.test/releases",
+            platform="linux",
+            install_kind="linux-package",
+            engine={"name": "engine", "current": RELEASE_VERSION, "latest": RELEASE_VERSION, "path": "/bin/dictate", "stale": False},
+            shell={"name": "shell", "current": "2026.4.0", "latest": RELEASE_VERSION, "path": "/usr/bin/dictate-ui-shell", "stale": True},
+            shell_stale=True,
+            phase="available",
+            step="ready",
+            progress=0,
+            actions=["check", "open_release"],
+            commands={"release": "https://example.test/releases"},
+            missing_deps=[],
         ),
         start_update_flow=lambda: UpdateFlow(
             mode="release",
             started=False,
             url="https://example.test/releases",
             message="Open the latest Linux package.",
+            platform="linux",
+            install_kind="linux-package",
+            phase="manual",
+            step="release",
+            progress=0,
+            actions=["open_release"],
+            commands={"release": "https://example.test/releases"},
+            missing_deps=[],
         ),
         startup_enabled=lambda: True,
         set_startup_enabled=lambda enabled: None,
@@ -317,6 +336,16 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertTrue(status["updateAvailable"])
             self.assertTrue(status["checked"])
             self.assertEqual(status["url"], "https://example.test/releases")
+            self.assertEqual(status["platform"], "linux")
+            self.assertEqual(status["installKind"], "linux-package")
+            self.assertTrue(status["shellStale"])
+            self.assertEqual(status["phase"], "available")
+            self.assertEqual(status["step"], "ready")
+            self.assertEqual(status["progress"], 0)
+            self.assertEqual(status["missingDeps"], [])
+            self.assertEqual(status["engine"]["current"], RELEASE_VERSION)
+            self.assertEqual(status["shell"]["current"], "2026.4.0")
+            self.assertEqual(status["commands"]["release"], "https://example.test/releases")
 
     def test_start_update_shape(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -325,6 +354,12 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertFalse(flow["started"])
             self.assertEqual(flow["url"], "https://example.test/releases")
             self.assertEqual(flow["message"], "Open the latest Linux package.")
+            self.assertEqual(flow["platform"], "linux")
+            self.assertEqual(flow["installKind"], "linux-package")
+            self.assertEqual(flow["phase"], "manual")
+            self.assertEqual(flow["step"], "release")
+            self.assertEqual(flow["progress"], 0)
+            self.assertEqual(flow["actions"], ["open_release"])
 
 
 class HttpIntegrationTests(unittest.TestCase):
