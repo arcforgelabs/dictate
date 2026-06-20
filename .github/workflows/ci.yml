@@ -54,8 +54,8 @@ jobs:
 
       - name: Run unit tests on Windows
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: .\.venv\Scripts\python.exe -m unittest discover -s tests
+        shell: cmd
+        run: .venv\Scripts\python.exe -m unittest discover -s tests
 
       - name: Show version on Linux
         if: runner.os == 'Linux'
