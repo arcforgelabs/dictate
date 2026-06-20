@@ -1,8 +1,7 @@
 # Microsoft Store Automation
 
 This runbook covers the non-secret automation pieces for publishing Dictate
-through the Microsoft Store after the first Partner Center product/submission
-exists.
+through the Microsoft Store for the existing Partner Center product.
 
 ## Current Partner Center Identity
 
@@ -14,21 +13,10 @@ exists.
 - Package/Properties/PublisherDisplayName: `Arc Forge Labs`
 - Package Family Name (PFN): `ArcForgeLabs.ArcForgeDictate_tbf7er950vsxw`
 - Package SID: `S-1-15-2-414942928-860362531-3808921871-2325232450-2546095560-3460849545-2812936032`
-- Manual draft submission: `Submission 1`
-- Submission ID: `1152921505701159461`
-- Submission last modified: `2026-06-03`
-- Current draft package: `ArcForgeDictate_2026.6.3.0_x64.msix`
-- Current draft package status: validated in Partner Center.
-- Current submission status: in certification.
-- Current certification stage: pre-processing.
-- Current publishing mode: publish as soon as certification passes.
-- Current gate status: all gates complete; the IARC questionnaire and Terms of
-  Use approval are saved.
-- Seller ID: `94852860`
-- Tenant ID: `040ca04b-6b25-40a6-8b72-385e983e33af`
-- Client ID: `1b26108f-d69b-4229-8282-c6fb937b4c03`
 - Partner Center app role: `Manager(Windows)`
-- Client secret: stored in Bitwarden and GitHub Actions secrets only.
+- Store publication status changes in Partner Center. Do not hard-code transient
+  submission IDs, draft package names, certification stages, or internal account
+  identifiers in this public repository.
 
 ## Store Package Builder
 
@@ -46,11 +34,12 @@ uses `tauri build --no-bundle`, stages `dictate-ui-shell.exe` and
 
 ## GitHub Actions Wiring
 
-Add these repository variables:
+Add these repository variables in GitHub Actions. Keep the values in repository
+settings, not in committed docs:
 
-- `MSSTORE_TENANT_ID`: `040ca04b-6b25-40a6-8b72-385e983e33af`
-- `MSSTORE_CLIENT_ID`: `1b26108f-d69b-4229-8282-c6fb937b4c03`
-- `MSSTORE_SELLER_ID`: `94852860`
+- `MSSTORE_TENANT_ID`
+- `MSSTORE_CLIENT_ID`
+- `MSSTORE_SELLER_ID`
 
 Add this repository secret:
 
@@ -62,18 +51,8 @@ Current GitHub Actions state:
 
 - Repository variables are set for tenant ID, client ID, and seller ID.
 - `MSSTORE_CLIENT_SECRET` is set as a GitHub Actions repository secret.
-- Local `auth-check` has verified token acquisition for
-  `https://api.store.microsoft.com/.default`.
-- Local `legacy-apps` has verified the MSIX/UWP Store services API can see
-  `Arc Forge Dictate`:
-  - App ID: `9P5S7747V0BP`
-  - Primary name: `Arc Forge Dictate`
-  - Package identity name: `ArcForgeLabs.ArcForgeDictate`
-  - Pending submission ID: `1152921505701159461`
-- Local `status` against Store ID `9P5S7747V0BP` returns `No Product Found` on
-  `https://api.store.microsoft.com/submission/v1/product/...`, which is expected
-  until we validate the correct API path for this MSIX/PWA product or create an
-  MSI/EXE product. Do not treat this as a secret or token failure.
+- `msstore-publish-msix.yml` status mode verifies credentials and current Store
+  submission status without creating or committing a package.
 
 ## Smoke Workflow
 
@@ -94,7 +73,7 @@ gh workflow run msstore-api-smoke.yml -f query=legacy-apps
 ```
 
 Use `.github/workflows/msstore-publish-msix.yml` for the guarded package update
-path after the first manual submission is accepted.
+path.
 
 Read-only status:
 
@@ -114,9 +93,9 @@ Commit the current draft to Microsoft certification:
 gh workflow run msstore-publish-msix.yml -f mode=publish -f product_id=9P5S7747V0BP
 ```
 
-Do not run `mode=draft` or `mode=publish` against `Submission 1` while it is in
-certification. The workflow exists for future API-managed updates after the
-first manual submission is accepted.
+`mode=draft` uploads a newly built MSIX into a Store draft without committing it.
+Review that draft in Partner Center before running `mode=publish`, which commits
+the current draft and polls Microsoft certification.
 
 ## Local Smoke
 
@@ -137,15 +116,13 @@ Microsoft warns that once a submission is created through the API, edits to that
 same submission should continue through the API rather than Partner Center. For
 Dictate:
 
-1. Complete `Submission 1` manually in Partner Center.
-2. Use the API smoke workflow to confirm credentials and product access.
-3. Use `msstore-publish-msix.yml` for future API-managed package updates after
-   the MSIX/PWA product accepts the first manual submission, or after a separate
-   MSI/EXE product is created for Tauri installer output.
-4. Use API-created submissions consistently for future automated updates.
-
-Current state: `Submission 1` is already in certification. Do not create or
-modify this submission through the API while certification is in progress.
+1. Use the API smoke/status workflow to confirm credentials and product access.
+2. Use `msstore-publish-msix.yml` with `mode=draft` to create/update the Store
+   draft package.
+3. Review the draft in Partner Center.
+4. Use `mode=publish` only when that draft should be submitted for Microsoft
+   certification.
+5. Use API-created submissions consistently for future automated updates.
 
 Use [msstore-listing.md](msstore-listing.md) for the first listing copy,
 privacy/certification notes, screenshots checklist, and remaining pre-submit

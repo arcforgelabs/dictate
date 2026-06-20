@@ -29,15 +29,17 @@ scripts/build-linux-desktop.sh
   ├─ npm --prefix ui run build                 # web UI -> ui/dist
   ├─ DICTATE_ONEFILE=1 packaging/build-engine.sh  # freeze engine -> one binary
   ├─ stage engine -> ui-shell/src-tauri/engine/dictate-engine
-  └─ tauri build --bundles deb,rpm   (required)  + appimage (best-effort)
+  └─ tauri build --bundles deb
 ```
 
 - **CI (`.github/workflows/ci.yml`, job `desktop-shell`)** compiles the shell and
   runs its Rust tests on every push (with a placeholder engine — no freeze).
 - **Release (`.github/workflows/release.yml`, job `linux-desktop`)** runs the full
   build after the manually dispatched release workflow verifies the requested
-  `v20*` tag is reachable from the default branch, then attaches
-  `.deb`/`.rpm`/AppImage to the GitHub release.
+  `v20*` tag is reachable from the default branch, then attaches the `.deb` to
+  the GitHub release. RPM packaging is intentionally not part of the release lane
+  because it has timed out in CI after producing the `.deb`; reintroduce it only
+  after the RPM bundling path is fixed and timed.
 - **Manual (`.github/workflows/desktop-bundle.yml`, `workflow_dispatch`)** builds
   the bundle and uploads artifacts + the full log — **use this to iterate on
   packaging without cutting releases.** Trigger: `gh workflow run desktop-bundle.yml`.
@@ -66,8 +68,8 @@ scripts/build-windows-desktop.ps1
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
   builds the Windows bundle and uploads artifacts + the full log without cutting
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
-- These artifacts are for internal validation until Microsoft Store submission
-  and signing are ready. The target public Windows channel is tracked in
+- These artifacts are for internal validation and signed direct-download fallback.
+  The target public Windows channel is Microsoft Store distribution, tracked in
   [goal.md](goal.md).
 - The Tauri shell looks for `dictate-engine.exe` on Windows and for
   `dictate-engine` elsewhere. It also reads the UI handshake from
@@ -108,6 +110,10 @@ scripts/build-windows-msix-store.ps1
   upload, or explicit publish/commit. Use `mode=status` for read-only checks,
   `mode=draft` to upload a generated MSIX without committing, and `mode=publish`
   only after the draft should be submitted to Microsoft.
+- Store publication is not triggered by GitHub release publication. After a
+  release is tagged and verified, create the Store draft with `mode=draft`,
+  review it in Partner Center, then use `mode=publish` when it is ready for
+  Microsoft certification.
 - The manifest identity is pinned to Partner Center:
   `ArcForgeLabs.ArcForgeDictate` and
   `CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C`.
@@ -123,26 +129,22 @@ scripts/build-windows-msix-store.ps1
 ## Gotchas (the expensive lessons)
 
 ### Freeze the engine **onefile**, not onedir
-`linuxdeploy` (the AppImage builder) walks every ELF in the AppDir and tries to
-"deploy dependencies". A PyInstaller **onedir** engine ships ~1,200 libs in
-`_internal/` with mangled names depending on mangled siblings via `$ORIGIN` rpath;
-linuxdeploy doesn't honour `$ORIGIN` and aborts with
-`ERROR: Could not find dependency: libnettle-<hash>.so`. A **onefile** freeze puts
-a single self-extracting ELF in the AppDir, so there's nothing for linuxdeploy to
-trip over. `.deb`/`.rpm` don't do this walk, so they work with either layout. We
-use onefile everywhere (set in `build-linux-desktop.sh`; `dictate-engine.spec`
-honours `DICTATE_ONEFILE`). Cost: ~1-2 s extraction at launch - fine for a tray app.
+A PyInstaller **onedir** engine ships ~1,200 libs in `_internal/`. A **onefile**
+freeze puts a single self-extracting ELF in the package, which keeps the Linux
+desktop artifact simpler and avoids fragile dependency walking during bundling.
+We use onefile everywhere (set in `build-linux-desktop.sh`;
+`dictate-engine.spec` honours `DICTATE_ONEFILE`). Cost: ~1-2 s extraction at
+launch - fine for a tray app.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if
 any configured icon isn't RGBA. `assets/dictate.png` is mode `LA` (grey+alpha);
 regenerate `ui-shell/src-tauri/icons/*.png` as RGBA (Pillow: `.convert("RGBA")`).
 
-### AppImage in CI needs FUSE-free env (and is best-effort)
-linuxdeploy/appimagetool can't FUSE-mount in headless CI. Set
-`APPIMAGE_EXTRACT_AND_RUN=1`, `NO_STRIP=true`, `ARCH=x86_64`. Even then it's the
-fragile format, so the build treats `.deb`/`.rpm` as **required** and AppImage as
-**best-effort** — an AppImage failure must never sink the native packages.
+### Keep optional Linux formats out of the release gate until timed
+The public release workflow currently publishes the `.deb` only. RPM/AppImage
+experiments belong in manual bundle workflows until they are reliable and timed;
+an optional package format must not sink the primary GitHub release.
 
 ### Release pipeline must be resilient
 - **npm publish is best-effort.** It used to run before `gh release create` in the
@@ -178,9 +180,9 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
 
 ## Install, update, conflicts
 
-- **Canonical install** is the `.deb`/`.rpm`/AppImage. `apt`/`dnf` handle updates
-  cleanly (dpkg/rpm replace the old version and drop files no longer in the
-  package). AppImage is replace-the-file.
+- **Canonical Linux release install** is the `.deb`. `apt` handles updates
+  cleanly: dpkg replaces the old version and drops files no longer in the
+  package.
 - **`install.sh` (source/dev) and the package both ship a daemon** and would fight
   over the push-to-talk key. `install.sh` now warns when a package is installed;
   `uninstall.sh` stops a running source daemon and removes the `dictate-ui-server`
@@ -194,7 +196,6 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
 ## Open / known follow-ups
 
 - **npm publishing**: the `arcforgelabs` org exists, but CI needs an **automation
-  token** in the `NPM_TOKEN` secret (Bitwarden holds login + 2FA, not a token).
-  Until set, npm publish just warns.
+  token** in the `NPM_TOKEN` secret. Until set, npm publish just warns.
 - **Autostart**: the package installs an app-menu entry but no login autostart
   (enable via Settings → "Launch on sign-in", or ship `/etc/xdg/autostart`).

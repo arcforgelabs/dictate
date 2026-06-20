@@ -7,17 +7,17 @@ speak, and it transcribes into whatever app you are already using.
 
 Current status: early desktop app. Linux installs, Windows 11 source installs,
 tray controls, startup integration, recent history, model selection, API key
-storage, update, and uninstall paths are implemented. Windows Store/signed
-installer packaging is being prepared; see `docs/goal.md`.
+storage, update, and uninstall paths are implemented. Microsoft Store packaging
+and submission automation are maintained separately from GitHub releases; see
+`docs/goal.md`.
 
 ## Install
 
 Windows 11 normal install:
 
-The target public channel is Microsoft Store distribution. Until that listing is
-ready, use the GitHub release installer artifacts for internal validation only.
-The PowerShell bootstrap installer below is a developer/source path, not the
-normal public install route.
+The target public channel is Microsoft Store distribution. GitHub release
+artifacts and the PowerShell bootstrap installer below are developer/source or
+internal validation paths, not the normal public Windows install route.
 
 Windows developer/source install from the hosted bootstrap:
 
@@ -181,12 +181,12 @@ A design-system desktop Settings window is being built alongside the tray:
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
 **Install it like a normal app:** tagged releases attach a **self-contained**
-Linux **`.deb`** and **`.AppImage`** — they bundle the frozen Python engine
-inside (PyInstaller sidecar), so there's no separate Python/pip step. Download,
-install, launch; speech models download on first use.
+Linux **`.deb`** — it bundles the frozen Python engine inside (PyInstaller
+sidecar), so there's no separate Python/pip step. Download, install, launch;
+speech models download on first use.
 
 ```bash
-sudo apt install ./dictate_*_amd64.deb      # or: chmod +x Dictate_*.AppImage && ./Dictate_*.AppImage
+sudo apt install ./Dictate_*_amd64.deb
 ```
 
 The app lives in the tray (Open Settings / Quit) and does push-to-talk straight

@@ -71,6 +71,12 @@ commit reachable from the default branch, then runs the Linux/Windows test
 matrix, the hosted Windows user install smoke test, release metadata validation,
 Python artifact checks, and npm package validation before publishing.
 
+GitHub release publication and Microsoft Store publication are separate lanes.
+Publishing a GitHub release updates the downloadable source/developer artifacts;
+it does not make an update available through the Microsoft Store. Store updates
+require the Store MSIX workflow in draft mode, Partner Center review, and an
+explicit publish/certification step.
+
 The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN
 install/update scripts. Configure npm trusted publishing for this repository and
 `.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret

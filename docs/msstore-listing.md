@@ -1,7 +1,7 @@
 # Microsoft Store Listing Draft
 
-This draft is for the first manual Partner Center submission for Dictate. Keep
-claims conservative and aligned with the current app behavior.
+This draft captures public Microsoft Store listing copy and certification notes
+for Dictate. Keep claims conservative and aligned with the current app behavior.
 
 ## Product Identity
 
@@ -15,12 +15,9 @@ claims conservative and aligned with the current app behavior.
 - Publisher display name: `Arc Forge Labs`
 - Package family name: `ArcForgeLabs.ArcForgeDictate_tbf7er950vsxw`
 - Package SID: `S-1-15-2-414942928-860362531-3808921871-2325232450-2546095560-3460849545-2812936032`
-- Manual draft submission: `Submission 1`
-- Submission ID: `1152921505701159461`
-- Submitted package: `ArcForgeDictate_2026.6.3.0_x64.msix`
 - Category: `Productivity`
 - Pricing: Free
-- Discoverability: Public after certification
+- Discoverability: Managed in Partner Center
 - Primary package path: Microsoft Store submission, with GitHub installer
   artifacts kept internal until signed.
 - Store MSIX builder: `scripts/build-windows-msix-store.ps1`
@@ -114,26 +111,9 @@ Required before submission:
 - At least one desktop screenshot
 - Prefer four or more screenshots before public launch
 
-Current Partner Center state:
-
-- The first draft listing has one uploaded Desktop screenshot generated from
-  the live Vite UI preview at `1400 x 900`.
-- The screenshot source used for the draft was
-  `/tmp/arc-forge-dictate-store-screenshot-1400x900.png`.
-- The package icons are being used for Store logos unless separate art is added
-  later.
-- Certification report `a0cf5c57-d578-48d9-b707-68a7a207ff6a` completed on
-  `2026-06-04` with status `Attention needed` under policy `10.5.1 Personal
-  Information - Privacy Policy`. Microsoft rejected the prior privacy URL
-  `https://arcforge.au/privacy` because it did not display an app privacy
-  policy.
-- Store CLI status run `26988691332` passed on `2026-06-05` and reported
-  `Submission Status = CertificationFailed`.
-- The Partner Center privacy policy URL was corrected to
-  `https://arcforge.au/privacy/dictate` and the submission was resubmitted on
-  `2026-06-05`.
-- Store CLI status run `26988971067` passed on `2026-06-05` and reported
-  `Submission Status = Certification`.
+Current Partner Center state changes over time. Check Partner Center or
+`.github/workflows/msstore-publish-msix.yml` in `mode=status` for live status;
+do not rely on committed docs for transient submission state.
 
 Suggested screenshots:
 
@@ -201,20 +181,7 @@ recent transcript history for copy/paste recovery.
 - Validate the MSIX package in Partner Center.
 - Create a separate MSI/EXE product only if the MSIX package path fails
   validation.
-- Complete the `Submission 1` draft gates currently shown by Partner Center.
-  Current state on `2026-06-03`:
-  - Pricing and availability: complete.
-  - Properties: complete.
-  - Packages: complete; `ArcForgeDictate_2026.6.3.0_x64.msix` validated.
-  - Store listings: complete for English (United States).
-  - Submission options: complete, with publishing set to start as soon as
-    certification passes.
-  - Age ratings: complete; IARC questionnaire and Terms of Use approval saved.
-  - Product submission: in certification after privacy URL correction and
-    resubmission on `2026-06-05`.
-  - Certification stage: Store CLI status run `26988971067` reported
-    `Certification`.
-  - Publishing mode: product starts publishing as soon as certification passes.
+- Complete the draft gates currently shown by Partner Center.
 - Confirm `https://arcforge.au/privacy/dictate` is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
 - Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
@@ -226,7 +193,8 @@ recent transcript history for copy/paste recovery.
   and privacy policy URL.
 - Complete age ratings.
 - Complete microphone/privacy certification notes.
-- Submit first draft manually.
+- Submit through the manual Partner Center flow or through
+  `msstore-publish-msix.yml` after draft review.
 - Use Store ID `9P5S7747V0BP` for Store API smoke checks after this workflow is
   available on the default branch.
 
