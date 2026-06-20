@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 import urllib.error
+import os
 from pathlib import Path
 from contextlib import redirect_stderr
 from io import BytesIO, StringIO
@@ -85,7 +86,8 @@ class ApiKeysTests(unittest.TestCase):
                 self.assertTrue(api_keys.secret_store_available())
                 api_keys.save_api_key("openai", " secret ")
                 self.assertEqual(api_keys.read_api_key("openai"), "secret")
-                self.assertEqual(fallback.stat().st_mode & 0o777, 0o600)
+                if os.name != "nt":
+                    self.assertEqual(fallback.stat().st_mode & 0o777, 0o600)
                 api_keys.clear_api_key("openai")
                 self.assertIsNone(api_keys.read_api_key("openai"))
 

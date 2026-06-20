@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from dictate.api_keys import ApiKeyStatus
 from dictate.history import HistoryStore
@@ -197,7 +198,11 @@ class UiBackendStateTests(unittest.TestCase):
                 "/usr/bin/printf xai-validtokenvalidtoken",
                 path=backend.config_path,
             )
-            state = backend.get_state()
+            with patch(
+                "dictate.ui_server.api_keys_mod._api_key_from_command",
+                return_value="xai-validtokenvalidtoken",
+            ):
+                state = backend.get_state()
             self.assertTrue(state["providers"]["xai"]["configured"])
             xai_model = next(model for model in state["models"] if model["backend"] == "xai")
             self.assertTrue(xai_model["configured"])
