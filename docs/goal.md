@@ -11,6 +11,74 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 
 ## Remaining Work
 
+### Product Surface Goal
+
+Dictate's current production surface is desktop, and the desktop version should
+keep a local-first model posture for normal dictation wherever that gives the
+best user experience, privacy, and reliability.
+
+The product direction is broader than desktop:
+
+1. Keep the desktop app as the primary daily-driver implementation target for
+   now.
+2. Do not design product concepts or architecture in a way that prevents a
+   future mobile/on-the-run capture surface.
+3. Treat mobile as a future product surface for quick capture, transcript review,
+   and sending text onward, not as a replacement for desktop push-to-talk.
+4. Keep shared concepts portable across surfaces: captures become transcripts or
+   notes, transcripts can be accepted/copied/inserted/exported, and hosted-model
+   use is explicit.
+
+### Transcription Notes Goal
+
+Dictate should move toward a transcript-first note capture model. The first
+implementation is **word-for-word transcription only**: no summaries, action
+items, cleanup, or note intelligence.
+
+Immediate production direction:
+
+1. Treat every capture as a `Note`: short dictation and long meetings are the
+   same record type with different duration, provider, speaker, and processing
+   state.
+2. Preserve two user intents through mode/defaults, not separate heavy screens:
+   - **Dictation**: plain verbatim transcription, no speaker labels by default,
+     suitable for prompts, email, and text insertion.
+   - **Meeting**: verbatim transcript with diarization/speaker labels enabled by
+     default.
+3. Make hosted xAI the first production meeting path because it supports the
+   required meeting contract: streaming/chunked speech-to-text plus speaker
+   labels/diarization.
+4. Keep proven local models available for direct dictation and offline fallback.
+   Do not present local models as production-ready meeting diarization until
+   separately benchmarked.
+5. Hide or de-emphasize hosted providers that cannot satisfy the meeting
+   contract. Provider selection should be capability-based, not a flat model
+   list.
+6. Store transcripts as the durable artifact. Do not retain audio by default.
+   Audio chunks should be discarded as soon as they have been successfully
+   transcribed/diarized and persisted as transcript segments.
+7. Long recordings must be streamed/chunked. The app must not hold hours of raw
+   audio in memory, upload one giant file, or block on one final transcription
+   request.
+8. Persist note metadata and transcript segments incrementally: note id, mode,
+   provider/model, start/end timestamps, duration, processing status, chunk
+   sequence, speaker ids/labels, transcript text, and errors if any.
+9. The UI should support in-app acceptance of dictation: after capture, the user
+   can read, edit, accept, copy, insert, export, or expand the transcript without
+   requiring another focused text field.
+
+Deferred / future work:
+
+1. Local meeting diarization is a future experimental feature, not part of the
+   first implementation.
+2. Candidate local paths include WhisperX + pyannote, pyannote paired with
+   existing local STT, and NVIDIA NeMo diarization. These require a separate
+   benchmark pass for accuracy, RAM/VRAM use, runtime, installation weight, and
+   long-meeting stability.
+3. If local meeting diarization is later exposed, label it as experimental or
+   high-performance-machine-only until it is proven on representative
+   multi-speaker recordings.
+
 1. For Store updates, run the guarded Microsoft Store MSIX workflow in
    `mode=draft`, review the draft in Partner Center, then run `mode=publish`
    only when ready for Microsoft certification.
