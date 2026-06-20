@@ -81,12 +81,11 @@ class SttRegistryTests(unittest.TestCase):
         completed = subprocess.run(
             [sys.executable, "-c", code],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             timeout=10,
         )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.returncode, 0)
 
     def test_backend_readiness_returns_metadata(self) -> None:
         report = check_backend_readiness(
