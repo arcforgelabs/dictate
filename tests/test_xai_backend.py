@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -12,14 +10,9 @@ from dictate.stt.xai_backend import (
     XAISpeechToText,
     _extract_diarized_text,
     _extract_text,
-    _keyterms,
     xai_api_key_available,
+    _keyterms,
 )
-
-
-def _print_command(value: str) -> str:
-    python = Path(sys.executable).as_posix()
-    return f'{python} -c "import sys; sys.stdout.write({value!r})"'
 
 
 class _FakeResponse:
@@ -147,9 +140,10 @@ class XAIBackendTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"DICTATE_XAI_API_KEY_COMMAND": _print_command("command-key")},
+                {"DICTATE_XAI_API_KEY_COMMAND": "dictate-xai-key"},
                 clear=True,
             ),
+            patch("dictate.stt.xai_backend._api_key_from_command", return_value="command-key"),
             patch("dictate.stt.xai_backend.read_api_key", return_value=None),
         ):
             self.assertTrue(xai_api_key_available())
