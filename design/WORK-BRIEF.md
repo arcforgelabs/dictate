@@ -3,10 +3,11 @@
 The single "what to do next" doc for the `arcforgelabs/dictate` design → engineering
 handover. Severity: 🔴 high · 🟠 medium · 🔵 low.
 
-> **State as of this handover (June 2026):** the previous brief's three big items have all
-> **shipped** to `arcforgelabs/dictate@master` (verified against the repo — see *Shipped*
-> below). What remains is propagating the design changes **we** just made, plus keeping
-> design ↔ code in parity. The two old handoff specs have been retired (their work is done).
+> **State as of this handover (June 2026):** the product direction is now **LOCKED — Note
+> Capture** (see §0). The dense seven-view console shipped to `arcforgelabs/dictate@master` and
+> still runs today, but it is **frozen and being superseded** — do not add features to it. The
+> remaining work is the port to Note Capture, plus the small console-parity ports that are still
+> worth doing during the transition.
 >
 > **Process rule:** prototype UI changes in Claude Design first where practical, sync/export the
 > actual prototype files into `design/`, then port from those files into `ui/src/` with minimal
@@ -26,6 +27,46 @@ handover. Severity: 🔴 high · 🟠 medium · 🔵 low.
 The prior handoff docs (`Recent History — Backend Fix Handoff.md`, `platforms/BUILD-DIRECTIONS.md`)
 were **deleted** — the work is done and the canonical engineering references now live in the
 repo's `docs/` and `LESSONS.md`.
+
+---
+
+## 0. Product direction — LOCKED: Note Capture 🔴
+
+**Decision (2026-06-21, ratified via `/forge` design review + independent verification):** Dictate's
+product is **Note Capture**, not the dense seven-view Settings console. One centered mic that
+toggles (press to start / press to stop); every capture — a quick dictation or a long meeting — is
+a **Note** you read, edit, and **Insert** into the focused app. Settings collapse behind a **gear**
+and **⌘K**. This resolves the old console's structural problems at the root (competing primaries,
+duplicated capture, dual navigation).
+
+**Source of truth:** [`dictate-note-capture/`](dictate-note-capture/) — the self-contained, locked
+prototype (promoted into the repo from the design-system ui-kit; runnable via its `index.html`).
+The old A/B/C concepts in `explorations/simplified-ui/` are **retired** — do not port from them.
+
+**Freeze rule:** the dense console (`dictate-app/`, `ui/src/`) is frozen. Ship no new console
+views or states (the recent `UpdateView` work was the last). Console-parity items below (§1–§2)
+are fine to finish during the transition because they also benefit the eventual port.
+
+**Port plan (the real, scoped effort — not yet started):**
+1. Stand up the Note Capture shell in `ui/src/` (the one-capture-object app + gear + provider sheet),
+   replacing the rail + seven views. Port from the **files** in `dictate-note-capture/`, not screenshots.
+2. Wire the prototype's toast-only actions to real IPC: **Insert** (type into focused app),
+   Accept (save to history), Copy, Edit, Export, plus provider/visualizer/appearance in the gear.
+3. Carry every state across — happy path *and* every fault: first-run/empty, mic-denied, no-device,
+   capture-error (retry / on-device), on-device fallback, dropped-chunk, interrupted, processing-at-rest.
+4. Keep settings reachable: gear menu + ⌘K. Recent history surfaces as the note list.
+
+**Before it's a lockable production target, resolve (from the design review):**
+- 🔵 **Light-theme rendered evidence** for every state (light is token-equal in code, but only dark
+  has been rendered). Capture light + dark for the key states.
+- 🔵 **Baseline packet** — create `design/locks/note-capture/baseline/` (key states × both themes) so
+  the port has a strict visual target. (Prototype defaults to dark — `note-app.jsx` `DEFAULTS`.)
+- 🔵 **Legibility floor** — several 10–10.5px muted/subtle captions sit below the comfortable read
+  size; lift the caption tier to ~11–12px or strengthen its color before lock.
+- 🔵 **Accessibility** — the Ring/Wave live-preview text isn't in an `aria-live` region (only the
+  Transcript-Stream visualizer is); wrap the preview line so screen readers announce partial text.
+- 🟠 **Brand mark** — still labelled *candidate* in the prototype; finalize the cradle-mic mark
+  (see §1) before the port locks, so it's propagated once.
 
 ---
 
@@ -107,5 +148,6 @@ lockstep.
 
 ## Priority order
 
-1. **§1 Brand mark propagation** — visible everywhere and gates any release art (icons).
-2. **§2 Model-card description removal** — one-line port.
+1. **§0 Note Capture port** — the locked direction; the real effort. Resolve its pre-lock list first.
+2. **§1 Brand mark propagation** — visible everywhere, gates release art *and* the Note Capture mark.
+3. **§2 Model-card description removal** — console-only; do only if still touching the frozen console.

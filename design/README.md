@@ -13,8 +13,9 @@ This README is the map. Open the file listed under each section to see the thing
 > long as it stays clear and discoverable (this README is the map).
 
 > **Engineers start here:** [`WORK-BRIEF.md`](WORK-BRIEF.md) — the consolidated "what to do
-> next". The last brief's bug-fix, status-port, and packaging work has all **shipped**; the
-> brief now covers the new brand mark and the small ports that remain.
+> next". **The product direction is now locked: [Note Capture](dictate-note-capture/) is the
+> target.** The dense seven-view Settings console still ships today but is being superseded —
+> do not add features to it. See the WORK-BRIEF for the port plan.
 
 ---
 
@@ -24,8 +25,9 @@ These are the current, maintained artifacts. Start here.
 
 | Path | What it is | Status |
 |---|---|---|
-| **`dictate-app/Dictate Settings.html`** | The Settings app prototype — the primary deliverable. Hi-fi, interactive, light/dark, capture workflow, ⌘K palette, listening HUD, toasts. | ✅ Current |
+| **`dictate-note-capture/index.html`** | **The locked product direction — the primary deliverable.** One mic that toggles; every capture is a Note you read / edit / insert. Self-contained: all states (happy + every fault), light/dark, reduced-motion, gear + provider sheet. | 🔒 Locked target |
 | **`dictate-ds/Dictate Design System.html`** | The living design-system doc — tokens, type, color, components. The binding visual reference. | ✅ Current |
+| **`dictate-app/Dictate Settings.html`** | The dense seven-view Settings console. **Ships today, but superseded by Note Capture — frozen, no new features.** Kept as the parity reference for the port. | 🧊 Shipping / frozen |
 | **`platforms/Dictate Across Platforms.html`** | Cross-platform chrome study — the same window wearing macOS / Win11 / Win10 / GNOME / KDE frames, light + dark. | ✅ Current |
 | **`logos.html`** | Brand-mark exploration — directions for a new, more distinctive logo and the chosen **"cradle mic"** mark (now in `dictate-app/icons.jsx`). | ✅ Current |
 

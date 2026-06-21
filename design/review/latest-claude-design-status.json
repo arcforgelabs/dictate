@@ -1,0 +1,19 @@
+{
+  "status": "timeout",
+  "updated_at": "2026-06-21T06:29:03.354Z",
+  "elapsed_ms": 1500173,
+  "target_url": "https://claude.ai/design/p/2477ec21-a493-41a0-b400-2a65c5bc3bf6",
+  "target_title": "Dictate Design System",
+  "url_contains": "2477ec21",
+  "prompt_marker": "WATCH_MARKER: Forge aggressive direction sweep 2026-06-21T14:05+0930",
+  "marker_found": true,
+  "busy": false,
+  "blocked": false,
+  "request": false,
+  "final_review": false,
+  "complete": false,
+  "response_path": "/home/samuel/repos/dictate/design/review/latest-claude-design-response.md",
+  "request_path": null,
+  "tail_chars": 12000,
+  "evidence": "itude-driven visualizers (live)\nFeedback\nEdit\nAdd usage notes\nSpacing\nElevation system\nSoft, warm, low — never glowy\nFeedback\nEdit\nAdd usage notes\nRadius scale\nClimbs with surface size · 9 → pill\nFeedback\nEdit\nAdd usage notes\nSpacing scale\nEven & few · strict 4px rhythm · 4 → 56\nFeedback\nEdit\nAdd usage notes\nType\nType families\nHanken Grotesk (human) + JetBrains Mono (machine)\nFeedback\nEdit\nAdd usage notes\nType scale — 7 roles\nOne modular scale, base 15 · ratio ~1.25\nFeedback\nEdit\nAdd usage notes"
+}

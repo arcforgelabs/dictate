@@ -7,3 +7,6 @@ build/
 .ruff_cache/
 
 .worktrees/
+
+.claude-design/
+.claude-design-ds/
