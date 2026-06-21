@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
-import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES } from "./store.jsx";
+import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -83,6 +83,156 @@ function CaptureHome() {
         </div>
         {/* Rendered inside note-home-inner so top:50px/right:0 anchors under the gear button */}
         {s.gearOpen && <GearMenu onClose={() => s.setGearOpen(false)} />}
+      </div>
+    </div>
+  );
+}
+
+/* ── Transcribing… (indeterminate, shown between stop and note event) ── */
+function NoteProcessing() {
+  return (
+    <div className="note-proc-wrap">
+      <div className="note-proc-inner">
+        <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
+        <div className="note-status-sub">Turning your words into a note.</div>
+        <div className="note-proc-bar" aria-hidden="true"><span /></div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Note ready: Insert · Open note · overflow (Copy / Export) ──────── */
+function NoteReady() {
+  const s = useStore();
+  const [ovfOpen, setOvfOpen] = useState(false);
+  const note = s.currentNote;
+  if (!note) return null;
+
+  const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
+
+  // TODO(backend): No /api/insert endpoint exists in ui_server.py — the typing
+  // daemon path (outputs.py) is invoked internally and is not reachable via HTTP
+  // from the webview. Until a POST /api/insert route is added to ui_server.py +
+  // backed by UiBackend.insert_text(), "Insert" copies to clipboard instead.
+  const handleInsert = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => s.toast("Copied — paste it where you want"))
+        .catch(() => s.toast("Could not copy to clipboard", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
+  };
+
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => { setOvfOpen(false); s.toast("Copied to clipboard"); })
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
+
+  const handleExport = () => {
+    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `note-${ts}.md`; a.click();
+    URL.revokeObjectURL(url);
+    setOvfOpen(false);
+    s.toast("Exported as Markdown");
+  };
+
+  return (
+    <div className="note-ready-wrap">
+      <div className="note-ready-inner">
+        {/* Minimal header */}
+        <div className="note-hdr">
+          <span className="note-ready-label">{noteLabel}</span>
+        </div>
+
+        {/* Note text preview (max 4 lines) */}
+        <div className="note-ready-body">
+          <p className="note-ready-text">{note.text}</p>
+        </div>
+
+        {/* Action hierarchy: Insert (single filled primary) > Open note > overflow */}
+        <div className="note-ready-cta">
+          <button className="btn primary block note-insert-btn" onClick={handleInsert}>
+            <Icon name="copy" size={15} /> Insert
+          </button>
+          <div className="note-ready-sub">
+            <button className="btn sm" onClick={() => s.setNoteView("expanded")}>
+              <Icon name="external" size={14} /> Open note
+            </button>
+            <div className="ovf-wrap" style={{ position: "relative" }}>
+              <button className="btn sm ghost" aria-label="More — Copy, Export"
+                aria-expanded={ovfOpen} onClick={() => setOvfOpen((v) => !v)}>
+                <Icon name="more" size={15} />
+              </button>
+              {ovfOpen && (
+                <>
+                  <div className="ovf-scrim" onClick={() => setOvfOpen(false)} />
+                  <div className="ovf-menu">
+                    <button onClick={handleCopy}><Icon name="copy" size={14} /> Copy</button>
+                    <button onClick={handleExport}><Icon name="download" size={14} /> Export</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <button className="note-new-btn" onClick={() => s.setNoteView(null)}>New note</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Expanded note: full scrollable text + Copy / Export ──────────────── */
+function ExpandedNote() {
+  const s = useStore();
+  const note = s.currentNote;
+  if (!note) return null;
+
+  const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
+
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => s.toast("Copied to clipboard"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
+
+  const handleExport = () => {
+    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `note-${ts}.md`; a.click();
+    URL.revokeObjectURL(url);
+    s.toast("Exported as Markdown");
+  };
+
+  return (
+    <div className="note-exp-wrap">
+      <div className="note-exp-top">
+        <button className="ibtn" title="Back" onClick={() => s.setNoteView("ready")}>
+          <Icon name="back" size={17} />
+        </button>
+        <span className="note-exp-title">{noteLabel}</span>
+        <div className="note-exp-tools">
+          <button className="ibtn" title="Copy" onClick={handleCopy}><Icon name="copy" size={16} /></button>
+          <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
+        </div>
+      </div>
+      {/* Search + Times omitted: real data is plain text, no timestamps or speaker lines */}
+      {/* TODO(backend): Add search once the engine exposes segment-level data */}
+      <div className="note-exp-body scroll">
+        <p className="note-exp-text">{note.text}</p>
       </div>
     </div>
   );
@@ -220,6 +370,9 @@ export default function App() {
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
   const [gearOpen, setGearOpen] = useState(false);
+  // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
+  const [noteView, setNoteView] = useState(null);
+  const [currentNote, setCurrentNote] = useState(null);
 
   // Detect prefers-reduced-motion for the BreathCradle.
   const [reduced, setReduced] = useState(() => {
@@ -270,10 +423,21 @@ export default function App() {
       }
       else if (ev.type === "note-recording") {
         setNoteRecording(!!ev.active);
+        if (ev.active) {
+          // New recording started — reset note surface and go to capture home.
+          setNoteView(null);
+          setCurrentNote(null);
+        } else {
+          // Recording stopped — show Transcribing… until the note event arrives.
+          setNoteView("processing");
+        }
       }
       else if (ev.type === "note") {
         if (typeof ev.text === "string") {
           setNoteText(ev.text);
+          const note = { id: ev.id || "n" + Date.now(), text: ev.text, createdAt: ev.createdAt || new Date().toISOString() };
+          setCurrentNote(note);
+          setNoteView("ready");
           toast("Conversation note saved");
         }
       }
@@ -291,7 +455,21 @@ export default function App() {
         } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
-      } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));
+      } else if (ev.type === "history-changed") {
+        ipc.getState().then((st) => {
+          if (!st) return;
+          const entries = mapHistory(st);
+          setHistory(entries);
+          // Fallback: if still waiting for a "note" event, resolve from latest history.
+          setNoteView((nv) => {
+            if (nv === "processing" && entries.length > 0) {
+              setCurrentNote(entries[0]);
+              return "ready";
+            }
+            return nv;
+          });
+        });
+      }
     });
     return () => { cancelled = true; resetTranscriptOrdering(); unsub && unsub(); };
   }, []);
@@ -411,13 +589,22 @@ export default function App() {
   const toggleNoteRecording = () => {
     if (!ipc.isLive()) {
       if (noteRecording) {
-        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+        // Stop: show Processing surface briefly, then resolve to note-ready.
         setNoteRecording(false);
-        setNoteText(demo);
-        pushHistory(demo);
-        toast("Conversation note saved");
+        setNoteView("processing");
+        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+        setTimeout(() => {
+          const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
+          setNoteText(demo);
+          setCurrentNote(note);
+          pushHistory(demo);
+          setNoteView("ready");
+          toast("Conversation note saved");
+        }, 800);
       } else {
         setNoteRecording(true);
+        setNoteView(null);
+        setCurrentNote(null);
         toast("Note recording started");
       }
       return;
@@ -562,6 +749,7 @@ export default function App() {
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
     // Note Capture additions
     gearOpen, setGearOpen, noteElapsed, reduced,
+    noteView, setNoteView, currentNote,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -574,6 +762,9 @@ export default function App() {
 
         <div className="shell">
           {view === "home" ? (
+            noteView === "processing" ? <NoteProcessing /> :
+            noteView === "ready"      ? <NoteReady /> :
+            noteView === "expanded"   ? <ExpandedNote /> :
             <CaptureHome />
           ) : (
             /* Settings view: full-window with a back button returning to capture home. */

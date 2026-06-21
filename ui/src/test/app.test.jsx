@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, within, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup, waitFor, act } from "@testing-library/react";
 import App from "../App.jsx";
 
 afterEach(() => {
@@ -97,6 +97,48 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     fireEvent.click(screen.getByText("Search settings & actions"));
     expect(screen.getByPlaceholderText(/Jump to a setting/i)).toBeInTheDocument();
+  });
+
+  it("shows Transcribing… then note-ready surface after a mock capture", async () => {
+    render(<App />);
+    // Start recording
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+    // Stop recording — transitions to "Transcribing…"
+    fireEvent.click(screen.getByLabelText("Stop recording"));
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+    // After the 800 ms mock delay the note-ready surface appears
+    await waitFor(() => expect(screen.getByText("Insert")).toBeInTheDocument(), { timeout: 2000 });
+    // CTA hierarchy: Insert primary, Open note, New note
+    expect(screen.getByText("Open note")).toBeInTheDocument();
+    expect(screen.getByText("New note")).toBeInTheDocument();
+    // The note text from the mock is visible
+    expect(screen.getByText(/project note/i)).toBeInTheDocument();
+  });
+
+  it("opens the expanded note from note-ready and returns with back", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    fireEvent.click(screen.getByLabelText("Stop recording"));
+    // Wait for note-ready
+    await waitFor(() => expect(screen.getByText("Open note")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByText("Open note"));
+    // Expanded: back button present, note text present
+    expect(screen.getByTitle("Back")).toBeInTheDocument();
+    const backBtn = screen.getByTitle("Back");
+    fireEvent.click(backBtn);
+    // Returns to note-ready
+    expect(screen.getByText("Insert")).toBeInTheDocument();
+  });
+
+  it("New note returns to capture home", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    fireEvent.click(screen.getByLabelText("Stop recording"));
+    await waitFor(() => expect(screen.getByText("New note")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByText("New note"));
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
   it("clears live transcript text when a stale transcript event arrives", async () => {

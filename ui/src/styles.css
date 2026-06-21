@@ -547,3 +547,55 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 /* Reduced-motion: suppress Breath Cradle loop + ring blooms */
 .reduce-motion .cradle-ring{display:none!important;}
 .reduce-motion .cradle-halo{opacity:.5!important;transform:translate(-50%,-50%) scale(1.16)!important;}
+
+/* ===========================================================================
+   NOTE CAPTURE — Stage 2: Processing / NoteReady / ExpandedNote
+   =========================================================================== */
+
+/* ── Transcribing… (indeterminate) ── */
+.note-proc-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:var(--bg);}
+.note-proc-inner{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:320px;text-align:center;}
+/* Indeterminate progress bar */
+.note-proc-bar{width:200px;height:3px;border-radius:2px;background:var(--surface-3);overflow:hidden;}
+.note-proc-bar>span{display:block;height:100%;width:40%;background:var(--live);border-radius:2px;
+  animation:indeterminate 1.4s ease-in-out infinite;}
+@keyframes indeterminate{0%{transform:translateX(-120%)}60%{transform:translateX(280%)}100%{transform:translateX(280%)}}
+
+/* ── Note ready ── */
+.note-ready-wrap{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
+.note-ready-inner{max-width:460px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;min-height:0;}
+.note-ready-label{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em;}
+/* Note text preview — clamped to 4 lines */
+.note-ready-body{flex:1;min-height:0;padding:20px 20px 16px;overflow:hidden;}
+.note-ready-text{font-size:14px;line-height:1.6;color:var(--fg);margin:0;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
+/* CTA bar */
+.note-ready-cta{padding:0 20px 12px;display:flex;flex-direction:column;gap:10px;}
+.note-insert-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:44px;
+  border-radius:var(--r-md);font-size:14px;font-weight:700;}
+/* Sub-actions row: Open note + overflow */
+.note-ready-sub{display:flex;align-items:center;gap:8px;}
+.note-ready-sub>.btn{flex:1;justify-content:center;}
+/* Overflow menu */
+.ovf-scrim{position:fixed;inset:0;z-index:30;}
+.ovf-menu{position:absolute;bottom:calc(100% + 6px);right:0;background:var(--surface);
+  border:1px solid var(--border-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);
+  z-index:31;overflow:hidden;padding:4px;min-width:140px;animation:menuIn .14s var(--ease-out);
+  transform-origin:bottom right;}
+.ovf-menu button{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 10px;
+  border:none;background:none;border-radius:7px;cursor:pointer;color:var(--fg);font-size:13px;
+  font-weight:500;transition:var(--t-fast);}
+.ovf-menu button:hover{background:var(--surface-2);}
+/* New note link */
+.note-new-btn{height:40px;background:none;border:none;cursor:pointer;color:var(--subtle);font-size:13px;
+  font-family:var(--font-ui);transition:var(--t-fast);margin-bottom:12px;}
+.note-new-btn:hover{color:var(--fg);}
+
+/* ── Expanded note ── */
+.note-exp-wrap{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
+.note-exp-top{height:50px;flex:0 0 50px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;
+  border-bottom:1px solid var(--hairline);background:var(--surface);}
+.note-exp-title{flex:1;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.note-exp-tools{display:flex;align-items:center;gap:2px;}
+.note-exp-body{flex:1;min-height:0;overflow-y:auto;padding:24px 24px 32px;}
+.note-exp-text{font-size:14px;line-height:1.72;color:var(--fg);margin:0;white-space:pre-wrap;word-break:break-word;}
