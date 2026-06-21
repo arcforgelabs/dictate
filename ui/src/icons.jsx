@@ -68,3 +68,15 @@ export const ArcMark = () => (
     <path d="M28 48 A32 32 0 0 0 92 48" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" />
   </svg>
 );
+
+/* Canonical cradle-mic mark — identical geometry to assets/dictate.svg.
+   Two shapes only: capsule (mic body) + open cradle arc. No stem, no base.
+   Used in the capture button (BreathCradle) and the header brand. */
+export function Mark({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="18 8 84 84" fill="none" aria-label="Dictate">
+      <rect x="47" y="16" width="26" height="48" rx="13" fill="currentColor" />
+      <path d="M28 48A32 32 0 0 0 92 48" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" />
+    </svg>
+  );
+}

@@ -1,20 +1,188 @@
-// App.jsx — the Quiet Console shell. Holds UI state, hydrates from the Dictate
-// engine over IPC when live (Tauri shell), and falls back to a self-contained
-// mock + dictation demo in a plain browser.
+// App.jsx — Note Capture shell. Home = Breath Cradle capture surface.
+// Settings views are reached via the gear menu (⚙) or ⌘K palette; they render
+// full-window with a back button. The rail + Status dashboard are gone.
+// IPC contract, overlays (ListeningHUD / ⌘K / Toasts), platform TitleBar,
+// StoreCtx, and all settings views are untouched.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon, ArcMark } from "./icons.jsx";
-import { Dot, Kbd } from "./primitives.jsx";
-import { StoreCtx, MODELS, modelById, DEMO_PHRASES } from "./store.jsx";
+import { Icon, Mark } from "./icons.jsx";
+import { Kbd } from "./primitives.jsx";
+import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
+import { BreathCradle } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.6.20";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
+// Human-readable labels for settings views (used in the back-nav bar).
+const VIEW_LABELS = {
+  status: "Status", model: "Model", ptt: "Push-to-talk", hotwords: "Hotwords",
+  history: "Recent history", update: "App update", startup: "Startup", advanced: "Advanced",
+};
+
+// Format seconds → m:ss or h:mm:ss (mirrors the design's fmt helper).
+function fmtSecs(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
+}
+
+/* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
+function CaptureHome() {
+  const s = useStore();
+  return (
+    <div className="note-home">
+      {/* note-home-inner is position:relative — GearMenu anchors to it */}
+      <div className="note-home-inner">
+        {/* Header row: brand mark left, gear right */}
+        <div className="note-hdr">
+          <div className="note-brand">
+            <span className="note-brand-mark"><Mark size={17} /></span>
+            <span>Dictate</span>
+          </div>
+          <button className="ibtn" title="Settings" onClick={() => s.setGearOpen(true)}>
+            <Icon name="gear" size={17} />
+          </button>
+        </div>
+
+        {/* Cradle + feedback */}
+        <div className="note-screen">
+          <BreathCradle
+            active={s.noteRecording}
+            reduced={s.reduced}
+            onToggle={s.toggleNoteRecording}
+          />
+          <div className="note-feedback">
+            {s.noteRecording ? (
+              <>
+                <div className="note-status live">Recording</div>
+                <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
+                <div className="note-preview" aria-live="polite">
+                  {s.transcript?.text
+                    ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
+                    : <span className="note-preview-wait">Listening for speech…</span>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="note-status">Ready to capture</div>
+                <div className="note-status-sub">Press the mic and speak — it becomes a note.</div>
+                {/* Live push-to-talk transcript also surfaces here */}
+                {s.transcript?.text && !s.transcript.stale && (
+                  <div className="note-preview" aria-live="polite">
+                    <span>{s.transcript.text}</span>
+                    {s.recording && <span className="note-caret" />}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        {/* Rendered inside note-home-inner so top:50px/right:0 anchors under the gear button */}
+        {s.gearOpen && <GearMenu onClose={() => s.setGearOpen(false)} />}
+      </div>
+    </div>
+  );
+}
+
+/* ── Gear menu: on-device toggle · appearance · settings links ────────── */
+function GearMenu({ onClose }) {
+  const s = useStore();
+  const onDevice = modelById(s.model).local;
+
+  const toggleOnDevice = () => {
+    if (onDevice) {
+      // Switch to the first hosted model that has a key configured.
+      const hosted = MODELS.find((m) => !m.local && s.keys[m.brand]);
+      if (hosted) {
+        s.setModel(hosted.id);
+      } else {
+        // No provider key is configured — guide the user instead of silently no-op'ing.
+        s.toast("Add a provider key first — set one in Model settings.");
+        s.setView("model");
+        onClose();
+      }
+    } else {
+      s.setModel("faster-whisper/turbo");
+    }
+  };
+
+  const goTo = (v) => { s.setView(v); onClose(); };
+
+  const settingsItems = [
+    { v: "model", label: "Model" },
+    { v: "ptt", label: "Push-to-talk" },
+    { v: "hotwords", label: "Hotwords" },
+    { v: "history", label: "Recent history" },
+    { v: "update", label: "App update" },
+    { v: "startup", label: "Startup" },
+    { v: "advanced", label: "Advanced" },
+    { v: "status", label: "Status" },
+  ];
+
+  return (
+    <>
+      {/* Invisible scrim — click outside menu to dismiss */}
+      <div className="gear-scrim" onClick={onClose} />
+      <div className="gear-menu" role="dialog" aria-label="Settings menu">
+        <div className="gear-head t-label">Settings</div>
+
+        {/* Always on-device toggle */}
+        <button
+          className="gear-row"
+          role="switch"
+          aria-checked={onDevice}
+          onClick={toggleOnDevice}
+        >
+          <span className="gear-mk">
+            Always on-device <span className="gear-mk-note">private</span>
+          </span>
+          <span className="gear-mv">
+            <span className={"gear-switch" + (onDevice ? " on" : "")} />
+          </span>
+        </button>
+
+        <div className="gear-div" />
+
+        {/* Appearance segmented control */}
+        <div className="gear-seg-row">
+          <span className="gear-mk">Appearance</span>
+          <div className="gear-mini-seg">
+            {["light", "dark"].map((th) => (
+              <button
+                key={th}
+                className={s.theme === th ? "on" : ""}
+                onClick={() => s.setTheme(th)}
+              >
+                {th[0].toUpperCase() + th.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="gear-div" />
+
+        {/* Settings navigation entries */}
+        {settingsItems.map(({ v, label }) => (
+          <button key={v} className="gear-row" onClick={() => goTo(v)}>
+            <span className="gear-mk">{label}</span>
+            <Icon name="chev" size={15} style={{ color: "var(--subtle)", marginLeft: "auto" }} />
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ======================================================================
+   App — root component
+   ====================================================================== */
 export default function App() {
-  const [view, setView] = useState("status");
+  // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
+  const [view, setView] = useState("home");
   const [model, setModelState] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
@@ -40,6 +208,7 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
@@ -50,6 +219,20 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
+  const [gearOpen, setGearOpen] = useState(false);
+
+  // Detect prefers-reduced-motion for the BreathCradle.
+  const [reduced, setReduced] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handler = (e) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // ---- refs to dodge stale closures in global listeners ----
   const recRef = useRef(false); recRef.current = recording;
@@ -62,6 +245,13 @@ export default function App() {
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
+
+  // ---- note-recording elapsed timer ----
+  useEffect(() => {
+    if (!noteRecording) { setNoteElapsed(0); return; }
+    const id = setInterval(() => setNoteElapsed((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [noteRecording]);
 
   // ---- hydrate from the engine + subscribe to live events ----
   useEffect(() => {
@@ -296,17 +486,11 @@ export default function App() {
 
   function mockUpdateStatus(v) {
     return {
-      currentVersion: v,
-      latestVersion: v,
-      updateAvailable: false,
-      checked: false,
-      platform: "linux",
-      installKind: "linux-package",
+      currentVersion: v, latestVersion: v, updateAvailable: false, checked: false,
+      platform: "linux", installKind: "linux-package",
       engine: { name: "engine", current: v, latest: v, path: "~/.local/bin/dictate", stale: false },
       shell: { name: "shell", current: v, latest: v, path: "/usr/bin/dictate-ui-shell", stale: false },
-      shellStale: false,
-      phase: "current",
-      actions: ["check", "open_docs"],
+      shellStale: false, phase: "current", actions: ["check", "open_docs"],
       commands: { release: "https://github.com/arcforgelabs/dictate/releases" },
     };
   }
@@ -376,23 +560,12 @@ export default function App() {
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
+    // Note Capture additions
+    gearOpen, setGearOpen, noteElapsed, reduced,
   };
 
-  const NAV = [
-    { v: "status", icon: "status", label: "Status" },
-    { sec: "Configure" },
-    { v: "model", icon: "sliders", label: "Model" },
-    { v: "ptt", icon: "keyboard", label: "Push-to-talk" },
-    { v: "hotwords", icon: "hash", label: "Hotwords", badge: hotwords.length },
-    { sec: "Activity" },
-    { v: "history", icon: "history", label: "Recent history", badge: history.length || null },
-    { sec: "App" },
-    { v: "update", icon: "download", label: "App update", badge: updateStatus?.shellStale ? "!" : null },
-    { v: "startup", icon: "power", label: "Startup" },
-    { v: "advanced", icon: "gear", label: "Advanced" },
-  ];
-  const Current = VIEWS[view];
-  const m = modelById(model);
+  // Resolve the current settings view component (null when on capture home).
+  const Current = view !== "home" ? VIEWS[view] : null;
 
   return (
     <StoreCtx.Provider value={store}>
@@ -400,32 +573,22 @@ export default function App() {
         <TitleBar platform={platform} onSearch={() => setPalette(true)} />
 
         <div className="shell">
-          <aside className="rail">
-            <div className="rail-status">
-              <span className="mic"><Icon name="mic" size={19} /></span>
-              <span className="meta">
-                <span className="nm">Dictate <Dot live /></span>
-                <span className="t-meta">{m.name.split(" · ")[0]} · {noteRecording ? "recording" : recording ? "listening" : "ready"}</span>
-              </span>
+          {view === "home" ? (
+            <CaptureHome />
+          ) : (
+            /* Settings view: full-window with a back button returning to capture home. */
+            <div className="note-settings-wrap">
+              <div className="note-settings-bar">
+                <button className="btn ghost sm" onClick={() => setView("home")}>
+                  <Icon name="back" size={15} />Back
+                </button>
+                <span className="note-settings-title">{VIEW_LABELS[view] || view}</span>
+              </div>
+              <div className="scroll">
+                {Current && <Current />}
+              </div>
             </div>
-            <nav className="nav">
-              {NAV.map((n, i) => n.sec
-                ? <div className="nav-sec" key={i}>{n.sec}</div>
-                : <button key={n.v} className={"nav-item" + (view === n.v ? " active" : "")} onClick={() => setView(n.v)}>
-                    <Icon name={n.icon} size={18} /><span>{n.label}</span>
-                    {n.badge ? <span className="badge tnum">{n.badge}</span> : null}
-                  </button>)}
-            </nav>
-            <div className="rail-foot">
-              <button className="iconbtn" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-                <Icon name={theme === "dark" ? "sun" : "moon"} size={17} /></button>
-              <span className="t-mono" style={{ color: "var(--subtle)" }}>v{version}</span>
-            </div>
-          </aside>
-
-          <main className="content">
-            <div className="scroll"><Current /></div>
-          </main>
+          )}
         </div>
 
         <ListeningHUD />
@@ -440,7 +603,7 @@ function providerLabel(brand) {
   return { openai: "OpenAI", xai: "xAI", gemini: "Gemini" }[brand] || brand;
 }
 
-// Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) -> engine combo token.
+// Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) → engine combo token.
 function comboToToken(arr) {
   const map = { "Ctrl": "ctrl", "Ctrl (R)": "ctrl_r", "Right Ctrl": "ctrl_r", "Ctrl (L)": "ctrl_l",
     "Alt": "alt", "Shift": "shift", "Super": "super" };

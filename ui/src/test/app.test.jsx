@@ -9,24 +9,46 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Click a sidebar nav entry by its label, scoped to the rail so it never
-// collides with same-named mini-cards or badges elsewhere on the page.
-function navTo(container, label) {
-  const nav = container.querySelector(".nav");
-  fireEvent.click(within(nav).getByText(label));
+// Navigate to a settings view via the ⌘K command palette.
+// The palette opens with Ctrl+K, we type the label to filter to one item,
+// then press Enter to execute. The palette closes and the view renders.
+function navTo(label) {
+  fireEvent.keyDown(window, { ctrlKey: true, key: "k", bubbles: true });
+  const input = screen.getByPlaceholderText(/Jump to a setting/i);
+  fireEvent.change(input, { target: { value: label } });
+  fireEvent.keyDown(input, { key: "Enter" });
 }
 
 describe("Quiet Console app (mock mode)", () => {
-  it("renders the Status view by default", () => {
+  it("renders the Note Capture home by default", () => {
     render(<App />);
-    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+    // Capture home: gear button, the record cradle button, and status text.
+    // "Dictate" appears in both TitleBar and the capture header so use getAllBy.
+    expect(screen.getAllByText("Dictate").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTitle("Settings")).toBeInTheDocument();
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+  });
+
+  it("preserves Quick dictation and Record conversation in the Status view", () => {
+    render(<App />);
+    // Navigate to the legacy Status view (still accessible via ⌘K).
+    navTo("Status");
     expect(screen.getByText("Quick dictation")).toBeInTheDocument();
     expect(screen.getByText("Record conversation")).toBeInTheDocument();
   });
 
+  it("back button returns to capture home from a settings view", () => {
+    render(<App />);
+    navTo("Model");
+    expect(screen.getByText("Transcription model")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Back"));
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+  });
+
   it("navigates to the Model view and lists all four providers", () => {
-    const { container } = render(<App />);
-    navTo(container, "Model");
+    render(<App />);
+    navTo("Model");
     expect(screen.getByText("Transcription model")).toBeInTheDocument();
     expect(screen.getByText("faster-whisper · turbo")).toBeInTheDocument();
     expect(screen.getByText("gpt-4o-mini-transcribe")).toBeInTheDocument();
@@ -35,8 +57,8 @@ describe("Quiet Console app (mock mode)", () => {
   });
 
   it("navigates to the App update view without prototype controls", () => {
-    const { container } = render(<App />);
-    navTo(container, "App update");
+    render(<App />);
+    navTo("App update");
     expect(screen.getByRole("heading", { name: "App update" })).toBeInTheDocument();
     expect(screen.getByText("Engine")).toBeInTheDocument();
     expect(screen.getByText("App window")).toBeInTheDocument();
@@ -45,8 +67,8 @@ describe("Quiet Console app (mock mode)", () => {
   });
 
   it("adds and removes a hotword", () => {
-    const { container } = render(<App />);
-    navTo(container, "Hotwords");
+    render(<App />);
+    navTo("Hotwords");
     const input = screen.getByPlaceholderText("Add a word…");
     fireEvent.change(input, { target: { value: "Kubernetes" } });
     fireEvent.click(screen.getByText("Add word"));
@@ -55,10 +77,12 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByText("Kubernetes")).not.toBeInTheDocument();
   });
 
-  it("toggles the theme via the rail button", () => {
+  it("toggles the theme via the gear menu appearance control", () => {
     render(<App />);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    fireEvent.click(screen.getByTitle("Toggle theme"));
+    // Open gear menu then click the Dark option.
+    fireEvent.click(screen.getByTitle("Settings"));
+    fireEvent.click(screen.getByText("Dark"));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
 
