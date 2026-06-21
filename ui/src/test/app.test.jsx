@@ -141,6 +141,100 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
+  it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // Engine fires note-recording(false) → UI shows Transcribing…
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "note-recording", active: false }),
+      });
+    });
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+
+    // Engine fires note event with status="empty" (no speech detected)
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "note", text: "", status: "empty" }),
+      });
+    });
+
+    // Must leave Transcribing… and return to capture home
+    await waitFor(() => expect(screen.queryByText("Transcribing…")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+  });
+
+  it("resolves Transcribing… back to home on note status=failed (live SSE)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "note-recording", active: false }) });
+    });
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "note", text: "", status: "failed" }) });
+    });
+
+    await waitFor(() => expect(screen.queryByText("Transcribing…")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+  });
+
+  it("resolves Transcribing… back to home when stale transcript arrives while processing (live SSE)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "note-recording", active: false }) });
+    });
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+
+    // _fail_recording_session fires a stale transcript event (belt-and-suspenders)
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "transcript", phase: "final", text: "", stale: true }),
+      });
+    });
+
+    await waitFor(() => expect(screen.queryByText("Transcribing…")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+  });
+
   it("clears live transcript text when a stale transcript event arrives", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };

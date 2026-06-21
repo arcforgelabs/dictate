@@ -395,6 +395,10 @@ export default function App() {
   const transcriptIdRef = useRef(null);
   const terminalTranscriptIdsRef = useRef(new Set());
   const terminalTranscriptIdOrderRef = useRef([]);
+  // noteViewRef: stale-closure-safe read of noteView inside the SSE handler.
+  const noteViewRef = useRef(null); noteViewRef.current = noteView;
+  // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
+  const watchdogRef = useRef(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
@@ -424,21 +428,33 @@ export default function App() {
       else if (ev.type === "note-recording") {
         setNoteRecording(!!ev.active);
         if (ev.active) {
-          // New recording started — reset note surface and go to capture home.
+          // New recording started — clear any stale watchdog, reset note surface.
+          clearWatchdog();
           setNoteView(null);
           setCurrentNote(null);
         } else {
-          // Recording stopped — show Transcribing… until the note event arrives.
+          // Recording stopped — show Transcribing… and arm the safety-net watchdog.
           setNoteView("processing");
+          armWatchdog();
         }
       }
       else if (ev.type === "note") {
-        if (typeof ev.text === "string") {
+        // The backend now sends a `status` field on every terminal note outcome.
+        // Old daemons without the field default to "ok" for backward compatibility.
+        const status = ev.status || (ev.text ? "ok" : "empty");
+        clearWatchdog();
+        if (status === "ok" && typeof ev.text === "string" && ev.text) {
           setNoteText(ev.text);
           const note = { id: ev.id || "n" + Date.now(), text: ev.text, createdAt: ev.createdAt || new Date().toISOString() };
           setCurrentNote(note);
           setNoteView("ready");
           toast("Conversation note saved");
+        } else if (status === "empty") {
+          setNoteView(null);
+          toast("No speech detected", { bad: true });
+        } else if (status === "failed") {
+          setNoteView(null);
+          toast("Couldn't transcribe — try again", { bad: true });
         }
       }
       else if (ev.type === "transcript") {
@@ -451,6 +467,14 @@ export default function App() {
         if (eventId !== null) transcriptIdRef.current = eventId;
         if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
         if (ev.stale) {
+          // Belt-and-suspenders: _fail_recording_session fires a stale transcript;
+          // the note "failed" event is also emitted, but handle it here too in case
+          // the note channel callback throws or the order is unexpected.
+          if (noteViewRef.current === "processing") {
+            clearWatchdog();
+            setNoteView(null);
+            toast("Couldn't transcribe — try again", { bad: true });
+          }
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
@@ -463,6 +487,7 @@ export default function App() {
           // Fallback: if still waiting for a "note" event, resolve from latest history.
           setNoteView((nv) => {
             if (nv === "processing" && entries.length > 0) {
+              clearWatchdog();
               setCurrentNote(entries[0]);
               return "ready";
             }
@@ -471,7 +496,7 @@ export default function App() {
         });
       }
     });
-    return () => { cancelled = true; resetTranscriptOrdering(); unsub && unsub(); };
+    return () => { cancelled = true; resetTranscriptOrdering(); clearWatchdog(); unsub && unsub(); };
   }, []);
 
   const resetTranscriptOrdering = () => {
@@ -530,6 +555,24 @@ export default function App() {
     setToasts((ts) => [...ts, { id, msg, ...opts }]);
     setTimeout(() => dismiss(id), opts.undo ? 5000 : 2600);
   }, []);
+
+  // ---- Note-surface watchdog (60 s safety net for missing terminal events) ----
+  // clearWatchdog and armWatchdog are stable (useCallback with [] / [clearWatchdog,toast])
+  // so the SSE useEffect can safely close over them even though it has [] deps.
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+  }, []);
+  const armWatchdog = useCallback(() => {
+    clearWatchdog();
+    watchdogRef.current = setTimeout(() => {
+      watchdogRef.current = null;
+      // Return to home only if we're still stuck in processing — never abort a ready/expanded note.
+      setNoteView((nv) => {
+        if (nv === "processing") toast("Transcription timed out — try again", { bad: true });
+        return nv === "processing" ? null : nv;
+      });
+    }, 60_000);
+  }, [clearWatchdog, toast]);
 
   // ---- persisting mutations (optimistic local + IPC when live) ----
   const persist = (payload) => { if (ipc.isLive()) ipc.patchConfig(payload).catch(() => toast("Could not save change", { bad: true })); };
@@ -592,8 +635,10 @@ export default function App() {
         // Stop: show Processing surface briefly, then resolve to note-ready.
         setNoteRecording(false);
         setNoteView("processing");
+        armWatchdog();
         const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
         setTimeout(() => {
+          clearWatchdog();
           const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
           setNoteText(demo);
           setCurrentNote(note);
@@ -602,6 +647,7 @@ export default function App() {
           toast("Conversation note saved");
         }, 800);
       } else {
+        clearWatchdog();
         setNoteRecording(true);
         setNoteView(null);
         setCurrentNote(null);

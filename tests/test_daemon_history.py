@@ -302,6 +302,101 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(notes[0]["raw_text"], "hosted final")
             self.assertEqual(note_states, [True, False])
 
+    def test_note_success_includes_status_ok(self) -> None:
+        """The note callback payload must carry status='ok' on the success path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            notes: list[dict[str, object]] = []
+            daemon = Daemon(
+                _FakeApiStt(),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                note_callback=notes.append,
+            )
+            daemon.engine.min_duration_s = 0
+            daemon.start_note_recording()
+            daemon.stop_note_recording()
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(notes[0]["status"], "ok")
+            self.assertEqual(notes[0]["text"], "hosted final")
+
+    def test_note_empty_recording_publishes_terminal_signal(self) -> None:
+        """Empty note recording (no speech) must publish status='empty' via the note channel.
+
+        Without this, the webview is stuck on "Transcribing…" indefinitely because
+        _surface_empty_final_status only prints to stderr and never publishes an event.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            class _SilentStt(_FakeStt):
+                """Returns empty transcription — simulates silence / no speech."""
+                def transcribe(self, audio, *args, **kwargs):  # noqa: ANN001
+                    del audio, args, kwargs
+                    return ""
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            notes: list[dict[str, object]] = []
+            daemon = Daemon(
+                _SilentStt(),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                note_callback=notes.append,
+            )
+            daemon.engine.min_duration_s = 0
+            daemon.start_note_recording()
+            daemon.stop_note_recording()
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            # Must emit exactly one terminal signal so the UI can leave "Transcribing…".
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(notes[0]["status"], "empty")
+            self.assertEqual(notes[0]["text"], "")
+            # Nothing saved to history for an empty capture.
+            self.assertEqual(store.load(), [])
+            output.send.assert_not_called()
+
+    def test_note_failed_recording_publishes_terminal_signal(self) -> None:
+        """A failed note recording must publish status='failed' via the note channel.
+
+        _fail_recording_session fires a stale transcript already, but the note
+        channel signal is the primary, deterministic mechanism for the webview.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            notes: list[dict[str, object]] = []
+            daemon = Daemon(
+                _FakeApiStt(),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                note_callback=notes.append,
+            )
+            daemon.engine.min_duration_s = 0
+            daemon.start_note_recording()
+            daemon.stop_note_recording()
+            recording_id = daemon._audio_queue.get_nowait().recording_id
+            # Simulate a transcription failure (overload / STT error).
+            daemon._fail_recording_session(recording_id, "Transcription backlog exceeded")
+
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(notes[0]["status"], "failed")
+            self.assertEqual(notes[0]["text"], "")
+
     def test_note_recording_uses_backend_diarization_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
