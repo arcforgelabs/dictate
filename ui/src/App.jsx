@@ -4,7 +4,7 @@
 // IPC contract, overlays (ListeningHUD / ⌘K / Toasts), platform TitleBar,
 // StoreCtx, and all settings views are untouched.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon, Mark } from "./icons.jsx";
+import { Icon } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
 import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
@@ -35,19 +35,8 @@ function CaptureHome() {
   const s = useStore();
   return (
     <div className="note-home">
-      {/* note-home-inner is position:relative — GearMenu anchors to it */}
+      {/* Stage 3: no in-app header — the cradle sits directly under the TitleBar chrome */}
       <div className="note-home-inner">
-        {/* Header row: brand mark left, gear right */}
-        <div className="note-hdr">
-          <div className="note-brand">
-            <span className="note-brand-mark"><Mark size={17} /></span>
-            <span>Dictate</span>
-          </div>
-          <button className="ibtn" title="Settings" onClick={() => s.setGearOpen(true)}>
-            <Icon name="gear" size={17} />
-          </button>
-        </div>
-
         {/* Cradle + feedback */}
         <div className="note-screen">
           <BreathCradle
@@ -81,8 +70,6 @@ function CaptureHome() {
             )}
           </div>
         </div>
-        {/* Rendered inside note-home-inner so top:50px/right:0 anchors under the gear button */}
-        {s.gearOpen && <GearMenu onClose={() => s.setGearOpen(false)} />}
       </div>
     </div>
   );
@@ -349,7 +336,11 @@ export default function App() {
       { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon." },
     ];
   });
-  const [theme, setThemeState] = useState("light");
+  // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
+  const [theme, setThemeState] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [startup, setStartupState] = useState(true);
   const [trayOnly, setTrayOnlyState] = useState(true);
   const [overlay, setOverlayState] = useState(true);
@@ -804,7 +795,7 @@ export default function App() {
   return (
     <StoreCtx.Provider value={store}>
       <div className={"win " + platform} ref={winRef}>
-        <TitleBar platform={platform} onSearch={() => setPalette(true)} />
+        <TitleBar platform={platform} onSearch={() => setPalette(true)} onGear={() => setGearOpen(true)} />
 
         <div className="shell">
           {view === "home" ? (
@@ -828,6 +819,8 @@ export default function App() {
           )}
         </div>
 
+        {/* GearMenu: position:absolute anchors to .win just below the titlebar */}
+        {gearOpen && <GearMenu onClose={() => setGearOpen(false)} />}
         <ListeningHUD />
         <CommandPalette />
         <Toasts />

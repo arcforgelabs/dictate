@@ -1,7 +1,8 @@
 // TitleBar.jsx — one interior, per-OS window controls. The control cluster,
 // alignment and corner radius change with `platform`; nothing else forks.
 // Linux (GNOME/Adwaita + KDE/Breeze) is the focus; win/mac kept for parity.
-import { Icon, ArcMark } from "../icons.jsx";
+// Stage 3: receded chrome — wordmark + "Settings" label removed; gear lives here.
+import { Icon } from "../icons.jsx";
 import { Kbd } from "../primitives.jsx";
 import { ipc } from "../ipc.js";
 
@@ -42,21 +43,26 @@ function Controls({ platform }) {
   return <Adwaita />; // gnome / linux default
 }
 
-export default function TitleBar({ platform, onSearch }) {
+export default function TitleBar({ platform, onSearch, onGear }) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="tb-left">
         {platform === "mac"
           ? <span className="lights"><i className="c" /><i className="m" /><i className="g" /></span>
-          : <><span className="tb-mark"><ArcMark /></span>Dictate
-              <span className="t-meta" style={{ fontWeight: 500, color: "var(--subtle)" }}>Settings</span></>}
+          : null}
       </div>
       <div className="tb-center">
         <button className="tb-search" onClick={onSearch}>
           <Icon name="search" size={14} /><span>Search settings &amp; actions</span><Kbd>⌘K</Kbd>
         </button>
       </div>
-      <div className="tb-ctrls"><Controls platform={platform} /></div>
+      <div className="tb-ctrls">
+        {/* Gear opens the settings menu; sits left of the OS window controls */}
+        <button className="ibtn" title="Settings" onClick={onGear}>
+          <Icon name="gear" size={15} />
+        </button>
+        <Controls platform={platform} />
+      </div>
     </div>
   );
 }

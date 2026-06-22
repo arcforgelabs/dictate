@@ -22,9 +22,8 @@ function navTo(label) {
 describe("Quiet Console app (mock mode)", () => {
   it("renders the Note Capture home by default", () => {
     render(<App />);
-    // Capture home: gear button, the record cradle button, and status text.
-    // "Dictate" appears in both TitleBar and the capture header so use getAllBy.
-    expect(screen.getAllByText("Dictate").length).toBeGreaterThanOrEqual(1);
+    // Capture home: gear button in the TitleBar, cradle button, and status text.
+    // Stage 3: "Dictate" wordmark removed from both TitleBar and capture surface.
     expect(screen.getByTitle("Settings")).toBeInTheDocument();
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
     expect(screen.getByText("Ready to capture")).toBeInTheDocument();
