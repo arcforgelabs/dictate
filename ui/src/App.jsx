@@ -1,20 +1,330 @@
-// App.jsx — the Quiet Console shell. Holds UI state, hydrates from the Dictate
-// engine over IPC when live (Tauri shell), and falls back to a self-contained
-// mock + dictation demo in a plain browser.
+// App.jsx — Note Capture shell. Home = Breath Cradle capture surface.
+// Settings views are reached via the gear menu (⚙) or ⌘K palette; they render
+// full-window with a back button. The rail + Status dashboard are gone.
+// IPC contract, overlays (ListeningHUD / ⌘K / Toasts), platform TitleBar,
+// StoreCtx, and all settings views are untouched.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon, ArcMark } from "./icons.jsx";
-import { Dot, Kbd } from "./primitives.jsx";
-import { StoreCtx, MODELS, modelById, DEMO_PHRASES } from "./store.jsx";
+import { Icon } from "./icons.jsx";
+import { Kbd } from "./primitives.jsx";
+import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
+import { BreathCradle } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.6.20";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
+// Human-readable labels for settings views (used in the back-nav bar).
+const VIEW_LABELS = {
+  status: "Status", model: "Model", ptt: "Push-to-talk", hotwords: "Hotwords",
+  history: "Recent history", update: "App update", startup: "Startup", advanced: "Advanced",
+};
+
+// Format seconds → m:ss or h:mm:ss (mirrors the design's fmt helper).
+function fmtSecs(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
+}
+
+/* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
+function CaptureHome() {
+  const s = useStore();
+  return (
+    <div className="note-home">
+      {/* Stage 3: no in-app header — the cradle sits directly under the TitleBar chrome */}
+      <div className="note-home-inner">
+        {/* Cradle + feedback */}
+        <div className="note-screen">
+          <BreathCradle
+            active={s.noteRecording}
+            reduced={s.reduced}
+            onToggle={s.toggleNoteRecording}
+          />
+          <div className="note-feedback">
+            {s.noteRecording ? (
+              <>
+                <div className="note-status live">Recording</div>
+                <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
+                <div className="note-preview" aria-live="polite">
+                  {s.transcript?.text
+                    ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
+                    : <span className="note-preview-wait">Listening for speech…</span>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="note-status">Ready to capture</div>
+                <div className="note-status-sub">Press the mic and speak — it becomes a note.</div>
+                {/* Live push-to-talk transcript also surfaces here */}
+                {s.transcript?.text && !s.transcript.stale && (
+                  <div className="note-preview" aria-live="polite">
+                    <span>{s.transcript.text}</span>
+                    {s.recording && <span className="note-caret" />}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Transcribing… (indeterminate, shown between stop and note event) ── */
+function NoteProcessing() {
+  return (
+    <div className="note-proc-wrap">
+      <div className="note-proc-inner">
+        <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
+        <div className="note-status-sub">Turning your words into a note.</div>
+        <div className="note-proc-bar" aria-hidden="true"><span /></div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Note ready: Insert · Open note · overflow (Copy / Export) ──────── */
+function NoteReady() {
+  const s = useStore();
+  const [ovfOpen, setOvfOpen] = useState(false);
+  const note = s.currentNote;
+  if (!note) return null;
+
+  const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
+
+  // TODO(backend): No /api/insert endpoint exists in ui_server.py — the typing
+  // daemon path (outputs.py) is invoked internally and is not reachable via HTTP
+  // from the webview. Until a POST /api/insert route is added to ui_server.py +
+  // backed by UiBackend.insert_text(), "Insert" copies to clipboard instead.
+  const handleInsert = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => s.toast("Copied — paste it where you want"))
+        .catch(() => s.toast("Could not copy to clipboard", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
+  };
+
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => { setOvfOpen(false); s.toast("Copied to clipboard"); })
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
+
+  const handleExport = () => {
+    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `note-${ts}.md`; a.click();
+    URL.revokeObjectURL(url);
+    setOvfOpen(false);
+    s.toast("Exported as Markdown");
+  };
+
+  return (
+    <div className="note-ready-wrap">
+      <div className="note-ready-inner">
+        {/* Minimal header */}
+        <div className="note-hdr">
+          <span className="note-ready-label">{noteLabel}</span>
+        </div>
+
+        {/* Note text preview (max 4 lines) */}
+        <div className="note-ready-body">
+          <p className="note-ready-text">{note.text}</p>
+        </div>
+
+        {/* Action hierarchy: Insert (single filled primary) > Open note > overflow */}
+        <div className="note-ready-cta">
+          <button className="btn primary block note-insert-btn" onClick={handleInsert}>
+            <Icon name="copy" size={15} /> Insert
+          </button>
+          <div className="note-ready-sub">
+            <button className="btn sm" onClick={() => s.setNoteView("expanded")}>
+              <Icon name="external" size={14} /> Open note
+            </button>
+            <div className="ovf-wrap" style={{ position: "relative" }}>
+              <button className="btn sm ghost" aria-label="More — Copy, Export"
+                aria-expanded={ovfOpen} onClick={() => setOvfOpen((v) => !v)}>
+                <Icon name="more" size={15} />
+              </button>
+              {ovfOpen && (
+                <>
+                  <div className="ovf-scrim" onClick={() => setOvfOpen(false)} />
+                  <div className="ovf-menu">
+                    <button onClick={handleCopy}><Icon name="copy" size={14} /> Copy</button>
+                    <button onClick={handleExport}><Icon name="download" size={14} /> Export</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <button className="note-new-btn" onClick={() => s.setNoteView(null)}>New note</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Expanded note: full scrollable text + Copy / Export ──────────────── */
+function ExpandedNote() {
+  const s = useStore();
+  const note = s.currentNote;
+  if (!note) return null;
+
+  const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
+
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => s.toast("Copied to clipboard"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
+
+  const handleExport = () => {
+    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `note-${ts}.md`; a.click();
+    URL.revokeObjectURL(url);
+    s.toast("Exported as Markdown");
+  };
+
+  return (
+    <div className="note-exp-wrap">
+      <div className="note-exp-top">
+        <button className="ibtn" title="Back" onClick={() => s.setNoteView("ready")}>
+          <Icon name="back" size={17} />
+        </button>
+        <span className="note-exp-title">{noteLabel}</span>
+        <div className="note-exp-tools">
+          <button className="ibtn" title="Copy" onClick={handleCopy}><Icon name="copy" size={16} /></button>
+          <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
+        </div>
+      </div>
+      {/* Search + Times omitted: real data is plain text, no timestamps or speaker lines */}
+      {/* TODO(backend): Add search once the engine exposes segment-level data */}
+      <div className="note-exp-body scroll">
+        <p className="note-exp-text">{note.text}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Gear menu: on-device toggle · appearance · settings links ────────── */
+function GearMenu({ onClose }) {
+  const s = useStore();
+  const onDevice = modelById(s.model).local;
+
+  const toggleOnDevice = () => {
+    if (onDevice) {
+      // Switch to the first hosted model that has a key configured.
+      const hosted = MODELS.find((m) => !m.local && s.keys[m.brand]);
+      if (hosted) {
+        s.setModel(hosted.id);
+      } else {
+        // No provider key is configured — guide the user instead of silently no-op'ing.
+        s.toast("Add a provider key first — set one in Model settings.");
+        s.setView("model");
+        onClose();
+      }
+    } else {
+      s.setModel("faster-whisper/turbo");
+    }
+  };
+
+  const goTo = (v) => { s.setView(v); onClose(); };
+
+  const settingsItems = [
+    { v: "model", label: "Model" },
+    { v: "ptt", label: "Push-to-talk" },
+    { v: "hotwords", label: "Hotwords" },
+    { v: "history", label: "Recent history" },
+    { v: "update", label: "App update" },
+    { v: "startup", label: "Startup" },
+    { v: "advanced", label: "Advanced" },
+    { v: "status", label: "Status" },
+  ];
+
+  return (
+    <>
+      {/* Invisible scrim — click outside menu to dismiss */}
+      <div className="gear-scrim" onClick={onClose} />
+      <div className="gear-menu" role="dialog" aria-label="Settings menu">
+        <div className="gear-head t-label">Settings</div>
+
+        {/* Always on-device toggle */}
+        <button
+          className="gear-row"
+          role="switch"
+          aria-checked={onDevice}
+          onClick={toggleOnDevice}
+        >
+          <span className="gear-mk">
+            Always on-device <span className="gear-mk-note">private</span>
+          </span>
+          <span className="gear-mv">
+            <span className={"gear-switch" + (onDevice ? " on" : "")} />
+          </span>
+        </button>
+
+        <div className="gear-div" />
+
+        {/* Appearance segmented control */}
+        <div className="gear-seg-row">
+          <span className="gear-mk">Appearance</span>
+          <div className="gear-mini-seg">
+            {["light", "dark"].map((th) => (
+              <button
+                key={th}
+                className={s.theme === th ? "on" : ""}
+                onClick={() => s.setTheme(th)}
+              >
+                {th[0].toUpperCase() + th.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="gear-div" />
+
+        {/* Settings navigation entries */}
+        {(() => {
+          const hasUpdate = !!(s.updateStatus?.updateAvailable || s.updateStatus?.shellStale);
+          return settingsItems.map(({ v, label }) => (
+            <button key={v} className="gear-row" onClick={() => goTo(v)}>
+              <span className="gear-mk">{label}</span>
+              {/* Quiet update dot on the "App update" row only */}
+              {v === "update" && hasUpdate && <span className="update-dot update-dot-row" aria-label="Update available" />}
+              <Icon name="chev" size={15} style={{ color: "var(--subtle)", marginLeft: v === "update" && hasUpdate ? "8px" : "auto" }} />
+            </button>
+          ));
+        })()}
+      </div>
+    </>
+  );
+}
+
+/* ======================================================================
+   App — root component
+   ====================================================================== */
 export default function App() {
-  const [view, setView] = useState("status");
+  // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
+  const [view, setView] = useState("home");
   const [model, setModelState] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
@@ -31,7 +341,11 @@ export default function App() {
       { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon." },
     ];
   });
-  const [theme, setThemeState] = useState("light");
+  // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
+  const [theme, setThemeState] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [startup, setStartupState] = useState(true);
   const [trayOnly, setTrayOnlyState] = useState(true);
   const [overlay, setOverlayState] = useState(true);
@@ -40,6 +354,7 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
@@ -50,6 +365,39 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
+  const [gearOpen, setGearOpen] = useState(false);
+  // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
+  const [noteView, setNoteView] = useState(null);
+  const [currentNote, setCurrentNote] = useState(null);
+
+  // Detect prefers-reduced-motion for the BreathCradle.
+  const [reduced, setReduced] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handler = (e) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  // Track whether the user has explicitly picked a theme (Light/Dark via gear or loaded from prefs).
+  // Only the system follower uses this; an explicit pick must always win.
+  const explicitThemeRef = useRef(false);
+
+  // Live-follow the OS color scheme, but only when no explicit user pref is set — mirrors the
+  // reduced-motion listener pattern. An explicit pick (or a saved pref on hydration) locks the theme.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e) => {
+      if (!explicitThemeRef.current) setThemeState(e.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // ---- refs to dodge stale closures in global listeners ----
   const recRef = useRef(false); recRef.current = recording;
@@ -59,9 +407,20 @@ export default function App() {
   const transcriptIdRef = useRef(null);
   const terminalTranscriptIdsRef = useRef(new Set());
   const terminalTranscriptIdOrderRef = useRef([]);
+  // noteViewRef: stale-closure-safe read of noteView inside the SSE handler.
+  const noteViewRef = useRef(null); noteViewRef.current = noteView;
+  // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
+  const watchdogRef = useRef(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
+
+  // ---- note-recording elapsed timer ----
+  useEffect(() => {
+    if (!noteRecording) { setNoteElapsed(0); return; }
+    const id = setInterval(() => setNoteElapsed((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [noteRecording]);
 
   // ---- hydrate from the engine + subscribe to live events ----
   useEffect(() => {
@@ -80,11 +439,34 @@ export default function App() {
       }
       else if (ev.type === "note-recording") {
         setNoteRecording(!!ev.active);
+        if (ev.active) {
+          // New recording started — clear any stale watchdog, reset note surface.
+          clearWatchdog();
+          setNoteView(null);
+          setCurrentNote(null);
+        } else {
+          // Recording stopped — show Transcribing… and arm the safety-net watchdog.
+          setNoteView("processing");
+          armWatchdog();
+        }
       }
       else if (ev.type === "note") {
-        if (typeof ev.text === "string") {
+        // The backend now sends a `status` field on every terminal note outcome.
+        // Old daemons without the field default to "ok" for backward compatibility.
+        const status = ev.status || (ev.text ? "ok" : "empty");
+        clearWatchdog();
+        if (status === "ok" && typeof ev.text === "string" && ev.text) {
           setNoteText(ev.text);
+          const note = { id: ev.id || "n" + Date.now(), text: ev.text, createdAt: ev.createdAt || new Date().toISOString() };
+          setCurrentNote(note);
+          setNoteView("ready");
           toast("Conversation note saved");
+        } else if (status === "empty") {
+          setNoteView(null);
+          toast("No speech detected", { bad: true });
+        } else if (status === "failed") {
+          setNoteView(null);
+          toast("Couldn't transcribe — try again", { bad: true });
         }
       }
       else if (ev.type === "transcript") {
@@ -97,13 +479,37 @@ export default function App() {
         if (eventId !== null) transcriptIdRef.current = eventId;
         if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
         if (ev.stale) {
+          // Belt-and-suspenders: _fail_recording_session fires a stale transcript
+          // AND a note "failed" event. Resolve the view here (silent — the note
+          // "failed" handler is the authoritative toaster to avoid a duplicate).
+          // Old daemons without note "failed": UI unblocks but no toast; the 60 s
+          // watchdog was also cleared here so it won't double-fire.
+          if (noteViewRef.current === "processing") {
+            clearWatchdog();
+            setNoteView(null);
+          }
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
-      } else if (ev.type === "history-changed") ipc.getState().then((st) => st && setHistory(mapHistory(st)));
+      } else if (ev.type === "history-changed") {
+        ipc.getState().then((st) => {
+          if (!st) return;
+          const entries = mapHistory(st);
+          setHistory(entries);
+          // Fallback: if still waiting for a "note" event, resolve from latest history.
+          setNoteView((nv) => {
+            if (nv === "processing" && entries.length > 0) {
+              clearWatchdog();
+              setCurrentNote(entries[0]);
+              return "ready";
+            }
+            return nv;
+          });
+        });
+      }
     });
-    return () => { cancelled = true; resetTranscriptOrdering(); unsub && unsub(); };
+    return () => { cancelled = true; resetTranscriptOrdering(); clearWatchdog(); unsub && unsub(); };
   }, []);
 
   const resetTranscriptOrdering = () => {
@@ -141,7 +547,7 @@ export default function App() {
     }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.prefs) {
-      if (st.prefs.theme && st.prefs.theme !== "system") setThemeState(st.prefs.theme);
+      if (st.prefs.theme && st.prefs.theme !== "system") { explicitThemeRef.current = true; setThemeState(st.prefs.theme); }
       setTrayOnlyState(!!st.prefs.trayOnly);
       setOverlayState(!!st.prefs.overlay);
       setSoundState(!!st.prefs.sound);
@@ -163,6 +569,24 @@ export default function App() {
     setTimeout(() => dismiss(id), opts.undo ? 5000 : 2600);
   }, []);
 
+  // ---- Note-surface watchdog (60 s safety net for missing terminal events) ----
+  // clearWatchdog and armWatchdog are stable (useCallback with [] / [clearWatchdog,toast])
+  // so the SSE useEffect can safely close over them even though it has [] deps.
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+  }, []);
+  const armWatchdog = useCallback(() => {
+    clearWatchdog();
+    watchdogRef.current = setTimeout(() => {
+      watchdogRef.current = null;
+      // Return to home only if we're still stuck in processing — never abort a ready/expanded note.
+      setNoteView((nv) => {
+        if (nv === "processing") toast("Transcription timed out — try again", { bad: true });
+        return nv === "processing" ? null : nv;
+      });
+    }, 60_000);
+  }, [clearWatchdog, toast]);
+
   // ---- persisting mutations (optimistic local + IPC when live) ----
   const persist = (payload) => { if (ipc.isLive()) ipc.patchConfig(payload).catch(() => toast("Could not save change", { bad: true })); };
   const persistOrThrow = (payload) => ipc.isLive() ? ipc.patchConfig(payload) : Promise.resolve(null);
@@ -180,7 +604,7 @@ export default function App() {
     }
   };
   const setActivation = (v) => { setActivationState(v); persist({ shortcut: { activation: v } }); };
-  const setTheme = (v) => { setThemeState(v); persist({ prefs: { theme: v } }); };
+  const setTheme = (v) => { explicitThemeRef.current = true; setThemeState(v); persist({ prefs: { theme: v } }); };
   const setStartup = (v) => { setStartupState(v); persist({ startup: v }); };
   const setTrayOnly = (v) => { setTrayOnlyState(v); persist({ prefs: { trayOnly: v } }); };
   const setOverlay = (v) => { setOverlayState(v); persist({ prefs: { overlay: v } }); };
@@ -221,13 +645,25 @@ export default function App() {
   const toggleNoteRecording = () => {
     if (!ipc.isLive()) {
       if (noteRecording) {
-        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+        // Stop: show Processing surface briefly, then resolve to note-ready.
         setNoteRecording(false);
-        setNoteText(demo);
-        pushHistory(demo);
-        toast("Conversation note saved");
+        setNoteView("processing");
+        armWatchdog();
+        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+        setTimeout(() => {
+          clearWatchdog();
+          const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
+          setNoteText(demo);
+          setCurrentNote(note);
+          pushHistory(demo);
+          setNoteView("ready");
+          toast("Conversation note saved");
+        }, 800);
       } else {
+        clearWatchdog();
         setNoteRecording(true);
+        setNoteView(null);
+        setCurrentNote(null);
         toast("Note recording started");
       }
       return;
@@ -296,17 +732,11 @@ export default function App() {
 
   function mockUpdateStatus(v) {
     return {
-      currentVersion: v,
-      latestVersion: v,
-      updateAvailable: false,
-      checked: false,
-      platform: "linux",
-      installKind: "linux-package",
+      currentVersion: v, latestVersion: v, updateAvailable: false, checked: false,
+      platform: "linux", installKind: "linux-package",
       engine: { name: "engine", current: v, latest: v, path: "~/.local/bin/dictate", stale: false },
       shell: { name: "shell", current: v, latest: v, path: "/usr/bin/dictate-ui-shell", stale: false },
-      shellStale: false,
-      phase: "current",
-      actions: ["check", "open_docs"],
+      shellStale: false, phase: "current", actions: ["check", "open_docs"],
       commands: { release: "https://github.com/arcforgelabs/dictate/releases" },
     };
   }
@@ -376,58 +806,48 @@ export default function App() {
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
+    // Note Capture additions
+    gearOpen, setGearOpen, noteElapsed, reduced,
+    noteView, setNoteView, currentNote,
   };
 
-  const NAV = [
-    { v: "status", icon: "status", label: "Status" },
-    { sec: "Configure" },
-    { v: "model", icon: "sliders", label: "Model" },
-    { v: "ptt", icon: "keyboard", label: "Push-to-talk" },
-    { v: "hotwords", icon: "hash", label: "Hotwords", badge: hotwords.length },
-    { sec: "Activity" },
-    { v: "history", icon: "history", label: "Recent history", badge: history.length || null },
-    { sec: "App" },
-    { v: "update", icon: "download", label: "App update", badge: updateStatus?.shellStale ? "!" : null },
-    { v: "startup", icon: "power", label: "Startup" },
-    { v: "advanced", icon: "gear", label: "Advanced" },
-  ];
-  const Current = VIEWS[view];
-  const m = modelById(model);
+  // Resolve the current settings view component (null when on capture home).
+  const Current = view !== "home" ? VIEWS[view] : null;
 
   return (
     <StoreCtx.Provider value={store}>
       <div className={"win " + platform} ref={winRef}>
-        <TitleBar platform={platform} onSearch={() => setPalette(true)} />
+        <TitleBar
+          platform={platform}
+          onSearch={() => setPalette(true)}
+          onGear={() => setGearOpen(true)}
+          hasUpdate={!!(updateStatus.updateAvailable || updateStatus.shellStale)}
+        />
 
         <div className="shell">
-          <aside className="rail">
-            <div className="rail-status">
-              <span className="mic"><Icon name="mic" size={19} /></span>
-              <span className="meta">
-                <span className="nm">Dictate <Dot live /></span>
-                <span className="t-meta">{m.name.split(" · ")[0]} · {noteRecording ? "recording" : recording ? "listening" : "ready"}</span>
-              </span>
+          {view === "home" ? (
+            noteView === "processing" ? <NoteProcessing /> :
+            noteView === "ready"      ? <NoteReady /> :
+            noteView === "expanded"   ? <ExpandedNote /> :
+            <CaptureHome />
+          ) : (
+            /* Settings view: full-window with a back button returning to capture home. */
+            <div className="note-settings-wrap">
+              <div className="note-settings-bar">
+                <button className="btn ghost sm" onClick={() => setView("home")}>
+                  <Icon name="back" size={15} />Back
+                </button>
+                <span className="note-settings-title">{VIEW_LABELS[view] || view}</span>
+              </div>
+              <div className="scroll">
+                {Current && <Current />}
+              </div>
             </div>
-            <nav className="nav">
-              {NAV.map((n, i) => n.sec
-                ? <div className="nav-sec" key={i}>{n.sec}</div>
-                : <button key={n.v} className={"nav-item" + (view === n.v ? " active" : "")} onClick={() => setView(n.v)}>
-                    <Icon name={n.icon} size={18} /><span>{n.label}</span>
-                    {n.badge ? <span className="badge tnum">{n.badge}</span> : null}
-                  </button>)}
-            </nav>
-            <div className="rail-foot">
-              <button className="iconbtn" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-                <Icon name={theme === "dark" ? "sun" : "moon"} size={17} /></button>
-              <span className="t-mono" style={{ color: "var(--subtle)" }}>v{version}</span>
-            </div>
-          </aside>
-
-          <main className="content">
-            <div className="scroll"><Current /></div>
-          </main>
+          )}
         </div>
 
+        {/* GearMenu: position:absolute anchors to .win just below the titlebar */}
+        {gearOpen && <GearMenu onClose={() => setGearOpen(false)} />}
         <ListeningHUD />
         <CommandPalette />
         <Toasts />
@@ -440,7 +860,7 @@ function providerLabel(brand) {
   return { openai: "OpenAI", xai: "xAI", gemini: "Gemini" }[brand] || brand;
 }
 
-// Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) -> engine combo token.
+// Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) → engine combo token.
 function comboToToken(arr) {
   const map = { "Ctrl": "ctrl", "Ctrl (R)": "ctrl_r", "Right Ctrl": "ctrl_r", "Ctrl (L)": "ctrl_l",
     "Alt": "alt", "Shift": "shift", "Super": "super" };

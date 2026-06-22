@@ -50,12 +50,14 @@ function Notice({ tone = "amber", icon, title, children }) {
   );
 }
 
-/* ---------- header (one compact settings control) ---------- */
+/* ---------- header (quiet window chrome — drag bar + one settings control) ----------
+   No wordmark: the cradle-mic hero is the identity. In production this becomes the OS
+   titlebar, so it reads as a thin, quiet drag bar with only a gear at the right. */
 function Header({ onGear }) {
   return (
     <div className="hdr">
-      <div className="brand"><span className="brand-mark"><Mark s={17} /></span><span>Dictate</span></div>
-      <button className="ibtn" title="Settings" onClick={onGear}><Icon n="gear" s={17} /></button>
+      <div className="hdr-drag" aria-hidden="true" />
+      <button className="ibtn" title="Settings" aria-label="Settings" onClick={onGear}><Icon n="gear" s={18} /></button>
     </div>
   );
 }
@@ -254,10 +256,10 @@ function GearMenu({ a, onClose }) {
           <span className="mv"><span className={"mswitch" + (a.onDevice ? " on" : "")} /></span>
         </button>
         <div className="menu-div" />
-        <div className="menu-seg-row">
-          <span className="mk">Appearance</span>
-          <div className="mini-seg">
-            {["light", "dark"].map((th) => <button key={th} className={a.theme === th ? "on" : ""} onClick={() => a.setTweak("theme", th)}>{th[0].toUpperCase() + th.slice(1)}</button>)}
+        <div className="menu-appear">
+          <span className="ma-label t-mono">Appearance</span>
+          <div className="seg3">
+            {["system", "light", "dark"].map((th) => <button key={th} className={a.theme === th ? "on" : ""} onClick={() => a.setTweak("theme", th)}>{th[0].toUpperCase() + th.slice(1)}</button>)}
           </div>
         </div>
         <div className="menu-div" />
@@ -275,7 +277,7 @@ function Toasts({ items }) {
 }
 
 /* =========================== APP =========================== */
-const DEFAULTS = /*EDITMODE-BEGIN*/{ "theme": "dark", "onDevice": false, "scenario": "short", "preview": "live", "timestamps": false, "reduce": false }/*EDITMODE-END*/;
+const DEFAULTS = /*EDITMODE-BEGIN*/{ "theme": "system", "onDevice": false, "scenario": "short", "preview": "live", "timestamps": false, "reduce": false }/*EDITMODE-END*/;
 
 function App() {
   const [t, setTweak] = useTweaks(DEFAULTS);
@@ -299,7 +301,18 @@ function App() {
   const clearTimers = () => { Object.values(timers.current).forEach((x) => { clearInterval(x); clearTimeout(x); }); timers.current = {}; };
   const toast = (msg) => { const id = ++tid.current; setToasts((x) => [...x, { id, msg }]); setTimeout(() => setToasts((x) => x.filter((t) => t.id !== id)), 2200); };
 
-  uE(() => { document.documentElement.dataset.theme = t.theme; }, [t.theme]);
+  // Theme follows the system by default; light/dark are explicit overrides.
+  uE(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme = t.theme === "system" ? (mq.matches ? "dark" : "light") : t.theme;
+    };
+    apply();
+    if (t.theme === "system") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
+  }, [t.theme]);
   uE(() => { document.documentElement.classList.toggle("reduce-motion", !!t.reduce); }, [t.reduce]);
 
   function makeNote(dur, lines, local) { return { title: lines.length > 1 ? "Team sync" : "Quick note", dur, lines, local: !!local }; }
@@ -427,7 +440,7 @@ function App() {
           onChange={(v) => setTweak("preview", v)} />
         <TweakRadio label="Scenario" value={t.scenario} options={["short", "long"]} onChange={(v) => setTweak("scenario", v)} />
         <TweakSection label="Theme & motion" />
-        <TweakRadio label="Appearance" value={t.theme} options={["light", "dark"]} onChange={(v) => setTweak("theme", v)} />
+        <TweakRadio label="Appearance" value={t.theme} options={["system", "light", "dark"]} onChange={(v) => setTweak("theme", v)} />
         <TweakToggle label="Reduce motion" value={t.reduce} onChange={(v) => setTweak("reduce", v)} />
         <TweakButton label="Reset to ready" onClick={() => { setTweak("preview", "live"); go("ready"); }} />
       </TweaksPanel>

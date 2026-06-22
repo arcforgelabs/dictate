@@ -10,7 +10,7 @@ const ICONS = {
   hash: <path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16"/>,
   clock: <><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.2l2.8 1.8"/></>,
   power: <><path d="M12 4v7"/><path d="M7.4 7.4a7 7 0 1 0 9.2 0"/></>,
-  gear: <><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M5.5 5.5l1.6 1.6M16.9 16.9l1.6 1.6M3.5 12h2.2M18.3 12h2.2M5.5 18.5l1.6-1.6M16.9 7.1l1.6-1.6"/></>,
+  gear: <><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></>,
   chev: <path d="M9 6l6 6-6 6"/>,
   chevd: <path d="M6 9l6 6 6-6"/>,
   back: <path d="M15 6l-6 6 6 6"/>,
@@ -34,6 +34,8 @@ const ICONS = {
   pin: <><path d="M12 21s7-5.5 7-11a7 7 0 0 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4.5l3 1.7"/></>,
   download: <><path d="M12 3v12M7 11l5 4 5-4"/><path d="M5 20h14"/></>,
+  more: <><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></>,
+  external: <><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>,
 };
 
 export function Icon({ name, size = 18, style, cls }) {
@@ -68,3 +70,15 @@ export const ArcMark = () => (
     <path d="M28 48 A32 32 0 0 0 92 48" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" />
   </svg>
 );
+
+/* Canonical cradle-mic mark — identical geometry to assets/dictate.svg.
+   Two shapes only: capsule (mic body) + open cradle arc. No stem, no base.
+   Used in the capture button (BreathCradle) and the header brand. */
+export function Mark({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="18 8 84 84" fill="none" aria-label="Dictate">
+      <rect x="47" y="16" width="26" height="48" rx="13" fill="currentColor" />
+      <path d="M28 48A32 32 0 0 0 92 48" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" />
+    </svg>
+  );
+}

@@ -690,6 +690,7 @@ class Daemon:
             "text": text,
             "raw_text": raw_text,
             "recording_id": recording_id,
+            "status": "ok",
         }
         if self.note_callback is not None:
             try:
@@ -704,6 +705,21 @@ class Daemon:
             stale=False,
             mode="note",
         )
+
+    def _surface_note_terminal(self, recording_id: int, status: str) -> None:
+        """Publish a terminal note signal so the webview can leave "Transcribing…".
+
+        Called on every non-success terminal path for note-mode recordings:
+        empty/no-speech (status="empty") and transcription failure (status="failed").
+        Reuses the same "note" event channel as the success path; the webview
+        distinguishes by the status field.
+        """
+        if self.note_callback is None:
+            return
+        try:
+            self.note_callback({"text": "", "status": status, "recording_id": recording_id})
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Note terminal callback failed: {exc}", file=sys.stderr)
 
     def _notify_transcript(self, event: dict[str, object]) -> None:
         if self.transcript_callback is None:
@@ -747,9 +763,14 @@ class Daemon:
             return
         assembled_text = self._assembled_recording_text(recording_id)
         if not assembled_text:
+            # Capture mode before _clear_recording_state pops it from the dict.
+            mode = self._recording_mode(recording_id)
             final_result = final_result or self._last_recording_audio_status(recording_id)
             self._clear_recording_state(recording_id)
             self._surface_empty_final_status(final_result)
+            if mode == "note":
+                # Deterministic terminal signal so the webview can leave "Transcribing…".
+                self._surface_note_terminal(recording_id, "empty")
             return
 
         mode = self._recording_mode(recording_id)
@@ -784,6 +805,8 @@ class Daemon:
         note_text = raw_text.strip()
         if not note_text:
             self._surface_empty_final_status(None)
+            # Assembled text was whitespace-only: signal the webview to leave "Transcribing…".
+            self._surface_note_terminal(recording_id, "empty")
             return
         try:
             self.history_store.append(note_text)
@@ -804,6 +827,8 @@ class Daemon:
         with self._queue_lock:
             if recording_id in self._terminal_recordings:
                 return
+            # Save mode before it is popped; needed to signal note-mode failures.
+            mode = self._recording_modes.get(recording_id, "dictation")
             self._remember_terminal_recording_locked(recording_id)
             self._recording_parts.pop(recording_id, None)
             self._recording_chunk_counts.pop(recording_id, None)
@@ -823,6 +848,9 @@ class Daemon:
             stale=True,
             reason=transcript_reason,
         )
+        if mode == "note":
+            # Publish a terminal note signal so the webview can leave "Transcribing…".
+            self._surface_note_terminal(recording_id, "failed")
 
     def _clear_recording_state(self, recording_id: int) -> None:
         with self._queue_lock:
