@@ -43,7 +43,7 @@ function Controls({ platform }) {
   return <Adwaita />; // gnome / linux default
 }
 
-export default function TitleBar({ platform, onSearch, onGear }) {
+export default function TitleBar({ platform, onSearch, onGear, hasUpdate }) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="tb-left">
@@ -58,8 +58,9 @@ export default function TitleBar({ platform, onSearch, onGear }) {
       </div>
       <div className="tb-ctrls">
         {/* Gear opens the settings menu; sits left of the OS window controls */}
-        <button className="ibtn" title="Settings" onClick={onGear}>
+        <button className="ibtn tb-gear" title="Settings" onClick={onGear}>
           <Icon name="gear" size={15} />
+          {hasUpdate && <span className="update-dot" aria-label="Update available" />}
         </button>
         <Controls platform={platform} />
       </div>

@@ -234,6 +234,48 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
   });
 
+  it("fires exactly one toast when _fail_recording_session sends stale+note-failed (P3.1)", async () => {
+    // Regression test: stale transcript AND note status="failed" both arrive (normal on fail path).
+    // The stale branch must resolve silently; only the note "failed" branch toasts.
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // Recording stops → processing
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "note-recording", active: false }) });
+    });
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+
+    // _fail_recording_session fires stale transcript THEN note{failed}
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "transcript", phase: "final", text: "", stale: true }),
+      });
+    });
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "note", text: "", status: "failed" }),
+      });
+    });
+
+    // Exactly one "Couldn't transcribe" toast — no duplicate
+    await waitFor(() =>
+      expect(screen.getAllByText(/Couldn't transcribe/i)).toHaveLength(1)
+    );
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+  });
+
   it("clears live transcript text when a stale transcript event arrives", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };

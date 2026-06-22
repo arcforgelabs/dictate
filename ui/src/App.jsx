@@ -303,12 +303,17 @@ function GearMenu({ onClose }) {
         <div className="gear-div" />
 
         {/* Settings navigation entries */}
-        {settingsItems.map(({ v, label }) => (
-          <button key={v} className="gear-row" onClick={() => goTo(v)}>
-            <span className="gear-mk">{label}</span>
-            <Icon name="chev" size={15} style={{ color: "var(--subtle)", marginLeft: "auto" }} />
-          </button>
-        ))}
+        {(() => {
+          const hasUpdate = !!(s.updateStatus?.updateAvailable || s.updateStatus?.shellStale);
+          return settingsItems.map(({ v, label }) => (
+            <button key={v} className="gear-row" onClick={() => goTo(v)}>
+              <span className="gear-mk">{label}</span>
+              {/* Quiet update dot on the "App update" row only */}
+              {v === "update" && hasUpdate && <span className="update-dot update-dot-row" aria-label="Update available" />}
+              <Icon name="chev" size={15} style={{ color: "var(--subtle)", marginLeft: v === "update" && hasUpdate ? "8px" : "auto" }} />
+            </button>
+          ));
+        })()}
       </div>
     </>
   );
@@ -374,6 +379,22 @@ export default function App() {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const handler = (e) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  // Track whether the user has explicitly picked a theme (Light/Dark via gear or loaded from prefs).
+  // Only the system follower uses this; an explicit pick must always win.
+  const explicitThemeRef = useRef(false);
+
+  // Live-follow the OS color scheme, but only when no explicit user pref is set — mirrors the
+  // reduced-motion listener pattern. An explicit pick (or a saved pref on hydration) locks the theme.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e) => {
+      if (!explicitThemeRef.current) setThemeState(e.matches ? "dark" : "light");
+    };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
@@ -458,13 +479,14 @@ export default function App() {
         if (eventId !== null) transcriptIdRef.current = eventId;
         if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
         if (ev.stale) {
-          // Belt-and-suspenders: _fail_recording_session fires a stale transcript;
-          // the note "failed" event is also emitted, but handle it here too in case
-          // the note channel callback throws or the order is unexpected.
+          // Belt-and-suspenders: _fail_recording_session fires a stale transcript
+          // AND a note "failed" event. Resolve the view here (silent — the note
+          // "failed" handler is the authoritative toaster to avoid a duplicate).
+          // Old daemons without note "failed": UI unblocks but no toast; the 60 s
+          // watchdog was also cleared here so it won't double-fire.
           if (noteViewRef.current === "processing") {
             clearWatchdog();
             setNoteView(null);
-            toast("Couldn't transcribe — try again", { bad: true });
           }
           setTranscript({ phase: ev.phase || "final", text: "", stale: true });
         } else if (typeof ev.text === "string") {
@@ -525,7 +547,7 @@ export default function App() {
     }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.prefs) {
-      if (st.prefs.theme && st.prefs.theme !== "system") setThemeState(st.prefs.theme);
+      if (st.prefs.theme && st.prefs.theme !== "system") { explicitThemeRef.current = true; setThemeState(st.prefs.theme); }
       setTrayOnlyState(!!st.prefs.trayOnly);
       setOverlayState(!!st.prefs.overlay);
       setSoundState(!!st.prefs.sound);
@@ -582,7 +604,7 @@ export default function App() {
     }
   };
   const setActivation = (v) => { setActivationState(v); persist({ shortcut: { activation: v } }); };
-  const setTheme = (v) => { setThemeState(v); persist({ prefs: { theme: v } }); };
+  const setTheme = (v) => { explicitThemeRef.current = true; setThemeState(v); persist({ prefs: { theme: v } }); };
   const setStartup = (v) => { setStartupState(v); persist({ startup: v }); };
   const setTrayOnly = (v) => { setTrayOnlyState(v); persist({ prefs: { trayOnly: v } }); };
   const setOverlay = (v) => { setOverlayState(v); persist({ prefs: { overlay: v } }); };
@@ -795,7 +817,12 @@ export default function App() {
   return (
     <StoreCtx.Provider value={store}>
       <div className={"win " + platform} ref={winRef}>
-        <TitleBar platform={platform} onSearch={() => setPalette(true)} onGear={() => setGearOpen(true)} />
+        <TitleBar
+          platform={platform}
+          onSearch={() => setPalette(true)}
+          onGear={() => setGearOpen(true)}
+          hasUpdate={!!(updateStatus.updateAvailable || updateStatus.shellStale)}
+        />
 
         <div className="shell">
           {view === "home" ? (
