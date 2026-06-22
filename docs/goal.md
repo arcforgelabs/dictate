@@ -3,27 +3,93 @@
 ## Status
 
 The repository-side Windows release, Microsoft Store package, Store API smoke,
-and Dictate/ClawSweeper integration work is complete as of 2026-06-04.
+and Dictate/ClawSweeper integration work is complete. The current public
+release lane is `v2026.6.20`.
 
 Completed implementation details and verification IDs have been moved to the
 root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 
 ## Remaining Work
 
-1. Wait for Microsoft Partner Center certification and automatic Store
-   publishing after the privacy URL correction was resubmitted on `2026-06-05`.
-   Store CLI status run `26988971067` confirmed the pending submission is back
-   in `Certification`.
+### Product Surface Goal
+
+Dictate's current production surface is desktop, and the desktop version should
+keep a local-first model posture for normal dictation wherever that gives the
+best user experience, privacy, and reliability.
+
+The product direction is broader than desktop:
+
+1. Keep the desktop app as the primary daily-driver implementation target for
+   now.
+2. Do not design product concepts or architecture in a way that prevents a
+   future mobile/on-the-run capture surface.
+3. Treat mobile as a future product surface for quick capture, transcript review,
+   and sending text onward, not as a replacement for desktop push-to-talk.
+4. Keep shared concepts portable across surfaces: captures become transcripts or
+   notes, transcripts can be accepted/copied/inserted/exported, and hosted-model
+   use is explicit.
+
+### Transcription Notes Goal
+
+Dictate should move toward a transcript-first note capture model. The first
+implementation is **word-for-word transcription only**: no summaries, action
+items, cleanup, or note intelligence.
+
+Immediate production direction:
+
+1. Treat every capture as a `Note`: short dictation and long meetings are the
+   same record type with different duration, provider, speaker, and processing
+   state.
+2. Preserve two user intents through mode/defaults, not separate heavy screens:
+   - **Dictation**: plain verbatim transcription, no speaker labels by default,
+     suitable for prompts, email, and text insertion.
+   - **Meeting**: verbatim transcript with diarization/speaker labels enabled by
+     default.
+3. Make hosted xAI the first production meeting path because it supports the
+   required meeting contract: streaming/chunked speech-to-text plus speaker
+   labels/diarization.
+4. Keep proven local models available for direct dictation and offline fallback.
+   Do not present local models as production-ready meeting diarization until
+   separately benchmarked.
+5. Hide or de-emphasize hosted providers that cannot satisfy the meeting
+   contract. Provider selection should be capability-based, not a flat model
+   list.
+6. Store transcripts as the durable artifact. Do not retain audio by default.
+   Audio chunks should be discarded as soon as they have been successfully
+   transcribed/diarized and persisted as transcript segments.
+7. Long recordings must be streamed/chunked. The app must not hold hours of raw
+   audio in memory, upload one giant file, or block on one final transcription
+   request.
+8. Persist note metadata and transcript segments incrementally: note id, mode,
+   provider/model, start/end timestamps, duration, processing status, chunk
+   sequence, speaker ids/labels, transcript text, and errors if any.
+9. The UI should support in-app acceptance of dictation: after capture, the user
+   can read, edit, accept, copy, insert, export, or expand the transcript without
+   requiring another focused text field.
+
+Deferred / future work:
+
+1. Local meeting diarization is a future experimental feature, not part of the
+   first implementation.
+2. Candidate local paths include WhisperX + pyannote, pyannote paired with
+   existing local STT, and NVIDIA NeMo diarization. These require a separate
+   benchmark pass for accuracy, RAM/VRAM use, runtime, installation weight, and
+   long-meeting stability.
+3. If local meeting diarization is later exposed, label it as experimental or
+   high-performance-machine-only until it is proven on representative
+   multi-speaker recordings.
+
+1. For Store updates, run the guarded Microsoft Store MSIX workflow in
+   `mode=draft`, review the draft in Partner Center, then run `mode=publish`
+   only when ready for Microsoft certification.
 2. Run a real Windows install/runtime smoke after package download or Store
-   availability.
+   availability for each material release.
 3. Configure a real Windows signing certificate in GitHub Actions before
    attaching `.msi` or `.exe` installers to public GitHub releases. The signing
    script and release workflow path exist, but no signing certificate secret is
    currently configured.
-4. Use the guarded Microsoft Store MSIX publish workflow for future package
-   updates after the first manual submission is accepted. The workflow can check
-   status, upload a generated MSIX as an uncommitted draft, or explicitly commit
-   the draft.
+4. Keep the GitHub release lane and Microsoft Store publication lane separate:
+   a GitHub release does not automatically make a Store update available.
 5. Keep ClawSweeper scheduled/background runs disabled for Dictate until the
    maintainer decides scheduled fanout should begin. Manual smokes are passing;
    `CLAWSWEEPER_ENABLE_SCHEDULES` remains `0`.
@@ -43,24 +109,10 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 - Dictate is a public open-source repository.
 - Arc Forge ClawSweeper and its durable state repository remain private.
 - ClawSweeper is currently review/comment only for Dictate.
-- Recent manual ClawSweeper smokes passed for Dictate and Arc Forge Console:
-  `26925824791`, `26929644423`, `26930314117`, and `26930384789`.
-- Microsoft Store Developer CLI status mode passed on run `26930465947` and
-  reported the pending submission status as `Certification`.
-- Microsoft Store Developer CLI status mode passed again on run `26930602624`
-  and reported the pending submission status as `Certification`.
-- Microsoft Store Developer CLI status mode passed again on run `26930886850`
-  and reported the pending submission status as `Certification`.
-- Microsoft Partner Center certification report
-  `a0cf5c57-d578-48d9-b707-68a7a207ff6a` completed on `2026-06-04` with status
-  `Attention needed` because the submitted privacy URL pointed to the general
-  Arc Forge privacy page rather than the dedicated Dictate privacy policy.
-- Microsoft Store Developer CLI status mode passed on run `26988691332` and
-  reported the pending submission status as `CertificationFailed`.
-- The Partner Center privacy policy URL was corrected to
-  `https://arcforge.au/privacy/dictate` and resubmitted on `2026-06-05`.
-- Microsoft Store Developer CLI status mode passed on run `26988971067` and
-  reported the pending submission status as `Certification`.
+- Recent manual ClawSweeper smokes passed for Dictate and Arc Forge Console.
+- Partner Center state changes over time; check Partner Center or
+  `.github/workflows/msstore-publish-msix.yml` in `mode=status` for live Store
+  status rather than relying on historical run IDs in this public doc.
 - UI Dependabot alerts for `vitest`, `vite`, and `esbuild` were remediated by
   upgrading the UI development toolchain; `npm audit` now reports zero
   vulnerabilities in the UI package.

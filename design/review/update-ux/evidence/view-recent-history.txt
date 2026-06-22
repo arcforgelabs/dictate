@@ -1,0 +1,53 @@
+Dictate
+Settings
+Search settings & actions
+⌘K
+Dictate
+faster-whisper · ready
+Status
+CONFIGURE
+Model
+Push-to-talk
+Hotwords
+3
+ACTIVITY
+Recent history
+APP
+App update
+Startup
+Advanced
+v2026.6.18
+RECENT HISTORY
+Recent dictations
+
+A small local safety net — recover text if it landed in the wrong place.
+
+Nothing here yet
+Your recent dictations will show up here for quick recovery.
+Listening
+0:00
+release to insert
+esc
+GO TO
+Status
+Model
+Push-to-talk
+Hotwords
+Recent history
+App update
+Startup
+Advanced
+ACTIONS
+Try dictation
+Switch to dark
+Run doctor
+Clear recent history
+MODELS
+Use faster-whisper · turbo
+Local
+Use gpt-4o-mini-transcribe
+OpenAI
+Use grok-speech-to-text
+xAI
+Use gemini-3-flash-preview
+Google

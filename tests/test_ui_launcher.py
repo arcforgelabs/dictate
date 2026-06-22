@@ -34,7 +34,11 @@ class FindShellBinaryTests(unittest.TestCase):
     def test_user_install_precedes_path_binary(self) -> None:
         with patch.dict(os.environ, {"PATH": "/usr/bin"}):
             candidates = ui_launcher.shell_binary_candidates()
-        self.assertEqual(candidates[0], Path.home() / ".local" / "bin" / "dictate-ui-shell")
+        suffix = ".exe" if ui_launcher.is_windows() else ""
+        self.assertEqual(
+            candidates[0],
+            Path.home() / ".local" / "bin" / f"dictate-ui-shell{suffix}",
+        )
 
     def test_build_launch_command(self) -> None:
         binary = Path("/usr/bin/dictate-ui-shell")

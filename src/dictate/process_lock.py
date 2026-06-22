@@ -89,6 +89,8 @@ def _pid_is_running(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        return False
     return True
 
 

@@ -1,0 +1,70 @@
+Dictate
+Settings
+Search settings & actions
+⌘K
+Dictate
+faster-whisper · ready
+Status
+CONFIGURE
+Model
+Push-to-talk
+Hotwords
+3
+ACTIVITY
+Recent history
+APP
+App update
+Startup
+Advanced
+v2026.6.18
+APP UPDATE
+App update
+
+Dictate updates in two parts — the background engine and this app window. Both should be on the same version.
+
+Engine
+~/.local/bin/dictate
+2026.6.18
+App window
+/usr/bin/dictate-ui-shell
+2026.6.18
+Checking for updates
+
+Looking for the latest Dictate release and comparing the engine with this app window.
+
+1
+Download the latest signed package
+2
+Run the installer or package manager
+3
+Restart so the new window loads
+Checking...
+Check again
+Advanced — update from a terminal
+Listening
+0:00
+release to insert
+esc
+GO TO
+Status
+Model
+Push-to-talk
+Hotwords
+Recent history
+App update
+Startup
+Advanced
+ACTIONS
+Try dictation
+Switch to dark
+Run doctor
+Clear recent history
+MODELS
+Use faster-whisper · turbo
+Local
+Use gpt-4o-mini-transcribe
+OpenAI
+Use grok-speech-to-text
+xAI
+Use gemini-3-flash-preview
+Google
