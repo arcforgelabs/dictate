@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$DictateVersion = "2026.6.20"
+$DictateVersion = "2026.6.22"
 
 if (-not $ArchiveUrl) {
     $ArchiveUrl = "https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip"

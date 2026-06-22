@@ -13,7 +13,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.6.20";
+const DEFAULT_VERSION = "2026.6.22";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
 // Human-readable labels for settings views (used in the back-nav bar).
