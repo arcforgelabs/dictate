@@ -19,6 +19,20 @@ can annotate items for improvement, then sync changes back to `master`. First
 target is refining the Settings/gear menu. Full plan and surface inventory:
 [docs/claude-design-workflow.md](claude-design-workflow.md).
 
+### Windows CI crash blocks the full release lane
+
+Windows unit-test jobs (`windows-latest`, Python 3.11 + 3.12) crash with exit
+`0xC0000142` (DLL-init failure) part-way through `python -m unittest discover`.
+Red on `master` since the `2026.6.22` bump (last green CI: 2026-06-22 07:23);
+Linux, UI, Rust, npm, and the Windows install-smoke all stay green. Because the
+Release workflow gates on the full test matrix, this blocks automated releases.
+
+`v2026.6.23` was therefore shipped **Linux-only**, by publishing the GitHub
+release manually with the validated `.deb` + Python dist + scripts. Before the
+next Windows-inclusive release: diagnose the crash (suspect a regressed unpinned
+native wheel — onnxruntime/ctranslate2/numpy — or a test added in `2026.6.22`),
+fix it, get CI green, then run `release.yml` normally.
+
 ### Product Surface Goal
 
 Dictate's current production surface is desktop, and the desktop version should
