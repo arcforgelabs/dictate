@@ -486,6 +486,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-status{font-size:19px;font-weight:800;letter-spacing:-.02em;}
 .note-status.live{color:var(--live);}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
+.note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
 .note-timer{font-size:14px;color:var(--muted);}
 .note-preview{max-width:330px;font-size:13.5px;line-height:1.5;color:var(--muted);text-align:center;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}

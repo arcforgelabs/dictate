@@ -164,8 +164,8 @@ class UiBackendStateTests(unittest.TestCase):
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(backends, {"faster-whisper", "openai", "xai", "gemini"})
             # default shortcut + activation
-            self.assertEqual(state["shortcut"]["combo"], "ctrl_r")
-            self.assertEqual(state["shortcut"]["display"], ["Ctrl (R)"])
+            self.assertEqual(state["shortcut"]["combo"], "ctrl+d")
+            self.assertEqual(state["shortcut"]["display"], ["Ctrl", "D"])
             self.assertEqual(state["shortcut"]["activation"], "hold")
             self.assertEqual(state["prefs"], DEFAULT_PREFS)
             self.assertEqual(state["providers"]["openai"]["status"], "None")

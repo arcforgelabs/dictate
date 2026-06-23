@@ -44,7 +44,7 @@ class Daemon:
         lexicon_mode: LexiconMode = "native",
         lexicon_replacements: dict[str, str] | None = None,
         history_store: HistoryStore | None = None,
-        push_to_talk_combo: str = "ctrl_r",
+        push_to_talk_combo: str = "ctrl+d",
         status_callback: Callable[[str | None], None] | None = None,
         recording_callback: Callable[[bool], None] | None = None,
         history_callback: Callable[[], None] | None = None,

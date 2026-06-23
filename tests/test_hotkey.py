@@ -65,6 +65,15 @@ class HotkeyTests(unittest.TestCase):
         self.assertEqual(_normalize_evdev_keycode("KEY_LEFTCTRL"), "ctrl_l")
         self.assertEqual(_normalize_evdev_keycode("KEY_RIGHTCTRL"), "ctrl_r")
 
+    def test_ctrl_d_parses_and_matches(self) -> None:
+        parsed = parse_hotkey_combo("ctrl+d")
+        self.assertEqual(parsed.combo, "ctrl+d")
+        self.assertIn("ctrl", parsed.tokens)
+        self.assertIn("d", parsed.tokens)
+        self.assertTrue(combo_is_active({"ctrl_l", "d"}, "ctrl+d"))
+        self.assertTrue(combo_is_active({"ctrl_r", "d"}, "ctrl+d"))
+        self.assertFalse(combo_is_active({"ctrl_l"}, "ctrl+d"))
+
     def test_display_name_is_human_readable(self) -> None:
         self.assertEqual(format_hotkey_combo("ctrl_r"), "Ctrl (R)")
         self.assertEqual(format_hotkey_combo("ctrl+space"), "Ctrl + Space")

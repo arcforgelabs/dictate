@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DEFAULT_PUSH_TO_TALK_COMBO = "ctrl_r"
+DEFAULT_PUSH_TO_TALK_COMBO = "ctrl+d"
 SUPPORTED_SINGLE_KEY_ALIASES = ("ctrl_r", "ctrl_l")
 _MODIFIER_ORDER = {"ctrl": 0, "ctrl_l": 1, "ctrl_r": 2, "shift": 3, "shift_l": 4, "shift_r": 5, "alt": 6, "alt_l": 7, "alt_r": 8, "super": 9, "super_l": 10, "super_r": 11}
 

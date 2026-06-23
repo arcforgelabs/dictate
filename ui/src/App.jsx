@@ -49,7 +49,6 @@ function CopyLastNote() {
       <span className="lc-ico"><Icon name="copy" size={15} /></span>
       <span className="lc-body">
         <span className="lc-text">{latest.text}</span>
-        <span className="lc-meta t-mono">Last note · {formatHistoryTime(latest.createdAt)} · tap to copy</span>
       </span>
     </button>
   );
@@ -83,7 +82,8 @@ function CaptureHome() {
             ) : (
               <>
                 <div className="note-status">Ready to capture</div>
-                <div className="note-status-sub">Press the mic and speak — it becomes a note.</div>
+                <div className="note-status-sub">Press the mic and speak.</div>
+                <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
                 {/* Live push-to-talk transcript also surfaces here */}
                 {s.transcript?.text && !s.transcript.stale && (
                   <div className="note-preview" aria-live="polite">
@@ -364,7 +364,7 @@ export default function App() {
   const [view, setView] = useState("home");
   const [model, setModelState] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
-  const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
+  const [shortcut, setShortcutState] = useState(["Ctrl", "D"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
   const [device2, setDevice2State] = useState("auto");
@@ -805,12 +805,12 @@ export default function App() {
   };
   const dictateOnce = () => { if (recRef.current || live) return; setRecording(true); setTimeout(dictateStop, 1300); };
 
-  // ---- global keyboard: ⌘K palette + push-to-talk demo (Ctrl (R)) ----
+  // ---- global keyboard: ⌘K palette + push-to-talk demo (Ctrl+D) ----
   useEffect(() => {
     const down = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
       if (capRef.current || live) return;
-      if (e.code === "ControlRight" && !e.repeat) {
+      if (e.ctrlKey && e.code === "KeyD" && !e.repeat) {
         e.preventDefault();
         if (actRef.current === "toggle") { recRef.current ? dictateStop() : dictateStart(); }
         else dictateStart();
@@ -818,7 +818,7 @@ export default function App() {
     };
     const up = (e) => {
       if (capRef.current || live) return;
-      if (e.code === "ControlRight" && actRef.current === "hold") { e.preventDefault(); dictateStop(); }
+      if ((e.code === "KeyD" || e.key === "Control") && actRef.current === "hold") { e.preventDefault(); dictateStop(); }
     };
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);
@@ -913,6 +913,6 @@ function providerLabel(brand) {
 // Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) → engine combo token.
 function comboToToken(arr) {
   const map = { "Ctrl": "ctrl", "Ctrl (R)": "ctrl_r", "Right Ctrl": "ctrl_r", "Ctrl (L)": "ctrl_l",
-    "Alt": "alt", "Shift": "shift", "Super": "super" };
+    "Alt": "alt", "Shift": "shift", "Super": "super", "D": "d" };
   return arr.map((k) => map[k] || k.toLowerCase()).join("+");
 }

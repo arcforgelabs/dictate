@@ -408,7 +408,7 @@ class MainSttSelectionTests(unittest.TestCase):
 
         self.assertEqual(hotkey, "ctrl+space")
 
-    def test_x11_default_push_to_talk_combo_stays_right_ctrl(self) -> None:
+    def test_x11_default_push_to_talk_combo_is_ctrl_d(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -420,7 +420,7 @@ class MainSttSelectionTests(unittest.TestCase):
                     config=Config(),
                 )
 
-        self.assertEqual(hotkey, "ctrl_r")
+        self.assertEqual(hotkey, "ctrl+d")
 
 
 if __name__ == "__main__":

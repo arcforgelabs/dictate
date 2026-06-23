@@ -17,6 +17,7 @@ from dictate.hotkey import (
 )
 
 PRESET_COMBOS: tuple[tuple[str, str], ...] = (
+    ("Ctrl + D", "ctrl+d"),
     ("Ctrl (R)", "ctrl_r"),
     ("Ctrl (L)", "ctrl_l"),
     ("Ctrl + Space", "ctrl+space"),
@@ -54,7 +55,7 @@ class PushToTalkDialog(Gtk.Dialog):
         content.set_margin_bottom(12)
 
         info = Gtk.Label(
-            label="Choose a preset or capture a holdable combo such as ctrl_r, ctrl_l, ctrl+space, or ctrl+shift.",
+            label="Choose a preset or capture a holdable combo such as ctrl+d, ctrl_r, ctrl+space, or ctrl+shift.",
             xalign=0.0,
         )
         info.set_line_wrap(True)
@@ -79,7 +80,7 @@ class PushToTalkDialog(Gtk.Dialog):
 
         self.entry = Gtk.Entry()
         self.entry.set_text(self.result_combo)
-        self.entry.set_placeholder_text("ctrl_r or ctrl+space")
+        self.entry.set_placeholder_text("ctrl+d or ctrl+space")
         self.entry.set_hexpand(True)
         content.pack_start(self.entry, False, False, 0)
 

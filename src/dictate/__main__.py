@@ -141,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--push-to-talk-combo",
         default=DEFAULT_PUSH_TO_TALK_COMBO,
-        help="Push-to-talk combo for daemon/tray mode (examples: ctrl_r, ctrl_l, ctrl+space)",
+        help="Push-to-talk combo for daemon/tray mode (examples: ctrl+d, ctrl_r, ctrl+space)",
     )
     parser.add_argument(
         "--push-to-talk-key",
