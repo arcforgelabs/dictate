@@ -83,6 +83,8 @@ def _read_pid(path: Path) -> int | None:
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _pid_is_running_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -92,6 +94,35 @@ def _pid_is_running(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _pid_is_running_windows(pid: int) -> bool:
+    """Liveness probe for Windows that never sends a console control signal.
+
+    ``os.kill(pid, 0)`` is unsafe here: on Windows ``signal 0`` is
+    ``CTRL_C_EVENT``, so it delivers a Ctrl+C to the console process group
+    instead of probing — which crashes anything sharing the console (notably
+    the test runner). Use OpenProcess + GetExitCodeProcess via ctypes instead.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    ERROR_ACCESS_DENIED = 5
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Access-denied means the process exists but we cannot query it.
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return code.value == STILL_ACTIVE
+        return True
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _lock_age_seconds(path: Path) -> float:

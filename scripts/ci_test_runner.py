@@ -19,7 +19,7 @@ def main() -> int:
     # On hang: dump all thread tracebacks, then hard-exit non-zero.
     faulthandler.dump_traceback_later(_TIMEOUT_SECONDS, exit=True)
     suite = unittest.TestLoader().discover("tests")
-    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
     return 0 if result.wasSuccessful() else 1
 
 
