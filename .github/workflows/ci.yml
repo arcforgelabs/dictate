@@ -57,7 +57,7 @@ jobs:
         shell: cmd
         env:
           PYTHONFAULTHANDLER: "1"
-        run: .venv\Scripts\python.exe -X faulthandler -m unittest discover -s tests -v
+        run: .venv\Scripts\python.exe scripts\ci_test_runner.py
 
       - name: Show version on Linux
         if: runner.os == 'Linux'
