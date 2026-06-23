@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.request
 import wave
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -138,6 +139,41 @@ def _api_key_from_command() -> str | None:
 
 def _base_url() -> str:
     return os.environ.get("DICTATE_XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
+
+
+def make_xai_probe(*, timeout: float = 4.0) -> Callable[[], bool]:
+    """Return a lightweight probe callable for the xAI ``/models`` endpoint.
+
+    Reads the stored API key on each call and makes an authenticated GET
+    request.  Returns ``True`` on 2xx, ``False`` on any error or missing key.
+    **Never logs the key.**
+
+    Parameters
+    ----------
+    timeout:
+        Per-request timeout in seconds (default 4 s — fast enough for a
+        health check, generous enough for a slow connection).
+    """
+
+    def _probe() -> bool:
+        try:
+            api_key = _api_key()
+        except Exception:  # noqa: BLE001 — missing / broken key → not healthy
+            return False
+        if not api_key:
+            return False
+        req = urllib.request.Request(
+            f"{_base_url()}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                return resp.status < 300
+        except Exception:  # noqa: BLE001 — any network error → not healthy
+            return False
+
+    return _probe
 
 
 def _keyterms(hotwords: str | None) -> list[str]:

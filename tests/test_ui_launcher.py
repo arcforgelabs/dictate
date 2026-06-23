@@ -133,11 +133,22 @@ class WireDaemonEventsTests(unittest.TestCase):
         )
 
 
+def _reset_launcher_globals() -> None:
+    """Reset all process-wide singletons in ui_launcher between tests."""
+    if ui_launcher._supervisor is not None:
+        try:
+            ui_launcher._supervisor.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+    ui_launcher._server_handle = None
+    ui_launcher._server_broker = None
+    ui_launcher._wired_daemon_id = None
+    ui_launcher._supervisor = None
+
+
 class EnsureServerStartedTests(unittest.TestCase):
     def tearDown(self) -> None:
-        ui_launcher._server_handle = None
-        ui_launcher._server_broker = None
-        ui_launcher._wired_daemon_id = None
+        _reset_launcher_globals()
 
     def test_existing_server_can_be_wired_to_daemon_later(self) -> None:
         class Daemon:
@@ -179,6 +190,126 @@ class EnsureServerStartedTests(unittest.TestCase):
 
         backend = serve.call_args.kwargs["backend"]
         self.assertIs(backend.kwargs["history_store"], daemon.history_store)
+
+
+class EnsureServerStartedSupervisorTests(unittest.TestCase):
+    """Regression tests: live startup must wire a ProviderSupervisor, not stay inert."""
+
+    def tearDown(self) -> None:
+        _reset_launcher_globals()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_daemon(backend_name: str = "xai") -> object:
+        class FakeEngine:
+            health_sink = None
+
+            class _stt:
+                pass
+
+        engine = FakeEngine()
+        engine.stt = type("Stt", (), {"backend_name": backend_name})()
+
+        class FakeDaemon:
+            pass
+
+        d = FakeDaemon()
+        d.engine = engine
+        d.supervisor = None
+        d.history_store = None
+        # Attributes that _wire_daemon_events reads via getattr
+        d.status_callback = None
+        d.recording_callback = None
+        d.note_recording_callback = None
+        d.transcript_callback = None
+        d.note_callback = None
+        d.history_callback = None
+        return d
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    def test_supervisor_created_and_connect_supervisor_called_on_new_server(self) -> None:
+        """ensure_server_started must create a ProviderSupervisor and call connect_supervisor."""
+        connect_calls: list[object] = []
+
+        class FakeBackend:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def connect_supervisor(self, sup: object) -> None:
+                connect_calls.append(sup)
+
+        broker = _Broker()
+        daemon = self._make_daemon("xai")
+
+        with (
+            patch("dictate.ui_server.EventBroker", return_value=broker),
+            patch("dictate.ui_server.UiBackend", FakeBackend),
+            patch("dictate.ui_server.serve", return_value=object()),
+            patch("dictate.ui_launcher._make_probe_fn", return_value=lambda: False) as mock_probe,
+        ):
+            ui_launcher.ensure_server_started(daemon)
+
+        # Probe factory was invoked for the configured backend
+        mock_probe.assert_called_once_with("xai")
+        # Module-level supervisor was created
+        self.assertIsNotNone(ui_launcher._supervisor)
+        # Daemon has the supervisor attached
+        self.assertIs(daemon.supervisor, ui_launcher._supervisor)
+        # connect_supervisor was called exactly once with the new supervisor
+        self.assertEqual(len(connect_calls), 1)
+        self.assertIs(connect_calls[0], ui_launcher._supervisor)
+
+    def test_supervisor_probe_fn_is_xai_for_xai_backend(self) -> None:
+        """_make_probe_fn('xai') returns a callable (not the no-op lambda)."""
+        with patch("dictate.stt.xai_backend.make_xai_probe", return_value=lambda: True) as m:
+            probe = ui_launcher._make_probe_fn("xai")
+        m.assert_called_once()
+        self.assertTrue(callable(probe))
+
+    def test_supervisor_probe_fn_is_noop_for_private_backend(self) -> None:
+        """_make_probe_fn('faster-whisper') returns a no-op probe."""
+        probe = ui_launcher._make_probe_fn("faster-whisper")
+        self.assertFalse(probe())
+
+    def test_engine_health_sink_routes_to_supervisor(self) -> None:
+        """After wiring, engine.health_sink failure calls supervisor.report_failure."""
+        connect_calls: list[object] = []
+
+        class FakeBackend:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def connect_supervisor(self, sup: object) -> None:
+                connect_calls.append(sup)
+
+        broker = _Broker()
+        daemon = self._make_daemon("xai")
+
+        with (
+            patch("dictate.ui_server.EventBroker", return_value=broker),
+            patch("dictate.ui_server.UiBackend", FakeBackend),
+            patch("dictate.ui_server.serve", return_value=object()),
+            patch("dictate.ui_launcher._make_probe_fn", return_value=lambda: False),
+        ):
+            ui_launcher.ensure_server_started(daemon)
+
+        supervisor = ui_launcher._supervisor
+        self.assertIsNotNone(supervisor)
+        self.assertFalse(supervisor.is_degraded())
+
+        # Simulate an engine health_sink call (remote failure)
+        daemon.engine.health_sink(False, "unreachable")
+        self.assertTrue(supervisor.is_degraded())
+
+        # Simulate recovery
+        daemon.engine.health_sink(True, None)
+        self.assertFalse(supervisor.is_degraded())
 
 
 if __name__ == "__main__":
