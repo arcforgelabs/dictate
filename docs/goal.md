@@ -19,19 +19,23 @@ can annotate items for improvement, then sync changes back to `master`. First
 target is refining the Settings/gear menu. Full plan and surface inventory:
 [docs/claude-design-workflow.md](claude-design-workflow.md).
 
-### Windows CI crash blocks the full release lane
+### Windows CI crash — FIXED (2026-06-23)
 
-Windows unit-test jobs (`windows-latest`, Python 3.11 + 3.12) crash with exit
-`0xC0000142` (DLL-init failure) part-way through `python -m unittest discover`.
-Red on `master` since the `2026.6.22` bump (last green CI: 2026-06-22 07:23);
-Linux, UI, Rust, npm, and the Windows install-smoke all stay green. Because the
-Release workflow gates on the full test matrix, this blocks automated releases.
+The Windows unit-test jobs crashed with exit `0xC0000142` (red on `master` since
+the `2026.6.22` single-instance-guard work). Root cause: `process_lock._pid_is_running`
+used `os.kill(pid, 0)`, but on Windows `signal 0 == CTRL_C_EVENT`, so the liveness
+probe delivered a Ctrl+C to the console process group — including the test runner —
+surfacing as a non-deterministic `KeyboardInterrupt`. Fixed by routing Windows to a
+`ctypes` `OpenProcess` liveness check (never `os.kill` on win32); CI is green.
 
-`v2026.6.23` was therefore shipped **Linux-only**, by publishing the GitHub
-release manually with the validated `.deb` + Python dist + scripts. Before the
-next Windows-inclusive release: diagnose the crash (suspect a regressed unpinned
-native wheel — onnxruntime/ctranslate2/numpy — or a test added in `2026.6.22`),
-fix it, get CI green, then run `release.yml` normally.
+This was also a real **product** bug: the daemon single-instance guard's liveness
+check would misbehave on Windows. `v2026.6.23` shipped Linux-only before the fix.
+
+Note on Windows public distribution: the GitHub release workflow only attaches
+**signed** Windows `.msi`/`.exe` artifacts, and no signing certificate is configured
+(see signing items below), so a Windows-inclusive *public GitHub* release is not yet
+possible — the public Windows channel is the Microsoft Store lane. Re-running
+`release.yml` on a fixed tag would produce only unsigned internal artifacts.
 
 ### Product Surface Goal
 
