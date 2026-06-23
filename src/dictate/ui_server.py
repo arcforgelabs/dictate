@@ -36,6 +36,7 @@ from dictate import config as config_mod
 from dictate import startup as startup_mod
 from dictate import update_status as update_status_mod
 from dictate.history import HistoryStore
+from dictate.provider_supervisor import ProviderSupervisor
 from dictate.hotkey import (
     DEFAULT_PUSH_TO_TALK_COMBO,
     format_hotkey_combo,
@@ -231,6 +232,10 @@ class UiBackend:
     broker: EventBroker | None = None
     daemon: Any | None = None
     provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
+    # Optional supervisor wired at runtime by connect_supervisor().
+    # When present, providerHealth returns richer state; SSE events are emitted
+    # as provider-degraded / provider-recovered rather than provider-health.
+    _supervisor: ProviderSupervisor | None = field(default=None, repr=False)
 
     # Injectable hooks (default to the real implementations).
     save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
@@ -602,37 +607,146 @@ class UiBackend:
     def _compute_provider_health(self, cfg: config_mod.Config) -> dict[str, Any]:
         """Return provider health state for the UI.
 
+        Shape (superset of the legacy ``{healthy, status, mode}``):
+        - ``healthy``    bool       — backward compat; False when degraded or no-key
+        - ``status``     str        — backward compat; reason string or "ok"
+        - ``mode``       str        — "private" | "online"
+        - ``preferred``  str        — configured stt_backend
+        - ``active``     str        — currently transcribing backend
+        - ``degraded``   bool       — True when remote failed, using local fallback
+        - ``reason``     str|null   — failure class or null
+        - ``since``      str|null   — ISO-8601 UTC timestamp of degradation start
+
         Logic:
         * ``private`` (faster-whisper) → always healthy; no key needed.
-        * ``online`` + no key stored → unhealthy, reason ``no-key``.
-        * ``online`` + last transcription failed → unhealthy, reason from engine.
-        * ``online`` + last transcription succeeded → healthy.
+        * Supervisor present → read full state from supervisor.
+        * Online + no key → unhealthy, status ``no-key``.
+        * Online + key present → reflect the tracked runtime outcome.
         """
         backend = cfg.stt_backend or "faster-whisper"
         is_private = backend == "faster-whisper"
         mode = "private" if is_private else "online"
 
+        # --- supervisor path (richer state) ---
+        if self._supervisor is not None:
+            sup_state = self._supervisor.get_state()
+            preferred = sup_state.get("preferred", backend)
+            active = sup_state.get("active", backend)
+            degraded = bool(sup_state.get("degraded", False))
+            reason = sup_state.get("reason")
+            since = sup_state.get("since")
+            healthy = not degraded
+            status = reason if degraded else "ok"
+            # Still surface no-key as unhealthy even when supervisor is healthy
+            if not is_private and healthy:
+                has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(preferred), False)
+                if not has_key:
+                    healthy = False
+                    status = "no-key"
+            return {
+                "healthy": healthy,
+                "status": status,
+                "mode": mode,
+                "preferred": preferred,
+                "active": active,
+                "degraded": degraded,
+                "reason": reason,
+                "since": since,
+            }
+
+        # --- legacy path (no supervisor) ---
         if is_private:
-            return {"healthy": True, "status": "ok", "mode": mode}
+            return {
+                "healthy": True,
+                "status": "ok",
+                "mode": mode,
+                "preferred": backend,
+                "active": backend,
+                "degraded": False,
+                "reason": None,
+                "since": None,
+            }
 
         # Online: check that a key is present
         has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(backend), False)
         if not has_key:
-            return {"healthy": False, "status": "no-key", "mode": mode}
+            return {
+                "healthy": False,
+                "status": "no-key",
+                "mode": mode,
+                "preferred": backend,
+                "active": backend,
+                "degraded": False,
+                "reason": None,
+                "since": None,
+            }
 
         # Online + key present: reflect the tracked runtime outcome
         healthy, reason = self.provider_health.get()
         if not healthy:
-            return {"healthy": False, "status": reason or "unreachable", "mode": mode}
+            return {
+                "healthy": False,
+                "status": reason or "unreachable",
+                "mode": mode,
+                "preferred": backend,
+                "active": "faster-whisper",
+                "degraded": True,
+                "reason": reason or "unreachable",
+                "since": None,
+            }
 
-        return {"healthy": True, "status": "ok", "mode": mode}
+        return {
+            "healthy": True,
+            "status": "ok",
+            "mode": mode,
+            "preferred": backend,
+            "active": backend,
+            "degraded": False,
+            "reason": None,
+            "since": None,
+        }
+
+    def connect_supervisor(self, supervisor: ProviderSupervisor) -> None:
+        """Wire a ``ProviderSupervisor`` to this backend for SSE and get_state.
+
+        Installs ``on_degraded`` / ``on_recovered`` callbacks that update
+        ``provider_health`` and publish the new ``provider-degraded`` /
+        ``provider-recovered`` SSE events.  Call after the supervisor is created
+        and before the daemon starts transcribing.
+        """
+        self._supervisor = supervisor
+        ph = self.provider_health
+        broker = self.broker
+
+        def _on_degraded(state: dict) -> None:
+            ph.report(False, state.get("reason"))
+            if broker is not None:
+                broker.publish(
+                    "provider-degraded",
+                    preferred=state.get("preferred"),
+                    active=state.get("active"),
+                    reason=state.get("reason"),
+                    since=state.get("since"),
+                )
+
+        def _on_recovered(state: dict) -> None:
+            ph.report(True, None)
+            if broker is not None:
+                broker.publish(
+                    "provider-recovered",
+                    preferred=state.get("preferred"),
+                    active=state.get("active"),
+                )
+
+        supervisor._on_degraded = _on_degraded
+        supervisor._on_recovered = _on_recovered
 
     def connect_engine_health(self, engine: Any) -> None:
         """Wire this backend's health tracker as the engine's ``health_sink``.
 
-        Call this once after the daemon's engine is available. It installs a
-        callback that updates ``provider_health`` and pushes an SSE event on
-        every state change so the UI updates live.
+        Legacy convenience method for setups without a ``ProviderSupervisor``.
+        Installs a callback that updates ``provider_health`` and pushes a
+        ``provider-health`` SSE event on every state change.
         """
         ph = self.provider_health
         broker = self.broker

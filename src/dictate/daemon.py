@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import sys
+import time
 import threading
 from collections import deque
 from collections.abc import Callable
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -22,7 +26,13 @@ from dictate.hotkey_backend import (
 )
 from dictate.lexicon import LexiconMode
 from dictate.outputs import TextOutput
+from dictate.provider_supervisor import ProviderSupervisor
 from dictate.stt import SpeechToText
+
+# Retry policy for long recordings (note mode) when remote transcription fails.
+# We retry the full chunk up to N times with exponential backoff before degrading.
+_LONG_RECORDING_MAX_RETRIES = 2
+_LONG_RECORDING_RETRY_BASE_DELAY = 1.0  # seconds
 
 SAMPLE_RATE = 16000
 NOTE_MAX_RECORDING_SECONDS = 900
@@ -52,6 +62,7 @@ class Daemon:
         note_recording_callback: Callable[[bool], None] | None = None,
         note_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
+        supervisor: ProviderSupervisor | None = None,
     ):
         self.active = True
         self.language = language
@@ -64,6 +75,7 @@ class Daemon:
         self.note_recording_callback = note_recording_callback
         self.note_callback = note_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
+        self.supervisor = supervisor
         self.engine = DictationEngine(
             stt=stt,
             sample_rate=SAMPLE_RATE,
@@ -71,6 +83,10 @@ class Daemon:
             lexicon_mode=lexicon_mode,
             lexicon_replacements=lexicon_replacements,
         )
+        # Wire the supervisor as the engine's health_sink so remote
+        # success/failure is reported automatically on every transcription.
+        if supervisor is not None:
+            self.engine.health_sink = _make_supervisor_health_sink(supervisor)
         self.recorder = recorder or SoundDeviceRecorder(
             sample_rate=SAMPLE_RATE,
             max_recording_seconds=NOTE_MAX_RECORDING_SECONDS,
@@ -217,6 +233,12 @@ class Daemon:
             except Exception:  # noqa: BLE001
                 pass
 
+        if self.supervisor is not None:
+            try:
+                self.supervisor.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+
         self._queue_stop_signal()
 
     def _start_recording(self, mode: RecordingMode = "dictation") -> bool:
@@ -263,6 +285,11 @@ class Daemon:
             self._notify_recording(True)
             if mode == "note":
                 self._notify_note_recording(True)
+            # Opportunistic recovery probe: if degraded, check whether the remote
+            # recovered while we were idle — cheap way to avoid waiting for the
+            # next scheduled probe to fire.
+            if self.supervisor is not None:
+                self.supervisor.probe_now()
             return True
 
     def _finalize_recording(self) -> None:
@@ -909,12 +936,93 @@ class Daemon:
                 return None
             if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
                 return None
+
+            mode = self._recording_mode(recording_id)
+            supervisor = self.supervisor
+
+            # --- Degraded path: force on-device transcription ---
+            # When the supervisor is degraded (remote failed earlier), bypass
+            # the remote backend entirely and go straight to the CPU fallback.
+            if supervisor is not None and supervisor.is_degraded():
+                return self.engine.transcribe_local(
+                    audio,
+                    language=self.language,
+                    min_duration_s=min_duration_s,
+                )
+
+            # --- Long recording (note mode): retry remote before degrading ---
+            # Note recordings can be many minutes long; we retry the chunk a
+            # bounded number of times with backoff before giving up and running
+            # locally, so a brief network hiccup does not forfeit the session.
+            if mode == "note" and supervisor is not None:
+                return self._transcribe_long_recording_with_retry(
+                    audio,
+                    min_duration_s=min_duration_s,
+                    supervisor=supervisor,
+                )
+
+            # --- Default path (no supervisor, or streaming chunks in dictation) ---
+            # One remote attempt; on failure the engine falls back to CPU and
+            # sets result.notice.  For note recordings without a supervisor,
+            # diarize=True so the backend diarization path is used.
+            diarize = mode == "note"
             return self.engine.transcribe(
                 audio,
                 language=self.language,
                 min_duration_s=min_duration_s,
-                diarize=self._recording_mode(recording_id) == "note",
+                diarize=diarize,
             )
+
+    def _transcribe_long_recording_with_retry(
+        self,
+        audio: np.ndarray,
+        *,
+        min_duration_s: float | None,
+        supervisor: ProviderSupervisor,
+    ) -> TranscriptionResult:
+        """Retry remote transcription for long (note) recordings before degrading.
+
+        On each failure the remote-only transcription raises (instead of falling
+        back silently) so we can retry.  If all retries are exhausted we:
+        1. Report failure to the supervisor (marks degraded, schedules probe).
+        2. Run the audio locally via the CPU fallback.
+        3. Return the local result *with* a notice so the UI can surface it.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(_LONG_RECORDING_MAX_RETRIES + 1):
+            if attempt > 0:
+                delay = _LONG_RECORDING_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                time.sleep(delay)
+            try:
+                return self.engine.transcribe_remote_only(
+                    audio,
+                    language=self.language,
+                    min_duration_s=min_duration_s,
+                    diarize=True,  # note recordings use diarization
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                # Continue to next retry (supervisor health_sink already updated
+                # inside transcribe_remote_only)
+
+        # All retries exhausted — report failure and use local fallback.
+        # (health_sink already marked failure; supervisor.report_failure is
+        #  idempotent for subsequent calls in the same degraded window.)
+        logger.warning(
+            "Remote transcription failed after %d retries; using on-device fallback. "
+            "Error: %s",
+            _LONG_RECORDING_MAX_RETRIES,
+            last_exc,
+        )
+        # Use the normal engine.transcribe() which also includes the CPU fallback
+        # and sets result.notice — we pass the original exception context via the
+        # engine's existing path.
+        return self.engine.transcribe(
+            audio,
+            language=self.language,
+            min_duration_s=min_duration_s,
+            diarize=True,
+        )
 
     def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:
         with self._queue_lock:
@@ -962,3 +1070,24 @@ class Daemon:
                 and self._recording_chunk_counts.get(recording_id, 0) > 0
                 and recording_id not in self._recording_final_chunks
             )
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+
+def _make_supervisor_health_sink(
+    supervisor: ProviderSupervisor,
+) -> Callable[[bool, str | None], None]:
+    """Return an engine ``health_sink`` that routes results to a supervisor.
+
+    The supervisor tracks degradation/recovery state and fires SSE callbacks.
+    We still honour the (healthy: bool, reason: str | None) signature so
+    the engine doesn't need to know about the supervisor.
+    """
+    def _sink(healthy: bool, reason: str | None) -> None:
+        if healthy:
+            supervisor.report_success()
+        else:
+            supervisor.report_failure(reason or "unreachable")
+    return _sink

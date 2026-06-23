@@ -89,7 +89,80 @@ class DictationEngine:
         min_duration_s: float | None = None,
         diarize: bool = False,
     ) -> TranscriptionResult:
-        """Transcribe audio and classify common non-success outcomes."""
+        """Transcribe audio; fall back to on-device CPU on remote failure."""
+        return self._do_transcribe(
+            audio,
+            language,
+            min_duration_s=min_duration_s,
+            diarize=diarize,
+            allow_cpu_fallback=True,
+        )
+
+    def transcribe_remote_only(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        *,
+        min_duration_s: float | None = None,
+        diarize: bool = False,
+    ) -> TranscriptionResult:
+        """Transcribe using the primary backend only; raise on remote failure.
+
+        No CPU fallback.  Used by the daemon's retry loop for long recordings
+        so each chunk can be retried before giving up and degrading.
+
+        Unlike ``transcribe()``, failure does NOT call the ``health_sink`` —
+        individual retry attempts should not prematurely mark the supervisor
+        degraded.  The daemon's retry wrapper calls ``engine.transcribe()``
+        for the final attempt, which does report to the sink.  Success on any
+        retry attempt DOES call the sink (so a prior degradation can recover).
+        """
+        return self._do_transcribe(
+            audio,
+            language,
+            min_duration_s=min_duration_s,
+            diarize=diarize,
+            allow_cpu_fallback=False,
+            report_health_on_fail=False,
+        )
+
+    def transcribe_local(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        *,
+        min_duration_s: float | None = None,
+    ) -> TranscriptionResult:
+        """Force on-device CPU transcription (for degraded sessions).
+
+        Bypasses the primary STT backend entirely and never produces a
+        fallback-notice message (the caller owns the degradation context).
+        """
+        if audio.size == 0:
+            return TranscriptionResult(status="empty", duration_s=0.0)
+
+        duration = self.duration_s(audio)
+        duration_floor = self.min_duration_s if min_duration_s is None else min_duration_s
+        if duration < duration_floor:
+            return TranscriptionResult(status="too_short", duration_s=duration)
+
+        return self._transcribe_with_cpu_fallback(
+            audio,
+            language=language,
+            primary_error=None,
+        )
+
+    def _do_transcribe(
+        self,
+        audio: np.ndarray,
+        language: str | None,
+        *,
+        min_duration_s: float | None,
+        diarize: bool,
+        allow_cpu_fallback: bool,
+        report_health_on_fail: bool = True,
+    ) -> TranscriptionResult:
+        """Core transcription logic shared by public transcribe variants."""
         if audio.size == 0:
             return TranscriptionResult(status="empty", duration_s=0.0)
 
@@ -120,14 +193,18 @@ class DictationEngine:
                     prompt_context=lexicon_plan.prompt_context,
                 ).strip()
         except Exception as exc:  # noqa: BLE001
-            if _online:
+            if _online and report_health_on_fail:
                 self._report_health(False, _classify_health_error(exc))
             if not _api_fallback_allowed(self.stt):
+                # Non-API (on-device) backend: return error directly; no fallback.
                 return TranscriptionResult(
                     status="error",
                     duration_s=duration,
                     error=str(exc),
                 )
+            if not allow_cpu_fallback:
+                # Caller wants raw remote failure (retry logic in daemon).
+                raise
             return self._transcribe_with_cpu_fallback(
                 audio,
                 language=language,
@@ -174,21 +251,30 @@ class DictationEngine:
         audio: np.ndarray,
         *,
         language: str | None,
-        primary_error: Exception,
+        primary_error: Exception | None,
     ) -> TranscriptionResult:
+        """Fall back to on-device CPU whisper transcription.
+
+        ``primary_error=None`` means a silent fallback (caller is already in
+        degraded mode and wants no notice message on every chunk).
+        """
         fallback_stt = self._api_fallback_stt
         if fallback_stt is None:
             try:
                 fallback_stt = _create_cpu_whisper_fallback()
             except Exception as fallback_load_error:  # noqa: BLE001
-                return TranscriptionResult(
-                    status="error",
-                    duration_s=self.duration_s(audio),
-                    error=_fallback_error_message(
+                if primary_error is not None:
+                    error = _fallback_error_message(
                         self.stt,
                         primary_error=primary_error,
                         fallback_error=fallback_load_error,
-                    ),
+                    )
+                else:
+                    error = f"CPU fallback load failed: {fallback_load_error}"
+                return TranscriptionResult(
+                    status="error",
+                    duration_s=self.duration_s(audio),
+                    error=error,
                 )
             self._api_fallback_stt = fallback_stt
 
@@ -206,14 +292,18 @@ class DictationEngine:
                 prompt_context=fallback_plan.prompt_context,
             ).strip()
         except Exception as fallback_error:  # noqa: BLE001
-            return TranscriptionResult(
-                status="error",
-                duration_s=self.duration_s(audio),
-                error=_fallback_error_message(
+            if primary_error is not None:
+                error = _fallback_error_message(
                     self.stt,
                     primary_error=primary_error,
                     fallback_error=fallback_error,
-                ),
+                )
+            else:
+                error = f"CPU fallback transcription failed: {fallback_error}"
+            return TranscriptionResult(
+                status="error",
+                duration_s=self.duration_s(audio),
+                error=error,
             )
 
         if fallback_plan.post_hotwords or fallback_plan.post_replacements:
@@ -223,17 +313,20 @@ class DictationEngine:
                 replacements=fallback_plan.post_replacements,
             ).strip()
 
+        # Notice is only attached when there is an original remote error to report
+        notice = _fallback_notice_message(self.stt, primary_error) if primary_error is not None else None
+
         if not text:
             return TranscriptionResult(
                 status="no_speech",
                 duration_s=self.duration_s(audio),
-                notice=_fallback_notice_message(self.stt, primary_error),
+                notice=notice,
             )
         return TranscriptionResult(
             status="ok",
             duration_s=self.duration_s(audio),
             text=text,
-            notice=_fallback_notice_message(self.stt, primary_error),
+            notice=notice,
         )
 
 
@@ -248,10 +341,49 @@ class DictationEngine:
 
 
 def _classify_health_error(exc: Exception) -> str:
-    """Map a transcription exception to a provider-health reason string."""
+    """Map a transcription exception to a provider-health reason string.
+
+    Returns one of: ``"auth"``, ``"rate-limit"``, ``"budget"``, ``"unreachable"``.
+    """
     msg = str(exc).lower()
-    if "401" in msg or "unauthorized" in msg or "authentication" in msg or "invalid api key" in msg:
+
+    # Auth failures — 401, 403, bad key messages
+    if (
+        "401" in msg
+        or "403" in msg
+        or "unauthorized" in msg
+        or "forbidden" in msg
+        or "authentication" in msg
+        or "invalid api key" in msg
+        or "invalid_api_key" in msg
+        or "api key" in msg and "invalid" in msg
+    ):
         return "auth"
+
+    # Rate limiting — 429, explicit rate-limit messages
+    if (
+        "429" in msg
+        or "rate limit" in msg
+        or "rate_limit" in msg
+        or "too many requests" in msg
+        or "ratelimit" in msg
+    ):
+        return "rate-limit"
+
+    # Budget / quota / billing exhaustion
+    if (
+        "402" in msg
+        or "insufficient_quota" in msg
+        or "quota" in msg
+        or "billing" in msg
+        or "credits" in msg
+        or "budget" in msg
+        or "payment" in msg
+        or "plan limit" in msg
+    ):
+        return "budget"
+
+    # Everything else: connectivity, timeout, DNS, server errors
     return "unreachable"
 
 
@@ -265,7 +397,9 @@ def _create_cpu_whisper_fallback() -> SpeechToText:
     return FasterWhisperSpeechToText(model_name="base", device="cpu", compute_type="int8")
 
 
-def _fallback_notice_message(stt: SpeechToText, primary_error: Exception) -> str:
+def _fallback_notice_message(stt: SpeechToText, primary_error: Exception | None) -> str:
+    if primary_error is None:
+        return f"Using on-device fallback (degraded mode)"
     return (
         f"{_backend_label(stt)} transcription failed; "
         "used faster-whisper/base on CPU for this turn. "
@@ -276,9 +410,11 @@ def _fallback_notice_message(stt: SpeechToText, primary_error: Exception) -> str
 def _fallback_error_message(
     stt: SpeechToText,
     *,
-    primary_error: Exception,
+    primary_error: Exception | None,
     fallback_error: Exception,
 ) -> str:
+    if primary_error is None:
+        return f"CPU fallback failed: {_short_error(fallback_error)}"
     return (
         f"{_backend_label(stt)} transcription failed: {_short_error(primary_error)}; "
         f"CPU fallback failed: {_short_error(fallback_error)}"
