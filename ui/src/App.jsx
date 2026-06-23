@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
 import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
-import { VIEWS } from "./views.jsx";
+import { VIEWS, HistoryView } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle } from "./visualizers.jsx";
@@ -28,30 +28,6 @@ function fmtSecs(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
   const p = (n) => String(n).padStart(2, "0");
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
-}
-
-/* ── Copy-last row: quiet recovery chip below the cradle (home only) ─── */
-function CopyLastNote() {
-  const s = useStore();
-  if (!s.history || s.history.length === 0 || s.noteRecording) return null;
-  const latest = s.history[0];
-  const handleCopy = () => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(latest.text)
-        .then(() => s.toast("Copied last note"))
-        .catch(() => s.toast("Could not copy", { bad: true }));
-    } else {
-      s.toast("Clipboard not available", { bad: true });
-    }
-  };
-  return (
-    <button className="lastcap" onClick={handleCopy} title="Copy the last note">
-      <span className="lc-ico"><Icon name="copy" size={15} /></span>
-      <span className="lc-body">
-        <span className="lc-text">{latest.text}</span>
-      </span>
-    </button>
-  );
 }
 
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
@@ -110,8 +86,6 @@ function CaptureHome() {
               </>
             )}
           </div>
-          {/* Copy-last: quiet row beneath the cradle; hidden while recording or when empty */}
-          <CopyLastNote />
           {/* Degraded recording strip: amber, visible while recording on local fallback */}
           {s.noteRecording && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
@@ -169,16 +143,20 @@ function NoteReady() {
     }
   };
 
+  // No webview file-download or fs plugin is wired, so a blob "download" silently
+  // does nothing in the packaged app. Copy the Markdown to the clipboard instead —
+  // truthful and works everywhere. (A real save-to-file path can come via a backend route.)
   const handleExport = () => {
     const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
     const md = `# Note — ${ts}\n\n${note.text}\n`;
-    const blob = new Blob([md], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `note-${ts}.md`; a.click();
-    URL.revokeObjectURL(url);
     setOvfOpen(false);
-    s.toast("Exported as Markdown");
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(md)
+        .then(() => s.toast("Copied as Markdown"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
   };
 
   return (
@@ -212,8 +190,8 @@ function NoteReady() {
                 <>
                   <div className="ovf-scrim" onClick={() => setOvfOpen(false)} />
                   <div className="ovf-menu">
-                    <button onClick={handleCopy}><Icon name="copy" size={14} /> Copy</button>
-                    <button onClick={handleExport}><Icon name="download" size={14} /> Export</button>
+                    <button onClick={handleCopy}><Icon name="copy" size={14} /> Copy text</button>
+                    <button onClick={handleExport}><Icon name="download" size={14} /> Copy as Markdown</button>
                   </div>
                 </>
               )}
@@ -235,13 +213,14 @@ function ExpandedNote() {
 
   const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
 
-  // Back routing: return to the notes list when opened from there, else to note-ready.
+  // Back routing: from a just-captured note return to its ready CTA; otherwise
+  // always fall back to the notes list (the home surface).
   const handleBack = () => {
-    if (s.expandedFrom === "history") {
-      s.setNoteView(null);
-      s.setView("history");
-    } else {
+    if (s.expandedFrom === "ready") {
       s.setNoteView("ready");
+    } else {
+      s.setNoteView(null);
+      s.setView("home");
     }
   };
 
@@ -253,15 +232,17 @@ function ExpandedNote() {
     }
   };
 
+  // See NoteReady.handleExport — copy Markdown to clipboard rather than a no-op blob download.
   const handleExport = () => {
     const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
     const md = `# Note — ${ts}\n\n${note.text}\n`;
-    const blob = new Blob([md], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `note-${ts}.md`; a.click();
-    URL.revokeObjectURL(url);
-    s.toast("Exported as Markdown");
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(md)
+        .then(() => s.toast("Copied as Markdown"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
   };
 
   return (
@@ -273,7 +254,7 @@ function ExpandedNote() {
         <span className="note-exp-title">{noteLabel}</span>
         <div className="note-exp-tools">
           <button className="ibtn" title="Copy" onClick={handleCopy}><Icon name="copy" size={16} /></button>
-          <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
+          <button className="ibtn" title="Copy as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
         </div>
       </div>
       {/* Search + Times omitted: real data is plain text, no timestamps or speaker lines */}
@@ -313,7 +294,6 @@ function GearMenu({ onClose }) {
     { v: "model", label: "Model" },
     { v: "ptt", label: "Push-to-talk" },
     { v: "hotwords", label: "Hotwords" },
-    { v: "history", label: "Recent history" },
     { v: "update", label: "App update" },
     { v: "startup", label: "Startup" },
     { v: "advanced", label: "Advanced" },
@@ -962,7 +942,8 @@ export default function App() {
             noteView === "processing" ? <NoteProcessing /> :
             noteView === "ready"      ? <NoteReady /> :
             noteView === "expanded"   ? <ExpandedNote /> :
-            <CaptureHome />
+            noteRecording             ? <CaptureHome /> :
+            <HistoryView home />
           ) : (
             /* Settings view: full-window with a back button returning to capture home.
                The notes list (history) renders its own header and takes full height. */

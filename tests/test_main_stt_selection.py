@@ -402,31 +402,17 @@ class MainSttSelectionTests(unittest.TestCase):
 
         self.assertEqual(hotkey, "ctrl+space")
 
-    def test_wayland_default_push_to_talk_combo_prefers_ctrl_space(self) -> None:
+    def test_default_push_to_talk_combo_is_ctrl_d(self) -> None:
+        """No saved config and no CLI flag resolves to ctrl+d on every session type."""
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "detect_session_type", return_value="wayland"):
-            with contextlib.redirect_stderr(io.StringIO()):
-                hotkey = main_module._resolve_startup_push_to_talk_combo(
-                    args=args,
-                    cli_args=[],
-                    config=Config(),
-                )
-
-        self.assertEqual(hotkey, "ctrl+space")
-
-    def test_x11_default_push_to_talk_combo_is_ctrl_d(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with patch.object(main_module, "detect_session_type", return_value="x11"):
-            with contextlib.redirect_stderr(io.StringIO()):
-                hotkey = main_module._resolve_startup_push_to_talk_combo(
-                    args=args,
-                    cli_args=[],
-                    config=Config(),
-                )
+        with contextlib.redirect_stderr(io.StringIO()):
+            hotkey = main_module._resolve_startup_push_to_talk_combo(
+                args=args,
+                cli_args=[],
+                config=Config(),
+            )
 
         self.assertEqual(hotkey, "ctrl+d")
 

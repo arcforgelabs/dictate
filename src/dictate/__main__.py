@@ -51,7 +51,6 @@ from dictate.outputs import (
     ClipboardOutput,
     OutputError,
     StdoutOutput,
-    detect_session_type,
     resolve_typing_backend,
 )
 from dictate.process_lock import ProcessLock, daemon_lock_path
@@ -492,8 +491,6 @@ def _resolve_startup_push_to_talk_combo(
 
 
 def _default_push_to_talk_combo() -> str:
-    if detect_session_type() == "wayland":
-        return normalize_push_to_talk_combo("ctrl+space")
     return normalize_push_to_talk_combo(DEFAULT_PUSH_TO_TALK_COMBO)
 
 

@@ -20,13 +20,12 @@ function navTo(label) {
 }
 
 describe("Quiet Console app (mock mode)", () => {
-  it("renders the Note Capture home by default", () => {
+  it("renders the Notes home by default", () => {
     render(<App />);
-    // Capture home: gear button in the TitleBar, cradle button, and status text.
-    // Stage 3: "Dictate" wordmark removed from both TitleBar and capture surface.
-    expect(screen.getByTitle("Settings")).toBeInTheDocument();
+    // Home is now the Notes list: title, search, and the capture (mic) button.
+    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
   it("preserves Quick dictation and Record conversation in the Status view", () => {
@@ -37,12 +36,12 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Record conversation")).toBeInTheDocument();
   });
 
-  it("back button returns to capture home from a settings view", () => {
+  it("back button returns to the notes home from a settings view", () => {
     render(<App />);
     navTo("Model");
     expect(screen.getByText("Transcription model")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Back"));
-    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
   });
 
   it("navigates to the Model view and lists all four providers", () => {
@@ -79,8 +78,9 @@ describe("Quiet Console app (mock mode)", () => {
   it("toggles the theme via the gear menu appearance control", () => {
     render(<App />);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    // Open gear menu then click the Dark option.
-    fireEvent.click(screen.getByTitle("Settings"));
+    // Open gear menu then click the Dark option. (Two "Settings" gears exist in
+    // jsdom — the hidden TitleBar one and the notes-home one; either opens the menu.)
+    fireEvent.click(screen.getAllByTitle("Settings")[0]);
     fireEvent.click(screen.getByText("Dark"));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
@@ -130,14 +130,14 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Insert")).toBeInTheDocument();
   });
 
-  it("New note returns to capture home", async () => {
+  it("New note returns to the notes home", async () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
     fireEvent.click(screen.getByLabelText("Stop recording"));
     await waitFor(() => expect(screen.getByText("New note")).toBeInTheDocument(), { timeout: 2000 });
     fireEvent.click(screen.getByText("New note"));
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
   });
 
   it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
@@ -449,46 +449,12 @@ describe("Quiet Console app (mock mode)", () => {
 });
 
 /* =====================================================================
-   Feature: copy-last row
-   ===================================================================== */
-describe("Copy-last row", () => {
-  it("is visible on the home when history is non-empty (mock mode)", () => {
-    render(<App />);
-    // Default mock mode seeds 3 history items, so the chip should appear.
-    expect(screen.getByTitle("Copy the last note")).toBeInTheDocument();
-  });
-
-  it("is hidden while the note recording is active", () => {
-    render(<App />);
-    fireEvent.click(screen.getByLabelText("Start recording"));
-    expect(screen.queryByTitle("Copy the last note")).not.toBeInTheDocument();
-  });
-
-  it("is hidden when history is empty (live SSE, empty hydration)", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({ history: [] }),
-    });
-    render(<App />);
-    // After SSE connects and hydrates with empty history the chip must be absent.
-    await waitFor(() => expect(screen.queryByTitle("Copy the last note")).not.toBeInTheDocument());
-  });
-});
-
-/* =====================================================================
-   Feature: Notes list + search (redesigned history view)
+   Feature: Notes list + search (now the home surface)
    ===================================================================== */
 describe("Notes list (history view)", () => {
-  it("renders the Notes list with search field when navigating to history", () => {
+  it("renders the Notes list with search field as the home surface", () => {
     render(<App />);
-    navTo("Recent history");
-    expect(screen.getByText("Notes")).toBeInTheDocument();
+    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
     // Count badge — 3 mock notes
     expect(screen.getByText("3")).toBeInTheDocument();
@@ -496,7 +462,6 @@ describe("Notes list (history view)", () => {
 
   it("shows all three mock notes in the list", () => {
     render(<App />);
-    navTo("Recent history");
     expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
     expect(screen.getByText(/sync to Thursday/i)).toBeInTheDocument();
     expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
@@ -504,7 +469,6 @@ describe("Notes list (history view)", () => {
 
   it("search filters notes by text and updates the count", () => {
     render(<App />);
-    navTo("Recent history");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "Stalwart" } });
     // Matching note visible
@@ -518,7 +482,6 @@ describe("Notes list (history view)", () => {
 
   it("shows no-results state when search has no matches", () => {
     render(<App />);
-    navTo("Recent history");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "xyzzy" } });
     expect(screen.getByText(/No notes match/i)).toBeInTheDocument();
@@ -526,7 +489,6 @@ describe("Notes list (history view)", () => {
 
   it("clear button removes the search query and shows all notes again", () => {
     render(<App />);
-    navTo("Recent history");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "Stalwart" } });
     expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
@@ -536,7 +498,6 @@ describe("Notes list (history view)", () => {
 
   it("tapping a note row opens it in the expanded view", () => {
     render(<App />);
-    navTo("Recent history");
     // Click the Stalwart note row (its text bubbles the click up to note-row)
     fireEvent.click(screen.getByText(/Stalwart/i));
     // Should now be in the ExpandedNote view
@@ -547,7 +508,6 @@ describe("Notes list (history view)", () => {
 
   it("Space key on a note row opens it in the expanded view (role=button a11y)", () => {
     render(<App />);
-    navTo("Recent history");
     // Find the note-row div via its role="button" that contains the Stalwart text
     const noteRow = screen.getByText(/Stalwart/i).closest('[role="button"]');
     fireEvent.keyDown(noteRow, { key: " " });
@@ -557,13 +517,12 @@ describe("Notes list (history view)", () => {
 
   it("back from expanded note (opened from notes list) returns to the notes list", () => {
     render(<App />);
-    navTo("Recent history");
     fireEvent.click(screen.getByText(/Stalwart/i));
     // In expanded view; click Back
     fireEvent.click(screen.getByTitle("Back"));
     // Should be back at the notes list
     expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
-    expect(screen.getByText("Notes")).toBeInTheDocument();
+    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
   });
 
   it("back from expanded note (opened from note-ready) still returns to note-ready", async () => {
@@ -587,10 +546,9 @@ describe("Notes list (history view)", () => {
    Recording is NEVER hard-blocked. On-device is the always-available floor.
    ===================================================================== */
 describe("Provider resilience — graceful degradation", () => {
-  it("shows capture home by default with mic always enabled", () => {
+  it("shows the notes home by default with mic always enabled", () => {
     render(<App />);
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
     // BlockedHome is gone — these strings must never appear
     expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();

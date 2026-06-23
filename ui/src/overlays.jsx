@@ -40,10 +40,12 @@ export function CommandPalette() {
   const items = useMemo(() => {
     const nav = [
       ["status", "Status", "status"], ["sliders", "Model", "model"], ["keyboard", "Push-to-talk", "ptt"],
-      ["hash", "Hotwords", "hotwords"], ["history", "Recent history", "history"],
+      ["hash", "Hotwords", "hotwords"],
       ["download", "App update", "update"], ["power", "Startup", "startup"],
       ["gear", "Advanced", "advanced"],
     ].map(([icon, label, view]) => ({ icon, label, group: "Go to", run: () => s.setView(view) }));
+    // Notes is the home surface now, not a settings view — clear any open note first.
+    const notes = { icon: "history", label: "Notes", group: "Go to", run: () => { s.setNoteView(null); s.setView("home"); } };
     const actions = [
       { icon: "mic", label: "Try dictation", group: "Actions", run: () => { s.setView("status"); s.dictateOnce(); } },
       { icon: s.theme === "dark" ? "sun" : "moon", label: s.theme === "dark" ? "Switch to light" : "Switch to dark", group: "Actions", run: () => s.setTheme(s.theme === "dark" ? "light" : "dark") },
@@ -51,7 +53,7 @@ export function CommandPalette() {
       { icon: "trash", label: "Clear recent history", group: "Actions", run: () => s.clearHistory() },
     ];
     const models = MODELS.map((m) => ({ icon: null, brand: m.brand, label: "Use " + m.name, meta: m.provider, group: "Models", run: () => { s.setView("model"); if (m.local || s.keys[m.brand]) s.setModel(m.id); } }));
-    const all = [...nav, ...actions, ...models];
+    const all = [notes, ...nav, ...actions, ...models];
     if (!q.trim()) return all;
     const lq = q.toLowerCase();
     return all.filter((i) => i.label.toLowerCase().includes(lq) || (i.meta || "").toLowerCase().includes(lq));

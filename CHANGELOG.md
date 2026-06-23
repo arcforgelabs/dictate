@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-06-23 (later)
+
+### Changed
+
+- Made the Notes list the home surface (transcript-first): opening the window
+  shows recent notes you can search and reopen, rather than a capture screen.
+  Capture became an action — a mic button on the notes header (push-to-talk
+  still works globally) — and the cradle now appears only while recording.
+- Moved settings access to a gear menu on the notes header (the custom titlebar
+  is hidden under native window decorations, so its gear/search were
+  unreachable). Back from any note now returns to the notes list.
+- Removed the standalone "copy last note" snippet — the notes list shows recent
+  notes with per-row copy, so it was redundant.
+- Made the Wayland default push-to-talk shortcut Ctrl+D too, matching every
+  other platform (it previously fell back to Ctrl+Space on Wayland).
+
+### Fixed
+
+- Re-centred the cradle-mic desktop/app icon. It was shifted off-centre; the
+  Linux package icons and the Windows `.ico` are regenerated from the canonical
+  `assets/dictate.svg`, with the cradle rendering as a clean curve.
+- Note "Export" no longer claims success while writing nothing. The packaged
+  webview has no file-download path, so it now copies the note as Markdown to
+  the clipboard and says so ("Copied as Markdown").
+
 ## 2026-06-23
 
 ### Added
