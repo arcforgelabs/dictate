@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
 import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
-import { VIEWS, HistoryView } from "./views.jsx";
+import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle } from "./visualizers.jsx";
@@ -37,7 +37,15 @@ function CaptureHome() {
   const noKey = s.providerMode === "online" && s.providerStatus === "no-key";
   return (
     <div className="note-home">
-      {/* Stage 3: no in-app header — the cradle sits directly under the TitleBar chrome */}
+      {/* Quiet home chrome: settings + notes (the native-decoration titlebar is hidden). */}
+      <div className="home-top">
+        <button className="ibtn" title="Settings" onClick={() => s.setGearOpen(true)}>
+          <Icon name="gear" size={17} />
+        </button>
+        <button className="ibtn" title="Notes" onClick={() => s.setView("history")}>
+          <Icon name="history" size={17} />
+        </button>
+      </div>
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">
@@ -86,6 +94,8 @@ function CaptureHome() {
               </>
             )}
           </div>
+          {/* Copy-last: quiet row beneath the cradle; hidden while recording or when empty */}
+          <CopyLastNote />
           {/* Degraded recording strip: amber, visible while recording on local fallback */}
           {s.noteRecording && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
@@ -96,6 +106,30 @@ function CaptureHome() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── Copy-last row: quiet chip below the cradle for fast reuse of the last note ── */
+function CopyLastNote() {
+  const s = useStore();
+  if (!s.history || s.history.length === 0 || s.noteRecording) return null;
+  const latest = s.history[0];
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(latest.text)
+        .then(() => s.toast("Copied last note"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
+  };
+  return (
+    <button className="lastcap" onClick={handleCopy} title="Copy the last note">
+      <span className="lc-ico"><Icon name="copy" size={15} /></span>
+      <span className="lc-body">
+        <span className="lc-text">{latest.text}</span>
+      </span>
+    </button>
   );
 }
 
@@ -213,14 +247,13 @@ function ExpandedNote() {
 
   const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
 
-  // Back routing: from a just-captured note return to its ready CTA; otherwise
-  // always fall back to the notes list (the home surface).
+  // Back routing: return to the notes list when opened from there, else to note-ready.
   const handleBack = () => {
-    if (s.expandedFrom === "ready") {
-      s.setNoteView("ready");
-    } else {
+    if (s.expandedFrom === "history") {
       s.setNoteView(null);
-      s.setView("home");
+      s.setView("history");
+    } else {
+      s.setNoteView("ready");
     }
   };
 
@@ -942,8 +975,7 @@ export default function App() {
             noteView === "processing" ? <NoteProcessing /> :
             noteView === "ready"      ? <NoteReady /> :
             noteView === "expanded"   ? <ExpandedNote /> :
-            noteRecording             ? <CaptureHome /> :
-            <HistoryView home />
+            <CaptureHome />
           ) : (
             /* Settings view: full-window with a back button returning to capture home.
                The notes list (history) renders its own header and takes full height. */

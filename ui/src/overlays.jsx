@@ -44,8 +44,8 @@ export function CommandPalette() {
       ["download", "App update", "update"], ["power", "Startup", "startup"],
       ["gear", "Advanced", "advanced"],
     ].map(([icon, label, view]) => ({ icon, label, group: "Go to", run: () => s.setView(view) }));
-    // Notes is the home surface now, not a settings view — clear any open note first.
-    const notes = { icon: "history", label: "Notes", group: "Go to", run: () => { s.setNoteView(null); s.setView("home"); } };
+    // Notes list (recent dictations) — its own view, reachable from the capture home.
+    const notes = { icon: "history", label: "Notes", group: "Go to", run: () => { s.setNoteView(null); s.setView("history"); } };
     const actions = [
       { icon: "mic", label: "Try dictation", group: "Actions", run: () => { s.setView("status"); s.dictateOnce(); } },
       { icon: s.theme === "dark" ? "sun" : "moon", label: s.theme === "dark" ? "Switch to light" : "Switch to dark", group: "Actions", run: () => s.setTheme(s.theme === "dark" ? "light" : "dark") },

@@ -461,7 +461,7 @@ function hilite(text, q) {
   return <>{text.slice(0, i)}<mark className="hl">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
-export function HistoryView({ home = false }) {
+function HistoryView() {
   const s = useStore();
   const [q, setQ] = useState("");
   const [, tick] = useState(0);
@@ -499,36 +499,13 @@ export function HistoryView({ home = false }) {
 
   return (
     <div className="notes">
-      {/* Own header. As home: settings gear · title · capture. As a sub-view: back · title · count. */}
+      {/* Own header: back → capture home, title. */}
       <div className="notes-top">
-        {home ? (
-          <button className="ibtn" title="Settings" onClick={() => s.setGearOpen(true)}>
-            <Icon name="gear" size={17} />
-          </button>
-        ) : (
-          <button className="ibtn" title="Back" onClick={() => s.setView("home")}>
-            <Icon name="back" size={17} />
-          </button>
-        )}
+        <button className="ibtn" title="Back" onClick={() => s.setView("home")}>
+          <Icon name="back" size={17} />
+        </button>
         <div className="notes-title">Notes</div>
-        {!empty && (
-          <div className="notes-count t-mono">
-            {q ? `${filtered.length} of ${all.length}` : String(all.length)}
-          </div>
-        )}
-        {home && (
-          <button className="ibtn notes-capture" title="Record a conversation" aria-label="Start recording" onClick={s.toggleNoteRecording}>
-            <Icon name="mic" size={17} />
-          </button>
-        )}
       </div>
-
-      {/* Config-gap hint: online chosen but no key — quiet, never a block. */}
-      {home && s.providerMode === "online" && s.providerStatus === "no-key" && (
-        <div className="config-hint notes-config-hint">
-          <Icon name="lock" size={12} /> Using on-device · add an xAI key to go online
-        </div>
-      )}
 
       {/* Search field — autofocused, with ×-clear when non-empty */}
       <div className="notes-search">
@@ -554,9 +531,6 @@ export function HistoryView({ home = false }) {
             <span className="nb-ico"><Icon name="history" size={22} /></span>
             <div className="nb-title">Your notes will appear here</div>
             <div className="nb-sub">Every dictation is saved as a note you can search and reuse.</div>
-            {home && (
-              <div className="nb-hint t-mono">Hold {s.shortcut.join(" + ")} to dictate, or tap the mic to record a conversation.</div>
-            )}
           </div>
         ) : filtered.length === 0 ? (
           <div className="notes-blank">
@@ -592,14 +566,6 @@ export function HistoryView({ home = false }) {
           ))
         )}
       </div>
-
-      {/* Live push-to-talk transcript: quiet footer while dictating, cleared when stale. */}
-      {home && s.transcript?.text && !s.transcript.stale && (
-        <div className="notes-livestrip" aria-live="polite">
-          <span className="note-caret" />
-          <span>{s.transcript.text}</span>
-        </div>
-      )}
     </div>
   );
 }

@@ -4,15 +4,11 @@
 
 ### Changed
 
-- Made the Notes list the home surface (transcript-first): opening the window
-  shows recent notes you can search and reopen, rather than a capture screen.
-  Capture became an action — a mic button on the notes header (push-to-talk
-  still works globally) — and the cradle now appears only while recording.
-- Moved settings access to a gear menu on the notes header (the custom titlebar
-  is hidden under native window decorations, so its gear/search were
-  unreachable). Back from any note now returns to the notes list.
-- Removed the standalone "copy last note" snippet — the notes list shows recent
-  notes with per-row copy, so it was redundant.
+- Restored on-screen navigation that the native-decorations switch had hidden:
+  the capture (mic) home now carries a settings gear and a Notes button, since
+  the custom titlebar holding the old gear/search is hidden under native window
+  decorations. The capture screen stays the home; Notes is a searchable list of
+  recent dictations one tap away, and back returns to the mic.
 - Made the Wayland default push-to-talk shortcut Ctrl+D too, matching every
   other platform (it previously fell back to Ctrl+Space on Wayland).
 

@@ -20,12 +20,12 @@ function navTo(label) {
 }
 
 describe("Quiet Console app (mock mode)", () => {
-  it("renders the Notes home by default", () => {
+  it("renders the capture (mic) home by default", () => {
     render(<App />);
-    // Home is now the Notes list: title, search, and the capture (mic) button.
-    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    // Home is the capture surface: the cradle mic, ready status, and a Notes button.
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    expect(screen.getByTitle("Notes")).toBeInTheDocument();
   });
 
   it("preserves Quick dictation and Record conversation in the Status view", () => {
@@ -36,12 +36,13 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Record conversation")).toBeInTheDocument();
   });
 
-  it("back button returns to the notes home from a settings view", () => {
+  it("back button returns to the capture home from a settings view", () => {
     render(<App />);
     navTo("Model");
     expect(screen.getByText("Transcription model")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Back"));
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
   it("navigates to the Model view and lists all four providers", () => {
@@ -130,14 +131,14 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Insert")).toBeInTheDocument();
   });
 
-  it("New note returns to the notes home", async () => {
+  it("New note returns to the capture home", async () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
     fireEvent.click(screen.getByLabelText("Stop recording"));
     await waitFor(() => expect(screen.getByText("New note")).toBeInTheDocument(), { timeout: 2000 });
     fireEvent.click(screen.getByText("New note"));
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
   it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
@@ -449,26 +450,27 @@ describe("Quiet Console app (mock mode)", () => {
 });
 
 /* =====================================================================
-   Feature: Notes list + search (now the home surface)
+   Feature: Notes list + search (reachable from the capture home)
    ===================================================================== */
 describe("Notes list (history view)", () => {
-  it("renders the Notes list with search field as the home surface", () => {
+  it("renders the Notes list with search field", () => {
     render(<App />);
+    navTo("Notes");
     expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
-    // Count badge — 3 mock notes
-    expect(screen.getByText("3")).toBeInTheDocument();
   });
 
   it("shows all three mock notes in the list", () => {
     render(<App />);
+    navTo("Notes");
     expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
     expect(screen.getByText(/sync to Thursday/i)).toBeInTheDocument();
     expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
   });
 
-  it("search filters notes by text and updates the count", () => {
+  it("search filters notes by text", () => {
     render(<App />);
+    navTo("Notes");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "Stalwart" } });
     // Matching note visible
@@ -476,12 +478,11 @@ describe("Notes list (history view)", () => {
     // Non-matching notes absent
     expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sync to Thursday/i)).not.toBeInTheDocument();
-    // Count shows "1 of 3"
-    expect(screen.getByText("1 of 3")).toBeInTheDocument();
   });
 
   it("shows no-results state when search has no matches", () => {
     render(<App />);
+    navTo("Notes");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "xyzzy" } });
     expect(screen.getByText(/No notes match/i)).toBeInTheDocument();
@@ -489,6 +490,7 @@ describe("Notes list (history view)", () => {
 
   it("clear button removes the search query and shows all notes again", () => {
     render(<App />);
+    navTo("Notes");
     const input = screen.getByPlaceholderText("Search notes");
     fireEvent.change(input, { target: { value: "Stalwart" } });
     expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
@@ -498,6 +500,7 @@ describe("Notes list (history view)", () => {
 
   it("tapping a note row opens it in the expanded view", () => {
     render(<App />);
+    navTo("Notes");
     // Click the Stalwart note row (its text bubbles the click up to note-row)
     fireEvent.click(screen.getByText(/Stalwart/i));
     // Should now be in the ExpandedNote view
@@ -508,6 +511,7 @@ describe("Notes list (history view)", () => {
 
   it("Space key on a note row opens it in the expanded view (role=button a11y)", () => {
     render(<App />);
+    navTo("Notes");
     // Find the note-row div via its role="button" that contains the Stalwart text
     const noteRow = screen.getByText(/Stalwart/i).closest('[role="button"]');
     fireEvent.keyDown(noteRow, { key: " " });
@@ -517,6 +521,7 @@ describe("Notes list (history view)", () => {
 
   it("back from expanded note (opened from notes list) returns to the notes list", () => {
     render(<App />);
+    navTo("Notes");
     fireEvent.click(screen.getByText(/Stalwart/i));
     // In expanded view; click Back
     fireEvent.click(screen.getByTitle("Back"));
@@ -546,9 +551,10 @@ describe("Notes list (history view)", () => {
    Recording is NEVER hard-blocked. On-device is the always-available floor.
    ===================================================================== */
 describe("Provider resilience — graceful degradation", () => {
-  it("shows the notes home by default with mic always enabled", () => {
+  it("shows the capture home by default with mic always enabled", () => {
     render(<App />);
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
     // BlockedHome is gone — these strings must never appear
     expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
