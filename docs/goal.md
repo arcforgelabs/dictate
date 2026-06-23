@@ -11,6 +11,14 @@ root `CHANGELOG.md`. This file now tracks only the remaining goal work.
 
 ## Remaining Work
 
+### Design Feedback Loop (next order of business)
+
+Stand up a fast loop for marking up and adjusting the UI: reconstruct the current
+production UI (`ui/src/`) 1:1 inside the Claude Design project so the maintainer
+can annotate items for improvement, then sync changes back to `master`. First
+target is refining the Settings/gear menu. Full plan and surface inventory:
+[docs/claude-design-workflow.md](claude-design-workflow.md).
+
 ### Product Surface Goal
 
 Dictate's current production surface is desktop, and the desktop version should
