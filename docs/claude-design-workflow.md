@@ -7,7 +7,7 @@ project-specific mapping.
 
 | What | Where |
 | --- | --- |
-| Claude Design project | `https://claude.ai/design/p/2309408a-2350-4da0-bb4c-c03c7cfee48a` (main prototype: `dictate-app/Dictate Settings.html`) |
+| Claude Design project | **"Dictate Design System" (`2477ec…`)** — the canonical Note Capture ui-kit + design system. (The old `2309408a…` "[LEGACY] dictate" project is superseded and flagged for deletion — do not use it.) |
 | Design deliverables | the **`design/`** folder — organised by the design agent, mapped in [`../design/README.md`](../design/README.md). Keep it clear and discoverable; internal structure is the agent's call. |
 | Production | `ui/src/` (Vite app) |
 | Build / test | from `ui/`: `npm run dev` · `npm run build` · `npm test` |
@@ -31,10 +31,14 @@ while production has grown a full surface set. The prototype must catch up so
 every screen the user sees exists in Claude Design to mark up.
 
 **The loop:**
-1. **Reconstruct** the current production UI 1:1 into the Claude Design project
-   (`2309408a-…`) — one prototype per surface, matching `ui/src/` exactly
-   (layout, copy, states). Use the `claude-design` skill (`write_files` +
-   `render_preview`), not hand-copied CDP.
+1. **Reconstruct** the current production UI 1:1 into the canonical Claude Design
+   project (**`2477ec…` "Dictate Design System"**) — one prototype per surface,
+   matching `ui/src/` exactly (layout, copy, states). Cloud-first: design here,
+   then sync to `ui/src` — never restyle `ui/src` directly. Use the
+   `claude-design` skill (`write_files` + `render_preview`), not hand-copied CDP.
+   Note: `design/locks/note-capture-core/` already froze the *shipped core*, but
+   it predates this session's changes (capture-home top bar, standalone Notes
+   view, gear-menu refinement) — those still need to land in the cloud project.
 2. **Mark up** — the maintainer annotates items for improvement on the rendered
    prototypes.
 3. **Sync back** — changes land in `ui/src/` via `/design-sync` onto `master`
