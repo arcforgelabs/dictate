@@ -281,6 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             lexicon_mode=lexicon_mode,
             lexicon_replacements=config.lexicon_replacements,
             push_to_talk_combo=push_to_talk_combo,
+            stt_backend=stt_backend,
         )
         return 0
     _run_tray(
@@ -291,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         lexicon_mode=lexicon_mode,
         lexicon_replacements=config.lexicon_replacements,
         push_to_talk_combo=push_to_talk_combo,
+        stt_backend=stt_backend,
     )
     return 0
 
@@ -890,9 +892,12 @@ def _run_headless(
     lexicon_mode: LexiconMode,
     lexicon_replacements: dict[str, str] | None,
     push_to_talk_combo: str,
+    stt_backend: str,
 ) -> None:
     from dictate.daemon import Daemon
+    from dictate.provider_supervisor import ProviderSupervisor, make_remote_probe
 
+    supervisor = ProviderSupervisor(preferred=stt_backend, probe_fn=make_remote_probe(stt_backend))
     output = _resolve_typing_output_or_exit(type_backend)
     daemon = Daemon(
         stt,
@@ -902,9 +907,13 @@ def _run_headless(
         lexicon_mode=lexicon_mode,
         lexicon_replacements=lexicon_replacements,
         push_to_talk_combo=push_to_talk_combo,
+        supervisor=supervisor,
     )
     _maybe_start_ui_server(daemon)
-    daemon.run()
+    try:
+        daemon.run()
+    finally:
+        supervisor.shutdown()
 
 
 def _maybe_start_ui_server(daemon: object) -> object | None:
@@ -934,9 +943,12 @@ def _run_tray(
     lexicon_mode: LexiconMode,
     lexicon_replacements: dict[str, str] | None,
     push_to_talk_combo: str,
+    stt_backend: str,
 ) -> None:
     from dictate.daemon import Daemon
+    from dictate.provider_supervisor import ProviderSupervisor, make_remote_probe
 
+    supervisor = ProviderSupervisor(preferred=stt_backend, probe_fn=make_remote_probe(stt_backend))
     output = _resolve_typing_output_or_exit(type_backend)
     daemon = Daemon(
         stt,
@@ -946,16 +958,20 @@ def _run_tray(
         lexicon_mode=lexicon_mode,
         lexicon_replacements=lexicon_replacements,
         push_to_talk_combo=push_to_talk_combo,
+        supervisor=supervisor,
     )
-    if sys.platform.startswith("win"):
-        from dictate.windows_tray import WindowsTrayIcon
+    try:
+        if sys.platform.startswith("win"):
+            from dictate.windows_tray import WindowsTrayIcon
 
-        WindowsTrayIcon(daemon).run()
-        return
+            WindowsTrayIcon(daemon).run()
+            return
 
-    from dictate.tray import TrayIcon
+        from dictate.tray import TrayIcon
 
-    TrayIcon(daemon).run()
+        TrayIcon(daemon).run()
+    finally:
+        supervisor.shutdown()
 
 
 if __name__ == "__main__":

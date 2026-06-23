@@ -142,18 +142,44 @@ def _make_probe_fn(preferred: str) -> Callable[[], bool]:
 
 
 def _wire_supervisor(daemon: object, backend: object) -> None:
-    """Create a ``ProviderSupervisor`` and wire it to the daemon and UI backend.
+    """Wire a ``ProviderSupervisor`` to the daemon and UI backend.
 
-    Shuts down any previously created supervisor first.  Safe to call after
-    the daemon is constructed (sets ``daemon.supervisor`` and
-    ``engine.health_sink`` directly).
+    If the daemon already carries a supervisor (injected at startup by
+    ``__main__.py``), that supervisor is reused and connected to the UI
+    backend — no duplicate is created and ``Daemon.__init__`` already wired
+    ``engine.health_sink``.
 
-    The supervisor is idle when the preferred backend is on-device or the
-    reason is ``auth`` — so it is always safe to create.
+    If no supervisor exists yet (e.g. ``DICTATE_UI_SERVER`` headless mode
+    without a startup supervisor), a fresh one is created from the daemon's
+    active STT backend.
+
+    Shuts down any previously registered module-level supervisor before
+    registering a new one.  Safe to call after the daemon is constructed.
     """
     global _supervisor  # noqa: PLW0603
 
-    # Tear down an existing supervisor before replacing it.
+    # ------------------------------------------------------------------
+    # Fast path: reuse the supervisor that __main__.py already created.
+    # ------------------------------------------------------------------
+    existing = getattr(daemon, "supervisor", None)
+    if existing is not None:
+        old = _supervisor
+        if old is not None and old is not existing:
+            try:
+                old.shutdown()  # type: ignore[union-attr]
+            except Exception:  # noqa: BLE001
+                pass
+        _supervisor = existing
+        # health_sink was already wired in Daemon.__init__; just connect the UI.
+        try:
+            backend.connect_supervisor(existing)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to connect supervisor to UI backend")
+        return
+
+    # ------------------------------------------------------------------
+    # Slow path: no startup supervisor — create one now.
+    # ------------------------------------------------------------------
     old = _supervisor
     if old is not None:
         try:

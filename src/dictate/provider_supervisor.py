@@ -336,6 +336,34 @@ class ProviderSupervisor:
 
 
 # --------------------------------------------------------------------------- #
+# Probe factory
+# --------------------------------------------------------------------------- #
+
+
+def make_remote_probe(backend: str) -> Callable[[], bool]:
+    """Return a lightweight authenticated health-check callable for *backend*.
+
+    The returned ``probe_fn`` reads the stored key on every call and does a
+    real remote validation.  Returns ``True`` iff the key is present and
+    accepted; ``False`` on any failure or missing key.  **Never logs the key.**
+
+    Uses the public ``api_keys.api_key_status`` wrapper so the probe logic
+    stays consistent with the rest of the key-validation stack.
+    """
+
+    def _probe() -> bool:
+        try:
+            from dictate import api_keys
+
+            result = api_keys.api_key_status(backend, validate_remote=True, timeout=4)
+            return result.status == "Ready"
+        except Exception:  # noqa: BLE001
+            return False
+
+    return _probe
+
+
+# --------------------------------------------------------------------------- #
 # Helper utilities
 # --------------------------------------------------------------------------- #
 

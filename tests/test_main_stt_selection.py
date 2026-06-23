@@ -306,6 +306,13 @@ class MainSttSelectionTests(unittest.TestCase):
             patch.object(main_module.sys, "platform", "win32"),
             patch.object(main_module, "_resolve_typing_output_or_exit", return_value=output),
             patch.dict(sys.modules, {"dictate.windows_tray": fake_windows_tray}),
+            patch(
+                "dictate.provider_supervisor.ProviderSupervisor",
+                lambda preferred, *, probe_fn, **kw: type(
+                    "_Sup", (), {"preferred": preferred, "shutdown": lambda self: None}
+                )(),
+            ),
+            patch("dictate.provider_supervisor.make_remote_probe", return_value=lambda: False),
         ):
             main_module._run_tray(
                 stt,
@@ -315,6 +322,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 lexicon_mode="native",
                 lexicon_replacements=None,
                 push_to_talk_combo="ctrl_r",
+                stt_backend="xai",
             )
 
         self.assertTrue(calls["ran"])
