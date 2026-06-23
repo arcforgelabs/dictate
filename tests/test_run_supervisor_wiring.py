@@ -7,11 +7,20 @@ All probes are mocked — this suite never hits the network.
 from __future__ import annotations
 
 import sys
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
 from dictate import __main__ as main_module
 from dictate.stt import SttCapabilities
+
+
+def tearDownModule() -> None:
+    """Cancel probe Timers left alive by supervisors so no daemon thread
+    survives to interpreter shutdown (a Windows STATUS_DLL_INIT_FAILED hazard)."""
+    for t in threading.enumerate():
+        if isinstance(t, threading.Timer) and t.is_alive():
+            t.cancel()
 
 
 # ---------------------------------------------------------------------------

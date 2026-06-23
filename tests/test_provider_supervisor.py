@@ -27,6 +27,18 @@ from dictate.provider_supervisor import (
 )
 
 
+def tearDownModule() -> None:
+    """Cancel any probe Timers left alive by supervisors created in this module.
+
+    A daemon Timer still alive at interpreter shutdown crashes the Windows test
+    runner with STATUS_DLL_INIT_FAILED (0xC0000142). Most tests call
+    ``supervisor.shutdown()``; this is a belt-and-suspenders sweep for the rest.
+    """
+    for t in threading.enumerate():
+        if isinstance(t, threading.Timer) and t.is_alive():
+            t.cancel()
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #

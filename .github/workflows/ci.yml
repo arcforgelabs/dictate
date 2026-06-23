@@ -55,7 +55,9 @@ jobs:
       - name: Run unit tests on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: .venv\Scripts\python.exe -m unittest discover -s tests
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: .venv\Scripts\python.exe -X faulthandler -m unittest discover -s tests -v
 
       - name: Show version on Linux
         if: runner.os == 'Linux'
