@@ -14,10 +14,20 @@ follow-ups below.
   retired (`dictate-app/`, `dictate-ds/`, `explorations/`, loose `dictate-note-capture/`).
 
 ## Follow-ups (rough priority)
-1. **Settings detail surfaces** 🟠 — production still renders the old dense views behind the
-   gear (Model · Push-to-talk · Hotwords · Recent history · App update · Startup · Advanced).
-   Design them in the Note Capture style **in the cloud (`2477ec`) first → sync → port** — do
-   NOT restyle directly in `ui/src` (cloud-first).
+1. **Settings — ELIMINATED (direction locked 2026-06-24).** Decision: the GUI owes the
+   *non-technical daily user* nothing but doing-it-for-them; all advanced config lives in the
+   **`dictate config` CLI** (agents/power users). So the gear-menu-of-pages is removed entirely.
+   - **Keep (the one survivor):** a quiet **"On-device · private" privacy pill** on the capture
+     home (trust/consent, not config — tap to flip). **No gear.** Notes stays (it's content).
+   - **Delete from the GUI:** Status view, Model/provider picker, Push-to-talk page, Hotwords
+     page, App update page, Startup page, Advanced page. Theme **follows the system**; updates
+     **auto-install**; the hotkey ships sensible (Ctrl+D). Advanced = `dictate config`.
+   - **Cloud proposals built** (`2477ec`, /preview): `comp-settings.html` (faithful current),
+     `comp-settings-simplified.html` (4-row interim), `comp-settings-minimal.html` (eliminated),
+     `comp-capture-home.html` (the no-gear home with the privacy pill), `comp-notes-list.html`.
+   - **Implementation (port to `ui/src` after markup):** remove `GearMenu` + the `VIEWS` settings
+     pages from `App.jsx`/`views.jsx`, drop the home-top gear, add the privacy pill; keep the
+     Notes button. Verify `dictate config` covers every deleted control before removing it.
 2. **Real `/api/insert`** 🟠 — Insert currently copies to clipboard + a `TODO(backend)`. Add
    `POST /api/insert` (ui_server) → `UiBackend.insert_text` → the typing backend so Insert
    types the note into the focused app.
