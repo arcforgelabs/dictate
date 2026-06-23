@@ -583,43 +583,73 @@ describe("Notes list (history view)", () => {
 });
 
 /* =====================================================================
-   Feature: Provider-health blocked state (Bundle C Part 3)
+   Feature: Provider resilience — graceful degradation (Bundle C Part 3)
+   Recording is NEVER hard-blocked. On-device is the always-available floor.
    ===================================================================== */
-describe("Provider health blocked state", () => {
-  it("shows capture home by default (healthy provider)", () => {
+describe("Provider resilience — graceful degradation", () => {
+  it("shows capture home by default with mic always enabled", () => {
     render(<App />);
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
     expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    // BlockedHome is gone — these strings must never appear
+    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
+  });
+
+  it("mic is NOT disabled by provider state — online+unhealthy still shows Start recording", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "auth", mode: "online", degraded: true, reason: "auth", active: "faster-whisper" },
+        providers: { xai: { configured: true, status: "Ready" } },
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // After hydration with degraded state, the mic button must still be enabled
+    await waitFor(() => expect(screen.getByLabelText("Start recording")).toBeInTheDocument());
+    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
+  });
+
+  it("config-gap hint shows when online mode selected but no API key configured", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "no-key", mode: "online", degraded: false, active: "faster-whisper" },
+        providers: { xai: { configured: false, status: "None" } },
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // Quiet amber hint — not a block
+    await waitFor(() =>
+      expect(screen.getByText(/Using on-device · add an xAI key to go online/)).toBeInTheDocument()
+    );
+    // Mic is still enabled — not blocked
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
     expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
   });
 
-  it("provider-health SSE updates providerHealthy state (live mode)", async () => {
-    // When getState hydrates with online+healthy, then provider-health SSE fires unhealthy,
-    // the UI should switch to BlockedHome.
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    // Initial hydration: online and healthy (has a key)
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "auth", mode: "online" },
-        providers: { xai: { configured: true, status: "Ready" } },
-      }),
-    });
-
-    render(<App />);
-    // After hydration the blocked screen appears
-    await waitFor(() =>
-      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
-    );
-  });
-
-  it("renders BlockedHome when hydrated with online+unhealthy providerHealth", async () => {
+  it("provider-degraded SSE triggers amber toast and degraded strip during recording", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -628,66 +658,76 @@ describe("Provider health blocked state", () => {
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
-      json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "no-key", mode: "online" },
-        providers: { xai: { configured: false, status: "None" } },
-      }),
+      json: async () => ({ history: [] }),
     });
 
     render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // Start recording via SSE note-recording event
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "note-recording", active: true }),
+      });
+    });
+    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+
+    // Fire provider-degraded SSE
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "provider-degraded", preferred: "xai", active: "faster-whisper", reason: "unreachable" }),
+      });
+    });
+
+    // Amber toast: "Switched to on-device"
     await waitFor(() =>
-      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
+      expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument()
     );
-    // The mic button is disabled (danger class)
-    const mic = screen.getByLabelText("Recording blocked — provider unhealthy");
-    expect(mic).toBeDisabled();
-    // Actions are present
-    expect(screen.getByText("Switch to Private")).toBeInTheDocument();
-    expect(screen.getByText("Retry")).toBeInTheDocument();
-    // Mono hint
-    expect(screen.getByText(/dictate config set-key xai/)).toBeInTheDocument();
+
+    // Degraded strip shows during recording
+    expect(screen.getByText(/On-device · xAI unreachable — retrying…/)).toBeInTheDocument();
+
+    // Mic remains functional (recording still active)
+    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
   });
 
-  it("Switch to Private returns to capture home (sets faster-whisper model)", async () => {
+  it("provider-recovered SSE clears degraded state and shows recovery toast", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
       close() {}
     };
-    // First call returns online+unhealthy, subsequent patch returns private+healthy
-    let patchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
-      if (opts?.method === "PATCH") {
-        patchCount++;
-        return { ok: true, json: async () => ({
-          history: [],
-          providerHealth: { healthy: true, status: "ok", mode: "private" },
-        })};
-      }
-      return { ok: true, json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "no-key", mode: "online" },
-        providers: { xai: { configured: false, status: "None" } },
-      })};
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
     });
 
     render(<App />);
-    await waitFor(() =>
-      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
-    );
+    await waitFor(() => expect(sources).toHaveLength(1));
 
-    fireEvent.click(screen.getByText("Switch to Private"));
+    // First degrade
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "provider-degraded", preferred: "xai", active: "faster-whisper", reason: "unreachable" }),
+      });
+    });
+    await waitFor(() => expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument());
 
-    // After switching, capture home should return (patchConfig was called)
-    await waitFor(() =>
-      expect(screen.getByText("Ready to capture")).toBeInTheDocument(), { timeout: 2000 }
-    );
-    expect(patchCount).toBeGreaterThan(0);
+    // Then recover
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "provider-recovered", preferred: "xai", active: "xai" }),
+      });
+    });
+
+    // Recovery toast appears
+    await waitFor(() => expect(screen.getByText(/Back on xAI/)).toBeInTheDocument());
+    // Home screen is still reachable (mic not disabled)
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
   });
 
-  it("blocked mic button is visually disabled (aria)", async () => {
+  it("degraded strip renders when hydrated with providerDegraded=true and recording starts", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -698,17 +738,23 @@ describe("Provider health blocked state", () => {
       ok: true,
       json: async () => ({
         history: [],
-        providerHealth: { healthy: false, status: "auth", mode: "online" },
-        providers: { xai: { configured: true, status: "Ready" } },
+        providerHealth: { healthy: false, status: "unreachable", mode: "online", degraded: true, reason: "unreachable", active: "faster-whisper" },
       }),
     });
 
     render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    // Start recording via SSE (providerDegraded is already true from hydration)
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "note-recording", active: true }),
+      });
+    });
+
     await waitFor(() =>
-      expect(screen.getByLabelText("Recording blocked — provider unhealthy")).toBeInTheDocument()
+      expect(screen.getByText(/On-device · xAI unreachable — retrying…/)).toBeInTheDocument()
     );
-    const btn = screen.getByLabelText("Recording blocked — provider unhealthy");
-    expect(btn).toBeDisabled();
-    expect(btn.className).toContain("danger");
+    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
   });
 });

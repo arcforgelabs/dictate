@@ -16,6 +16,7 @@
   --shell-edge:rgba(27,26,22,.30); --shell-edge-soft:rgba(27,26,22,.10); --shell-divider:rgba(27,26,22,.18);
   --primary:#1b1a16; --primary-fg:#faf8f4; --primary-hover:#322f29;
   --danger:#c5402c; --danger-bg:rgba(197,64,44,.10); --live:#2f8f63; --live-bg:rgba(47,143,99,.12); --live-text:#1d6b48;
+  --amber:#c08a2d; --amber-bg:rgba(192,138,45,.09); --amber-line:rgba(192,138,45,.28); --amber-text:#7a5a1e; --amber-dot:#c08a2d;
   --shadow-sm:0 1px 2px rgba(27,26,22,.05),0 1px 1px rgba(27,26,22,.04);
   --shadow-md:0 2px 4px rgba(27,26,22,.05),0 6px 16px rgba(27,26,22,.07);
   --shadow-lg:0 8px 24px rgba(27,26,22,.10),0 24px 48px rgba(27,26,22,.10);
@@ -33,6 +34,7 @@
   --shell-edge:rgba(243,241,236,.32); --shell-edge-soft:rgba(0,0,0,.46); --shell-divider:rgba(243,241,236,.22);
   --primary:#f3f1ec; --primary-fg:#161618; --primary-hover:#dedbd3;
   --danger:#ff6b5b; --danger-bg:rgba(255,107,91,.13); --live:#4fbd86; --live-bg:rgba(79,189,134,.14); --live-text:#4fbd86;
+  --amber:#e0a83a; --amber-bg:rgba(192,138,45,.14); --amber-line:rgba(192,138,45,.35); --amber-text:#e0a83a; --amber-dot:#e0a83a;
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow-md:0 2px 6px rgba(0,0,0,.4),0 8px 20px rgba(0,0,0,.35);
   --shadow-lg:0 10px 30px rgba(0,0,0,.5),0 30px 60px rgba(0,0,0,.45);
@@ -377,6 +379,8 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .toast{display:flex;align-items:center;gap:11px;padding:11px 14px;background:var(--surface);border:1px solid var(--border-2);
   border-radius:var(--r-md);box-shadow:var(--shadow-lg);font-size:13px;animation:toastIn .3s var(--ease-out);max-width:330px;}
 .toast .ic{color:var(--live);display:flex;flex:0 0 auto;}
+.toast.amber{border-color:var(--amber-line);}
+.toast.amber .ic{color:var(--amber);}
 .toast .undo{margin-left:6px;color:var(--muted);font-weight:600;font-size:12.5px;}
 .toast .undo:hover{color:var(--fg);}
 @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
@@ -481,20 +485,31 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-home{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
 .note-home-inner{max-width:460px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;min-height:0;}
 .note-screen{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:24px;padding:24px;}
+  gap:24px;padding:24px;position:relative;}
 .note-feedback{display:flex;flex-direction:column;align-items:center;gap:8px;min-height:110px;}
 .note-status{font-size:19px;font-weight:800;letter-spacing:-.02em;}
 .note-status.live{color:var(--live);}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
+/* Config-gap: quiet amber pill on home when online mode but no API key configured */
+.config-hint{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-pill);
+  background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber-text);font-size:11.5px;font-weight:600;}
+.config-hint svg{color:var(--amber);}
 .note-timer{font-size:14px;color:var(--muted);}
 .note-preview{max-width:330px;font-size:13.5px;line-height:1.5;color:var(--muted);text-align:center;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .note-preview-wait{color:var(--subtle);}
 .note-caret{display:inline-block;width:2px;height:14px;background:var(--live);vertical-align:-2px;
   margin-left:2px;animation:blink 1s step-end infinite;}
+/* Degraded recording strip: amber band pinned to the bottom of the capture screen */
+.note-longstrip{position:absolute;bottom:24px;left:0;right:0;display:flex;justify-content:center;
+  align-items:center;gap:8px;color:var(--subtle);font-size:10.5px;padding:0 24px;text-align:center;}
+.note-longstrip.amber{color:var(--amber-text);}
+.note-longstrip .wdot{width:7px;height:7px;border-radius:50%;background:var(--amber-dot);flex:0 0 auto;}
 
-/* ── Breath Cradle (recwrap / recbtn / cradle-halo / cradle-ring) ── */
+/* ── Breath Cradle (cradle-wrap / recwrap / recbtn / cradle-halo / cradle-ring) ── */
+/* cradle-wrap: positions the flash ring relative to the cradle */
+.cradle-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
 .recwrap{position:relative;width:108px;height:108px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
 .recbtn{position:relative;z-index:2;width:108px;height:108px;border-radius:50%;border:1px solid var(--border-2);
   background:var(--surface-2);color:var(--fg);cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -502,17 +517,21 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .recbtn:hover{transform:translateY(-2px);}
 .recbtn:active{transform:scale(.97);}
 .recbtn.rec{background:var(--live-bg);border-color:var(--live);color:var(--live);}
-/* Danger tone: hard red block — no hover transform, no interaction */
-.recbtn.danger{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);box-shadow:none;cursor:default;}
-.recbtn.danger:hover,.recbtn.danger:active{transform:none;}
 .rb-ico{display:flex;color:inherit;}
 /* The halo and bloom rings emanate from the cradle, behind the button */
 .cradle-halo,.cradle-ring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;
   border:1.5px solid var(--live);transform:translate(-50%,-50%) scale(1);opacity:0;pointer-events:none;z-index:1;}
+/* Provider-switch flash ring: one-shot ring pulse (never silent) */
+.flashring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;border:2.5px solid var(--live);
+  transform:translate(-50%,-50%) scale(1);pointer-events:none;z-index:5;animation:flashpulse .85s var(--ease-out) forwards;}
+.flashring.local{border-color:var(--amber);}
+.flashring.remote{border-color:var(--live);}
+@keyframes flashpulse{0%{opacity:.7;transform:translate(-50%,-50%) scale(.98);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.7);}}
 /* Reduced-motion: static state-colour — never invisible */
 @media (prefers-reduced-motion:reduce){
   .cradle-ring{display:none!important;}
   .cradle-halo{opacity:.5!important;transform:translate(-50%,-50%) scale(1.16)!important;}
+  .flashring{animation:none!important;opacity:.6;transform:translate(-50%,-50%) scale(1.2);}
 }
 
 /* ── Settings view wrapper (replaces .rail + .content) ── */
@@ -550,9 +569,10 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   cursor:pointer;color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;transition:var(--t-fast);}
 .gear-mini-seg button.on{background:var(--surface);color:var(--fg);box-shadow:var(--shadow-sm);}
 
-/* Reduced-motion: suppress Breath Cradle loop + ring blooms */
+/* Reduced-motion: suppress Breath Cradle loop + ring blooms + flash animation */
 .reduce-motion .cradle-ring{display:none!important;}
 .reduce-motion .cradle-halo{opacity:.5!important;transform:translate(-50%,-50%) scale(1.16)!important;}
+.reduce-motion .flashring{animation:none!important;opacity:.6;transform:translate(-50%,-50%) scale(1.2);}
 
 /* ===========================================================================
    NOTE CAPTURE — Stage 2: Processing / NoteReady / ExpandedNote

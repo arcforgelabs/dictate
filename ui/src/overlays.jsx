@@ -100,12 +100,17 @@ export function CommandPalette() {
 export function Toasts() {
   const s = useStore();
   return (
-    <div className="toasts">{s.toasts.map((t) => (
-      <div className="toast" key={t.id}>
-        <span className="ic" style={t.bad ? { color: "var(--danger)" } : null}>
-          <Icon name={t.bad ? "x" : "check"} size={16} /></span>
-        <span>{t.msg}</span>
-        {t.undo && <button className="undo" onClick={() => { t.undo(); s.dismiss(t.id); }}>Undo</button>}
-      </div>))}</div>
+    <div className="toasts">{s.toasts.map((t) => {
+      const iconName = t.icon || (t.bad ? "x" : "check");
+      const icColor = t.tone === "amber" ? "var(--amber)" : t.bad ? "var(--danger)" : undefined;
+      return (
+        <div className={"toast" + (t.tone ? " " + t.tone : "")} key={t.id}>
+          <span className="ic" style={icColor ? { color: icColor } : null}>
+            <Icon name={iconName} size={16} /></span>
+          <span>{t.msg}</span>
+          {t.undo && <button className="undo" onClick={() => { t.undo(); s.dismiss(t.id); }}>Undo</button>}
+        </div>
+      );
+    })}</div>
   );
 }

@@ -37,6 +37,8 @@ const ICONS = {
   more: <><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></>,
   lock: <><rect x="5" y="11" width="14" height="11" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
   external: <><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>,
+  cloud: <path d="M17.5 19H8a5.5 5.5 0 1 1 .5-10.9A5 5 0 0 1 17.5 19z"/>,
+  cloudoff: <><path d="m2 2 20 20"/><path d="M5.6 5.6A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.3-8.8M15.6 3.1A5 5 0 0 1 20.5 8c0 .25-.02.5-.05.75"/></>,
 };
 
 export function Icon({ name, size = 18, style, cls }) {
