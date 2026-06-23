@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-06-23
+
+### Added
+
+- Added a `dictate config` subcommand group for headless/agent setup:
+  `set-key <backend> <key>` (format-validated, saved to the OS secret store),
+  `set-provider private|online`, `set-model <id>`, and `show` (provider mode,
+  model, per-backend key presence, secret-store status). Output is plain and
+  scriptable.
+- Added provider resilience via a new `ProviderSupervisor`: it tracks the
+  preferred vs. active backend with on-device always available as the floor,
+  classifies failures (auth / rate-limit / budget / unreachable), and applies
+  class-aware exponential backoff with a single cancellable timer (never
+  busy-polls). It probes for recovery opportunistically and on network-up, and
+  emits `provider-degraded` / `provider-recovered` events to the UI over SSE.
+- Added live provider-health tracking end to end: an engine `health_sink`
+  reports every online-backend transcription outcome, the UI server publishes
+  `provider-health` SSE events on each state change, and the UI hydrates and
+  updates from them.
+- Added a quiet "or hold Ctrl + D" shortcut hint (derived from the stored
+  shortcut) to the ready state.
+
+### Changed
+
+- Made Dictate private by default: an unset provider resolves to the on-device
+  `faster-whisper` backend. Online (xAI) transcription now requires an
+  explicitly configured key.
+- Changed the default push-to-talk shortcut from Ctrl+Right to **Ctrl+D**
+  across the engine, daemon, preflight, doctor, Windows control, the
+  push-to-talk dialog presets, the default config, and the UI.
+- Made recording resilient instead of hard-blocked: recording is never disabled
+  by provider state. A degraded provider now shows a one-shot flash-ring pulse
+  and toast, an "On-device · <provider> unreachable" strip during recording, and
+  a quiet config hint when online with no key — replacing the previous fully
+  blocked home screen.
+- Long (note-mode) recordings now retry the remote provider up to twice with
+  backoff before degrading to on-device; quick push-to-talk dictation keeps its
+  existing fail-fast CPU fallback. The supervisor learns from every outcome.
+- Dropped the timestamp from the copy-last-note row and shortened the ready-state
+  status copy.
+
+### Fixed
+
+- Fixed the engine-version test to assert against `RELEASE_VERSION` dynamically
+  instead of a hardcoded version that went stale after CalVer bumps.
+
 ## 2026-06-20
 
 ### Added
