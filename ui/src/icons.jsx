@@ -35,6 +35,7 @@ const ICONS = {
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4.5l3 1.7"/></>,
   download: <><path d="M12 3v12M7 11l5 4 5-4"/><path d="M5 20h14"/></>,
   more: <><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></>,
+  lock: <><rect x="5" y="11" width="14" height="11" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
   external: <><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>,
 };
 

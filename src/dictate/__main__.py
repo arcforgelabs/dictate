@@ -37,6 +37,9 @@ from dictate.config import (
     parse_hotwords_text,
     remove_hotwords,
     remove_lexicon_replacements,
+    set_stt_backend,
+    set_stt_model,
+    set_stt_selection,
 )
 from dictate.doctor import run_doctor
 from dictate.engine import DictationEngine
@@ -203,6 +206,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_control_panel()
     if cli_args and cli_args[0] == "doctor":
         return run_doctor(cli_args[1:])
+    if cli_args and cli_args[0] == "config":
+        return _handle_config_commands(cli_args[1:])
 
     parser = build_parser()
     args = parser.parse_args(cli_args)
@@ -683,6 +688,106 @@ def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
             print("No lexicon replacements configured.", file=sys.stderr)
         return 0
     return None
+
+
+def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
+    """Handle `dictate config <subcommand>` — key management and provider switching."""
+    import argparse as _ap
+
+    from dictate.api_keys import (
+        API_BACKENDS,
+        has_stored_api_key,
+        save_api_key,
+        secret_store_available,
+        secret_store_description,
+        validate_api_key_format,
+    )
+
+    parser = _ap.ArgumentParser(
+        prog="dictate config",
+        description="Manage Dictate configuration and API keys",
+        add_help=True,
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    # set-key <backend> <KEY>
+    sk = sub.add_parser("set-key", help="Save an API key to the OS secret store")
+    sk.add_argument(
+        "backend",
+        choices=list(API_BACKENDS),
+        help="API backend (openai, xai, gemini)",
+    )
+    sk.add_argument("key", help="The API key value")
+
+    # set-provider online|private
+    sp = sub.add_parser(
+        "set-provider",
+        help="Switch between private (on-device faster-whisper) and online (xAI)",
+    )
+    sp.add_argument(
+        "mode",
+        choices=["private", "online"],
+        help="'private' → faster-whisper; 'online' → xai",
+    )
+
+    # set-model <id>
+    sm = sub.add_parser("set-model", help="Set the model for the current backend")
+    sm.add_argument("model_id", help="Model name (e.g. grok-speech-to-text)")
+
+    # show
+    sub.add_parser("show", help="Print current config and key status")
+
+    args = parser.parse_args(argv)
+    if args.cmd is None:
+        parser.print_help()
+        return 2
+
+    # ---- set-key -----------------------------------------------------------
+    if args.cmd == "set-key":
+        fmt_error = validate_api_key_format(args.backend, args.key)
+        if fmt_error:
+            print(f"error: {fmt_error}", file=sys.stderr)
+            return 1
+        try:
+            save_api_key(args.backend, args.key)
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: could not save key: {exc}", file=sys.stderr)
+            return 1
+        print(f"ok: {args.backend} key saved to {secret_store_description()}")
+        return 0
+
+    # ---- set-provider ------------------------------------------------------
+    if args.cmd == "set-provider":
+        backend = "faster-whisper" if args.mode == "private" else "xai"
+        set_stt_backend(backend)
+        print(f"ok: provider={args.mode} (stt_backend={backend})")
+        return 0
+
+    # ---- set-model ---------------------------------------------------------
+    if args.cmd == "set-model":
+        cfg = load_config()
+        backend = cfg.stt_backend or "faster-whisper"
+        set_stt_selection(backend, args.model_id)
+        print(f"ok: model={args.model_id} (backend={backend})")
+        return 0
+
+    # ---- show --------------------------------------------------------------
+    if args.cmd == "show":
+        cfg = load_config()
+        backend = cfg.stt_backend or "faster-whisper"
+        mode = "private" if backend == "faster-whisper" else "online"
+        model = cfg.stt_model or "(default)"
+        print(f"provider: {mode} (stt_backend={backend})")
+        print(f"model: {model}")
+        for b in API_BACKENDS:
+            has_key = has_stored_api_key(b)
+            print(f"key.{b}: {'set' if has_key else 'not-set'}")
+        store = secret_store_description()
+        available = secret_store_available()
+        print(f"secret-store: {store} ({'available' if available else 'unavailable'})")
+        return 0
+
+    return 2  # unreachable, argparse catches unknown subcommands
 
 
 def record_until_enter(recorder):

@@ -187,6 +187,20 @@ def set_stt_selection(backend: str, model: str, path: Path = CONFIG_PATH) -> Non
     _save_raw(data, path)
 
 
+def set_stt_backend(backend: str, path: Path = CONFIG_PATH) -> None:
+    """Persist STT backend without changing the saved model."""
+    data = _load_raw(path)
+    data["stt_backend"] = backend
+    _save_raw(data, path)
+
+
+def set_stt_model(model: str, path: Path = CONFIG_PATH) -> None:
+    """Persist the STT model without changing the saved backend."""
+    data = _load_raw(path)
+    data["stt_model"] = model
+    _save_raw(data, path)
+
+
 def set_stt_runtime_profile(device: str, compute_type: str, path: Path = CONFIG_PATH) -> None:
     """Persist selected STT runtime profile for tray startup defaults."""
     data = _load_raw(path)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -46,6 +48,22 @@ class DictationEngine:
         self.lexicon_mode = normalize_lexicon_mode(lexicon_mode)
         self.lexicon_replacements = dict(lexicon_replacements or {})
         self._api_fallback_stt: SpeechToText | None = None
+        # Optional callback for provider health reporting.
+        # Signature: health_sink(healthy: bool, reason: str | None) -> None
+        # Called after each online-backend transcription attempt; not called for
+        # faster-whisper (on-device). Thread-safe: the lock guards the assignment.
+        self._health_sink_lock = threading.Lock()
+        self._health_sink: Callable[[bool, str | None], None] | None = None
+
+    @property
+    def health_sink(self) -> Callable[[bool, str | None], None] | None:
+        with self._health_sink_lock:
+            return self._health_sink
+
+    @health_sink.setter
+    def health_sink(self, fn: Callable[[bool, str | None], None] | None) -> None:
+        with self._health_sink_lock:
+            self._health_sink = fn
 
     @property
     def supports_hotwords(self) -> bool:
@@ -86,6 +104,7 @@ class DictationEngine:
             lexicon_mode=self.lexicon_mode,
             replacements=self.lexicon_replacements,
         )
+        _online = self.stt.backend_name in {"xai", "openai", "gemini"}
         try:
             if diarize and hasattr(self.stt, "transcribe_diarized"):
                 text = self.stt.transcribe_diarized(
@@ -101,6 +120,8 @@ class DictationEngine:
                     prompt_context=lexicon_plan.prompt_context,
                 ).strip()
         except Exception as exc:  # noqa: BLE001
+            if _online:
+                self._report_health(False, _classify_health_error(exc))
             if not _api_fallback_allowed(self.stt):
                 return TranscriptionResult(
                     status="error",
@@ -112,6 +133,9 @@ class DictationEngine:
                 language=language,
                 primary_error=exc,
             )
+
+        if _online:
+            self._report_health(True, None)
 
         if lexicon_plan.post_hotwords or lexicon_plan.post_replacements:
             text = apply_post_corrections(
@@ -211,6 +235,24 @@ class DictationEngine:
             text=text,
             notice=_fallback_notice_message(self.stt, primary_error),
         )
+
+
+    def _report_health(self, healthy: bool, reason: str | None) -> None:
+        """Call the health_sink callback if one is registered."""
+        sink = self.health_sink
+        if sink is not None:
+            try:
+                sink(healthy, reason)
+            except Exception:  # noqa: BLE001 — never let health reporting crash transcription
+                pass
+
+
+def _classify_health_error(exc: Exception) -> str:
+    """Map a transcription exception to a provider-health reason string."""
+    msg = str(exc).lower()
+    if "401" in msg or "unauthorized" in msg or "authentication" in msg or "invalid api key" in msg:
+        return "auth"
+    return "unreachable"
 
 
 def _api_fallback_allowed(stt: SpeechToText) -> bool:

@@ -502,6 +502,9 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .recbtn:hover{transform:translateY(-2px);}
 .recbtn:active{transform:scale(.97);}
 .recbtn.rec{background:var(--live-bg);border-color:var(--live);color:var(--live);}
+/* Danger tone: hard red block — no hover transform, no interaction */
+.recbtn.danger{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);box-shadow:none;cursor:default;}
+.recbtn.danger:hover,.recbtn.danger:active{transform:none;}
 .rb-ico{display:flex;color:inherit;}
 /* The halo and bloom rings emanate from the cradle, behind the button */
 .cradle-halo,.cradle-ring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;

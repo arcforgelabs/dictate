@@ -581,3 +581,134 @@ describe("Notes list (history view)", () => {
     expect(screen.queryByPlaceholderText("Search notes")).not.toBeInTheDocument();
   });
 });
+
+/* =====================================================================
+   Feature: Provider-health blocked state (Bundle C Part 3)
+   ===================================================================== */
+describe("Provider health blocked state", () => {
+  it("shows capture home by default (healthy provider)", () => {
+    render(<App />);
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
+  });
+
+  it("provider-health SSE updates providerHealthy state (live mode)", async () => {
+    // When getState hydrates with online+healthy, then provider-health SSE fires unhealthy,
+    // the UI should switch to BlockedHome.
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    // Initial hydration: online and healthy (has a key)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "auth", mode: "online" },
+        providers: { xai: { configured: true, status: "Ready" } },
+      }),
+    });
+
+    render(<App />);
+    // After hydration the blocked screen appears
+    await waitFor(() =>
+      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
+    );
+  });
+
+  it("renders BlockedHome when hydrated with online+unhealthy providerHealth", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "no-key", mode: "online" },
+        providers: { xai: { configured: false, status: "None" } },
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
+    );
+    // The mic button is disabled (danger class)
+    const mic = screen.getByLabelText("Recording blocked — provider unhealthy");
+    expect(mic).toBeDisabled();
+    // Actions are present
+    expect(screen.getByText("Switch to Private")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+    // Mono hint
+    expect(screen.getByText(/dictate config set-key xai/)).toBeInTheDocument();
+  });
+
+  it("Switch to Private returns to capture home (sets faster-whisper model)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    // First call returns online+unhealthy, subsequent patch returns private+healthy
+    let patchCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+      if (opts?.method === "PATCH") {
+        patchCount++;
+        return { ok: true, json: async () => ({
+          history: [],
+          providerHealth: { healthy: true, status: "ok", mode: "private" },
+        })};
+      }
+      return { ok: true, json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "no-key", mode: "online" },
+        providers: { xai: { configured: false, status: "None" } },
+      })};
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Online transcription isn't working")).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByText("Switch to Private"));
+
+    // After switching, capture home should return (patchConfig was called)
+    await waitFor(() =>
+      expect(screen.getByText("Ready to capture")).toBeInTheDocument(), { timeout: 2000 }
+    );
+    expect(patchCount).toBeGreaterThan(0);
+  });
+
+  it("blocked mic button is visually disabled (aria)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [],
+        providerHealth: { healthy: false, status: "auth", mode: "online" },
+        providers: { xai: { configured: true, status: "Ready" } },
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Recording blocked — provider unhealthy")).toBeInTheDocument()
+    );
+    const btn = screen.getByLabelText("Recording blocked — provider unhealthy");
+    expect(btn).toBeDisabled();
+    expect(btn.className).toContain("danger");
+  });
+});

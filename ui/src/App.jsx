@@ -54,6 +54,69 @@ function CopyLastNote() {
   );
 }
 
+/* ── Blocked: online provider unhealthy — hard red block ─────────────── */
+function BlockedHome() {
+  const s = useStore();
+
+  const switchToPrivate = () => {
+    s.setModel("faster-whisper/turbo");
+  };
+
+  const retry = () => {
+    if (ipc.isLive()) {
+      ipc.getState()
+        .then((st) => { if (st?.providerHealth) s.hydrateProviderHealth(st.providerHealth); })
+        .catch(() => {});
+    } else {
+      // Mock mode: treat retry as resolving healthy so user can test
+      s.hydrateProviderHealth({ healthy: true, status: "ok", mode: "online" });
+    }
+  };
+
+  return (
+    <div className="note-home">
+      <div className="note-home-inner">
+        <div className="note-screen">
+          {/* Red disabled cradle-mic */}
+          <div className="recwrap">
+            <button
+              className="recbtn danger"
+              aria-label="Recording blocked — provider unhealthy"
+              disabled
+            >
+              <span className="rb-ico"><Icon name="mic" size={32} /></span>
+            </button>
+          </div>
+
+          {/* Status copy */}
+          <div className="note-feedback">
+            <div className="note-status" style={{ color: "var(--danger)" }}>
+              Online transcription isn't working
+            </div>
+            <div className="note-status-sub" style={{ maxWidth: 300 }}>
+              Dictate can't reach xAI with the current API key, so recording is paused.
+              Switch to Private to keep capturing on-device — nothing leaves your machine.
+            </div>
+            <div className="note-status-hint t-mono" style={{ marginTop: 8, color: "var(--subtle)" }}>
+              {"set a key:  dictate config set-key xai <key>"}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 320 }}>
+            <button className="btn primary block" onClick={switchToPrivate}>
+              <Icon name="lock" size={15} /> Switch to Private
+            </button>
+            <button className="btn ghost block" onClick={retry} style={{ justifyContent: "center" }}>
+              <Icon name="refresh" size={15} /> Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
@@ -407,6 +470,10 @@ export default function App() {
   // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
+  // Provider health: online mode with failing key → hard red block
+  const [providerHealthy, setProviderHealthy] = useState(true);
+  const [providerStatus, setProviderStatus] = useState("ok");
+  const [providerMode, setProviderMode] = useState("private");
   // expandedFrom: where the expanded view was opened from — "ready" (note-ready surface) or
   // "history" (notes list). Controls what the back button does when leaving ExpandedNote.
   const [expandedFrom, setExpandedFrom] = useState("ready");
@@ -533,6 +600,9 @@ export default function App() {
         } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
+      } else if (ev.type === "provider-health") {
+        setProviderHealthy(!!ev.healthy);
+        if (ev.status) setProviderStatus(ev.status);
       } else if (ev.type === "history-changed") {
         ipc.getState().then((st) => {
           if (!st) return;
@@ -597,6 +667,11 @@ export default function App() {
     if (typeof st.startup === "boolean") setStartupState(st.startup);
     if (st.device?.device) setDevice2State(st.device.device);
     if (st.version) setVersion(st.version);
+    if (st.providerHealth) {
+      setProviderHealthy(!!st.providerHealth.healthy);
+      setProviderStatus(st.providerHealth.status || "ok");
+      setProviderMode(st.providerHealth.mode || "private");
+    }
   }, []);
 
   const mapHistory = (st) =>
@@ -632,7 +707,16 @@ export default function App() {
   const persist = (payload) => { if (ipc.isLive()) ipc.patchConfig(payload).catch(() => toast("Could not save change", { bad: true })); };
   const persistOrThrow = (payload) => ipc.isLive() ? ipc.patchConfig(payload) : Promise.resolve(null);
 
-  const setModel = (id) => { setModelState(id); const m = modelById(id); persist({ model: { backend: m.backend, model: id.split("/").slice(1).join("/") } }); };
+  const setModel = (id) => {
+    setModelState(id);
+    const m = modelById(id);
+    // Optimistically update provider mode when the model changes.
+    // Private models (local) are always healthy; switching clears the block immediately.
+    const newMode = m.local ? "private" : "online";
+    setProviderMode(newMode);
+    if (m.local) setProviderHealthy(true);
+    persist({ model: { backend: m.backend, model: id.split("/").slice(1).join("/") } });
+  };
   const setShortcut = async (arr) => {
     const previous = shortcut;
     setShortcutState(arr);
@@ -683,7 +767,20 @@ export default function App() {
     if (ipc.isLive()) ipc.clearHistory().catch(() => {});
   };
 
+  const hydrateProviderHealth = (ph) => {
+    if (!ph) return;
+    setProviderHealthy(!!ph.healthy);
+    setProviderStatus(ph.status || "ok");
+    setProviderMode(ph.mode || "private");
+  };
+
+  const blocked = providerMode === "online" && !providerHealthy;
+
   const toggleNoteRecording = () => {
+    if (blocked) {
+      toast("Fix the xAI API key or switch to Private first.", { bad: true });
+      return;
+    }
     if (!ipc.isLive()) {
       if (noteRecording) {
         // Stop: show Processing surface briefly, then resolve to note-ready.
@@ -851,6 +948,8 @@ export default function App() {
     gearOpen, setGearOpen, noteElapsed, reduced,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
+    // Provider health
+    providerHealthy, providerStatus, providerMode, hydrateProviderHealth,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -871,6 +970,7 @@ export default function App() {
             noteView === "processing" ? <NoteProcessing /> :
             noteView === "ready"      ? <NoteReady /> :
             noteView === "expanded"   ? <ExpandedNote /> :
+            blocked                   ? <BlockedHome /> :
             <CaptureHome />
           ) : (
             /* Settings view: full-window with a back button returning to capture home.

@@ -110,6 +110,34 @@ class ApiError(Exception):
 
 
 # --------------------------------------------------------------------------- #
+# Provider health — thread-safe runtime outcome tracker
+# --------------------------------------------------------------------------- #
+class _ProviderHealthState:
+    """Thread-safe tracker for the last online-provider transcription outcome.
+
+    Updated by ``UiBackend.connect_engine_health`` when the engine reports a
+    result. The UI reads it via ``get_state()``; changes are also pushed via SSE.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._healthy: bool = True
+        self._reason: str | None = None
+
+    def report(self, healthy: bool, reason: str | None = None) -> bool:
+        """Update state. Returns ``True`` if the state changed."""
+        with self._lock:
+            changed = self._healthy != healthy or self._reason != reason
+            self._healthy = healthy
+            self._reason = reason
+            return changed
+
+    def get(self) -> tuple[bool, str | None]:
+        with self._lock:
+            return self._healthy, self._reason
+
+
+# --------------------------------------------------------------------------- #
 # Preferences store (UI-only settings the engine does not persist itself)
 # --------------------------------------------------------------------------- #
 class UiPrefsStore:
@@ -202,6 +230,7 @@ class UiBackend:
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
     daemon: Any | None = None
+    provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
 
     # Injectable hooks (default to the real implementations).
     save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
@@ -255,6 +284,7 @@ class UiBackend:
             "secretStore": self._safe(self.secret_store_description, "OS secret store"),
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
             "micConnected": True,
+            "providerHealth": self._compute_provider_health(cfg),
         }
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:
@@ -567,6 +597,59 @@ class UiBackend:
 
     def _note_recording_active(self) -> bool:
         return bool(self.daemon is not None and getattr(self.daemon, "note_recording_active", False))
+
+    # ----- provider health ------------------------------------------------ #
+    def _compute_provider_health(self, cfg: config_mod.Config) -> dict[str, Any]:
+        """Return provider health state for the UI.
+
+        Logic:
+        * ``private`` (faster-whisper) → always healthy; no key needed.
+        * ``online`` + no key stored → unhealthy, reason ``no-key``.
+        * ``online`` + last transcription failed → unhealthy, reason from engine.
+        * ``online`` + last transcription succeeded → healthy.
+        """
+        backend = cfg.stt_backend or "faster-whisper"
+        is_private = backend == "faster-whisper"
+        mode = "private" if is_private else "online"
+
+        if is_private:
+            return {"healthy": True, "status": "ok", "mode": mode}
+
+        # Online: check that a key is present
+        has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(backend), False)
+        if not has_key:
+            return {"healthy": False, "status": "no-key", "mode": mode}
+
+        # Online + key present: reflect the tracked runtime outcome
+        healthy, reason = self.provider_health.get()
+        if not healthy:
+            return {"healthy": False, "status": reason or "unreachable", "mode": mode}
+
+        return {"healthy": True, "status": "ok", "mode": mode}
+
+    def connect_engine_health(self, engine: Any) -> None:
+        """Wire this backend's health tracker as the engine's ``health_sink``.
+
+        Call this once after the daemon's engine is available. It installs a
+        callback that updates ``provider_health`` and pushes an SSE event on
+        every state change so the UI updates live.
+        """
+        ph = self.provider_health
+        broker = self.broker
+
+        def _sink(healthy: bool, reason: str | None) -> None:
+            changed = ph.report(healthy, reason)
+            if changed and broker is not None:
+                broker.publish(
+                    "provider-health",
+                    healthy=bool(healthy),
+                    status=reason or "ok",
+                )
+
+        try:
+            engine.health_sink = _sink
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not wire health sink to engine")
 
     def _require_daemon(self) -> Any:
         if self.daemon is None:

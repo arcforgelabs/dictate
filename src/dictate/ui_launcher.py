@@ -137,6 +137,12 @@ def ensure_server_started(daemon: object | None = None) -> object:
         if daemon is not None and _server_broker is not None and _wired_daemon_id != id(daemon):
             _wire_daemon_events(daemon, _server_broker)
             _wired_daemon_id = id(daemon)
+            engine = getattr(daemon, "engine", None)
+            if engine is not None and hasattr(_server_handle, "backend"):
+                try:
+                    _server_handle.backend.connect_engine_health(engine)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to wire engine health to UI backend")
         return _server_handle
     from dictate import ui_server
 
@@ -151,6 +157,9 @@ def ensure_server_started(daemon: object | None = None) -> object:
     if daemon is not None:
         _wire_daemon_events(daemon, broker)
         _wired_daemon_id = id(daemon)
+        engine = getattr(daemon, "engine", None)
+        if engine is not None:
+            backend.connect_engine_health(engine)
     return _server_handle
 
 
