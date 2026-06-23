@@ -15,6 +15,7 @@ from dictate.update_status import (
     parse_calver,
     start_update_flow,
 )
+from dictate.version import RELEASE_VERSION
 
 
 class _FakeResponse:
@@ -68,7 +69,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.install_kind, "linux-package")
         self.assertEqual(status.phase, "available")
         self.assertIn("open_release", status.actions or [])
-        self.assertEqual(status.engine["current"], "2026.6.20")
+        self.assertEqual(status.engine["current"], RELEASE_VERSION)
 
     def test_check_update_status_falls_back_to_tags(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
