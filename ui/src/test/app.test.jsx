@@ -447,3 +447,137 @@ describe("Quiet Console app (mock mode)", () => {
     expect(await screen.findByText("fresh session words")).toBeInTheDocument();
   });
 });
+
+/* =====================================================================
+   Feature: copy-last row
+   ===================================================================== */
+describe("Copy-last row", () => {
+  it("is visible on the home when history is non-empty (mock mode)", () => {
+    render(<App />);
+    // Default mock mode seeds 3 history items, so the chip should appear.
+    expect(screen.getByTitle("Copy the last note")).toBeInTheDocument();
+  });
+
+  it("is hidden while the note recording is active", () => {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    expect(screen.queryByTitle("Copy the last note")).not.toBeInTheDocument();
+  });
+
+  it("is hidden when history is empty (live SSE, empty hydration)", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+    render(<App />);
+    // After SSE connects and hydrates with empty history the chip must be absent.
+    await waitFor(() => expect(screen.queryByTitle("Copy the last note")).not.toBeInTheDocument());
+  });
+});
+
+/* =====================================================================
+   Feature: Notes list + search (redesigned history view)
+   ===================================================================== */
+describe("Notes list (history view)", () => {
+  it("renders the Notes list with search field when navigating to history", () => {
+    render(<App />);
+    navTo("Recent history");
+    expect(screen.getByText("Notes")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    // Count badge — 3 mock notes
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("shows all three mock notes in the list", () => {
+    render(<App />);
+    navTo("Recent history");
+    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+    expect(screen.getByText(/sync to Thursday/i)).toBeInTheDocument();
+    expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
+  });
+
+  it("search filters notes by text and updates the count", () => {
+    render(<App />);
+    navTo("Recent history");
+    const input = screen.getByPlaceholderText("Search notes");
+    fireEvent.change(input, { target: { value: "Stalwart" } });
+    // Matching note visible
+    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+    // Non-matching notes absent
+    expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sync to Thursday/i)).not.toBeInTheDocument();
+    // Count shows "1 of 3"
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+  });
+
+  it("shows no-results state when search has no matches", () => {
+    render(<App />);
+    navTo("Recent history");
+    const input = screen.getByPlaceholderText("Search notes");
+    fireEvent.change(input, { target: { value: "xyzzy" } });
+    expect(screen.getByText(/No notes match/i)).toBeInTheDocument();
+  });
+
+  it("clear button removes the search query and shows all notes again", () => {
+    render(<App />);
+    navTo("Recent history");
+    const input = screen.getByPlaceholderText("Search notes");
+    fireEvent.change(input, { target: { value: "Stalwart" } });
+    expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Clear search"));
+    expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
+  });
+
+  it("tapping a note row opens it in the expanded view", () => {
+    render(<App />);
+    navTo("Recent history");
+    // Click the Stalwart note row (its text bubbles the click up to note-row)
+    fireEvent.click(screen.getByText(/Stalwart/i));
+    // Should now be in the ExpandedNote view
+    expect(screen.getByTitle("Back")).toBeInTheDocument();
+    // The note text appears in the expanded body
+    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+  });
+
+  it("Space key on a note row opens it in the expanded view (role=button a11y)", () => {
+    render(<App />);
+    navTo("Recent history");
+    // Find the note-row div via its role="button" that contains the Stalwart text
+    const noteRow = screen.getByText(/Stalwart/i).closest('[role="button"]');
+    fireEvent.keyDown(noteRow, { key: " " });
+    expect(screen.getByTitle("Back")).toBeInTheDocument();
+    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+  });
+
+  it("back from expanded note (opened from notes list) returns to the notes list", () => {
+    render(<App />);
+    navTo("Recent history");
+    fireEvent.click(screen.getByText(/Stalwart/i));
+    // In expanded view; click Back
+    fireEvent.click(screen.getByTitle("Back"));
+    // Should be back at the notes list
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    expect(screen.getByText("Notes")).toBeInTheDocument();
+  });
+
+  it("back from expanded note (opened from note-ready) still returns to note-ready", async () => {
+    render(<App />);
+    // Do a mock capture to get to note-ready
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    fireEvent.click(screen.getByLabelText("Stop recording"));
+    await waitFor(() => expect(screen.getByText("Open note")).toBeInTheDocument(), { timeout: 2000 });
+    // Open expanded from note-ready
+    fireEvent.click(screen.getByText("Open note"));
+    expect(screen.getByTitle("Back")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Back"));
+    // Back at note-ready, not notes list
+    expect(screen.getByText("Insert")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search notes")).not.toBeInTheDocument();
+  });
+});

@@ -30,6 +30,31 @@ function fmtSecs(s) {
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
 }
 
+/* ── Copy-last row: quiet recovery chip below the cradle (home only) ─── */
+function CopyLastNote() {
+  const s = useStore();
+  if (!s.history || s.history.length === 0 || s.noteRecording) return null;
+  const latest = s.history[0];
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(latest.text)
+        .then(() => s.toast("Copied last note"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    } else {
+      s.toast("Clipboard not available", { bad: true });
+    }
+  };
+  return (
+    <button className="lastcap" onClick={handleCopy} title="Copy the last note">
+      <span className="lc-ico"><Icon name="copy" size={15} /></span>
+      <span className="lc-body">
+        <span className="lc-text">{latest.text}</span>
+        <span className="lc-meta t-mono">Last note · {formatHistoryTime(latest.createdAt)} · tap to copy</span>
+      </span>
+    </button>
+  );
+}
+
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
@@ -69,6 +94,8 @@ function CaptureHome() {
               </>
             )}
           </div>
+          {/* Copy-last: quiet row beneath the cradle; hidden while recording or when empty */}
+          <CopyLastNote />
         </div>
       </div>
     </div>
@@ -150,7 +177,7 @@ function NoteReady() {
             <Icon name="copy" size={15} /> Insert
           </button>
           <div className="note-ready-sub">
-            <button className="btn sm" onClick={() => s.setNoteView("expanded")}>
+            <button className="btn sm" onClick={() => { s.setExpandedFrom("ready"); s.setNoteView("expanded"); }}>
               <Icon name="external" size={14} /> Open note
             </button>
             <div className="ovf-wrap" style={{ position: "relative" }}>
@@ -185,6 +212,16 @@ function ExpandedNote() {
 
   const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
 
+  // Back routing: return to the notes list when opened from there, else to note-ready.
+  const handleBack = () => {
+    if (s.expandedFrom === "history") {
+      s.setNoteView(null);
+      s.setView("history");
+    } else {
+      s.setNoteView("ready");
+    }
+  };
+
   const handleCopy = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(note.text)
@@ -207,7 +244,7 @@ function ExpandedNote() {
   return (
     <div className="note-exp-wrap">
       <div className="note-exp-top">
-        <button className="ibtn" title="Back" onClick={() => s.setNoteView("ready")}>
+        <button className="ibtn" title="Back" onClick={handleBack}>
           <Icon name="back" size={17} />
         </button>
         <span className="note-exp-title">{noteLabel}</span>
@@ -335,10 +372,11 @@ export default function App() {
   const [hotwords, setHotwords] = useState(["AcmeWidget", "OpenClaw", "Stalwart"]);
   const [history, setHistory] = useState(() => {
     const now = Date.now();
+    // Newest-first: matches the real backend ordering and pushHistory behaviour.
     return [
-      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the beta testers and ask them for crash reports." },
-      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the sync to Thursday and keep Friday clear for the demo build." },
       { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon." },
+      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the sync to Thursday and keep Friday clear for the demo build." },
+      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the beta testers and ask them for crash reports." },
     ];
   });
   // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
@@ -369,6 +407,9 @@ export default function App() {
   // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
+  // expandedFrom: where the expanded view was opened from — "ready" (note-ready surface) or
+  // "history" (notes list). Controls what the back button does when leaving ExpandedNote.
+  const [expandedFrom, setExpandedFrom] = useState("ready");
 
   // Detect prefers-reduced-motion for the BreathCradle.
   const [reduced, setReduced] = useState(() => {
@@ -808,7 +849,8 @@ export default function App() {
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
     // Note Capture additions
     gearOpen, setGearOpen, noteElapsed, reduced,
-    noteView, setNoteView, currentNote,
+    noteView, setNoteView, currentNote, setCurrentNote,
+    expandedFrom, setExpandedFrom,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -831,17 +873,25 @@ export default function App() {
             noteView === "expanded"   ? <ExpandedNote /> :
             <CaptureHome />
           ) : (
-            /* Settings view: full-window with a back button returning to capture home. */
+            /* Settings view: full-window with a back button returning to capture home.
+               The notes list (history) renders its own header and takes full height. */
             <div className="note-settings-wrap">
-              <div className="note-settings-bar">
-                <button className="btn ghost sm" onClick={() => setView("home")}>
-                  <Icon name="back" size={15} />Back
-                </button>
-                <span className="note-settings-title">{VIEW_LABELS[view] || view}</span>
-              </div>
-              <div className="scroll">
-                {Current && <Current />}
-              </div>
+              {view === "history" ? (
+                /* Notes list: own .notes-top header, no shared bar. */
+                Current && <Current />
+              ) : (
+                <>
+                  <div className="note-settings-bar">
+                    <button className="btn ghost sm" onClick={() => setView("home")}>
+                      <Icon name="back" size={15} />Back
+                    </button>
+                    <span className="note-settings-title">{VIEW_LABELS[view] || view}</span>
+                  </div>
+                  <div className="scroll">
+                    {Current && <Current />}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

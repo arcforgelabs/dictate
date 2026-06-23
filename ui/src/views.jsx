@@ -1,5 +1,5 @@
 // views.jsx — the seven settings surfaces. Reads/acts through useStore().
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Icon, Brand } from "./icons.jsx";
 import { Combo, Chip, Dot, Toggle, Seg, Row } from "./primitives.jsx";
 import { useStore, MODELS, modelById, formatHistoryTime } from "./store.jsx";
@@ -451,44 +451,126 @@ function HotwordsView() {
   );
 }
 
-/* ============================== HISTORY ============================== */
+/* ============================== HISTORY (Notes list + search) ============================== */
+
+// Highlight the first case-insensitive match of q inside text with a .hl span.
+function hilite(text, q) {
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text;
+  return <>{text.slice(0, i)}<mark className="hl">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
+}
+
 function HistoryView() {
   const s = useStore();
+  const [q, setQ] = useState("");
   const [, tick] = useState(0);
+
+  // Refresh relative timestamps every 15 s without a full re-render.
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 15000);
     return () => clearInterval(id);
   }, []);
-  const copy = (it) => { try { navigator.clipboard && navigator.clipboard.writeText(it.text); } catch (e) {} s.toast("Copied to clipboard"); };
-  return (
-    <div className="view">
-      <div className="view-head"><div className="row"><div>
-        <div className="crumb">Recent history</div><h2 className="t-title">Recent dictations</h2>
-        <p className="t-meta">A small local safety net — recover text if it landed in the wrong place.</p></div>
-        {s.history.length > 0 && <button className="btn ghost sm danger" onClick={s.clearHistory}><Icon name="trash" size={15} />Clear</button>}
-      </div></div>
 
-      {s.history.length === 0 ? (
-        <div className="card tight" style={{ textAlign: "center", padding: "44px 20px", color: "var(--muted)" }}>
-          <Icon name="history" size={26} style={{ color: "var(--faint)", margin: "0 auto 10px" }} />
-          <div className="t-heading" style={{ color: "var(--fg)" }}>Nothing here yet</div>
-          <div className="t-meta" style={{ marginTop: 4 }}>Your recent dictations will show up here for quick recovery.</div>
-        </div>
-      ) : (
-        <div className="card pad">
-          {s.history.map((it, i) => (
-            <div className="row" key={it.id}>
-              <span className="ic" style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--surface-2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-                <span className="t-mono" style={{ fontSize: 10.5 }}>{i + 1}</span></span>
-              <div className="main">
-                <div className="t-mono" style={{ color: "var(--subtle)", fontSize: 10.5 }}>{formatHistoryTime(it.createdAt)}</div>
-                <div style={{ fontSize: 13.5, marginTop: 3, lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.text}</div>
+  const all = s.history || [];
+  const filtered = useMemo(() => {
+    if (!q) return all;
+    const sq = q.toLowerCase();
+    return all.filter((n) => n.text.toLowerCase().includes(sq));
+  }, [q, all]);
+
+  // Open a history note in the ExpandedNote read view; back will return here.
+  const openNote = (note) => {
+    s.setCurrentNote(note);
+    s.setExpandedFrom("history");
+    s.setView("home");
+    s.setNoteView("expanded");
+  };
+
+  const copyNote = (note) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(note.text)
+        .then(() => s.toast("Copied to clipboard"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
+
+  const empty = all.length === 0;
+
+  return (
+    <div className="notes">
+      {/* Own header: back → home, title, live count */}
+      <div className="notes-top">
+        <button className="ibtn" title="Back" onClick={() => s.setView("home")}>
+          <Icon name="back" size={17} />
+        </button>
+        <div className="notes-title">Notes</div>
+        {!empty && (
+          <div className="notes-count t-mono">
+            {q ? `${filtered.length} of ${all.length}` : String(all.length)}
+          </div>
+        )}
+      </div>
+
+      {/* Search field — autofocused, with ×-clear when non-empty */}
+      <div className="notes-search">
+        <Icon name="search" size={15} />
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search notes"
+          aria-label="Search notes"
+        />
+        {q && (
+          <button className="ibtn sm" onClick={() => setQ("")} title="Clear search">
+            <Icon name="x" size={15} />
+          </button>
+        )}
+      </div>
+
+      {/* Notes list — three states: empty-ever / no-results / rows */}
+      <div className="notes-list">
+        {empty ? (
+          <div className="notes-blank">
+            <span className="nb-ico"><Icon name="history" size={22} /></span>
+            <div className="nb-title">Your notes will appear here</div>
+            <div className="nb-sub">Every dictation is saved as a note you can search and reuse.</div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="notes-blank">
+            <div className="nb-title">No notes match &ldquo;{q}&rdquo;.</div>
+            <div className="nb-sub">Try a different word.</div>
+          </div>
+        ) : (
+          filtered.map((note) => (
+            <div
+              className="note-row"
+              key={note.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openNote(note)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openNote(note); } }}
+            >
+              <div className="nr-body">
+                {/* 2-line-clamped preview with search highlight on the first match */}
+                <div className="nr-text">{hilite(note.text, q)}</div>
+                <div className="nr-meta t-mono">
+                  <span>{formatHistoryTime(note.createdAt)}</span>
+                </div>
               </div>
-              <div className="ctrl"><button className="btn ghost sm" onClick={() => copy(it)}><Icon name="copy" size={15} />Copy</button></div>
+              {/* Per-row copy — revealed on hover/focus-within via CSS */}
+              <button
+                className="ibtn nr-copy"
+                title="Copy note"
+                onClick={(e) => { e.stopPropagation(); copyNote(note); }}
+              >
+                <Icon name="copy" size={16} />
+              </button>
             </div>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }
