@@ -58,7 +58,14 @@ function GsKeyboard() {
       <div className="gs-row">{row(13)}</div>
       <div className="gs-row">{row(11)}<span className="k wide" /></div>
       <div className="gs-row"><span className="k wide" />{row(9)}<span className="k wide" /></div>
-      <div className="gs-row"><span className="k" /><span className="k" /><span className="k" /><span className="k space" /><span className="k" /><span className="k hot">Ctrl</span></div>
+      <div className="gs-row">
+        <span className="k" /><span className="k" /><span className="k" />
+        <span className="k space" /><span className="k" /><span className="k hot">Ctrl</span>
+        <span className="gs-arrows">
+          <span className="ar-top"><i className="ak" /></span>
+          <span className="ar-bot"><i className="ak" /><i className="ak" /><i className="ak" /></span>
+        </span>
+      </div>
     </div>
   );
 }
