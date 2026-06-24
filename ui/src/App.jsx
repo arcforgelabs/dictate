@@ -316,7 +316,7 @@ export default function App() {
   const [view, setView] = useState("home");
   const [model, setModelState] = useState("faster-whisper/turbo");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
-  const [shortcut, setShortcutState] = useState(["Ctrl", "D"]);
+  const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
   const [device2, setDevice2State] = useState("auto");
@@ -820,12 +820,12 @@ export default function App() {
   };
   const dictateOnce = () => { if (recRef.current || live) return; setRecording(true); setTimeout(dictateStop, 1300); };
 
-  // ---- global keyboard: ⌘K palette + push-to-talk demo (Ctrl+D) ----
+  // ---- global keyboard: ⌘K palette + push-to-talk demo (Right Ctrl) ----
   useEffect(() => {
     const down = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
       if (capRef.current || live) return;
-      if (e.ctrlKey && e.code === "KeyD" && !e.repeat) {
+      if (e.code === "ControlRight" && !e.repeat) {
         e.preventDefault();
         if (actRef.current === "toggle") { recRef.current ? dictateStop() : dictateStart(); }
         else dictateStart();
@@ -833,7 +833,7 @@ export default function App() {
     };
     const up = (e) => {
       if (capRef.current || live) return;
-      if ((e.code === "KeyD" || e.key === "Control") && actRef.current === "hold") { e.preventDefault(); dictateStop(); }
+      if (e.code === "ControlRight" && actRef.current === "hold") { e.preventDefault(); dictateStop(); }
     };
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);

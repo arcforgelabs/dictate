@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--push-to-talk-combo",
-        default="ctrl+d",
+        default="ctrl_r",
         help="Push-to-talk combo to validate",
     )
     parser.add_argument(
@@ -232,7 +232,7 @@ def _seed_config_if_missing() -> None:
         shutil.copyfile(default_config, CONFIG_PATH)
         return
     CONFIG_PATH.write_text(
-        "push_to_talk_combo: ctrl+d\n"
+        "push_to_talk_combo: ctrl_r\n"
         "stt_backend: faster-whisper\n"
         "stt_model: turbo\n"
         "stt_device: auto\n"

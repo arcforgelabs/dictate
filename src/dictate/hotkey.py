@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DEFAULT_PUSH_TO_TALK_COMBO = "ctrl+d"
+DEFAULT_PUSH_TO_TALK_COMBO = "ctrl_r"
 SUPPORTED_SINGLE_KEY_ALIASES = ("ctrl_r", "ctrl_l")
 _MODIFIER_ORDER = {"ctrl": 0, "ctrl_l": 1, "ctrl_r": 2, "shift": 3, "shift_l": 4, "shift_r": 5, "alt": 6, "alt_l": 7, "alt_r": 8, "super": 9, "super_l": 10, "super_r": 11}
 
@@ -149,6 +149,12 @@ def key_event_names(key: object) -> set[str]:
             except HotkeyParseError:
                 continue
             names.add(normalized)
+            # Recover a Ctrl+letter that the platform reported as a control
+            # character (Ctrl+A..Ctrl+Z arrive as \x01..\x1a, masking the letter):
+            # e.g. Ctrl+D → char "\x04" → also register "d". Without this, a
+            # ctrl+<letter> combo only matches when Shift makes char the letter.
+            if len(current) == 1 and 1 <= ord(current) <= 26:
+                names.add(chr(ord(current) + 96))
     vk = getattr(key, "vk", None)
     if isinstance(vk, int):
         if vk in _VK_TOKEN_NAMES:

@@ -74,7 +74,7 @@ class ControlPanel:
         self.device_var = tk.StringVar(value="cpu")
         self.compute_var = tk.StringVar(value="int8")
         self.local_runtime_var = tk.StringVar(value="CPU")
-        self.combo_var = tk.StringVar(value="ctrl+d")
+        self.combo_var = tk.StringVar(value="ctrl_r")
         self.api_key_var = tk.StringVar(value="")
         self.api_status_var = tk.StringVar(value="API key: None")
         self.launch_on_startup_var = tk.BooleanVar(value=True)
@@ -259,7 +259,7 @@ class ControlPanel:
         self.model_var.set(config.stt_model if config.stt_model in model_choices else default_model)
         self._set_local_runtime_from_config(config.stt_device, config.stt_compute_type)
         self.api_key_var.set("")
-        combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl+d"
+        combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
         self.launch_on_startup_var.set(startup_enabled())
         self._sync_api_key_field()

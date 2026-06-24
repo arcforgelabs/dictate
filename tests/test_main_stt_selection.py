@@ -402,8 +402,9 @@ class MainSttSelectionTests(unittest.TestCase):
 
         self.assertEqual(hotkey, "ctrl+space")
 
-    def test_default_push_to_talk_combo_is_ctrl_d(self) -> None:
-        """No saved config and no CLI flag resolves to ctrl+d on every session type."""
+    def test_default_push_to_talk_combo_is_right_ctrl(self) -> None:
+        """No saved config and no CLI flag resolves to ctrl_r (Right Ctrl) on every
+        session type — a dedicated key with no terminal/EOF/agent-deck conflict."""
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -414,7 +415,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 config=Config(),
             )
 
-        self.assertEqual(hotkey, "ctrl+d")
+        self.assertEqual(hotkey, "ctrl_r")
 
 
 if __name__ == "__main__":

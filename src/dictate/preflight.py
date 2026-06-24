@@ -36,7 +36,7 @@ def run_preflight(
     require_typing: bool,
     require_clipboard: bool,
     typing_backend: str = "auto",
-    push_to_talk_combo: str = "ctrl+d",
+    push_to_talk_combo: str = "ctrl_r",
     stt_backend: SttBackend = "faster-whisper",
     stt_model: str | None = None,
     stt_device: ComputeDevice = "auto",

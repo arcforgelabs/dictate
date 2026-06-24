@@ -74,6 +74,23 @@ class HotkeyTests(unittest.TestCase):
         self.assertTrue(combo_is_active({"ctrl_r", "d"}, "ctrl+d"))
         self.assertFalse(combo_is_active({"ctrl_l"}, "ctrl+d"))
 
+    def test_default_is_right_ctrl(self) -> None:
+        # Right Ctrl: a dedicated, conflict-free push-to-talk default.
+        self.assertEqual(DEFAULT_PUSH_TO_TALK_COMBO, "ctrl_r")
+
+    def test_ctrl_letter_recovered_from_control_char(self) -> None:
+        # Regression: pressing Ctrl+D makes the platform report the control
+        # character "\x04" as the key char, masking the letter. key_event_names
+        # must still recover "d" so a ctrl+<letter> combo matches without Shift.
+        class _Key:
+            def __init__(self, char=None, vk=None, name=None):
+                self.char, self.vk, self.name = char, vk, name
+
+        names = key_event_names(_Key(char="\x04", vk=0x64))  # Ctrl+D on X11
+        self.assertIn("d", names)
+        pressed = {"ctrl_l"} | names
+        self.assertTrue(combo_is_active(pressed, "ctrl+d"))
+
     def test_display_name_is_human_readable(self) -> None:
         self.assertEqual(format_hotkey_combo("ctrl_r"), "Ctrl (R)")
         self.assertEqual(format_hotkey_combo("ctrl+space"), "Ctrl + Space")
