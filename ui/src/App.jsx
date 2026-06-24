@@ -48,6 +48,21 @@ function PrivacyPill() {
   );
 }
 
+/* ── Getting-started keyboard: a quiet, aligned keyboard graphic that points at
+   Right Ctrl. Shown on the empty home (no notes yet) to teach the one key. ──── */
+function GsKeyboard() {
+  const row = (n) => Array.from({ length: n }, (_, i) => <span className="k" key={i} />);
+  return (
+    <div className="gs-kbd" aria-hidden="true">
+      <div className="gs-row fn">{row(13)}</div>
+      <div className="gs-row">{row(13)}</div>
+      <div className="gs-row">{row(11)}<span className="k wide" /></div>
+      <div className="gs-row"><span className="k wide" />{row(9)}<span className="k wide" /></div>
+      <div className="gs-row"><span className="k" /><span className="k" /><span className="k" /><span className="k space" /><span className="k" /><span className="k hot">Ctrl</span></div>
+    </div>
+  );
+}
+
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
@@ -93,6 +108,8 @@ function CaptureHome() {
                 <div className="note-status">Ready to capture</div>
                 <div className="note-status-sub">Press the mic and speak.</div>
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
+                {/* Getting started: teach the key when there are no notes yet */}
+                {(!s.history || s.history.length === 0) && <GsKeyboard />}
                 {/* Live push-to-talk transcript */}
                 {s.transcript?.text && !s.transcript.stale && (
                   <div className="note-preview" aria-live="polite">
