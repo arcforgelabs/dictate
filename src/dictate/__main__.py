@@ -689,8 +689,40 @@ def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
     return None
 
 
+def _config_load_ui_prefs() -> dict:
+    """Read ui-prefs.json merged over defaults (the engine's UI-only prefs)."""
+    import json
+
+    from dictate.ui_server import DEFAULT_PREFS, UI_PREFS_PATH
+
+    prefs = dict(DEFAULT_PREFS)
+    try:
+        stored = json.loads(UI_PREFS_PATH.read_text())
+        if isinstance(stored, dict):
+            prefs.update({k: v for k, v in stored.items() if k in DEFAULT_PREFS})
+    except (OSError, ValueError):
+        pass
+    return prefs
+
+
+def _config_set_ui_pref(key: str, value: object) -> None:
+    """Persist a single ui-prefs.json key (theme, trayOnly, overlay, sound)."""
+    import json
+
+    from dictate.ui_server import UI_PREFS_PATH
+
+    prefs = _config_load_ui_prefs()
+    prefs[key] = value
+    UI_PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    UI_PREFS_PATH.write_text(json.dumps(prefs, indent=2))
+
+
 def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
-    """Handle `dictate config <subcommand>` — key management and provider switching."""
+    """Handle `dictate config <subcommand>` — keys, provider, and all daily settings.
+
+    This CLI is the single advanced-config surface: the GUI is do-it-for-them and
+    exposes no settings, so every user-changeable setting must be reachable here.
+    """
     import argparse as _ap
 
     from dictate.api_keys import (
@@ -733,6 +765,29 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     sm = sub.add_parser("set-model", help="Set the model for the current backend")
     sm.add_argument("model_id", help="Model name (e.g. grok-speech-to-text)")
 
+    # set-shortcut <combo>
+    ss = sub.add_parser("set-shortcut", help="Set the push-to-talk shortcut (e.g. ctrl+d)")
+    ss.add_argument("combo", help="Key combo, e.g. 'ctrl+d' or 'ctrl+space'")
+
+    # hotwords [--add] [--remove] [--clear]
+    hw = sub.add_parser("hotwords", help="List or edit hotwords (terms to always spell correctly)")
+    hw.add_argument("--add", help="Comma-separated words to add")
+    hw.add_argument("--remove", help="Comma-separated words to remove")
+    hw.add_argument("--clear", action="store_true", help="Remove all hotwords")
+
+    # set-theme light|dark|system
+    st = sub.add_parser("set-theme", help="Set the appearance theme")
+    st.add_argument("value", choices=["light", "dark", "system"])
+
+    # set-startup on|off
+    sst = sub.add_parser("set-startup", help="Launch Dictate on sign-in")
+    sst.add_argument("mode", choices=["on", "off"])
+
+    # set-behavior <tray|overlay|sound> on|off
+    sbe = sub.add_parser("set-behavior", help="Toggle tray-only / listening overlay / sound cue")
+    sbe.add_argument("name", choices=["tray", "overlay", "sound"])
+    sbe.add_argument("mode", choices=["on", "off"])
+
     # show
     sub.add_parser("show", help="Print current config and key status")
 
@@ -770,14 +825,98 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"ok: model={args.model_id} (backend={backend})")
         return 0
 
+    # ---- set-shortcut ------------------------------------------------------
+    if args.cmd == "set-shortcut":
+        from dictate.config import set_push_to_talk_combo
+        from dictate.hotkey import (
+            HotkeyParseError,
+            format_hotkey_combo,
+            normalize_push_to_talk_combo,
+        )
+
+        try:
+            combo = normalize_push_to_talk_combo(args.combo)
+        except HotkeyParseError as exc:
+            print(f"error: invalid shortcut: {exc}", file=sys.stderr)
+            return 1
+        set_push_to_talk_combo(combo)
+        print(f"ok: shortcut={format_hotkey_combo(combo)} ({combo})")
+        return 0
+
+    # ---- hotwords ----------------------------------------------------------
+    if args.cmd == "hotwords":
+        if args.clear:
+            current = load_config().hotwords
+            if current:
+                remove_hotwords(current)
+            print("ok: hotwords cleared")
+            return 0
+        changed = False
+        if args.add:
+            add_hotwords(_parse_csv_words(args.add))
+            changed = True
+        if args.remove:
+            remove_hotwords(_parse_csv_words(args.remove))
+            changed = True
+        words = load_config().hotwords
+        if changed:
+            print(f"ok: hotwords={', '.join(words) if words else '(none)'}")
+        elif words:
+            for w in words:
+                print(w)
+        else:
+            print("(no hotwords)")
+        return 0
+
+    # ---- set-theme ---------------------------------------------------------
+    if args.cmd == "set-theme":
+        _config_set_ui_pref("theme", args.value)
+        print(f"ok: theme={args.value}")
+        return 0
+
+    # ---- set-startup -------------------------------------------------------
+    if args.cmd == "set-startup":
+        from dictate import startup as startup_mod
+
+        enabled = args.mode == "on"
+        try:
+            startup_mod.set_startup_enabled(enabled)
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: could not change startup: {exc}", file=sys.stderr)
+            return 1
+        print(f"ok: startup={'on' if enabled else 'off'}")
+        return 0
+
+    # ---- set-behavior ------------------------------------------------------
+    if args.cmd == "set-behavior":
+        pref_key = {"tray": "trayOnly", "overlay": "overlay", "sound": "sound"}[args.name]
+        _config_set_ui_pref(pref_key, args.mode == "on")
+        print(f"ok: {args.name}={args.mode}")
+        return 0
+
     # ---- show --------------------------------------------------------------
     if args.cmd == "show":
         cfg = load_config()
         backend = cfg.stt_backend or "faster-whisper"
         mode = "private" if backend == "faster-whisper" else "online"
         model = cfg.stt_model or "(default)"
+        prefs = _config_load_ui_prefs()
         print(f"provider: {mode} (stt_backend={backend})")
         print(f"model: {model}")
+        print(f"shortcut: {cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO}")
+        hw = cfg.hotwords
+        print(f"hotwords: {len(hw)}" + (f" ({', '.join(hw)})" if hw else ""))
+        print(f"theme: {prefs.get('theme')}")
+        print(f"tray-only: {'on' if prefs.get('trayOnly') else 'off'}")
+        print(f"overlay: {'on' if prefs.get('overlay') else 'off'}")
+        print(f"sound: {'on' if prefs.get('sound') else 'off'}")
+        try:
+            from dictate import startup as startup_mod
+
+            startup_on = startup_mod.startup_enabled()
+        except Exception:  # noqa: BLE001
+            startup_on = False
+        print(f"startup: {'on' if startup_on else 'off'}")
         for b in API_BACKENDS:
             has_key = has_stored_api_key(b)
             print(f"key.{b}: {'set' if has_key else 'not-set'}")

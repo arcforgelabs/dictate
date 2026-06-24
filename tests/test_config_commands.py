@@ -146,3 +146,78 @@ class ConfigShowTests(unittest.TestCase):
                 with patch("dictate.api_keys.secret_store_available", return_value=False):
                     code = main_module.main(["config", "show"])
         self.assertEqual(code, 0)
+
+
+class ConfigDailySettingsTests(unittest.TestCase):
+    """CLI parity for the settings the GUI no longer exposes: shortcut, hotwords,
+    theme, startup, behaviour."""
+
+    def test_set_shortcut_valid(self) -> None:
+        with patch("dictate.config.set_push_to_talk_combo") as m:
+            code, out, _ = _run_config(["set-shortcut", "ctrl+d"])
+        self.assertEqual(code, 0)
+        self.assertIn("ctrl+d", out)
+        m.assert_called_once()
+
+    def test_set_shortcut_invalid_rejected(self) -> None:
+        from dictate.hotkey import HotkeyParseError
+
+        with patch(
+            "dictate.hotkey.normalize_push_to_talk_combo",
+            side_effect=HotkeyParseError("bad"),
+        ):
+            code, _, err = _run_config(["set-shortcut", "%%%"])
+        self.assertEqual(code, 1)
+        self.assertIn("error", err.lower())
+
+    def test_hotwords_list(self) -> None:
+        from dictate.config import Config
+
+        with patch("dictate.__main__.load_config", return_value=Config(hotwords=["Foo", "Bar"])):
+            code, out, _ = _run_config(["hotwords"])
+        self.assertEqual(code, 0)
+        self.assertIn("Foo", out)
+        self.assertIn("Bar", out)
+
+    def test_hotwords_add(self) -> None:
+        from dictate.config import Config
+
+        with patch("dictate.__main__.add_hotwords") as add, patch(
+            "dictate.__main__.load_config", return_value=Config(hotwords=["Baz"])
+        ):
+            code, out, _ = _run_config(["hotwords", "--add", "Baz"])
+        self.assertEqual(code, 0)
+        add.assert_called_once_with(["Baz"])
+
+    def test_hotwords_clear(self) -> None:
+        from dictate.config import Config
+
+        with patch("dictate.__main__.remove_hotwords") as rm, patch(
+            "dictate.__main__.load_config", return_value=Config(hotwords=["X", "Y"])
+        ):
+            code, out, _ = _run_config(["hotwords", "--clear"])
+        self.assertEqual(code, 0)
+        rm.assert_called_once_with(["X", "Y"])
+        self.assertIn("cleared", out)
+
+    def test_set_theme_persists_pref(self) -> None:
+        with patch("dictate.__main__._config_set_ui_pref") as m:
+            code, out, _ = _run_config(["set-theme", "dark"])
+        self.assertEqual(code, 0)
+        m.assert_called_once_with("theme", "dark")
+
+    def test_set_theme_invalid_rejected(self) -> None:
+        with self.assertRaises(SystemExit):
+            _run_config(["set-theme", "blue"])
+
+    def test_set_startup_on(self) -> None:
+        with patch("dictate.startup.set_startup_enabled") as m:
+            code, out, _ = _run_config(["set-startup", "on"])
+        self.assertEqual(code, 0)
+        m.assert_called_once_with(True)
+
+    def test_set_behavior_tray(self) -> None:
+        with patch("dictate.__main__._config_set_ui_pref") as m:
+            code, out, _ = _run_config(["set-behavior", "tray", "off"])
+        self.assertEqual(code, 0)
+        m.assert_called_once_with("trayOnly", False)
