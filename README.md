@@ -171,10 +171,14 @@ and should not be packaged into the public repo default config.
 
 ## Desktop UI — the Quiet Console (preview)
 
-A design-system desktop Settings window is being built alongside the tray:
+A quiet desktop window sits alongside the tray — a capture home (the mic is the
+record button), the notes list, and the ⌘K palette; no settings menu (config via
+the `dictate config` CLI).
 
-- [`ui/`](ui/README.md) — React/Vite front-end (the Quiet Console: seven views,
-  ⌘K palette, listening HUD, light/dark, GNOME/KDE chrome).
+- [`ui/`](ui/README.md) — React/Vite front-end. For UI work, **`cd ui && npm run
+  dev`** opens the whole app at `http://localhost:5173` against a built-in mock
+  (no engine, no Tauri, no STT) — the fast UI loop in a browser. Details, and
+  when to use the Tauri shell instead, are in that README's *Develop* section.
 - [`ui-shell/`](ui-shell/README.md) — Tauri 2 shell that hosts it on Linux.
 - `src/dictate/ui_server.py` — the loopback control server the UI talks to; the
   tray's **Open Settings…** launches the shell (falling back to native dialogs).

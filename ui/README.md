@@ -1,9 +1,11 @@
 # Dictate UI — the Quiet Console
 
-A faithful React port of the design-system Settings window (`design/ui_kits/`):
-seven views — Status, Model, Push-to-talk, Hotwords, Recent history, Startup,
-Advanced — plus the ⌘K command palette, the listening HUD pill, the toast stack,
-full light/dark parity, and per-OS window chrome (Linux GNOME/KDE focus).
+The React frontend: a capture home where the centred microphone *is* the record
+button, the notes / recent-history list, the ⌘K command palette, the
+getting-started empty state, the listening HUD, and the toast stack — full
+light/dark parity and per-OS window chrome (Linux GNOME/KDE focus). There is no
+settings menu: the one on-screen control is the privacy pill, and advanced
+config lives in the `dictate config` CLI.
 
 It runs two ways:
 
@@ -13,11 +15,30 @@ It runs two ways:
   `window.__DICTATE__ = { baseUrl, token, platform }` and the UI reflects and
   drives the real Python engine over the `ui_server` HTTP API.
 
-## Develop
+## Develop — the fast UI loop
+
+For UI work, run the frontend in a plain browser. With no Tauri shell and no
+engine present, `ipc.js` falls back to the built-in mock, so the *whole* app is
+interactive with zero backend — no STT, no system calls, all state in memory.
+This is the "simulated app in a browser" loop; it's the fast path for any visual
+or interaction work.
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173 — mock mode, gnome chrome by default
+```
+
+In the browser you can drive every everyday flow: press the mic (or hold **Right
+Ctrl** while the page is focused) to fire the simulated dictation, toggle the
+privacy pill, open Notes / search / copy / expand, ⌘K the palette, and see the
+getting-started keyboard when history is empty. HMR is live — edit `src/` and it
+updates instantly.
+
+Reach for the Tauri shell (`cd ../ui-shell && npm run dev`) only for genuinely
+native behaviour the browser can't simulate: OS-wide Right-Ctrl capture, the real
+window chrome, or live data from the Python engine (run the engine too for that).
+
+```bash
 npm run test     # vitest (jsdom)
 npm run build    # -> dist/ (embedded by ../ui-shell)
 ```
@@ -51,7 +72,7 @@ local (mock mode) — which is exactly what the test suite exercises.
 | `src/primitives.jsx` | Kbd/Combo/Chip/Dot/Toggle/Seg/Row/Wave |
 | `src/store.jsx` | Model catalog, demo phrases, context |
 | `src/ipc.js` | Engine bridge (live + mock fallback) |
-| `src/views.jsx` | The seven settings views |
+| `src/views.jsx` | The notes / recent-history view |
 | `src/overlays.jsx` | Listening HUD, ⌘K palette, toasts |
 | `src/platform/TitleBar.jsx` | Per-OS window-control cluster |
 | `src/App.jsx` | Shell, state, hydration, dictation demo |
