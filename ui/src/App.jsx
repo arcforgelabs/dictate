@@ -1,12 +1,12 @@
 // App.jsx — Note Capture shell. Home = Breath Cradle capture surface.
-// Settings views are reached via the gear menu (⚙) or ⌘K palette; they render
-// full-window with a back button. The rail + Status dashboard are gone.
-// IPC contract, overlays (ListeningHUD / ⌘K / Toasts), platform TitleBar,
-// StoreCtx, and all settings views are untouched.
+// The GUI is do-it-for-them: there is no settings menu. The home carries one
+// control — the privacy pill (on-device vs online) — plus a Notes button; the
+// only non-home view is the Notes list. All advanced config lives in the
+// `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
-import { StoreCtx, useStore, MODELS, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -16,12 +16,6 @@ import { ipc } from "./ipc.js";
 const DEFAULT_VERSION = "2026.6.23";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
-// Human-readable labels for settings views (used in the back-nav bar).
-const VIEW_LABELS = {
-  status: "Status", model: "Model", ptt: "Push-to-talk", hotwords: "Hotwords",
-  history: "Recent history", update: "App update", startup: "Startup", advanced: "Advanced",
-};
-
 // Format seconds → m:ss or h:mm:ss (mirrors the design's fmt helper).
 function fmtSecs(s) {
   s = Math.max(0, Math.floor(s));
@@ -30,18 +24,39 @@ function fmtSecs(s) {
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
 }
 
+/* ── Privacy pill: the one human control on the home — trust, not config.
+   Shows whether audio stays on-device; tapping an online session drops back to
+   private instantly. Online setup itself is a CLI action (dictate config). ──── */
+function PrivacyPill() {
+  const s = useStore();
+  const online = s.providerMode === "online";
+  const degraded = s.providerDegraded;
+  const onClick = () => {
+    if (online) {
+      s.setModel("faster-whisper/turbo");
+      s.toast("Switched to on-device · private");
+    } else {
+      s.toast("Online transcription is set up with: dictate config set-provider online");
+    }
+  };
+  const label = degraded ? "On-device · reconnecting" : online ? "Online" : "On-device · private";
+  const cls = "privpill" + (degraded ? " amber" : online ? " online" : "");
+  return (
+    <button className={cls} onClick={onClick} title="Privacy — where your audio is transcribed">
+      <span className="pp-dot" />{label}
+    </button>
+  );
+}
+
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
-  // Config-gap: online mode chosen but no API key — quiet hint, never a block.
-  const noKey = s.providerMode === "online" && s.providerStatus === "no-key";
   return (
     <div className="note-home">
-      {/* Quiet home chrome: settings + notes (the native-decoration titlebar is hidden). */}
+      {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
+          the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
       <div className="home-top">
-        <button className="ibtn" title="Settings" onClick={() => s.setGearOpen(true)}>
-          <Icon name="gear" size={17} />
-        </button>
+        <PrivacyPill />
         <button className="ibtn" title="Notes" onClick={() => s.setView("history")}>
           <Icon name="history" size={17} />
         </button>
@@ -78,14 +93,8 @@ function CaptureHome() {
                 <div className="note-status">Ready to capture</div>
                 <div className="note-status-sub">Press the mic and speak.</div>
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
-                {/* Config-gap hint: quiet amber pill — never a block */}
-                {noKey && (
-                  <div className="config-hint">
-                    <Icon name="lock" size={12} /> Using on-device · add an xAI key to go online
-                  </div>
-                )}
-                {/* Live push-to-talk transcript (not shown if config-gap hint is up) */}
-                {!noKey && s.transcript?.text && !s.transcript.stale && (
+                {/* Live push-to-talk transcript */}
+                {s.transcript?.text && !s.transcript.stale && (
                   <div className="note-preview" aria-live="polite">
                     <span>{s.transcript.text}</span>
                     {s.recording && <span className="note-caret" />}
@@ -100,7 +109,7 @@ function CaptureHome() {
           {s.noteRecording && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
               <span className="wdot" />
-              On-device · xAI unreachable — retrying…
+              On-device · reconnecting…
             </div>
           )}
         </div>
@@ -299,99 +308,6 @@ function ExpandedNote() {
   );
 }
 
-/* ── Gear menu: on-device toggle · appearance · settings links ────────── */
-function GearMenu({ onClose }) {
-  const s = useStore();
-  const onDevice = modelById(s.model).local;
-
-  const toggleOnDevice = () => {
-    if (onDevice) {
-      // Switch to the first hosted model that has a key configured.
-      const hosted = MODELS.find((m) => !m.local && s.keys[m.brand]);
-      if (hosted) {
-        s.setModel(hosted.id);
-      } else {
-        // No provider key is configured — guide the user instead of silently no-op'ing.
-        s.toast("Add a provider key first — set one in Model settings.");
-        s.setView("model");
-        onClose();
-      }
-    } else {
-      s.setModel("faster-whisper/turbo");
-    }
-  };
-
-  const goTo = (v) => { s.setView(v); onClose(); };
-
-  const settingsItems = [
-    { v: "model", label: "Model" },
-    { v: "ptt", label: "Push-to-talk" },
-    { v: "hotwords", label: "Hotwords" },
-    { v: "update", label: "App update" },
-    { v: "startup", label: "Startup" },
-    { v: "advanced", label: "Advanced" },
-    { v: "status", label: "Status" },
-  ];
-
-  return (
-    <>
-      {/* Invisible scrim — click outside menu to dismiss */}
-      <div className="gear-scrim" onClick={onClose} />
-      <div className="gear-menu" role="dialog" aria-label="Settings menu">
-        <div className="gear-head t-label">Settings</div>
-
-        {/* Always on-device toggle */}
-        <button
-          className="gear-row"
-          role="switch"
-          aria-checked={onDevice}
-          onClick={toggleOnDevice}
-        >
-          <span className="gear-mk">
-            Always on-device <span className="gear-mk-note">private</span>
-          </span>
-          <span className="gear-mv">
-            <span className={"gear-switch" + (onDevice ? " on" : "")} />
-          </span>
-        </button>
-
-        <div className="gear-div" />
-
-        {/* Appearance segmented control */}
-        <div className="gear-seg-row">
-          <span className="gear-mk">Appearance</span>
-          <div className="gear-mini-seg">
-            {["light", "dark"].map((th) => (
-              <button
-                key={th}
-                className={s.theme === th ? "on" : ""}
-                onClick={() => s.setTheme(th)}
-              >
-                {th[0].toUpperCase() + th.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="gear-div" />
-
-        {/* Settings navigation entries */}
-        {(() => {
-          const hasUpdate = !!(s.updateStatus?.updateAvailable || s.updateStatus?.shellStale);
-          return settingsItems.map(({ v, label }) => (
-            <button key={v} className="gear-row" onClick={() => goTo(v)}>
-              <span className="gear-mk">{label}</span>
-              {/* Quiet update dot on the "App update" row only */}
-              {v === "update" && hasUpdate && <span className="update-dot update-dot-row" aria-label="Update available" />}
-              <Icon name="chev" size={15} style={{ color: "var(--subtle)", marginLeft: v === "update" && hasUpdate ? "8px" : "auto" }} />
-            </button>
-          ));
-        })()}
-      </div>
-    </>
-  );
-}
-
 /* ======================================================================
    App — root component
    ====================================================================== */
@@ -439,11 +355,10 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
-  const [gearOpen, setGearOpen] = useState(false);
   // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
-  // Provider health: on-device is always-available floor; degraded = fell back from xAI.
+  // Provider health: on-device is always-available floor; degraded = fell back from the online provider.
   const [providerHealthy, setProviderHealthy] = useState(true);
   const [providerStatus, setProviderStatus] = useState("ok");
   const [providerMode, setProviderMode] = useState("private");
@@ -582,18 +497,18 @@ export default function App() {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
       } else if (ev.type === "provider-degraded") {
-        // Remote (xAI) failed — fell back to on-device. Show visible switch: flash + amber toast.
+        // Online provider failed — fell back to on-device. Visible switch: flash + amber toast.
         setProviderDegraded(true);
         setProviderReason(ev.reason || null);
         setProviderActive(ev.active || "faster-whisper");
         triggerFlash("local");
-        toast("Switched to on-device — xAI unreachable", { tone: "amber", icon: "cloudoff" });
+        toast("Switched to on-device", { tone: "amber", icon: "cloudoff" });
       } else if (ev.type === "provider-recovered") {
-        // xAI reachable again — auto-recovered. Show visible switch: flash + green toast.
+        // Online provider reachable again — auto-recovered. Visible switch: flash + green toast.
         setProviderDegraded(false);
-        setProviderActive(ev.active || "xai");
+        setProviderActive(ev.active || "online");
         triggerFlash("remote");
-        toast("Back on xAI", { icon: "cloud" });
+        toast("Back online", { icon: "cloud" });
       } else if (ev.type === "history-changed") {
         ipc.getState().then((st) => {
           if (!st) return;
@@ -948,10 +863,10 @@ export default function App() {
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
     // Note Capture additions
-    gearOpen, setGearOpen, noteElapsed, reduced,
+    noteElapsed, reduced,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
-    // Provider health — on-device is always available; degraded = fell back from xAI
+    // Provider health — on-device is always available; degraded = fell back from the online provider
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth,
@@ -966,7 +881,6 @@ export default function App() {
         <TitleBar
           platform={platform}
           onSearch={() => setPalette(true)}
-          onGear={() => setGearOpen(true)}
           hasUpdate={!!(updateStatus.updateAvailable || updateStatus.shellStale)}
         />
 
@@ -977,31 +891,13 @@ export default function App() {
             noteView === "expanded"   ? <ExpandedNote /> :
             <CaptureHome />
           ) : (
-            /* Settings view: full-window with a back button returning to capture home.
-               The notes list (history) renders its own header and takes full height. */
+            /* The only non-home view is the Notes list — it renders its own header. */
             <div className="note-settings-wrap">
-              {view === "history" ? (
-                /* Notes list: own .notes-top header, no shared bar. */
-                Current && <Current />
-              ) : (
-                <>
-                  <div className="note-settings-bar">
-                    <button className="btn ghost sm" onClick={() => setView("home")}>
-                      <Icon name="back" size={15} />Back
-                    </button>
-                    <span className="note-settings-title">{VIEW_LABELS[view] || view}</span>
-                  </div>
-                  <div className="scroll">
-                    {Current && <Current />}
-                  </div>
-                </>
-              )}
+              {Current && <Current />}
             </div>
           )}
         </div>
 
-        {/* GearMenu: position:absolute anchors to .win just below the titlebar */}
-        {gearOpen && <GearMenu onClose={() => setGearOpen(false)} />}
         <ListeningHUD />
         <CommandPalette />
         <Toasts />

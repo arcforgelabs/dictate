@@ -25,9 +25,12 @@ follow-ups below.
    - **Cloud proposals built** (`2477ec`, /preview): `comp-settings.html` (faithful current),
      `comp-settings-simplified.html` (4-row interim), `comp-settings-minimal.html` (eliminated),
      `comp-capture-home.html` (the no-gear home with the privacy pill), `comp-notes-list.html`.
-   - **Implementation (port to `ui/src` after markup):** remove `GearMenu` + the `VIEWS` settings
-     pages from `App.jsx`/`views.jsx`, drop the home-top gear, add the privacy pill; keep the
-     Notes button. Verify `dictate config` covers every deleted control before removing it.
+   - **Implementation — SHIPPED (2026-06-24).** CLI parity first: `dictate config` now covers
+     set-shortcut, hotwords, set-theme, set-startup, set-behavior (+ set-key/provider/model). Then
+     the GUI strip: removed `GearMenu` + every settings `VIEW` (Status/Model/PTT/Hotwords/Update/
+     Startup/Advanced) from `App.jsx`/`views.jsx`, dropped the titlebar gear, added the privacy
+     pill; Notes kept. Palette reduced to Notes + a few actions. All user-facing provider/brand
+     names (xAI, model ids) scrubbed → neutral "on-device / online". UI tests green (50).
 2. **Real `/api/insert`** 🟠 — Insert currently copies to clipboard + a `TODO(backend)`. Add
    `POST /api/insert` (ui_server) → `UiBackend.insert_text` → the typing backend so Insert
    types the note into the focused app.

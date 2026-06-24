@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Icon, Brand } from "./icons.jsx";
 import { Kbd, Wave } from "./primitives.jsx";
-import { useStore, MODELS } from "./store.jsx";
+import { useStore } from "./store.jsx";
 
 export function ListeningHUD() {
   const s = useStore();
@@ -38,26 +38,18 @@ export function CommandPalette() {
   useEffect(() => { if (s.palette) { setQ(""); setCur(0); setTimeout(() => inputRef.current && inputRef.current.focus(), 40); } }, [s.palette]);
 
   const items = useMemo(() => {
-    const nav = [
-      ["status", "Status", "status"], ["sliders", "Model", "model"], ["keyboard", "Push-to-talk", "ptt"],
-      ["hash", "Hotwords", "hotwords"],
-      ["download", "App update", "update"], ["power", "Startup", "startup"],
-      ["gear", "Advanced", "advanced"],
-    ].map(([icon, label, view]) => ({ icon, label, group: "Go to", run: () => s.setView(view) }));
-    // Notes list (recent dictations) — its own view, reachable from the capture home.
-    const notes = { icon: "history", label: "Notes", group: "Go to", run: () => { s.setNoteView(null); s.setView("history"); } };
-    const actions = [
-      { icon: "mic", label: "Try dictation", group: "Actions", run: () => { s.setView("status"); s.dictateOnce(); } },
+    // The GUI has no settings; the palette is just the daily verbs. Advanced
+    // config lives in the `dictate config` CLI, not here.
+    const all = [
+      { icon: "history", label: "Notes", group: "Go to", run: () => { s.setNoteView(null); s.setView("history"); } },
+      { icon: "mic", label: "Try dictation", group: "Actions", run: () => s.dictateOnce() },
       { icon: s.theme === "dark" ? "sun" : "moon", label: s.theme === "dark" ? "Switch to light" : "Switch to dark", group: "Actions", run: () => s.setTheme(s.theme === "dark" ? "light" : "dark") },
-      { icon: "status", label: "Run doctor", group: "Actions", run: () => s.setView("advanced") },
-      { icon: "trash", label: "Clear recent history", group: "Actions", run: () => s.clearHistory() },
+      { icon: "trash", label: "Clear notes", group: "Actions", run: () => s.clearHistory() },
     ];
-    const models = MODELS.map((m) => ({ icon: null, brand: m.brand, label: "Use " + m.name, meta: m.provider, group: "Models", run: () => { s.setView("model"); if (m.local || s.keys[m.brand]) s.setModel(m.id); } }));
-    const all = [notes, ...nav, ...actions, ...models];
     if (!q.trim()) return all;
     const lq = q.toLowerCase();
-    return all.filter((i) => i.label.toLowerCase().includes(lq) || (i.meta || "").toLowerCase().includes(lq));
-  }, [q, s.theme, s.keys]);
+    return all.filter((i) => i.label.toLowerCase().includes(lq));
+  }, [q, s.theme]);
 
   useEffect(() => { if (cur >= items.length) setCur(Math.max(0, items.length - 1)); }, [items.length]);
 
@@ -75,7 +67,7 @@ export function CommandPalette() {
       <div className="cmd" onClick={(e) => e.stopPropagation()}>
         <div className="cmd-in">
           <Icon name="search" size={18} style={{ color: "var(--muted)" }} />
-          <input ref={inputRef} placeholder="Jump to a setting, switch model, run an action…" value={q}
+          <input ref={inputRef} placeholder="Search notes, run an action…" value={q}
             onChange={(e) => { setQ(e.target.value); setCur(0); }} onKeyDown={onKey} />
           <Kbd>esc</Kbd>
         </div>

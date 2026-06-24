@@ -14,7 +14,7 @@ afterEach(() => {
 // then press Enter to execute. The palette closes and the view renders.
 function navTo(label) {
   fireEvent.keyDown(window, { ctrlKey: true, key: "k", bubbles: true });
-  const input = screen.getByPlaceholderText(/Jump to a setting/i);
+  const input = screen.getByPlaceholderText(/Search notes/i);
   fireEvent.change(input, { target: { value: label } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
@@ -28,61 +28,26 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByTitle("Notes")).toBeInTheDocument();
   });
 
-  it("preserves Quick dictation and Record conversation in the Status view", () => {
+  it("has no settings gear — config lives in the dictate config CLI", () => {
     render(<App />);
-    // Navigate to the legacy Status view (still accessible via ⌘K).
-    navTo("Status");
-    expect(screen.getByText("Quick dictation")).toBeInTheDocument();
-    expect(screen.getByText("Record conversation")).toBeInTheDocument();
+    expect(screen.queryByTitle("Settings")).not.toBeInTheDocument();
+    // The one survivor on the home is the privacy pill.
+    expect(screen.getByText("On-device · private")).toBeInTheDocument();
   });
 
-  it("back button returns to the capture home from a settings view", () => {
+  it("back button returns to the capture home from the Notes view", () => {
     render(<App />);
-    navTo("Model");
-    expect(screen.getByText("Transcription model")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Back"));
+    navTo("Notes");
+    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Back"));
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
     expect(screen.getByText("Ready to capture")).toBeInTheDocument();
   });
 
-  it("navigates to the Model view and lists all four providers", () => {
-    render(<App />);
-    navTo("Model");
-    expect(screen.getByText("Transcription model")).toBeInTheDocument();
-    expect(screen.getByText("faster-whisper · turbo")).toBeInTheDocument();
-    expect(screen.getByText("gpt-4o-mini-transcribe")).toBeInTheDocument();
-    expect(screen.getByText("grok-speech-to-text")).toBeInTheDocument();
-    expect(screen.getByText("gemini-3-flash-preview")).toBeInTheDocument();
-  });
-
-  it("navigates to the App update view without prototype controls", () => {
-    render(<App />);
-    navTo("App update");
-    expect(screen.getByRole("heading", { name: "App update" })).toBeInTheDocument();
-    expect(screen.getByText("Engine")).toBeInTheDocument();
-    expect(screen.getByText("App window")).toBeInTheDocument();
-    expect(screen.queryByText(/PROTOTYPE/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/JUMP TO STATE/i)).not.toBeInTheDocument();
-  });
-
-  it("adds and removes a hotword", () => {
-    render(<App />);
-    navTo("Hotwords");
-    const input = screen.getByPlaceholderText("Add a word…");
-    fireEvent.change(input, { target: { value: "Kubernetes" } });
-    fireEvent.click(screen.getByText("Add word"));
-    expect(screen.getByText("Kubernetes")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Remove Kubernetes"));
-    expect(screen.queryByText("Kubernetes")).not.toBeInTheDocument();
-  });
-
-  it("toggles the theme via the gear menu appearance control", () => {
+  it("toggles the theme via the command palette", () => {
     render(<App />);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    // Open gear menu then click the Dark option. (Two "Settings" gears exist in
-    // jsdom — the hidden TitleBar one and the notes-home one; either opens the menu.)
-    fireEvent.click(screen.getAllByTitle("Settings")[0]);
-    fireEvent.click(screen.getByText("Dark"));
+    navTo("Switch to dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
 
@@ -95,8 +60,8 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("opens the command palette with the title-bar search", () => {
     render(<App />);
-    fireEvent.click(screen.getByText("Search settings & actions"));
-    expect(screen.getByPlaceholderText(/Jump to a setting/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Search notes & actions"));
+    expect(screen.getByPlaceholderText(/Search notes/i)).toBeInTheDocument();
   });
 
   it("shows Transcribing… then note-ready surface after a mock capture", async () => {
@@ -585,34 +550,6 @@ describe("Provider resilience — graceful degradation", () => {
     expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
   });
 
-  it("config-gap hint shows when online mode selected but no API key configured", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "no-key", mode: "online", degraded: false, active: "faster-whisper" },
-        providers: { xai: { configured: false, status: "None" } },
-      }),
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-
-    // Quiet amber hint — not a block
-    await waitFor(() =>
-      expect(screen.getByText(/Using on-device · add an xAI key to go online/)).toBeInTheDocument()
-    );
-    // Mic is still enabled — not blocked
-    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
-  });
-
   it("provider-degraded SSE triggers amber toast and degraded strip during recording", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
@@ -649,7 +586,7 @@ describe("Provider resilience — graceful degradation", () => {
     );
 
     // Degraded strip shows during recording
-    expect(screen.getByText(/On-device · xAI unreachable — retrying…/)).toBeInTheDocument();
+    expect(screen.getByText(/On-device · reconnecting…/)).toBeInTheDocument();
 
     // Mic remains functional (recording still active)
     expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
@@ -686,7 +623,7 @@ describe("Provider resilience — graceful degradation", () => {
     });
 
     // Recovery toast appears
-    await waitFor(() => expect(screen.getByText(/Back on xAI/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Back online/)).toBeInTheDocument());
     // Home screen is still reachable (mic not disabled)
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
   });
@@ -717,7 +654,7 @@ describe("Provider resilience — graceful degradation", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText(/On-device · xAI unreachable — retrying…/)).toBeInTheDocument()
+      expect(screen.getByText(/On-device · reconnecting…/)).toBeInTheDocument()
     );
     expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
   });

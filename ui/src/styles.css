@@ -485,6 +485,14 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-home{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
 /* Quiet home chrome: settings (left) + notes (right) above the cradle. */
 .home-top{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;}
+/* Privacy pill — the one human control on the home (trust, not config). */
+.privpill{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:var(--r-pill);
+  background:var(--surface-2);border:1px solid var(--border);color:var(--fg);font-size:12px;font-weight:600;
+  cursor:pointer;transition:var(--t-fast);}
+.privpill:hover{background:var(--surface-3);}
+.pp-dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 3px var(--live-bg);flex:0 0 auto;}
+.privpill.amber{color:var(--amber-text);}
+.privpill.amber .pp-dot{background:var(--amber);box-shadow:0 0 0 3px var(--amber-bg);}
 .note-home-inner{max-width:460px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;min-height:0;}
 .note-screen{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:24px;padding:24px;position:relative;}
