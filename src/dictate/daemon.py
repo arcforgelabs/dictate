@@ -1120,18 +1120,19 @@ class Daemon:
         *,
         transcript_reason: str = "dropped-overload",
     ) -> None:
+        active_capture = False
         with self._queue_lock:
             if recording_id in self._terminal_recordings:
                 return
             # Preserve mode so stop() can still finalize the failed session.
             mode = self._recording_modes.get(recording_id, "dictation")
             note_id = self._recording_note_ids.pop(recording_id, None)
+            active_capture = self._active_recording_id == recording_id and self.recorder.is_recording
             self._remember_terminal_recording_locked(recording_id)
             self._recording_parts.pop(recording_id, None)
             self._recording_chunk_counts.pop(recording_id, None)
             self._recording_final_chunks.discard(recording_id)
             self._streaming_recordings.discard(recording_id)
-            self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
@@ -1140,6 +1141,8 @@ class Daemon:
                 self.note_store.mark_failed(note_id, error=reason)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not mark note failed: %s", exc)
+        if not active_capture:
+            self._clear_recording_state(recording_id)
         self._surface_status(reason)
         self._surface_transcript(
             phase="final",
@@ -1154,6 +1157,13 @@ class Daemon:
             self._notify_note_recording(False, paused=False)
             # Publish a terminal note signal so the webview can leave "Transcribing…".
             self._surface_note_terminal(recording_id, "failed")
+        if active_capture:
+            threading.Thread(
+                target=self._cleanup_failed_recording_session,
+                args=(recording_id,),
+                name=f"dictate-failed-cleanup-{recording_id}",
+                daemon=True,
+            ).start()
 
     def _clear_recording_state(self, recording_id: int) -> None:
         with self._queue_lock:
@@ -1168,6 +1178,21 @@ class Daemon:
             self._recording_prompt_tails.pop(recording_id, None)
             self._recording_note_chunk_cursors.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
+
+    def _cleanup_failed_recording_session(self, recording_id: int) -> None:
+        try:
+            if self.recorder.is_recording:
+                try:
+                    self.recorder.stop()
+                except AudioCaptureError as exc:
+                    print(f"\r  Microphone error: {exc}", file=sys.stderr)
+        finally:
+            with self._recording_lock:
+                if self._active_recording_id == recording_id:
+                    self._active_recording_id = None
+                self._note_recording_paused = False
+                self._note_pause_reason = None
+                self._clear_recording_state(recording_id)
 
     def _mark_recording_completed(self, recording_id: int) -> None:
         with self._queue_lock:

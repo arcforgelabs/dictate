@@ -113,6 +113,19 @@ class _FailingChunkStt(_FakeStt):
         raise RuntimeError("boom")
 
 
+class _FailingFasterWhisperStt(_FakeFasterWhisperStt):
+    def __init__(self) -> None:
+        super().__init__({16: "first"})
+        self.calls = 0
+
+    def transcribe(self, audio, *args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        self.calls += 1
+        if self.calls == 1:
+            return "first"
+        raise RuntimeError("boom")
+
+
 class _FakeRecorder:
     def __init__(self) -> None:
         self.is_recording = False
@@ -513,6 +526,54 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual([segment.t_start for segment in segments], [0.0, 0.25])
             self.assertEqual([segment.t_end for segment in segments], [0.25, 0.75])
 
+    def test_live_note_failure_stops_active_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _FakeRecorder()
+            daemon = Daemon(
+                _FakeFasterWhisperStt({16: "hello"}),
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+
+            original_append_segment = notes.append_segment
+
+            def _boom(note_id: str, segment) -> None:  # noqa: ANN001
+                del note_id, segment
+                raise OSError("disk full")
+
+            notes.append_segment = _boom  # type: ignore[method-assign]
+            daemon._handle_partial_chunk(
+                AudioChunk(samples=np.ones(16, dtype=np.float32), recording_id=recording_id)
+            )
+            notes.append_segment = original_append_segment  # type: ignore[method-assign]
+
+            deadline = time.time() + 2.0
+            while time.time() < deadline and (
+                recorder.is_recording or daemon._active_recording_id is not None
+            ):
+                time.sleep(0.01)
+
+            self.assertFalse(recorder.is_recording)
+            self.assertIsNone(daemon._active_recording_id)
+            self.assertFalse(daemon.note_recording_active)
+            self.assertFalse(daemon.note_recording_paused)
+            self.assertTrue(daemon.start_note_recording())
+            daemon.stop_note_recording()
+
     def test_note_auto_pause_after_sustained_silence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from unittest.mock import patch
@@ -614,8 +675,17 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertFalse(daemon.note_recording_active)
             self.assertEqual(recording_events[-1], False)
             self.assertEqual(note_events[-1], (False, False, None))
-            self.assertTrue(daemon.stop_note_recording())
+
+            deadline = time.time() + 2.0
+            while time.time() < deadline and (
+                daemon.recorder.is_recording or daemon._active_recording_id is not None
+            ):
+                time.sleep(0.01)
+
             self.assertFalse(daemon.recorder.is_recording)
+            self.assertIsNone(daemon._active_recording_id)
+            self.assertTrue(daemon.start_note_recording())
+            self.assertTrue(daemon.stop_note_recording())
 
             note = daemon.note_store.load_note(note_id)
             assert note is not None
@@ -1346,6 +1416,62 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertNotIn(11, daemon._streaming_recordings)
             self.assertTrue(any(event.get("stale") for event in transcripts))
             output.send.assert_not_called()
+
+    def test_failed_post_stop_session_clears_recording_maps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _NoteStreamingRecorder()
+            daemon = Daemon(
+                _FailingFasterWhisperStt(),
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            note_id = daemon._recording_note_ids[recording_id]
+
+            first_chunk = AudioChunk(
+                samples=np.ones(16, dtype=np.float32),
+                final=False,
+                sequence=0,
+                recording_id=recording_id,
+                t_start=0.0,
+                t_end=1.0,
+            )
+            daemon._handle_partial_chunk(first_chunk)
+            self.assertEqual(daemon._recording_note_chunk_cursors[recording_id], (1, 1.0))
+
+            self.assertTrue(daemon.stop_note_recording())
+
+            failing_chunk = AudioChunk(
+                samples=np.full(16, 2, dtype=np.float32),
+                final=False,
+                sequence=1,
+                recording_id=recording_id,
+                t_start=1.0,
+                t_end=2.0,
+            )
+            daemon._handle_partial_chunk(failing_chunk)
+
+            self.assertNotIn(recording_id, daemon._recording_modes)
+            self.assertNotIn(recording_id, daemon._recording_note_chunk_cursors)
+            self.assertNotIn(recording_id, daemon._recording_note_ids)
+            self.assertNotIn(recording_id, daemon._recording_prompt_tails)
+            self.assertNotIn(recording_id, daemon._recording_stt_ids)
+            self.assertFalse(recorder.is_recording)
+            self.assertFalse(daemon.note_recording_active)
+            self.assertFalse(notes.load_note(note_id) is None)
 
     def test_stop_capture_error_marks_recording_terminal_and_clears_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
