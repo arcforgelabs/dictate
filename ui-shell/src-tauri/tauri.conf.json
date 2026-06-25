@@ -40,7 +40,8 @@
           "libayatana-appindicator3-1",
           "libasound2",
           "libportaudio2"
-        ]
+        ],
+        "preInstallScript": "deb/preinst"
       },
       "rpm": {
         "depends": [

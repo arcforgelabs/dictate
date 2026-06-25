@@ -367,8 +367,10 @@ class UiBackend:
         }.get(backend)
         if command:
             api_key = api_keys_mod._api_key_from_command(command, backend=backend)
-            return self.api_key_status(backend, api_key=api_key, include_command=False)
-        return self.api_key_status(backend)
+            return self.api_key_status(
+                backend, api_key=api_key, include_command=False, log_failures=False
+            )
+        return self.api_key_status(backend, log_failures=False)
 
     def get_history(self) -> list[dict[str, Any]]:
         entries = self.history_store.load()

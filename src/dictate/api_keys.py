@@ -94,14 +94,23 @@ def api_key_status(
     include_command: bool = True,
     validate_remote: bool = False,
     timeout: int = 5,
+    log_failures: bool = True,
 ) -> ApiKeyStatus:
-    """Return Ready, None, or Invalid for a hosted backend API key."""
+    """Return Ready, None, or Invalid for a hosted backend API key.
+
+    ``log_failures=False`` keeps a passive status check quiet: it still reports an
+    Invalid/None status, but does not log a validation failure. Use it when
+    enumerating every backend for display (an unused, optionally-configured
+    provider should not spam the daemon log), and leave it on for explicit
+    user-driven validation and the provider health probe.
+    """
     _validate_backend(backend)
     if api_key is None:
         try:
             api_key, source = _configured_api_key(backend, include_command=include_command)
         except Exception as exc:  # noqa: BLE001
-            _log_api_key_validation_failure(backend, "read", exc)
+            if log_failures:
+                _log_api_key_validation_failure(backend, "read", exc)
             return ApiKeyStatus(backend=backend, status="Invalid", detail="read failed")
     else:
         api_key = api_key.strip()
@@ -112,7 +121,8 @@ def api_key_status(
 
     format_error = validate_api_key_format(backend, api_key)
     if format_error:
-        _log_api_key_validation_failure(backend, "format", format_error)
+        if log_failures:
+            _log_api_key_validation_failure(backend, "format", format_error)
         return ApiKeyStatus(
             backend=backend,
             status="Invalid",
@@ -126,7 +136,8 @@ def api_key_status(
     try:
         _validate_api_key_remote(backend, api_key, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
-        _log_api_key_validation_failure(backend, "remote", exc)
+        if log_failures:
+            _log_api_key_validation_failure(backend, "remote", exc)
         return ApiKeyStatus(backend=backend, status="Invalid", source=source, detail=str(exc))
     return ApiKeyStatus(backend=backend, status="Ready", source=source)
 

@@ -1165,7 +1165,7 @@ class TrayIcon:
     def _api_key_status_for_backend(self, backend: str) -> ApiKeyStatus:
         if backend not in API_BACKENDS:
             return ApiKeyStatus(backend=backend, status="None")
-        status = api_key_status(backend, include_command=False)
+        status = api_key_status(backend, include_command=False, log_failures=False)
         if (
             _api_key_command_configured_for_backend(backend)
             and status.source in {None, "secret-store"}

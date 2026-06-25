@@ -1,0 +1,23 @@
+#!/bin/sh
+# Dictate .deb preinst — runs before the new package is unpacked (including on
+# upgrade/reinstall). Stop any running engine and desktop shell first, otherwise
+# the old engine keeps holding the single-instance lock and the freshly
+# installed engine cannot start. Best-effort: never block the install.
+set +e
+
+ENGINE='/usr/lib/Dictate/engine/dictate-engine'
+
+pkill -f "$ENGINE" 2>/dev/null
+pkill -x dictate-ui-shell 2>/dev/null
+
+# Give them a moment to exit and release the lock; then force any stragglers.
+i=0
+while [ "$i" -lt 5 ]; do
+  pgrep -f "$ENGINE" >/dev/null 2>&1 || break
+  sleep 0.3
+  i=$((i + 1))
+done
+pkill -9 -f "$ENGINE" 2>/dev/null
+pkill -9 -x dictate-ui-shell 2>/dev/null
+
+exit 0

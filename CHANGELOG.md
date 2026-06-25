@@ -9,6 +9,14 @@
   Previously only the source `install.sh` set these up, so packaged installs
   never started on login despite the docs saying they did. One-time and gated to
   the frozen app, so it never overrides a user who later disables startup.
+- `dictate stop` command — stops a running engine via its single-instance lock
+  (SIGTERM, then SIGKILL fallback). Updaters use it so a fresh engine can claim
+  the lock cleanly instead of colliding with a stale daemon.
+- Clean shutdown on Linux update: `install.sh`/`update.sh` stop the running
+  engine before reinstalling, and the `.deb` ships a `preinst` that stops the
+  engine and desktop shell before unpacking an upgrade. Previously the old engine
+  kept running and held the lock, so the newly installed engine could not start
+  (Windows `update.ps1` already stopped the old process; Linux did not).
 
 ### Fixed
 
@@ -19,6 +27,11 @@
 - `dictate doctor` now flags launcher/startup entries whose `Exec` target is
   missing (e.g. a stale pip-era `~/.local/bin/dictate` left behind after moving
   to the package) and `dictate doctor --fix` repairs them.
+- Quietened startup log noise: passively enumerating provider key status (done
+  for every backend on startup) no longer logs a validation failure for an
+  unused, optionally-configured backend (e.g. a stale `openai` key while running
+  local faster-whisper). The status is still reported; only the noisy log is
+  suppressed. Explicit user validation and the provider health probe still log.
 
 ## 2026-06-23 (later)
 

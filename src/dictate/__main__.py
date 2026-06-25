@@ -204,6 +204,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from dictate.windows_control import run_control_panel
 
         return run_control_panel()
+    if cli_args and cli_args[0] == "stop":
+        return _handle_stop_command(cli_args[1:])
     if cli_args and cli_args[0] == "doctor":
         return run_doctor(cli_args[1:])
     if cli_args and cli_args[0] == "config":
@@ -296,6 +298,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         stt_backend=stt_backend,
     )
     return 0
+
+
+def _handle_stop_command(argv: Sequence[str]) -> int:
+    """`dictate stop` — stop a running Dictate engine daemon (used on update)."""
+    from dictate.process_lock import stop_running_daemon
+
+    quiet = "--quiet" in argv
+    stopped, message = stop_running_daemon()
+    if not quiet:
+        print(message, file=sys.stderr)
+    return 0 if stopped else 1
 
 
 def _ensure_desktop_integration() -> None:

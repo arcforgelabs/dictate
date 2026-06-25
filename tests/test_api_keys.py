@@ -348,5 +348,22 @@ class BackendStoredKeyTests(unittest.TestCase):
         self.assertEqual(stt.api_key, "stored-gemini")
 
 
+class ApiKeyStatusLoggingTests(unittest.TestCase):
+    def test_invalid_format_logs_by_default(self) -> None:
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            status = api_keys.api_key_status("openai", api_key="not-a-key")
+        self.assertEqual(status.status, "Invalid")
+        self.assertIn("validation failed for openai", stderr.getvalue())
+
+    def test_invalid_format_is_quiet_when_log_failures_disabled(self) -> None:
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            status = api_keys.api_key_status("openai", api_key="not-a-key", log_failures=False)
+        # Status is still reported as Invalid; only the noisy log is suppressed.
+        self.assertEqual(status.status, "Invalid")
+        self.assertEqual(stderr.getvalue(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

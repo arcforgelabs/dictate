@@ -125,6 +125,34 @@ elif command -v rpm >/dev/null 2>&1 && rpm -q dictate >/dev/null 2>&1; then
   echo "  Use one install method. To remove the package first: sudo dnf remove dictate"
 fi
 
+# Stop any running Dictate engine before we overwrite it, so the new install can
+# claim the single-instance lock cleanly instead of colliding with a stale daemon.
+stop_running_dictate() {
+  # Prefer the installed CLI's own clean stop; it knows the lock location.
+  if command -v dictate >/dev/null 2>&1 && dictate stop --quiet 2>/dev/null; then
+    return 0
+  fi
+  # Fallback (older builds without `dictate stop`): kill via the lock PID file.
+  local lockdir
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    lockdir="$XDG_RUNTIME_DIR/dictate-daemon.lockdir"
+  else
+    lockdir="/tmp/dictate-daemon-$(id -u).lockdir"
+  fi
+  local pidfile="$lockdir/pid"
+  [ -f "$pidfile" ] || return 0
+  local pid
+  pid="$(cat "$pidfile" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || break; sleep 0.3; done
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+echo "Stopping any running Dictate engine ..."
+stop_running_dictate
+
 echo "Creating venv at $INSTALL_DIR ..."
 uv venv "$INSTALL_DIR/venv" --python "$PYTHON_BIN" --system-site-packages --quiet
 

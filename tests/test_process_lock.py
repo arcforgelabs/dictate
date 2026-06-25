@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from dictate.process_lock import ProcessLock
+from dictate.process_lock import ProcessLock, _pid_is_running, stop_running_daemon
 
 
 class ProcessLockTests(unittest.TestCase):
@@ -60,6 +63,73 @@ class PidLivenessTests(unittest.TestCase):
             self.assertTrue(pl._pid_is_running(1234))
             winprobe.assert_called_once_with(1234)
             killer.assert_not_called()
+
+
+class StopRunningDaemonTests(unittest.TestCase):
+    def test_no_lock_reports_nothing_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lockdir = Path(tmp) / "dictate-daemon.lockdir"
+            with patch("dictate.process_lock.daemon_lock_path", return_value=lockdir):
+                stopped, message = stop_running_daemon()
+            self.assertTrue(stopped)
+            self.assertIn("no running", message)
+
+    def test_dead_pid_is_treated_as_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lockdir = Path(tmp) / "dictate-daemon.lockdir"
+            lockdir.mkdir()
+            (lockdir / "pid").write_text("999999999")
+            with patch("dictate.process_lock.daemon_lock_path", return_value=lockdir):
+                stopped, _ = stop_running_daemon()
+            self.assertTrue(stopped)
+
+    def test_live_process_is_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lockdir = Path(tmp) / "dictate-daemon.lockdir"
+            lockdir.mkdir()
+            pidfile = lockdir / "pid"
+            # Spawn a process reparented to init via a double-fork, so when it is
+            # signalled it is reaped by init — matching the real daemon, which is
+            # never a child of the installer. A direct child of this test would
+            # linger as a zombie and falsely read as "still running".
+            script = (
+                "import os, time\n"
+                f"pidfile = {str(pidfile)!r}\n"
+                "if os.fork() > 0:\n"
+                "    os._exit(0)\n"
+                "os.setsid()\n"
+                "open(pidfile, 'w').write(str(os.getpid()))\n"
+                "time.sleep(30)\n"
+            )
+            subprocess.run([sys.executable, "-c", script], check=True)
+
+            pid = None
+            for _ in range(50):
+                try:
+                    text = pidfile.read_text().strip()
+                except FileNotFoundError:
+                    text = ""
+                if text:
+                    pid = int(text)
+                    break
+                time.sleep(0.1)
+            self.assertIsNotNone(pid, "grandchild never recorded its pid")
+            self.addCleanup(self._force_kill, pid)
+
+            with patch("dictate.process_lock.daemon_lock_path", return_value=lockdir):
+                stopped, message = stop_running_daemon(timeout=5.0)
+            self.assertTrue(stopped, message)
+            self.assertFalse(_pid_is_running(pid))
+
+    @staticmethod
+    def _force_kill(pid: int) -> None:
+        import os
+        import signal
+
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

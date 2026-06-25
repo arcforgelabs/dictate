@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import tempfile
 import time
@@ -61,6 +62,49 @@ class ProcessLock:
             self.path.rmdir()
         except OSError:
             pass
+
+
+def stop_running_daemon(*, timeout: float = 10.0) -> tuple[bool, str]:
+    """Stop a running Dictate daemon found via its single-instance lock.
+
+    Returns ``(stopped, message)``. ``stopped`` is True when no live daemon
+    remains afterwards — either none was running, or it was signalled to exit.
+    Used by installers/updaters so a new engine can claim the lock cleanly
+    instead of colliding with a stale one. Targets the engine daemon (the lock
+    holder); the desktop shell is handled separately by the package scripts.
+    """
+    pid = _read_pid(daemon_lock_path() / "pid")
+    if pid is None or not _pid_is_running(pid):
+        return (True, "no running Dictate daemon")
+
+    if sys.platform == "win32":
+        import subprocess
+
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+        )
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return (True, "daemon already exited")
+        except OSError as exc:
+            return (False, f"could not signal Dictate daemon (pid {pid}): {exc}")
+        deadline = time.time() + timeout
+        while time.time() < deadline and _pid_is_running(pid):
+            time.sleep(0.2)
+        if _pid_is_running(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+            time.sleep(0.3)
+
+    if _pid_is_running(pid):
+        return (False, f"Dictate daemon (pid {pid}) did not stop")
+    return (True, f"stopped Dictate daemon (pid {pid})")
 
 
 def daemon_lock_path() -> Path:
