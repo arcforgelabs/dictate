@@ -132,6 +132,8 @@ class DictationEngine:
         language: str | None = None,
         *,
         min_duration_s: float | None = None,
+        initial_prompt: str | None = None,
+        long_form: bool = False,
     ) -> TranscriptionResult:
         """Force on-device CPU transcription (for degraded sessions).
 
@@ -150,6 +152,79 @@ class DictationEngine:
             audio,
             language=language,
             primary_error=None,
+            initial_prompt=initial_prompt,
+            long_form=long_form,
+        )
+
+    def transcribe_stream_chunk(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        *,
+        initial_prompt: str | None = None,
+        min_duration_s: float | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe one streamed note window on the active local backend."""
+        if audio.size == 0:
+            return TranscriptionResult(status="empty", duration_s=0.0)
+
+        duration = self.duration_s(audio)
+        duration_floor = self.min_duration_s if min_duration_s is None else min_duration_s
+        if duration < duration_floor:
+            return TranscriptionResult(status="too_short", duration_s=duration)
+
+        if _api_fallback_allowed(self.stt):
+            return self.transcribe_local(
+                audio,
+                language,
+                min_duration_s=min_duration_s,
+                initial_prompt=initial_prompt,
+                long_form=True,
+            )
+
+        lexicon_plan = build_lexicon_plan(
+            stt=self.stt,
+            hotwords=self.hotwords,
+            lexicon_mode=self.lexicon_mode,
+            replacements=self.lexicon_replacements,
+        )
+        try:
+            text = self.stt.transcribe(
+                audio,
+                language=language,
+                hotwords=lexicon_plan.decode_hotwords,
+                prompt_context=lexicon_plan.prompt_context,
+                initial_prompt=initial_prompt,
+                long_form=True,
+            ).strip()
+        except TypeError:
+            text = self.stt.transcribe(
+                audio,
+                language=language,
+                hotwords=lexicon_plan.decode_hotwords,
+                prompt_context=lexicon_plan.prompt_context,
+            ).strip()
+        except Exception as exc:  # noqa: BLE001
+            return TranscriptionResult(
+                status="error",
+                duration_s=duration,
+                error=str(exc),
+            )
+
+        if lexicon_plan.post_hotwords or lexicon_plan.post_replacements:
+            text = apply_post_corrections(
+                text,
+                hotwords=lexicon_plan.post_hotwords,
+                replacements=lexicon_plan.post_replacements,
+            ).strip()
+
+        if not text:
+            return TranscriptionResult(status="no_speech", duration_s=duration)
+
+        return TranscriptionResult(
+            status="ok",
+            duration_s=duration,
+            text=text,
         )
 
     def _do_transcribe(
@@ -252,6 +327,8 @@ class DictationEngine:
         *,
         language: str | None,
         primary_error: Exception | None,
+        initial_prompt: str | None = None,
+        long_form: bool = False,
     ) -> TranscriptionResult:
         """Fall back to on-device CPU whisper transcription.
 
@@ -290,6 +367,8 @@ class DictationEngine:
                 language=language,
                 hotwords=fallback_plan.decode_hotwords,
                 prompt_context=fallback_plan.prompt_context,
+                initial_prompt=initial_prompt,
+                long_form=long_form,
             ).strip()
         except Exception as fallback_error:  # noqa: BLE001
             if primary_error is not None:

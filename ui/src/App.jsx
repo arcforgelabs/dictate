@@ -152,13 +152,11 @@ function CaptureHome() {
               <>
                 <div className="note-status live">Recording</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
-                {(s.providerDegraded || s.transcript?.text) && (
-                  <div className="note-preview" aria-live="polite">
-                    {s.providerDegraded
-                      ? <span className="note-preview-wait">On-device transcript — ready when you finish.</span>
-                      : <><span>{s.transcript.text}</span><span className="note-caret" /></>}
-                  </div>
-                )}
+                <div className="note-preview" aria-live="polite">
+                  {s.transcript?.text
+                    ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
+                    : <span className="note-preview-wait">Listening for speech…</span>}
+                </div>
               </>
             ) : s.noteRecording && s.notePaused ? (
               <>

@@ -10,6 +10,8 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from dictate.note_chunker import NoteChunkAccumulator
+
 DEFAULT_MAX_RECORDING_SECONDS = 120
 DEFAULT_TRANSCRIPTION_WINDOW_SECONDS = 2.0
 
@@ -26,6 +28,8 @@ class AudioChunk:
     final: bool = False
     sequence: int = 0
     recording_id: int = 0
+    t_start: float | None = None
+    t_end: float | None = None
 
 
 class AudioRecorder(Protocol):
@@ -75,6 +79,8 @@ class SoundDeviceRecorder:
         self._on_chunk: Callable[[AudioChunk], None] | None = None
         self._stream: Any | None = None
         self._recording = False
+        self._note_chunks = False
+        self._note_accumulator: NoteChunkAccumulator | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -88,6 +94,10 @@ class SoundDeviceRecorder:
         self,
         on_chunk: Callable[[AudioChunk], None] | None = None,
         recording_id: int | None = None,
+        *,
+        note_chunks: bool = False,
+        note_chunk_seq_offset: int = 0,
+        note_time_offset_s: float = 0.0,
     ) -> None:
         """Start recording."""
         if self._recording:
@@ -101,6 +111,16 @@ class SoundDeviceRecorder:
         self._recording_id = 0 if recording_id is None else int(recording_id)
         self._window_count = 0
         self._on_chunk = on_chunk
+        self._note_chunks = bool(note_chunks)
+        self._note_accumulator = (
+            NoteChunkAccumulator(
+                sample_rate=self.sample_rate,
+                seq_offset=note_chunk_seq_offset,
+                time_offset_s=note_time_offset_s,
+            )
+            if self._note_chunks
+            else None
+        )
 
         try:
             import sounddevice as sd
@@ -130,6 +150,7 @@ class SoundDeviceRecorder:
         self._recording = False
 
         tail_chunk: AudioChunk | None = None
+        chunk_events: list[AudioChunk] = []
         if self._stream is not None:
             try:
                 self._stream.stop()
@@ -142,7 +163,20 @@ class SoundDeviceRecorder:
         with self._lock:
             callback = self._on_chunk
             self._on_chunk = None
-            if callback is not None and self._window_count > 0:
+            if self._note_accumulator is not None:
+                for emitted in self._note_accumulator.flush(final=True):
+                    chunk_events.append(
+                        AudioChunk(
+                            samples=emitted.samples,
+                            final=False,
+                            sequence=emitted.sequence,
+                            recording_id=self._recording_id,
+                            t_start=emitted.t_start,
+                            t_end=emitted.t_end,
+                        )
+                    )
+                self._note_accumulator = None
+            elif callback is not None and self._window_count > 0:
                 tail = self._window_buffer[: self._window_count].copy()
                 tail_chunk = AudioChunk(
                     samples=tail,
@@ -155,6 +189,8 @@ class SoundDeviceRecorder:
             if self._sample_count == 0:
                 self._sample_count = 0
                 audio = np.array([], dtype=np.float32)
+            elif self._note_chunks:
+                audio = np.array([], dtype=np.float32)
             elif self._sample_count < self._max_samples:
                 audio = self._buffer[: self._sample_count].copy()
             else:
@@ -166,11 +202,17 @@ class SoundDeviceRecorder:
                 ).astype(np.float32, copy=False)
             self._sample_count = 0
             self._write_pos = 0
-        if callback is not None and tail_chunk is not None:
-            try:
-                callback(tail_chunk)
-            except Exception:  # noqa: BLE001
-                pass
+        if callback is not None:
+            for chunk_event in chunk_events:
+                try:
+                    callback(chunk_event)
+                except Exception:  # noqa: BLE001
+                    pass
+            if tail_chunk is not None:
+                try:
+                    callback(tail_chunk)
+                except Exception:  # noqa: BLE001
+                    pass
         return audio
 
     def record_until(
@@ -198,8 +240,9 @@ class SoundDeviceRecorder:
         if samples.size == 0:
             return
         with self._lock:
-            self._write_capture(samples)
-            self._append_window_samples(samples, chunk_events)
+            if not self._note_chunks:
+                self._write_capture(samples)
+            self._append_stream_samples(samples, chunk_events)
             callback = self._on_chunk
         if callback is not None:
             for chunk_event in chunk_events:
@@ -221,6 +264,24 @@ class SoundDeviceRecorder:
         self._sample_count = min(self._max_samples, self._sample_count + len(samples))
         if previous_sample_count + len(samples) > self._max_samples:
             self._truncated = True
+
+    def _append_stream_samples(self, samples: np.ndarray, chunk_events: list[AudioChunk]) -> None:
+        if self._on_chunk is None:
+            return
+        if self._note_accumulator is not None:
+            for emitted in self._note_accumulator.push(samples):
+                chunk_events.append(
+                    AudioChunk(
+                        samples=emitted.samples,
+                        final=False,
+                        sequence=emitted.sequence,
+                        recording_id=self._recording_id,
+                        t_start=emitted.t_start,
+                        t_end=emitted.t_end,
+                    )
+                )
+            return
+        self._append_window_samples(samples, chunk_events)
 
     def _append_window_samples(self, samples: np.ndarray, chunk_events: list[AudioChunk]) -> None:
         if self._on_chunk is None:

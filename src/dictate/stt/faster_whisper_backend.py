@@ -69,6 +69,9 @@ class FasterWhisperSpeechToText(SpeechToText):
         language: str | None = None,
         hotwords: str | None = None,
         prompt_context: str | None = None,
+        *,
+        initial_prompt: str | None = None,
+        long_form: bool = False,
     ) -> str:
         """
         Transcribe with hallucination-suppression defaults.
@@ -84,13 +87,17 @@ class FasterWhisperSpeechToText(SpeechToText):
 
         We also tighten VAD padding/silence detection so less trailing non-speech audio is fed into
         the decoder in the first place.
+
+        Long-form chunked note capture re-enables ``condition_on_previous_text`` and threads an
+        ``initial_prompt`` tail for continuity across windows.
         """
-        del prompt_context
+        prompt = initial_prompt or prompt_context
         segments, _info = self.model.transcribe(
             audio,
             language=language,
             beam_size=1,
-            condition_on_previous_text=False,
+            condition_on_previous_text=long_form,
+            initial_prompt=prompt or None,
             no_speech_threshold=0.6,
             vad_filter=True,
             vad_parameters=dict(

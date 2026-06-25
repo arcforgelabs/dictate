@@ -18,6 +18,8 @@ import numpy as np
 from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
 from dictate.engine import DictationEngine, TranscriptionResult
 from dictate.history import HistoryStore
+from dictate.note_store import NoteSegment, NoteStore
+from dictate.transcript_merge import merge_transcript_piece, prompt_tail
 from dictate.hotkey import format_hotkey_combo, normalize_push_to_talk_combo
 from dictate.hotkey_backend import (
     HotkeyBackend,
@@ -37,7 +39,7 @@ _LONG_RECORDING_RETRY_BASE_DELAY = 1.0  # seconds
 SAMPLE_RATE = 16000
 NOTE_MAX_RECORDING_SECONDS = 900
 FINAL_AUDIO_QUEUE_SIZE = 4
-FINAL_WINDOW_QUEUE_SIZE = 64
+FINAL_WINDOW_QUEUE_SIZE = 128
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
 RecordingMode = Literal["dictation", "note"]
@@ -54,6 +56,7 @@ class Daemon:
         lexicon_mode: LexiconMode = "native",
         lexicon_replacements: dict[str, str] | None = None,
         history_store: HistoryStore | None = None,
+        note_store: NoteStore | None = None,
         push_to_talk_combo: str = "ctrl_r",
         status_callback: Callable[[str | None], None] | None = None,
         recording_callback: Callable[[bool], None] | None = None,
@@ -68,6 +71,7 @@ class Daemon:
         self.language = language
         self.output = output
         self.history_store = history_store or HistoryStore()
+        self.note_store = note_store or NoteStore()
         self.status_callback = status_callback
         self.recording_callback = recording_callback
         self.history_callback = history_callback
@@ -107,6 +111,9 @@ class Daemon:
         self._recording_stt_ids: dict[int, int] = {}
         self._recording_last_audio_status: dict[int, TranscriptionResult] = {}
         self._recording_modes: dict[int, RecordingMode] = {}
+        self._recording_note_ids: dict[int, str] = {}
+        self._recording_prompt_tails: dict[int, str] = {}
+        self._note_streaming_recordings: set[int] = set()
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -194,8 +201,26 @@ class Daemon:
             recording_id = self._active_recording_id
             if recording_id is None or self._recording_mode(recording_id) != "note":
                 return False
+            seq_offset = 0
+            time_offset_s = 0.0
+            if self._is_note_streaming(recording_id):
+                seq_offset, time_offset_s = self._note_chunk_resume_offsets(recording_id)
             try:
-                self.recorder.start(recording_id=recording_id)
+                self.recorder.start(
+                    recording_id=recording_id,
+                    on_chunk=self._queue_recording_chunk if self._recording_uses_streaming(recording_id) else None,
+                    note_chunks=self._is_note_streaming(recording_id),
+                    note_chunk_seq_offset=seq_offset,
+                    note_time_offset_s=time_offset_s,
+                )
+            except TypeError:
+                try:
+                    self.recorder.start(
+                        recording_id=recording_id,
+                        on_chunk=self._queue_recording_chunk if self._recording_uses_streaming(recording_id) else None,
+                    )
+                except TypeError:
+                    self.recorder.start()
             except (AudioCaptureError, TypeError) as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 return False
@@ -331,10 +356,23 @@ class Daemon:
                 self._active_recording_id = self._recording_generation
                 with self._engine_lock:
                     stt = self.engine.stt
+                    note_streaming = mode == "note" and (
+                        (self.supervisor is not None and self.supervisor.is_degraded())
+                        or stt.backend_name == "faster-whisper"
+                    )
                     streaming_enabled = (
-                        mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks)
+                        (mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks))
+                        or note_streaming
                     )
                     stt_id = id(stt)
+                    note_provider = ""
+                    note_model = ""
+                    if note_streaming:
+                        note_provider = stt.backend_name
+                        note_model = getattr(stt, "model_name", "") or ""
+                        if self.supervisor is not None and self.supervisor.is_degraded():
+                            note_provider = "faster-whisper"
+                            note_model = note_model or "base"
                 with self._queue_lock:
                     self._recording_parts[self._active_recording_id] = []
                     self._recording_chunk_counts[self._active_recording_id] = 0
@@ -345,14 +383,32 @@ class Daemon:
                         self._streaming_recordings.add(self._active_recording_id)
                     else:
                         self._streaming_recordings.discard(self._active_recording_id)
+                    if note_streaming:
+                        note_id = self.note_store.create_note(
+                            provider=note_provider,
+                            model=note_model,
+                            recording_id=self._active_recording_id,
+                        )
+                        self._recording_note_ids[self._active_recording_id] = note_id
+                        self._recording_prompt_tails[self._active_recording_id] = ""
+                        self._note_streaming_recordings.add(self._active_recording_id)
+                    else:
+                        self._note_streaming_recordings.discard(self._active_recording_id)
                     self._terminal_recordings.discard(self._active_recording_id)
                 try:
                     self.recorder.start(
                         on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                         recording_id=self._active_recording_id,
+                        note_chunks=note_streaming,
                     )
                 except TypeError:
-                    self.recorder.start()
+                    try:
+                        self.recorder.start(
+                            on_chunk=self._queue_recording_chunk if streaming_enabled else None,
+                            recording_id=self._active_recording_id,
+                        )
+                    except TypeError:
+                        self.recorder.start()
             except (AudioCaptureError, TypeError) as exc:
                 if self._active_recording_id is not None:
                     self._clear_recording_state(self._active_recording_id)
@@ -431,6 +487,10 @@ class Daemon:
 
     def start(self) -> None:
         """Start daemon threads (non-blocking). Returns immediately."""
+        try:
+            self.note_store.recover_interrupted()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Note store recovery failed: %s", exc)
         self._ensure_worker_started()
         self._start_hotkey_backend()
 
@@ -543,7 +603,13 @@ class Daemon:
             return
         if self._is_recording_failed(chunk.recording_id):
             return
-        result = self._transcribe_recording_audio(chunk.recording_id, audio)
+        mode = self._recording_mode(chunk.recording_id)
+        min_duration_s = 0.0 if self._is_note_streaming(chunk.recording_id) else None
+        result = self._transcribe_recording_audio(
+            chunk.recording_id,
+            audio,
+            min_duration_s=min_duration_s,
+        )
         if result is None:
             self._fail_recording_session(
                 chunk.recording_id,
@@ -562,7 +628,14 @@ class Daemon:
                 )
                 return
             if result.status == "ok" and result.text:
-                self._record_transcript_piece(chunk.recording_id, result)
+                piece = result.text.strip()
+                if self._is_note_streaming(chunk.recording_id):
+                    piece = self._append_note_stream_piece(chunk, piece)
+                if piece:
+                    self._record_transcript_piece(
+                        chunk.recording_id,
+                        TranscriptionResult(status="ok", duration_s=result.duration_s, text=piece),
+                    )
                 assembled_text = self._assembled_recording_text(chunk.recording_id)
                 if assembled_text:
                     self._surface_transcript(
@@ -571,6 +644,7 @@ class Daemon:
                         sequence=chunk.sequence,
                         recording_id=chunk.recording_id,
                         stale=False,
+                        mode=mode,
                     )
             else:
                 self._remember_recording_audio_status(chunk.recording_id, result)
@@ -706,8 +780,22 @@ class Daemon:
             self._partial_audio_queue.put_nowait(chunk)
             return True
         except queue.Full:
-            self._fail_recording_session(chunk.recording_id, "Transcription backlog exceeded")
-            return False
+            if self._is_note_streaming(chunk.recording_id):
+                self._fail_recording_session(
+                    chunk.recording_id,
+                    "Transcription backlog exceeded; note recording aborted",
+                )
+                return False
+            logger.warning("Transcription backlog for recording %s; dropping oldest partial chunk", chunk.recording_id)
+            try:
+                self._partial_audio_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._partial_audio_queue.put_nowait(chunk)
+                return True
+            except queue.Full:
+                return False
 
     def _queue_final_audio(self, audio: np.ndarray) -> None:
         chunk = AudioChunk(
@@ -875,20 +963,29 @@ class Daemon:
         if not assembled_text:
             # Capture mode before _clear_recording_state pops it from the dict.
             mode = self._recording_mode(recording_id)
+            note_id: str | None = None
+            with self._queue_lock:
+                note_id = self._recording_note_ids.get(recording_id)
             final_result = final_result or self._last_recording_audio_status(recording_id)
             self._clear_recording_state(recording_id)
             self._surface_empty_final_status(final_result)
             if mode == "note":
+                if note_id:
+                    try:
+                        self.note_store.mark_failed(note_id, error="empty")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Could not mark note failed: %s", exc)
                 # Deterministic terminal signal so the webview can leave "Transcribing…".
                 self._surface_note_terminal(recording_id, "empty")
             return
 
         mode = self._recording_mode(recording_id)
         self._mark_recording_completed(recording_id)
-        self._clear_recording_state(recording_id)
         if mode == "note":
             self._finalize_note_session(recording_id, assembled_text)
+            self._clear_recording_state(recording_id)
             return
+        self._clear_recording_state(recording_id)
         try:
             self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
@@ -912,6 +1009,19 @@ class Daemon:
         print(f"\r  Typed: {assembled_text}", file=sys.stderr)
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
+        note_id: str | None = None
+        with self._queue_lock:
+            note_id = self._recording_note_ids.pop(recording_id, None)
+            self._recording_prompt_tails.pop(recording_id, None)
+            self._note_streaming_recordings.discard(recording_id)
+        if note_id:
+            stored = self.note_store.assembled_text(note_id)
+            if stored.strip():
+                raw_text = stored
+            try:
+                self.note_store.mark_ready(note_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not mark note ready: %s", exc)
         note_text = raw_text.strip()
         if not note_text:
             self._surface_empty_final_status(None)
@@ -939,6 +1049,7 @@ class Daemon:
                 return
             # Save mode before it is popped; needed to signal note-mode failures.
             mode = self._recording_modes.get(recording_id, "dictation")
+            note_id = self._recording_note_ids.pop(recording_id, None)
             self._remember_terminal_recording_locked(recording_id)
             self._recording_parts.pop(recording_id, None)
             self._recording_chunk_counts.pop(recording_id, None)
@@ -947,6 +1058,13 @@ class Daemon:
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
             self._recording_modes.pop(recording_id, None)
+            self._recording_prompt_tails.pop(recording_id, None)
+            self._note_streaming_recordings.discard(recording_id)
+        if note_id:
+            try:
+                self.note_store.mark_failed(note_id, error=reason)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not mark note failed: %s", exc)
         if self._active_recording_id == recording_id:
             self._active_recording_id = None
         self._surface_status(reason)
@@ -971,6 +1089,9 @@ class Daemon:
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
             self._recording_modes.pop(recording_id, None)
+            self._recording_note_ids.pop(recording_id, None)
+            self._recording_prompt_tails.pop(recording_id, None)
+            self._note_streaming_recordings.discard(recording_id)
 
     def _mark_recording_completed(self, recording_id: int) -> None:
         with self._queue_lock:
@@ -997,6 +1118,73 @@ class Daemon:
     def _supports_streaming_chunks(self) -> bool:
         return bool(self.engine.stt.capabilities.supports_streaming_chunks)
 
+    def _note_streaming_enabled(self, mode: RecordingMode) -> bool:
+        if mode != "note":
+            return False
+        if self.supervisor is not None and self.supervisor.is_degraded():
+            return True
+        with self._engine_lock:
+            return self.engine.stt.backend_name == "faster-whisper"
+
+    def _is_note_streaming(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            return recording_id in self._note_streaming_recordings
+
+    def _recording_uses_streaming(self, recording_id: int) -> bool:
+        with self._queue_lock:
+            return recording_id in self._streaming_recordings
+
+    def _note_chunk_resume_offsets(self, recording_id: int) -> tuple[int, float]:
+        with self._queue_lock:
+            note_id = self._recording_note_ids.get(recording_id)
+        if not note_id:
+            return 0, 0.0
+        segments = self.note_store.load_segments(note_id)
+        if not segments:
+            return 0, 0.0
+        return max(segment.seq for segment in segments) + 1, max(segment.t_end for segment in segments)
+
+    def _stt_labels(self) -> tuple[str, str]:
+        with self._engine_lock:
+            stt = self.engine.stt
+            provider = stt.backend_name
+            model = getattr(stt, "model_name", "") or ""
+        if self.supervisor is not None and self.supervisor.is_degraded():
+            provider = "faster-whisper"
+            model = model or "base"
+        return provider, model
+
+    def _append_note_stream_piece(self, chunk: AudioChunk, piece: str) -> str:
+        recording_id = chunk.recording_id
+        with self._queue_lock:
+            tail = self._recording_prompt_tails.get(recording_id, "")
+            note_id = self._recording_note_ids.get(recording_id)
+        merged = merge_transcript_piece(tail, piece)
+        if not merged:
+            return ""
+        if note_id:
+            provider, model = self._stt_labels()
+            try:
+                self.note_store.append_segment(
+                    note_id,
+                    NoteSegment(
+                        seq=chunk.sequence,
+                        t_start=chunk.t_start if chunk.t_start is not None else 0.0,
+                        t_end=chunk.t_end if chunk.t_end is not None else self.engine.duration_s(chunk.samples),
+                        provider=provider,
+                        model=model,
+                        text=merged,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Could not persist note segment for %s", note_id)
+                self._fail_recording_session(recording_id, f"Note storage failed: {exc}")
+                return ""
+        with self._queue_lock:
+            combined = f"{tail} {merged}".strip() if tail else merged
+            self._recording_prompt_tails[recording_id] = prompt_tail(combined)
+        return merged
+
     def _transcribe_recording_audio(
         self,
         recording_id: int,
@@ -1022,6 +1210,19 @@ class Daemon:
 
             mode = self._recording_mode(recording_id)
             supervisor = self.supervisor
+
+            if self._is_note_streaming(recording_id):
+                initial_prompt: str | None = None
+                with self._queue_lock:
+                    tail = self._recording_prompt_tails.get(recording_id, "")
+                if tail:
+                    initial_prompt = prompt_tail(tail)
+                return self.engine.transcribe_stream_chunk(
+                    audio,
+                    language=self.language,
+                    initial_prompt=initial_prompt,
+                    min_duration_s=min_duration_s,
+                )
 
             # --- Degraded path: force on-device transcription ---
             # When the supervisor is degraded (remote failed earlier), bypass
