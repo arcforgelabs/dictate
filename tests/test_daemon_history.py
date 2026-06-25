@@ -1204,6 +1204,48 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(notes[0]["status"], "failed")
             self.assertEqual(notes[0]["text"], "")
 
+    def test_note_start_failure_does_not_leave_ghost_active_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            statuses: list[str | None] = []
+            notes: list[dict[str, object]] = []
+            recorder = _FakeRecorder()
+            daemon = Daemon(
+                _FakeFasterWhisperStt({}),
+                output=output,
+                history_store=store,
+                recorder=recorder,
+                status_callback=statuses.append,
+                note_callback=notes.append,
+            )
+            daemon.engine.min_duration_s = 0
+
+            original_create_note = daemon.note_store.create_note
+
+            def _boom(*args, **kwargs):  # noqa: ANN001
+                del args, kwargs
+                raise OSError("disk full")
+
+            daemon.note_store.create_note = _boom  # type: ignore[method-assign]
+            try:
+                self.assertFalse(daemon.start_note_recording())
+            finally:
+                daemon.note_store.create_note = original_create_note  # type: ignore[method-assign]
+
+            self.assertFalse(recorder.is_recording)
+            self.assertFalse(daemon.note_recording_active)
+            self.assertFalse(daemon.note_recording_paused)
+            self.assertIsNone(daemon._active_recording_id)
+            self.assertEqual(recorder.start_kwargs, [])
+            self.assertEqual(store.load(), [])
+            self.assertEqual(notes[-1]["status"], "failed")
+            self.assertEqual(notes[-1]["text"], "")
+            self.assertTrue(any("Note recording failed" in (status or "") for status in statuses))
+
     def test_note_recording_uses_backend_diarization_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon

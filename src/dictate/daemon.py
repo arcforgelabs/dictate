@@ -402,9 +402,12 @@ class Daemon:
 
                 self._note_pause_reason = None
                 self._note_silence_monitor.reset()
+                note_start_error: Exception | None = None
+                failed_recording_id: int | None = None
                 try:
                     self._recording_generation += 1
                     self._active_recording_id = self._recording_generation
+                    recording_id = self._active_recording_id
                     with self._engine_lock:
                         stt = self.engine.stt
                         note_streaming = mode == "note" and (
@@ -435,39 +438,53 @@ class Daemon:
                         else:
                             self._streaming_recordings.discard(self._active_recording_id)
                         if note_streaming:
-                            note_id = self.note_store.create_note(
-                                provider=note_provider,
-                                model=note_model,
-                                recording_id=self._active_recording_id,
-                            )
-                            self._recording_note_ids[self._active_recording_id] = note_id
-                            self._recording_prompt_tails[self._active_recording_id] = ""
-                            self._recording_note_chunk_cursors[self._active_recording_id] = (0, 0.0)
-                            self._note_streaming_recordings.add(self._active_recording_id)
+                            try:
+                                note_id = self.note_store.create_note(
+                                    provider=note_provider,
+                                    model=note_model,
+                                    recording_id=self._active_recording_id,
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                note_start_error = exc
+                                failed_recording_id = self._active_recording_id
+                            else:
+                                self._recording_note_ids[self._active_recording_id] = note_id
+                                self._recording_prompt_tails[self._active_recording_id] = ""
+                                self._recording_note_chunk_cursors[self._active_recording_id] = (0, 0.0)
+                                self._note_streaming_recordings.add(self._active_recording_id)
                         else:
                             self._note_streaming_recordings.discard(self._active_recording_id)
                         self._terminal_recordings.discard(self._active_recording_id)
-                    try:
-                        self.recorder.start(
-                            on_chunk=self._queue_recording_chunk if streaming_enabled else None,
-                            recording_id=self._active_recording_id,
-                            note_chunks=note_streaming,
-                            on_samples=self._track_note_silence if mode == "note" else None,
-                        )
-                    except TypeError:
+                    if note_start_error is None:
                         try:
                             self.recorder.start(
                                 on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                 recording_id=self._active_recording_id,
+                                note_chunks=note_streaming,
                                 on_samples=self._track_note_silence if mode == "note" else None,
                             )
                         except TypeError:
-                            self.recorder.start()
+                            try:
+                                self.recorder.start(
+                                    on_chunk=self._queue_recording_chunk if streaming_enabled else None,
+                                    recording_id=self._active_recording_id,
+                                    on_samples=self._track_note_silence if mode == "note" else None,
+                                )
+                            except TypeError:
+                                self.recorder.start()
                 except (AudioCaptureError, TypeError) as exc:
                     if self._active_recording_id is not None:
                         self._clear_recording_state(self._active_recording_id)
                     self._active_recording_id = None
                     print(f"\r  Microphone error: {exc}", file=sys.stderr)
+                    return False
+                if note_start_error is not None:
+                    if failed_recording_id is not None:
+                        self._clear_recording_state(failed_recording_id)
+                    self._active_recording_id = None
+                    print(f"\r  Note recording failed: {note_start_error}", file=sys.stderr)
+                    self._surface_status(f"Note recording failed: {note_start_error}")
+                    self._surface_note_terminal(recording_id, "failed")
                     return False
 
                 label = "Note recording" if mode == "note" else "Recording"
