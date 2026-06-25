@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import signal
 import sys
 import types
 import unittest
@@ -336,6 +337,40 @@ class MainSttSelectionTests(unittest.TestCase):
                 main_module._acquire_daemon_lock_or_exit()
 
         self.assertEqual(raised.exception.code, 0)
+
+    def test_daemon_mode_releases_process_lock_on_exit(self) -> None:
+        lock = Mock()
+        lock.acquire.return_value = True
+        stt = FakeOnceStt()
+
+        with (
+            patch("dictate.__main__.ProcessLock", return_value=lock),
+            patch.object(main_module, "_ensure_desktop_integration"),
+            patch.object(main_module, "_run_preflight_or_exit"),
+            patch.object(main_module, "_load_stt_or_exit", return_value=stt),
+            patch.object(main_module, "_resolve_language", return_value=None),
+            patch.object(main_module, "_resolve_hotwords", return_value=None),
+            patch.object(main_module, "_run_headless"),
+        ):
+            self.assertEqual(main_module.main(["--no-tray"]), 0)
+
+        lock.release.assert_called_once()
+        self.assertIsNone(main_module._DAEMON_LOCK)
+
+    def test_daemon_signal_handler_requests_shutdown_and_restores_handlers(self) -> None:
+        daemon = Mock()
+        previous_term = signal.getsignal(signal.SIGTERM)
+        previous_int = signal.getsignal(signal.SIGINT)
+
+        with main_module._DaemonSignalHandlers(daemon):
+            installed = signal.getsignal(signal.SIGTERM)
+            self.assertNotEqual(installed, previous_term)
+            assert callable(installed)
+            installed(signal.SIGTERM, None)
+
+        daemon.shutdown.assert_called_once()
+        self.assertIs(signal.getsignal(signal.SIGTERM), previous_term)
+        self.assertIs(signal.getsignal(signal.SIGINT), previous_int)
 
     def test_saved_lexicon_mode_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()

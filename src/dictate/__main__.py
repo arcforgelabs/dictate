@@ -20,8 +20,10 @@ Usage:
 import argparse
 import logging
 import os
+import signal
 import sys
 import threading
+from types import FrameType
 from typing import Sequence
 
 # Disable HF Xet transport by default to avoid observed hangs on large model artifacts.
@@ -237,35 +239,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         config=config,
     )
 
-    if not args.once:
-        _acquire_daemon_lock_or_exit()
-        _ensure_desktop_integration()
-
-    _run_preflight_or_exit(
-        require_typing=not args.once,
-        require_clipboard=args.once and args.copy,
-        typing_backend=args.type_backend,
-        push_to_talk_combo=push_to_talk_combo,
-        stt_backend=stt_backend,
-        stt_model=model_name,
-        stt_device=stt_device,
-    )
-
-    stt = _load_stt_or_exit(
-        stt_backend=stt_backend,
-        model_name=model_name,
-        device=stt_device,
-        compute_type=stt_compute_type,
-    )
-    language = _resolve_language(stt, args.language)
-    hotwords = _resolve_hotwords(
-        stt,
-        config=config,
-        cli_hotwords=args.hotwords,
-        lexicon_mode=lexicon_mode,
-    )
-
     if args.once:
+        _run_preflight_or_exit(
+            require_typing=False,
+            require_clipboard=args.copy,
+            typing_backend=args.type_backend,
+            push_to_talk_combo=push_to_talk_combo,
+            stt_backend=stt_backend,
+            stt_model=model_name,
+            stt_device=stt_device,
+        )
+        stt = _load_stt_or_exit(
+            stt_backend=stt_backend,
+            model_name=model_name,
+            device=stt_device,
+            compute_type=stt_compute_type,
+        )
+        language = _resolve_language(stt, args.language)
+        hotwords = _resolve_hotwords(
+            stt,
+            config=config,
+            cli_hotwords=args.hotwords,
+            lexicon_mode=lexicon_mode,
+        )
         _run_once(
             stt,
             copy_to_clipboard=args.copy,
@@ -275,8 +271,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             lexicon_replacements=config.lexicon_replacements,
         )
         return 0
-    if args.no_tray:
-        _run_headless(
+
+    _acquire_daemon_lock_or_exit()
+    try:
+        _ensure_desktop_integration()
+        _run_preflight_or_exit(
+            require_typing=True,
+            require_clipboard=False,
+            typing_backend=args.type_backend,
+            push_to_talk_combo=push_to_talk_combo,
+            stt_backend=stt_backend,
+            stt_model=model_name,
+            stt_device=stt_device,
+        )
+        stt = _load_stt_or_exit(
+            stt_backend=stt_backend,
+            model_name=model_name,
+            device=stt_device,
+            compute_type=stt_compute_type,
+        )
+        language = _resolve_language(stt, args.language)
+        hotwords = _resolve_hotwords(
+            stt,
+            config=config,
+            cli_hotwords=args.hotwords,
+            lexicon_mode=lexicon_mode,
+        )
+        if args.no_tray:
+            _run_headless(
+                stt,
+                type_backend=args.type_backend,
+                language=language,
+                hotwords=hotwords,
+                lexicon_mode=lexicon_mode,
+                lexicon_replacements=config.lexicon_replacements,
+                push_to_talk_combo=push_to_talk_combo,
+                stt_backend=stt_backend,
+            )
+            return 0
+        _run_tray(
             stt,
             type_backend=args.type_backend,
             language=language,
@@ -287,17 +320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             stt_backend=stt_backend,
         )
         return 0
-    _run_tray(
-        stt,
-        type_backend=args.type_backend,
-        language=language,
-        hotwords=hotwords,
-        lexicon_mode=lexicon_mode,
-        lexicon_replacements=config.lexicon_replacements,
-        push_to_talk_combo=push_to_talk_combo,
-        stt_backend=stt_backend,
-    )
-    return 0
+    finally:
+        _release_daemon_lock()
 
 
 def _handle_stop_command(argv: Sequence[str]) -> int:
@@ -330,6 +354,16 @@ def _acquire_daemon_lock_or_exit() -> None:
         )
         raise SystemExit(0)
     _DAEMON_LOCK = lock
+
+
+def _release_daemon_lock() -> None:
+    global _DAEMON_LOCK
+    if _DAEMON_LOCK is None:
+        return
+    try:
+        _DAEMON_LOCK.release()
+    finally:
+        _DAEMON_LOCK = None
 
 
 def main_with_logging() -> int:
@@ -1043,6 +1077,32 @@ def _resolve_typing_output_or_exit(type_backend: str):
         raise SystemExit(2) from exc
 
 
+class _DaemonSignalHandlers:
+    def __init__(self, daemon: object) -> None:
+        self._daemon = daemon
+        self._previous: dict[signal.Signals, object] = {}
+
+    def __enter__(self) -> "_DaemonSignalHandlers":
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            self._previous[sig] = signal.getsignal(sig)
+            signal.signal(sig, self._handle_signal)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+        if threading.current_thread() is not threading.main_thread():
+            return
+        for sig, handler in self._previous.items():
+            signal.signal(sig, handler)
+
+    def _handle_signal(self, signum: int, _frame: FrameType | None) -> None:
+        try:
+            self._daemon.shutdown()  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nShutdown after signal {signum} failed: {exc}", file=sys.stderr)
+
+
 def _run_headless(
     stt: SpeechToText,
     *,
@@ -1071,7 +1131,8 @@ def _run_headless(
     )
     _maybe_start_ui_server(daemon)
     try:
-        daemon.run()
+        with _DaemonSignalHandlers(daemon):
+            daemon.run()
     finally:
         supervisor.shutdown()
 
@@ -1121,15 +1182,16 @@ def _run_tray(
         supervisor=supervisor,
     )
     try:
-        if sys.platform.startswith("win"):
-            from dictate.windows_tray import WindowsTrayIcon
+        with _DaemonSignalHandlers(daemon):
+            if sys.platform.startswith("win"):
+                from dictate.windows_tray import WindowsTrayIcon
 
-            WindowsTrayIcon(daemon).run()
-            return
+                WindowsTrayIcon(daemon).run()
+                return
 
-        from dictate.tray import TrayIcon
+            from dictate.tray import TrayIcon
 
-        TrayIcon(daemon).run()
+            TrayIcon(daemon).run()
     finally:
         supervisor.shutdown()
 
