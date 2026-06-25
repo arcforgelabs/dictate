@@ -22,6 +22,8 @@ const ICONS = {
   x: <path d="M6 6l12 12M18 6 6 18"/>,
   minus: <path d="M5 12h14"/>,
   square: <rect x="5" y="5" width="14" height="14" rx="1.5"/>,
+  pause: <><rect x="7" y="5" width="4" height="14" rx="1"/><rect x="13" y="5" width="4" height="14" rx="1"/></>,
+  play: <path d="M8 5.8v12.4c0 .9 1 1.4 1.7.9l10.2-6.2c.7-.4.7-1.4 0-1.8L9.7 4.9A1 1 0 0 0 8 5.8z"/>,
   search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></>,
   cpu: <><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2"/></>,
   bolt: <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>,

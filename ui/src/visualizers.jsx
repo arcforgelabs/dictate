@@ -112,9 +112,11 @@ export function BreathCradle({ active, paused, session, reduced, onStart, onPaus
 
   const icon = showStopHint
     ? <Icon name="square" size={34} />
-    : showResumeHint || paused
-      ? <Icon name="mic" size={38} />
-      : <Mark size={42} />;
+    : showResumeHint
+      ? <Icon name="play" size={38} />
+      : paused
+        ? <Icon name="pause" size={38} />
+        : <Mark size={42} />;
 
   return (
     <div

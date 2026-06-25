@@ -130,39 +130,40 @@ function CaptureHome() {
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">
-          {/* cradle-wrap: positions the one-shot flash ring relative to the cradle */}
-          <div className="cradle-wrap">
-            {s.flash && (
-              <span className={"flashring " + s.flash.to} key={s.flash.id} aria-hidden="true" />
-            )}
-            <BreathCradle
-              session={s.noteRecording}
-              active={s.noteRecording && !s.notePaused}
-              paused={s.notePaused}
-              reduced={s.reduced}
-              onStart={s.startNoteRecording}
-              onPause={s.pauseNoteRecording}
-              onResume={s.resumeNoteRecording}
-            />
-          </div>
-          <div className="note-feedback">
+          <div className="note-capture-stack">
+            <div className="note-capture-anchor">
+              {/* cradle-wrap: positions the one-shot flash ring relative to the cradle */}
+              <div className="cradle-wrap">
+                {s.flash && (
+                  <span className={"flashring " + s.flash.to} key={s.flash.id} aria-hidden="true" />
+                )}
+                <BreathCradle
+                  session={s.noteRecording}
+                  active={s.noteRecording && !s.notePaused}
+                  paused={s.notePaused}
+                  reduced={s.reduced}
+                  onStart={s.startNoteRecording}
+                  onPause={s.pauseNoteRecording}
+                  onResume={s.resumeNoteRecording}
+                />
+              </div>
+              <div className="note-feedback">
             {s.noteRecording && !s.notePaused ? (
               <>
                 <div className="note-status live">Recording</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
-                <div className="note-preview" aria-live="polite">
-                  {s.providerDegraded
-                    ? <span className="note-preview-wait">On-device transcript — ready when you finish.</span>
-                    : s.transcript?.text
-                      ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
-                      : <span className="note-preview-wait">Listening for speech…</span>}
-                </div>
+                {(s.providerDegraded || s.transcript?.text) && (
+                  <div className="note-preview" aria-live="polite">
+                    {s.providerDegraded
+                      ? <span className="note-preview-wait">On-device transcript — ready when you finish.</span>
+                      : <><span>{s.transcript.text}</span><span className="note-caret" /></>}
+                  </div>
+                )}
               </>
             ) : s.noteRecording && s.notePaused ? (
               <>
                 <div className="note-status paused">Paused</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
-                <div className="note-status-sub t-mono">Hover the mic to resume, or finish the note.</div>
                 <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
                   Finish note
                 </button>
@@ -174,8 +175,8 @@ function CaptureHome() {
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
                 {/* Getting started: teach the key when there are no notes yet */}
                 {(!s.history || s.history.length === 0) && <GsKeyboard />}
-                {/* Live push-to-talk transcript */}
-                {s.transcript?.text && !s.transcript.stale && (
+                {/* Live push-to-talk transcript — hide once history has the same note (CopyLastNote). */}
+                {s.transcript?.text && !s.transcript.stale && (s.recording || !s.history?.length) && (
                   <div className="note-preview" aria-live="polite">
                     <span>{s.transcript.text}</span>
                     {s.recording && <span className="note-caret" />}
@@ -183,9 +184,12 @@ function CaptureHome() {
                 )}
               </>
             )}
+              </div>
+            </div>
           </div>
-          {/* Copy-last: quiet row beneath the cradle; hidden while recording or when empty */}
-          <CopyLastNote />
+          <div className="note-screen-footer">
+            <CopyLastNote />
+          </div>
           {/* Degraded recording strip: amber, visible while recording on local fallback */}
           {s.noteRecording && !s.notePaused && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
@@ -202,7 +206,18 @@ function CaptureHome() {
 /* ── Copy-last row: quiet chip below the cradle for fast reuse of the last note ── */
 function CopyLastNote() {
   const s = useStore();
-  if (!s.history || s.history.length === 0 || s.noteRecording) return null;
+  if (!s.history || s.history.length === 0) return null;
+  if (s.noteRecording) {
+    const latest = s.history[0];
+    return (
+      <button className="lastcap is-reserved" aria-hidden="true" tabIndex={-1} disabled>
+        <span className="lc-ico"><Icon name="copy" size={15} /></span>
+        <span className="lc-body">
+          <span className="lc-text">{latest.text}</span>
+        </span>
+      </button>
+    );
+  }
   const latest = s.history[0];
   const handleCopy = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {

@@ -544,9 +544,16 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   74%,100%{transform:translateY(0);box-shadow:0 1px 0 var(--border);}}
 @media (prefers-reduced-motion: reduce){.gs-row .k.hot{animation:none;transform:translateY(1.5px);box-shadow:0 0 0 4px var(--live-bg);}}
 .note-home-inner{max-width:460px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;min-height:0;}
-.note-screen{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:24px;padding:24px;position:relative;}
-.note-feedback{display:flex;flex-direction:column;align-items:center;gap:8px;min-height:110px;}
+.note-screen{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;
+  padding:24px;position:relative;}
+/* Stack pins the cradle vertically: equal flex spacers absorb height changes below. */
+.note-capture-stack{flex:1 1 0;min-height:0;width:100%;max-width:460px;display:flex;flex-direction:column;align-items:center;}
+.note-capture-stack::before,.note-capture-stack::after{content:"";flex:1 1 0;min-height:0;width:100%;}
+.note-capture-anchor{display:flex;flex-direction:column;align-items:center;gap:24px;flex:0 0 264px;
+  height:264px;width:100%;}
+.note-screen-footer{flex:0 0 auto;width:100%;max-width:320px;display:flex;justify-content:center;}
+.note-feedback{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;
+  flex:0 0 132px;height:132px;min-height:132px;width:100%;overflow:hidden;}
 .note-status{font-size:19px;font-weight:800;letter-spacing:-.02em;}
 .note-status.live{color:var(--live);}
 .note-status.paused{color:var(--muted);}
@@ -573,7 +580,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 
 /* ── Breath Cradle (cradle-wrap / recwrap / recbtn / cradle-halo / cradle-ring) ── */
 /* cradle-wrap: positions the flash ring relative to the cradle */
-.cradle-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.cradle-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:0 0 108px;}
 .recwrap{position:relative;width:108px;height:108px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;cursor:pointer;}
 .recwrap::before{content:"";position:absolute;inset:-28px;border-radius:50%;pointer-events:auto;}
 .recwrap:focus-visible{outline:2px solid var(--live);outline-offset:6px;border-radius:50%;}
@@ -674,6 +681,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .lastcap{display:flex;align-items:center;gap:12px;width:100%;max-width:320px;padding:8px 12px;
   border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--surface-2);
   color:var(--muted);cursor:pointer;text-align:left;transition:var(--t-fast);}
+.lastcap.is-reserved{visibility:hidden;pointer-events:none;}
 .lastcap:hover{border-color:var(--border-2);background:var(--surface-3);}
 .lc-ico{flex:0 0 auto;color:var(--subtle);display:flex;}
 .lc-body{min-width:0;display:flex;flex-direction:column;gap:1px;}
