@@ -103,12 +103,16 @@ class NoteChunkAccumulator:
         audio = self._take_samples(emit_count)
         t_start = self._cursor_samples / self.sample_rate
         t_end = (self._cursor_samples + emit_count) / self.sample_rate
-        self._cursor_samples += emit_count
-        if self.overlap_samples > 0 and emit_count > 0:
+        if reason == "final":
+            self._cursor_samples += emit_count
+            self._parts = []
+        elif self.overlap_samples > 0 and emit_count > 0:
             overlap = audio[emit_count - self.overlap_samples : emit_count].copy()
             self._parts = [overlap] if overlap.size else []
+            self._cursor_samples += max(0, emit_count - overlap.size)
         else:
             self._parts = []
+            self._cursor_samples += emit_count
         self._trailing_silence = 0
         chunk = EmittedNoteChunk(
             samples=audio,

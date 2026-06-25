@@ -455,6 +455,18 @@ class Daemon:
         with self._recording_lock:
             recording_id = self._active_recording_id
             mode = self._recording_mode(recording_id) if recording_id is not None else "dictation"
+            if recording_id is not None and self._is_recording_failed(recording_id):
+                try:
+                    self.recorder.stop()
+                except AudioCaptureError as exc:
+                    print(f"\r  Microphone error: {exc}", file=sys.stderr)
+                self._active_recording_id = None
+                self._note_recording_paused = False
+                self._clear_recording_state(recording_id)
+                self._notify_recording(False)
+                if mode == "note":
+                    self._notify_note_recording(False, paused=False)
+                return
             try:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
@@ -1102,7 +1114,7 @@ class Daemon:
         with self._queue_lock:
             if recording_id in self._terminal_recordings:
                 return
-            # Save mode before it is popped; needed to signal note-mode failures.
+            # Preserve mode so stop() can still finalize the failed session.
             mode = self._recording_modes.get(recording_id, "dictation")
             note_id = self._recording_note_ids.pop(recording_id, None)
             self._remember_terminal_recording_locked(recording_id)
@@ -1112,7 +1124,6 @@ class Daemon:
             self._streaming_recordings.discard(recording_id)
             self._recording_stt_ids.pop(recording_id, None)
             self._recording_last_audio_status.pop(recording_id, None)
-            self._recording_modes.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
         if note_id:
@@ -1120,8 +1131,6 @@ class Daemon:
                 self.note_store.mark_failed(note_id, error=reason)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not mark note failed: %s", exc)
-        if self._active_recording_id == recording_id:
-            self._active_recording_id = None
         self._surface_status(reason)
         self._surface_transcript(
             phase="final",
@@ -1131,7 +1140,9 @@ class Daemon:
             stale=True,
             reason=transcript_reason,
         )
+        self._notify_recording(False)
         if mode == "note":
+            self._notify_note_recording(False, paused=False)
             # Publish a terminal note signal so the webview can leave "Transcribing…".
             self._surface_note_terminal(recording_id, "failed")
 

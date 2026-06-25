@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 
 import numpy as np
@@ -52,6 +53,53 @@ class NoteChunkAccumulatorTests(unittest.TestCase):
         emitted = acc.flush(final=True)
         self.assertEqual(len(emitted), 1)
         self.assertEqual(emitted[0].samples.shape[0], 4)
+
+    def test_final_flush_with_default_overlap_returns_once(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=1.0,
+            max_chunk_seconds=2.0,
+            silence_gap_seconds=0.2,
+            silence_rms=0.01,
+        )
+        acc.push(np.full(3, 0.8, dtype=np.float32))
+
+        result: list[list[object]] = []
+
+        def _flush() -> None:
+            result.append(acc.flush(final=True))
+
+        thread = threading.Thread(target=_flush)
+        thread.start()
+        thread.join(timeout=1.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result[0]), 1)
+        self.assertEqual(result[0][0].samples.shape[0], 3)
+        self.assertEqual(acc.pending_samples, 0)
+
+    def test_cap_emissions_keep_monotonic_time_with_overlap(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=0.1,
+            max_chunk_seconds=0.5,
+            silence_gap_seconds=0.2,
+            overlap_seconds=0.2,
+            silence_rms=0.01,
+        )
+
+        first = acc.push(np.full(5, 0.8, dtype=np.float32))
+        second = acc.push(np.full(5, 0.8, dtype=np.float32))
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(first[0].sequence, 0)
+        self.assertEqual(second[0].sequence, 1)
+        self.assertAlmostEqual(first[0].t_start, 0.0)
+        self.assertAlmostEqual(first[0].t_end, 0.5)
+        self.assertAlmostEqual(second[0].t_start, 0.3)
+        self.assertAlmostEqual(second[0].t_end, 0.8)
 
     def test_resume_offsets_continue_sequence_and_time(self) -> None:
         acc = NoteChunkAccumulator(

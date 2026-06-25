@@ -408,6 +408,44 @@ class DaemonHistoryTests(unittest.TestCase):
             segments = notes.load_segments(note_id)
             self.assertEqual([segment.seq for segment in segments], [0, 1])
 
+    def test_note_chunk_resume_offsets_use_unique_persisted_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteSegment, NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            daemon = Daemon(_FakeStt(), output=output, history_store=hist, note_store=notes)
+
+            note_id = notes.create_note(provider="faster-whisper", model="turbo", recording_id=3)
+            notes.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=0.5,
+                    provider="faster-whisper",
+                    model="turbo",
+                    text="hello",
+                ),
+            )
+            notes.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=1,
+                    t_start=0.3,
+                    t_end=0.8,
+                    provider="faster-whisper",
+                    model="turbo",
+                    text="world",
+                ),
+            )
+
+            daemon._recording_note_ids[3] = note_id
+            self.assertEqual(daemon._note_chunk_resume_offsets(3), (2, 0.8))
+
     def test_note_auto_pause_after_sustained_silence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from unittest.mock import patch
@@ -433,6 +471,45 @@ class DaemonHistoryTests(unittest.TestCase):
                     time.sleep(0.01)
             self.assertTrue(daemon.note_recording_paused)
             self.assertEqual(daemon.note_pause_reason, "silence")
+
+    def test_failed_note_recording_remains_stoppable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            recording_events: list[bool] = []
+            note_events: list[tuple[bool, bool, str | None]] = []
+            daemon = Daemon(
+                _FakeFasterWhisperStt({}),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                recording_callback=recording_events.append,
+                note_recording_callback=lambda recording, paused=False, pause_reason=None: note_events.append(
+                    (recording, paused, pause_reason)
+                ),
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            note_id = daemon._recording_note_ids[recording_id]
+
+            daemon._fail_recording_session(recording_id, "Transcription backlog exceeded")
+
+            self.assertFalse(daemon.note_recording_active)
+            self.assertEqual(recording_events[-1], False)
+            self.assertEqual(note_events[-1], (False, False, None))
+            self.assertTrue(daemon.stop_note_recording())
+            self.assertFalse(daemon.recorder.is_recording)
+
+            note = daemon.note_store.load_note(note_id)
+            assert note is not None
+            self.assertEqual(note.status, "failed")
+            self.assertFalse(store.load())
 
     def test_note_store_failure_fails_recording_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
