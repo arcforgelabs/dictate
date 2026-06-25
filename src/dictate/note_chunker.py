@@ -58,6 +58,8 @@ class NoteChunkAccumulator:
         if samples.size == 0:
             return []
         chunk = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if self._overlap_only_buffer and self._measure_trailing_silence_in(chunk) == chunk.size:
+            return []
         self._parts.append(chunk)
         self._overlap_only_buffer = False
         emitted: list[EmittedNoteChunk] = []

@@ -137,6 +137,12 @@ class NoteChunkAccumulatorTests(unittest.TestCase):
         self.assertEqual(result[0][0].samples.tolist(), [1.0, 1.0, 1.0, 1.0, 1.0])
         self.assertEqual(acc.pending_samples, 2)
 
+        second = acc.push(np.zeros(2, dtype=np.float32))
+        third = acc.push(np.zeros(2, dtype=np.float32))
+        self.assertEqual(second, [])
+        self.assertEqual(third, [])
+        self.assertEqual(acc.pending_samples, 2)
+
     def test_cap_emissions_keep_monotonic_time_with_overlap(self) -> None:
         acc = NoteChunkAccumulator(
             sample_rate=10,
