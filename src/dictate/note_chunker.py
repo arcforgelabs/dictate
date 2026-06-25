@@ -48,6 +48,7 @@ class NoteChunkAccumulator:
         self._sequence = max(0, int(seq_offset))
         self._cursor_samples = max(0, int(sample_rate * float(time_offset_s)))
         self._trailing_silence = 0
+        self._overlap_only_buffer = False
 
     @property
     def pending_samples(self) -> int:
@@ -58,6 +59,7 @@ class NoteChunkAccumulator:
             return []
         chunk = np.asarray(samples, dtype=np.float32).reshape(-1)
         self._parts.append(chunk)
+        self._overlap_only_buffer = False
         emitted: list[EmittedNoteChunk] = []
         while True:
             ready = self._maybe_emit(force=False)
@@ -68,6 +70,11 @@ class NoteChunkAccumulator:
 
     def flush(self, *, final: bool = False) -> list[EmittedNoteChunk]:
         emitted: list[EmittedNoteChunk] = []
+        if final and self._overlap_only_buffer:
+            self._parts = []
+            self._overlap_only_buffer = False
+            self._trailing_silence = 0
+            return emitted
         while True:
             ready = self._maybe_emit(force=final)
             if ready is None:
@@ -106,12 +113,15 @@ class NoteChunkAccumulator:
         if reason == "final":
             self._cursor_samples += emit_count
             self._parts = []
+            self._overlap_only_buffer = False
         elif self.overlap_samples > 0 and emit_count > 0:
             overlap = audio[emit_count - self.overlap_samples : emit_count].copy()
             self._parts = [overlap] if overlap.size else []
+            self._overlap_only_buffer = bool(overlap.size)
             self._cursor_samples += max(0, emit_count - overlap.size)
         else:
             self._parts = []
+            self._overlap_only_buffer = False
             self._cursor_samples += emit_count
         self._trailing_silence = 0
         chunk = EmittedNoteChunk(

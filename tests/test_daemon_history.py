@@ -574,6 +574,58 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertTrue(daemon.start_note_recording())
             daemon.stop_note_recording()
 
+    def test_stale_failed_cleanup_does_not_stop_newer_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _FakeRecorder()
+            daemon = Daemon(
+                _FakeFasterWhisperStt({16: "alpha"}),
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            first_recording_id = daemon._active_recording_id
+            assert first_recording_id is not None
+
+            cleanup_started = threading.Event()
+            cleanup_release = threading.Event()
+            original_cleanup = daemon._cleanup_failed_recording_session
+
+            def _gated_cleanup(recording_id: int) -> None:
+                cleanup_started.set()
+                cleanup_release.wait(timeout=2.0)
+                original_cleanup(recording_id)
+
+            daemon._cleanup_failed_recording_session = _gated_cleanup  # type: ignore[method-assign]
+
+            daemon._fail_recording_session(first_recording_id, "Transcription backlog exceeded")
+            self.assertTrue(cleanup_started.wait(timeout=2.0))
+
+            self.assertTrue(daemon.stop_note_recording())
+            self.assertTrue(daemon.start_note_recording())
+            second_recording_id = daemon._active_recording_id
+            assert second_recording_id is not None
+
+            cleanup_release.set()
+            deadline = time.time() + 2.0
+            while time.time() < deadline and daemon._active_recording_id != second_recording_id:
+                time.sleep(0.01)
+
+            self.assertTrue(recorder.is_recording)
+            self.assertEqual(daemon._active_recording_id, second_recording_id)
+            self.assertFalse(daemon.note_recording_paused)
+            daemon.stop_note_recording()
+
     def test_note_auto_pause_after_sustained_silence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from unittest.mock import patch
@@ -691,6 +743,43 @@ class DaemonHistoryTests(unittest.TestCase):
             assert note is not None
             self.assertEqual(note.status, "failed")
             self.assertFalse(store.load())
+
+    def test_old_failed_note_does_not_inactivate_newer_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            recording_events: list[bool] = []
+            note_events: list[tuple[bool, bool, str | None]] = []
+            daemon = Daemon(
+                _FakeFasterWhisperStt({16: "hello"}),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                recording_callback=recording_events.append,
+                note_recording_callback=lambda recording, paused=False, pause_reason=None: note_events.append(
+                    (recording, paused, pause_reason)
+                ),
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            first_recording_id = daemon._active_recording_id
+            assert first_recording_id is not None
+            self.assertTrue(daemon.stop_note_recording())
+
+            self.assertTrue(daemon.start_note_recording())
+            second_recording_id = daemon._active_recording_id
+            assert second_recording_id is not None
+
+            daemon._fail_recording_session(first_recording_id, "Transcription backlog exceeded")
+
+            self.assertEqual(recording_events[-1], True)
+            self.assertEqual(note_events[-1], (True, False, None))
+            self.assertTrue(daemon.note_recording_active)
+            self.assertEqual(daemon._active_recording_id, second_recording_id)
 
     def test_note_store_failure_fails_recording_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

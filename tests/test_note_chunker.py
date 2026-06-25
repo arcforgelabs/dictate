@@ -79,6 +79,40 @@ class NoteChunkAccumulatorTests(unittest.TestCase):
         self.assertEqual(result[0][0].samples.shape[0], 3)
         self.assertEqual(acc.pending_samples, 0)
 
+    def test_final_flush_skips_overlap_only_buffer(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=0.1,
+            max_chunk_seconds=0.5,
+            silence_gap_seconds=0.2,
+            overlap_seconds=0.2,
+            silence_rms=0.01,
+        )
+        acc.push(np.full(5, 0.8, dtype=np.float32))
+
+        emitted = acc.flush(final=True)
+
+        self.assertEqual(emitted, [])
+        self.assertEqual(acc.pending_samples, 0)
+
+    def test_final_flush_emits_tail_after_overlap_buffer(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=0.1,
+            max_chunk_seconds=0.5,
+            silence_gap_seconds=0.2,
+            overlap_seconds=0.2,
+            silence_rms=0.01,
+        )
+        acc.push(np.full(5, 0.8, dtype=np.float32))
+        acc.push(np.full(2, 0.8, dtype=np.float32))
+
+        emitted = acc.flush(final=True)
+
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(emitted[0].samples.shape[0], 4)
+        self.assertEqual(acc.pending_samples, 0)
+
     def test_cap_emissions_keep_monotonic_time_with_overlap(self) -> None:
         acc = NoteChunkAccumulator(
             sample_rate=10,
