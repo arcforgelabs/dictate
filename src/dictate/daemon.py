@@ -539,61 +539,6 @@ class Daemon:
         if mode == "note":
             self._notify_note_recording(False, paused=False)
 
-    def _finalize_recording_locked(self) -> None:
-        recording_id = self._active_recording_id
-        mode = self._recording_mode(recording_id) if recording_id is not None else "dictation"
-        if recording_id is not None and self._is_recording_failed(recording_id):
-            try:
-                self.recorder.stop()
-            except AudioCaptureError as exc:
-                print(f"\r  Microphone error: {exc}", file=sys.stderr)
-            self._active_recording_id = None
-            self._note_recording_paused = False
-            self._clear_recording_state(recording_id)
-            self._notify_recording(False)
-            if mode == "note":
-                self._notify_note_recording(False, paused=False)
-            return
-        try:
-            audio = self.recorder.stop()
-        except AudioCaptureError as exc:
-            if recording_id is not None:
-                self._fail_recording_session(
-                    recording_id,
-                    f"Microphone error: {exc}",
-                    transcript_reason="capture-error",
-                )
-            else:
-                self._active_recording_id = None
-                print(f"\r  Microphone error: {exc}", file=sys.stderr)
-            self._notify_recording(False)
-            if recording_id is not None and mode == "note":
-                self._notify_note_recording(False, paused=False)
-            return
-
-        if recording_id is not None:
-            if self._should_queue_stop_audio(recording_id, audio):
-                if self._is_unstreamed_recording_truncated(recording_id):
-                    self._fail_recording_session(
-                        recording_id,
-                        "Recording exceeded retained audio limit; final audio incomplete",
-                        transcript_reason="truncated-audio",
-                    )
-                    self._notify_recording(False)
-                    if mode == "note":
-                        self._notify_note_recording(False, paused=False)
-                    return
-                self._queue_final_chunk(
-                    AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id)
-                )
-            elif self._should_queue_final_marker(recording_id):
-                self._queue_final_marker(recording_id)
-            self._active_recording_id = None
-        self._note_recording_paused = False
-        self._notify_recording(False)
-        if recording_id is not None and mode == "note":
-            self._notify_note_recording(False, paused=False)
-
     def _on_hotkey_press(self) -> None:
         try:
             self._start_recording()
