@@ -125,6 +125,37 @@ Deferred local meeting diarization:
 4. If local meeting diarization is exposed before it is broadly proven, label it
    as experimental or high-performance-machine-only.
 
+### Silence auto-pause (note recording)
+
+**Status:** Not implemented. Manual pause/finish exists; VAD-at-transcribe does
+not replace this.
+
+Long note sessions should not hold the mic open indefinitely during silence.
+Quiet meetings must not fail silently — the user should get a clear, gentle
+signal before capture stops waiting.
+
+Direction:
+
+1. **Auto-pause on sustained silence** — after **120 seconds** below a speech
+   threshold, pause the note recording (same session as manual pause; do not
+   auto-finish).
+2. **Paused + silence** — do not count silence while already paused. The idle
+   timer resets on resume.
+3. **Remote cost** — auto-pause saves mic battery/CPU during long waits;
+   VAD-at-transcribe only helps after the user stops and only affects decode,
+   not live capture or remote upload size.
+4. **Audible feedback** — play a short system or shipped sound (gentle click)
+   when pause happens, for both auto-pause and manual pause. Reuse one asset so
+   pause always feels the same.
+5. **UI** — surface paused state clearly (existing cradle + finish flow); optional
+   copy such as “Paused — no speech detected” for auto-pause only.
+
+Non-goals for the first slice:
+
+1. Do not auto-finish on silence; finishing stays explicit.
+2. Do not use a shorter threshold that would interrupt legitimate quiet
+   meeting stretches without the audible pause cue.
+
 ## Future Target: Media Notes
 
 **Status:** Future product target selected. Implementation not started.
