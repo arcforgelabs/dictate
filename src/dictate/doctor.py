@@ -137,8 +137,12 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
 
 def _check_runtime_paths(report) -> None:  # noqa: ANN001
     desktop_path = _desktop_entry_path()
+    desktop_paths = _desktop_entry_paths()
+    existing_desktop_path = next((path for path in desktop_paths if path.exists()), None)
     if desktop_path.exists():
         report.notes.append(f"Desktop entry: {desktop_path}")
+    elif existing_desktop_path is not None:
+        report.notes.append(f"Desktop entry: {existing_desktop_path}")
     else:
         report.warnings.append(f"Desktop entry not found: {desktop_path}")
     startup_path = startup_entry_path()
@@ -147,7 +151,8 @@ def _check_runtime_paths(report) -> None:  # noqa: ANN001
     else:
         report.warnings.append(f"Startup entry not found: {startup_path}")
 
-    for label, path in (("Desktop entry", desktop_path), ("Startup entry", startup_path)):
+    stale_checks = [("Desktop entry", existing_desktop_path or desktop_path), ("Startup entry", startup_path)]
+    for label, path in stale_checks:
         if path.exists():
             stale_target = _desktop_exec_target_missing(path)
             if stale_target is not None:
@@ -428,3 +433,21 @@ def _print_report(report, *, fixes: list[str] | None = None, updates: list[str] 
 
 def _desktop_entry_path() -> Path:
     return app_entry_path()
+
+
+def _desktop_entry_paths() -> list[Path]:
+    paths = [app_entry_path()]
+    if sys.platform.startswith("linux"):
+        paths.append(Path("/usr/share/applications/Dictate.desktop"))
+    return _unique_paths(paths)
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        result.append(path)
+    return result

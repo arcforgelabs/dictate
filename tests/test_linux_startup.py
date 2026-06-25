@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dictate import startup
-from dictate.doctor import _desktop_exec_target_missing, _fix_items
+from dictate.doctor import _check_runtime_paths, _desktop_exec_target_missing, _fix_items
 from dictate.preflight import PreflightReport
 
 
@@ -76,6 +76,29 @@ class EnsureDesktopIntegrationOnceTests(unittest.TestCase):
 
 
 class DoctorStaleLauncherTests(unittest.TestCase):
+    def test_packaged_desktop_entry_satisfies_runtime_check(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source_entry = root / "missing" / "dictate.desktop"
+            package_entry = root / "usr" / "share" / "applications" / "Dictate.desktop"
+            startup_entry = root / "config" / "autostart" / "dictate.desktop"
+            package_entry.parent.mkdir(parents=True)
+            startup_entry.parent.mkdir(parents=True)
+            package_entry.write_text("[Desktop Entry]\nExec=dictate-ui-shell\n", encoding="utf-8")
+            startup_entry.write_text("[Desktop Entry]\nExec=dictate-ui-shell\n", encoding="utf-8")
+            report = PreflightReport()
+
+            with (
+                patch("dictate.doctor._desktop_entry_path", return_value=source_entry),
+                patch("dictate.doctor._desktop_entry_paths", return_value=[source_entry, package_entry]),
+                patch("dictate.doctor.startup_entry_path", return_value=startup_entry),
+                patch("dictate.doctor.shutil.which", _which_map({"dictate-ui-shell": "/usr/bin/dictate-ui-shell"})),
+            ):
+                _check_runtime_paths(report)
+
+        self.assertTrue(any(f"Desktop entry: {package_entry}" == note for note in report.notes))
+        self.assertFalse(any("Desktop entry not found" in warning for warning in report.warnings))
+
     def test_detects_missing_exec_target(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             entry = Path(raw) / "dictate.desktop"
