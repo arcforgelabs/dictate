@@ -201,6 +201,7 @@ for source/dev installs.
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Microsoft Store automation](docs/msstore-automation.md)
 - [Microsoft Store listing draft](docs/msstore-listing.md)
+- [Deployment security](docs/deployment-security.md)
 - [Goals](docs/GOALS.md)
 - [Development streams](docs/development-streams.md)
 - [Security policy](SECURITY.md)

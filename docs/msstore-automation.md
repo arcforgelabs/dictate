@@ -1,7 +1,9 @@
 # Microsoft Store Automation
 
 This runbook covers the non-secret automation pieces for publishing Dictate
-through the Microsoft Store for the existing Partner Center product.
+through the Microsoft Store for the existing Partner Center product. Deployment
+credential boundaries and approval requirements are tracked in
+[deployment-security.md](deployment-security.md).
 
 ## Current Partner Center Identity
 

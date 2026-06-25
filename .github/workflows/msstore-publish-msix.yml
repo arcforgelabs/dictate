@@ -27,6 +27,8 @@ jobs:
   msstore:
     name: Microsoft Store MSIX ${{ inputs.mode }}
     runs-on: windows-latest
+    environment:
+      name: ${{ inputs.mode == 'publish' && 'microsoft-store-publish' || inputs.mode == 'draft' && 'microsoft-store-draft' || 'microsoft-store-status' }}
     env:
       MSSTORE_PRODUCT_ID: ${{ inputs.product_id }}
       MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
@@ -35,6 +37,13 @@ jobs:
       MSSTORE_SELLER_ID: ${{ vars.MSSTORE_SELLER_ID }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Require default branch workflow
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_name }}" -ne "${{ github.event.repository.default_branch }}") {
+            throw "Run this workflow from ${{ github.event.repository.default_branch }}, not ${{ github.ref_name }}."
+          }
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         if: inputs.mode == 'draft'

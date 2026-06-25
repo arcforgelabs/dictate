@@ -275,5 +275,6 @@ Media Notes first-slice non-goals:
 - [dictate-pro-subscription-architecture.md](dictate-pro-subscription-architecture.md)
 - [frontend-wiring.md](frontend-wiring.md)
 - [release-versioning.md](release-versioning.md)
+- [deployment-security.md](deployment-security.md)
 - [msstore-automation.md](msstore-automation.md)
 - [msstore-listing.md](msstore-listing.md)
