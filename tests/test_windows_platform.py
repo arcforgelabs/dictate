@@ -269,7 +269,9 @@ class WindowsPlatformTests(unittest.TestCase):
         # Hardened cleanup: stop a running source daemon and remove the
         # dictate-ui-server symlink + legacy logs (still preserving user data).
         self.assertIn("stop_source_processes", script)
+        self.assertIn("UI_SHELL_BIN_PATH", script)
         self.assertIn("UI_SERVER_BIN_PATH", script)
+        self.assertIn('remove_file "$UI_SHELL_BIN_PATH"', script)
         self.assertIn('remove_managed_symlink "$UI_SERVER_BIN_PATH"', script)
         self.assertIn('"$INSTALL_DIR/logs"', script)
 

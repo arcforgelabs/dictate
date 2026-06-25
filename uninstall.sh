@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/share/dictate"
 BIN_PATH="$HOME/.local/bin/dictate"
+UI_SHELL_BIN_PATH="$HOME/.local/bin/dictate-ui-shell"
 UI_SERVER_BIN_PATH="$HOME/.local/bin/dictate-ui-server"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
@@ -100,6 +101,7 @@ remove_file "$DESKTOP_DIR/dictate-settings.desktop"
 remove_file "$AUTOSTART_DIR/dictate.desktop"
 
 remove_managed_symlink "$BIN_PATH" "$INSTALL_DIR/venv/bin/dictate"
+remove_file "$UI_SHELL_BIN_PATH"
 remove_managed_symlink "$UI_SERVER_BIN_PATH" "$INSTALL_DIR/venv/bin/dictate-ui-server"
 
 rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/share/icons" "$INSTALL_DIR/logs"
