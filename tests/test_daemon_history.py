@@ -429,6 +429,60 @@ class DaemonHistoryTests(unittest.TestCase):
             assert note is not None
             self.assertEqual(note.status, "ready")
 
+    def test_note_mark_ready_failure_does_not_surface_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            note_events: list[dict[str, object]] = []
+            statuses: list[str | None] = []
+            stt = _FakeFasterWhisperStt({16: "hello"})
+            recorder = _FakeRecorder()
+            daemon = Daemon(
+                stt,
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+                status_callback=statuses.append,
+                note_callback=note_events.append,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            note_id = daemon._recording_note_ids[recording_id]
+
+            original_mark_ready = notes.mark_ready
+
+            def _boom(note_id: str, *, duration_s: float | None = None) -> None:  # noqa: ARG001
+                del duration_s
+                raise OSError("disk full")
+
+            notes.mark_ready = _boom  # type: ignore[method-assign]
+            try:
+                self.assertTrue(daemon.stop_note_recording())
+                daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+            finally:
+                notes.mark_ready = original_mark_ready  # type: ignore[method-assign]
+
+            self.assertEqual(hist.load(), [])
+            self.assertEqual(len(note_events), 1)
+            self.assertEqual(note_events[0]["status"], "failed")
+            self.assertEqual(note_events[0]["text"], "")
+            self.assertTrue(any("Note save failed" in (status or "") for status in statuses))
+            note = notes.load_note(note_id)
+            assert note is not None
+            self.assertEqual(note.status, "failed")
+            self.assertFalse(daemon.note_recording_active)
+            self.assertFalse(daemon.note_recording_paused)
+            self.assertIsNone(daemon._active_recording_id)
+
     def test_note_streaming_pause_resume_preserves_chunk_offsets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon

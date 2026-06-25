@@ -1123,6 +1123,13 @@ class Daemon:
                 self.note_store.mark_ready(note_id)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not mark note ready: %s", exc)
+                try:
+                    self.note_store.mark_failed(note_id, error=f"Could not mark note ready: {exc}")
+                except Exception as mark_exc:  # noqa: BLE001
+                    logger.warning("Could not mark note failed: %s", mark_exc)
+                self._surface_status(f"Note save failed: {exc}")
+                self._surface_note_terminal(recording_id, "failed")
+                return
         note_text = raw_text.strip()
         if not note_text:
             self._surface_empty_final_status(None)
