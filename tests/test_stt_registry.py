@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+import types
 import unittest
 from unittest.mock import patch
 
@@ -17,11 +18,12 @@ from dictate.stt import (
 
 class SttRegistryTests(unittest.TestCase):
     def test_backend_registry_has_expected_backends(self) -> None:
-        self.assertEqual(STT_BACKENDS, ("faster-whisper", "openai", "xai", "gemini"))
+        self.assertEqual(STT_BACKENDS, ("faster-whisper", "whisperx", "openai", "xai", "gemini"))
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
 
     def test_resolve_model_name_defaults(self) -> None:
         self.assertEqual(resolve_model_name("faster-whisper", None), "turbo")
+        self.assertEqual(resolve_model_name("whisperx", None), "large-v3")
         self.assertEqual(resolve_model_name("openai", None), "gpt-4o-mini-transcribe")
         self.assertEqual(resolve_model_name("xai", None), "grok-speech-to-text")
         self.assertEqual(resolve_model_name("gemini", None), "gemini-3-flash-preview")
@@ -50,7 +52,19 @@ class SttRegistryTests(unittest.TestCase):
                 model="gemini-3-flash-preview",
                 device="cpu",
             )
+        fake_whisperx = types.SimpleNamespace(
+            load_model=lambda *args, **kwargs: types.SimpleNamespace(
+                transcribe=lambda *a, **kw: {"segments": [{"text": "hello"}], "language": "en"}
+            )
+        )
+        with patch.dict("sys.modules", {"whisperx": fake_whisperx}):
+            whisperx = create_speech_to_text(
+                backend="whisperx",
+                model="large-v3",
+                device="cpu",
+            )
         self.assertEqual(whisper.backend_name, "faster-whisper")
+        self.assertEqual(whisperx.backend_name, "whisperx")
         self.assertEqual(openai.backend_name, "openai")
         self.assertEqual(xai.backend_name, "xai")
         self.assertEqual(gemini.backend_name, "gemini")
@@ -112,6 +126,16 @@ class SttRegistryTests(unittest.TestCase):
                 device="cpu",
             )
         self.assertTrue(any("API key" in error for error in report.errors))
+
+    def test_whisperx_readiness_reports_missing_optional_package(self) -> None:
+        with patch("dictate.stt.factory.whisperx_available", return_value=False):
+            report = check_backend_readiness(
+                backend="whisperx",
+                model="large-v3",
+                device="cpu",
+            )
+        self.assertTrue(any("WhisperX package" in error for error in report.errors))
+        self.assertTrue(any("Hugging Face token" in warning for warning in report.warnings))
 
     def test_gemini_readiness_requires_api_key(self) -> None:
         with (

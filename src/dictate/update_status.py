@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import urllib.error
 import urllib.request
@@ -24,6 +25,9 @@ TERMS_URL = "https://arcforge.au/terms"
 
 @dataclass(frozen=True)
 class UpdateStatus:
+    # Dictate ships the shell and engine as ONE unit at ONE version (the .deb,
+    # the MS Store package, the macOS bundle). There is no separate engine/shell
+    # version or staleness — they always update together.
     current_version: str
     latest_version: str | None = None
     update_available: bool = False
@@ -32,9 +36,6 @@ class UpdateStatus:
     url: str | None = None
     platform: str = ""
     install_kind: str = "manual"
-    engine: dict[str, str | bool | None] | None = None
-    shell: dict[str, str | bool | None] | None = None
-    shell_stale: bool = False
     phase: str = "idle"
     step: str | None = None
     progress: int | None = None
@@ -86,8 +87,6 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     try:
         latest, url = _fetch_latest_release(timeout=timeout)
         update_available = is_newer_version(latest)
-        shell_current = context["shell_current"] or RELEASE_VERSION
-        shell_stale = is_newer_version(latest, shell_current) if latest else False
         return UpdateStatus(
             current_version=RELEASE_VERSION,
             latest_version=latest,
@@ -96,13 +95,10 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
             url=url,
             platform=context["platform"],
             install_kind=context["install_kind"],
-            engine=_component("engine", RELEASE_VERSION, latest, context["engine_path"], update_available),
-            shell=_component("shell", shell_current, latest, context["shell_path"], shell_stale),
-            shell_stale=shell_stale,
-            phase="available" if update_available or shell_stale else "current",
-            step="ready" if update_available or shell_stale else "current",
-            progress=100 if not update_available and not shell_stale else 0,
-            actions=_available_actions(context["install_kind"], update_available or shell_stale),
+            phase="available" if update_available else "current",
+            step="ready" if update_available else "current",
+            progress=0 if update_available else 100,
+            actions=_available_actions(context["install_kind"], update_available),
             commands=_commands_for_context(context),
             missing_deps=[],
         )
@@ -113,14 +109,6 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
             error=str(exc),
             platform=context["platform"],
             install_kind=context["install_kind"],
-            engine=_component("engine", RELEASE_VERSION, None, context["engine_path"], False),
-            shell=_component(
-                "shell",
-                context["shell_current"] or RELEASE_VERSION,
-                None,
-                context["shell_path"],
-                False,
-            ),
             phase="failed",
             step="check",
             progress=0,
@@ -135,11 +123,15 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
 def start_update_flow() -> UpdateFlow:
     """Start the safest available update path for this install.
 
-    Linux packages do not currently have an in-app package manager integration,
-    so packaged installs return the releases URL for the UI to open. Source
-    checkouts can run the repository's own update.sh after validating the root.
+    A packaged Linux install (.deb) updates in-app and as one unit: download the
+    new package from the official release, install it via ``pkexec`` (one polkit
+    prompt), then the shell restarts so the new shell + engine come up together.
+    Source checkouts run the repository's own update.sh after validating the root.
+    Windows updates through the Microsoft Store; macOS through its bundle.
     """
     context = _update_context()
+    if context["install_kind"] == "linux-package":
+        return _run_linux_package_update(context)
     if context["install_kind"] == "linux-source":
         source_root = context["source_root"]
         if source_root is not None:
@@ -193,6 +185,124 @@ def start_update_flow() -> UpdateFlow:
     )
 
 
+DEB_ASSET_SUFFIX = "_amd64.deb"
+_DOWNLOAD_TIMEOUT = 600.0
+
+
+def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
+    """Download the latest .deb and install it via pkexec; the shell restarts."""
+    if not shutil.which("pkexec"):
+        return _missing_deps_flow(context, ["pkexec"])
+    try:
+        asset_url, asset_name = _find_release_asset(DEB_ASSET_SUFFIX)
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(
+            context, "no_asset", f"Could not find a .deb in the latest release: {exc}"
+        )
+    try:
+        deb_path = _download_file(asset_url, asset_name)
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(context, "download_failed", str(exc))
+    try:
+        result = _install_deb(deb_path)
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(context, "install_failed", str(exc))
+    finally:
+        try:
+            deb_path.unlink()
+        except OSError:
+            pass
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
+        # pkexec returns 126 (dialog dismissed) / 127 (auth failed) on cancel.
+        code = "cancelled" if result.returncode in (126, 127) else "install_failed"
+        return _update_failed(context, code, detail)
+    return UpdateFlow(
+        mode="installed",
+        started=True,
+        platform=str(context["platform"]),
+        install_kind=str(context["install_kind"]),
+        phase="installed",
+        step="restart",
+        progress=100,
+        actions=["restart"],
+        commands={},
+        missing_deps=[],
+        message="Update installed — restarting Dictate.",
+    )
+
+
+def _find_release_asset(suffix: str, *, timeout: float = 10.0) -> tuple[str, str]:
+    payload = _fetch_json(LATEST_RELEASE_URL, timeout=timeout)
+    assets = payload.get("assets") if isinstance(payload, dict) else None
+    if not isinstance(assets, list):
+        raise RuntimeError("release has no downloadable assets")
+    for asset in assets:
+        name = str(asset.get("name") or "")
+        url = asset.get("browser_download_url")
+        if name.endswith(suffix) and url:
+            return str(url), name
+    raise RuntimeError(f"no asset ending in {suffix}")
+
+
+def _download_file(url: str, name: str, *, timeout: float = _DOWNLOAD_TIMEOUT) -> Path:
+    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / name
+    request = urllib.request.Request(url, headers={"User-Agent": "Dictate updater"})
+    with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as fh:
+        shutil.copyfileobj(response, fh)
+    return dest
+
+
+def _install_deb(deb_path: Path) -> "subprocess.CompletedProcess[str]":
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+    return subprocess.run(  # noqa: S603
+        ["pkexec", "apt-get", "install", "-y", str(deb_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+def _update_failed(context: dict[str, object], code: str, detail: str) -> UpdateFlow:
+    return UpdateFlow(
+        mode="error",
+        started=False,
+        platform=str(context.get("platform") or ""),
+        install_kind=str(context.get("install_kind") or "manual"),
+        phase="failed",
+        step="update",
+        progress=0,
+        actions=["check", "open_release"],
+        commands={"release": RELEASES_URL},
+        missing_deps=[],
+        message="Could not complete the update.",
+        error_code=code,
+        error_detail=detail,
+    )
+
+
+def _missing_deps_flow(context: dict[str, object], deps: list[str]) -> UpdateFlow:
+    joined = ", ".join(deps)
+    return UpdateFlow(
+        mode="error",
+        started=False,
+        platform=str(context.get("platform") or ""),
+        install_kind=str(context.get("install_kind") or "manual"),
+        phase="failed",
+        step="deps",
+        progress=0,
+        actions=["open_release"],
+        commands={"release": RELEASES_URL},
+        missing_deps=deps,
+        message=f"Missing required tool: {joined}.",
+        error_code="missing_deps",
+        error_detail=f"Install {joined} to update in-app, or download the package manually.",
+    )
+
+
 def _candidate_source_roots() -> list[Path]:
     roots = [
         Path.cwd(),
@@ -222,15 +332,10 @@ def _update_context() -> dict[str, object]:
     platform = _platform_key()
     source_root = _find_source_root()
     install_kind = _install_kind(platform, source_root)
-    shell_path = os.environ.get("DICTATE_SHELL_PATH") or _find_shell_binary()
-    shell_current = os.environ.get("DICTATE_SHELL_VERSION") or RELEASE_VERSION
     return {
         "platform": platform,
         "install_kind": install_kind,
         "source_root": source_root,
-        "engine_path": str(Path(sys.executable).resolve()),
-        "shell_path": shell_path,
-        "shell_current": shell_current,
     }
 
 
@@ -246,34 +351,15 @@ def _install_kind(platform: str, source_root: Path | None) -> str:
     return "manual"
 
 
-def _find_shell_binary() -> str | None:
-    name = "dictate-ui-shell.exe" if sys.platform.startswith("win") else "dictate-ui-shell"
-    if sys.platform.startswith("win") and os.name != "nt":
-        return None
-    found = shutil.which(name)
-    return found or None
-
-
-def _component(
-    name: str,
-    current: str | None,
-    latest: str | None,
-    path: object,
-    stale: bool,
-) -> dict[str, str | bool | None]:
-    return {
-        "name": name,
-        "current": current,
-        "latest": latest,
-        "path": str(path) if path else None,
-        "stale": bool(stale),
-    }
-
-
 def _available_actions(install_kind: str, has_update: bool) -> list[str]:
     actions = ["check"]
     if has_update:
-        actions.append("update" if install_kind.endswith("-source") else "open_release")
+        # In-app update for source checkouts and the Linux .deb; Windows (Store)
+        # and macOS (bundle) still open the release page.
+        if install_kind.endswith("-source") or install_kind == "linux-package":
+            actions.append("update")
+        else:
+            actions.append("open_release")
     actions.append("open_docs")
     return actions
 

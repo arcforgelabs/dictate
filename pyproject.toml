@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["torch>=2.4.0"]
+whisperx = ["whisperx>=3.8.6"]
 nemo = ["nemo_toolkit[asr]>=2.4.0"]
 x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]

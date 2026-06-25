@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -68,8 +69,8 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.platform, "linux")
         self.assertEqual(status.install_kind, "linux-package")
         self.assertEqual(status.phase, "available")
-        self.assertIn("open_release", status.actions or [])
-        self.assertEqual(status.engine["current"], RELEASE_VERSION)
+        self.assertIn("update", status.actions or [])
+        self.assertEqual(status.current_version, RELEASE_VERSION)
 
     def test_check_update_status_falls_back_to_tags(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
@@ -124,19 +125,66 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(calls, [(["bash", str(root / "update.sh")], str(root))])
 
-    def test_linux_package_update_falls_back_to_releases(self) -> None:
-        with patch("dictate.update_status.sys.platform", "linux"):
-            with patch("dictate.update_status._candidate_source_roots", return_value=[]):
-                with patch("dictate.update_status.subprocess.Popen") as popen:
-                    flow = start_update_flow()
+    def _linux_package(self):  # noqa: ANN202
+        # platform=linux, no source root -> install_kind == "linux-package"
+        return (
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch("dictate.update_status._candidate_source_roots", return_value=[]),
+        )
 
-        self.assertEqual(flow.mode, "release")
-        self.assertFalse(flow.started)
-        self.assertEqual(flow.url, RELEASES_URL)
-        self.assertEqual(flow.platform, "linux")
+    def test_linux_package_update_downloads_and_installs(self) -> None:
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        plat, roots = self._linux_package()
+        with (
+            plat,
+            roots,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status._find_release_asset",
+                return_value=("https://example.test/Dictate_2099.1.2_amd64.deb", "Dictate_2099.1.2_amd64.deb"),
+            ),
+            patch("dictate.update_status._download_file", return_value=Path("/tmp/x.deb")) as dl,
+            patch("dictate.update_status._install_deb", return_value=ok) as install,
+            patch("dictate.update_status.Path.unlink"),
+        ):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "installed")
+        self.assertTrue(flow.started)
         self.assertEqual(flow.install_kind, "linux-package")
-        self.assertEqual(flow.phase, "manual")
-        popen.assert_not_called()
+        self.assertIn("restart", flow.actions or [])
+        dl.assert_called_once()
+        install.assert_called_once()
+
+    def test_linux_package_update_reports_cancelled(self) -> None:
+        cancelled = subprocess.CompletedProcess(args=[], returncode=126, stdout="", stderr="dismissed")
+        plat, roots = self._linux_package()
+        with (
+            plat,
+            roots,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status._find_release_asset",
+                return_value=("https://example.test/x_amd64.deb", "x_amd64.deb"),
+            ),
+            patch("dictate.update_status._download_file", return_value=Path("/tmp/x.deb")),
+            patch("dictate.update_status._install_deb", return_value=cancelled),
+            patch("dictate.update_status.Path.unlink"),
+        ):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "error")
+        self.assertFalse(flow.started)
+        self.assertEqual(flow.error_code, "cancelled")
+
+    def test_linux_package_update_requires_pkexec(self) -> None:
+        plat, roots = self._linux_package()
+        with plat, roots, patch("dictate.update_status.shutil.which", return_value=None):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "error")
+        self.assertEqual(flow.error_code, "missing_deps")
+        self.assertEqual(flow.missing_deps, ["pkexec"])
 
     def test_windows_source_update_runs_validated_update_script(self) -> None:
         calls = []

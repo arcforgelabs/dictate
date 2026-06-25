@@ -1,6 +1,9 @@
 # Windows 11 Support
 
-Windows 11 is a supported desktop target for Dictate. The normal path is the installed `Dictate` app entry, which starts the Windows tray app and lets you configure model, API keys, startup, updates, hotkeys, and recent history.
+Windows 11 is a supported desktop target for Dictate. The normal path is the
+installed `Dictate` app entry, which starts the desktop capture app and tray
+process. The primary workflow is simple dictation and local dictation recovery;
+advanced provider/API-key configuration lives in the `dictate config` CLI.
 
 ## Supported Surface
 
@@ -130,21 +133,28 @@ One-shot:
 - Start Menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Dictate.lnk`
 - Startup shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Dictate.lnk`
 
-## Settings
+## Desktop App
 
-Open `Dictate` from the Start Menu for the tray app, then open settings from the tray menu. Current settings include:
+Open `Dictate` from the Start Menu. The desktop app includes:
 
-- selected provider/model status at the top
-- Provider and Select Model controls
-- API key entry/status for hosted providers
-- Hotkeys
-- Local CPU/GPU runtime choice
-- Launch on start up
-- About section with version, update status, Check for Updates, Update, Documentation, and Terms
-- Recent History paging with copy/paste actions
+- a capture home with a mic control
+- a local dictations view for copy/paste recovery
+- a command palette for daily actions
+- a private/cloud toggle that points users to Dictate Pro or CLI API-key setup
+  when hosted transcription is unavailable
+- quiet update status when an app update is available
+
+Advanced configuration remains available from PowerShell:
+
+```powershell
+.\.venv\Scripts\dictate.exe config show
+.\.venv\Scripts\dictate.exe config set-provider online
+.\.venv\Scripts\dictate.exe config set-key xai xai-YOUR_KEY_HERE
+```
 
 ## Known Gaps
 
-- Microsoft Store submission and signed Windows installer validation are pending; the hosted PowerShell bootstrap and repo-local PowerShell installer are developer/source paths.
+- Microsoft Store Submission 2 is staged with refreshed listing assets and is
+  held until the next version package is bundled and tested.
 - Global hotkey reliability depends on `pynput` permissions and the active desktop/session.
 - NeMo Canary on Windows is not part of the supported baseline.

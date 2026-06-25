@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -16,10 +17,12 @@ from dictate.stt.base import (
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.gemini_backend import GeminiSpeechToText, gemini_api_key_available
 from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
+from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "turbo",
+    "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
     "gemini": "gemini-3-flash-preview",
@@ -27,6 +30,7 @@ DEFAULT_MODELS: dict[SttBackend, str] = {
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "turbo",
 )
+WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
     "gpt-4o-transcribe",
@@ -54,6 +58,18 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="CTranslate2-optimized Whisper inference.",
         capabilities=FasterWhisperSpeechToText.capabilities,
         builder=lambda model, device, compute_type: FasterWhisperSpeechToText(
+            model_name=model,
+            device=device,
+            compute_type=compute_type,
+        ),
+    ),
+    "whisperx": BackendSpec(
+        backend="whisperx",
+        default_model=DEFAULT_MODELS["whisperx"],
+        model_examples=WHISPERX_MODELS,
+        description="Local WhisperX transcription, alignment, and pyannote diarization.",
+        capabilities=WhisperXSpeechToText.capabilities,
+        builder=lambda model, device, compute_type: WhisperXSpeechToText(
             model_name=model,
             device=device,
             compute_type=compute_type,
@@ -138,6 +154,9 @@ def check_backend_readiness(
         if device in {"cuda", "auto"}:
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
+    if backend == "whisperx":
+        _check_whisperx(report, model_name=model_name, device=device)
+
     if backend == "openai":
         _check_openai(report, model_name=model_name)
 
@@ -165,6 +184,32 @@ def _check_openai(report: BackendReadiness, *, model_name: str) -> None:
         )
     else:
         report.errors.append(f"OpenAI API key status: {status.status}.")
+
+
+def _check_whisperx(
+    report: BackendReadiness,
+    *,
+    model_name: str,
+    device: ComputeDevice,
+) -> None:
+    if model_name not in WHISPERX_MODELS:
+        report.warnings.append(
+            f"WhisperX model '{model_name}' is not one of the built-in examples."
+        )
+    if whisperx_available():
+        report.notes.append("WhisperX package importable.")
+    else:
+        report.errors.append(
+            'WhisperX package is not importable. Install with: uv pip install -e ".[whisperx]"'
+        )
+    if not any(
+        os.environ.get(name)
+        for name in ("DICTATE_HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
+    ):
+        report.warnings.append(
+            "WhisperX diarization requires a Hugging Face token for pyannote models."
+        )
+    _check_cuda_with_torch(report, requested_device=device)
 
 
 def _check_xai(report: BackendReadiness, *, model_name: str) -> None:

@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dictate.platform_paths import user_data_dir
+
 
 def app_entry_path() -> Path:
     if sys.platform.startswith("win"):
@@ -80,6 +82,37 @@ def install_linux_desktop_integration(
     return app_path, startup_path
 
 
+def _desktop_integration_marker() -> Path:
+    return user_data_dir() / ".desktop-integrated"
+
+
+def ensure_desktop_integration_once() -> None:
+    """First time the installed Linux app runs, create the app launcher and
+    autostart entries so Dictate appears in the menu and starts on sign-in.
+
+    The frozen ``.deb``/AppImage has no installer step that writes these (source
+    installs do it in ``install.sh``), so the engine self-registers on first run.
+    Gated to the frozen app and run once via a marker, so a user who later
+    disables startup is not overridden. Best-effort: never blocks daemon start.
+    """
+    if sys.platform.startswith("win"):
+        return
+    if not getattr(sys, "frozen", False):
+        return
+    marker = _desktop_integration_marker()
+    if marker.exists():
+        return
+    try:
+        install_linux_desktop_integration(include_startup=True)
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("1\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def install_windows_startup_shortcut() -> Path:
     startup_path = startup_entry_path()
     scripts_dir = Path(sys.executable).resolve().parent
@@ -133,7 +166,18 @@ def _linux_desktop_entry(*, autostart: bool) -> str:
 
 
 def _linux_exec_path() -> str:
-    return shutil.which("dictate") or str(Path.home() / ".local" / "bin" / "dictate")
+    # The installed (.deb/AppImage) engine runs as a PyInstaller sidecar of the
+    # Tauri shell, so there is no `dictate` console script on PATH — only
+    # `dictate-ui-shell`, which spawns this engine. Autostart/launch the shell.
+    if getattr(sys, "frozen", False):
+        shell = shutil.which("dictate-ui-shell")
+        if shell:
+            return shell
+    return (
+        shutil.which("dictate")
+        or shutil.which("dictate-ui-shell")
+        or str(Path.home() / ".local" / "bin" / "dictate")
+    )
 
 
 def _linux_icon_path() -> str:

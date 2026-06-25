@@ -13,6 +13,7 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
-    "os:default"
+    "os:default",
+    "dialog:default"
   ]
 }

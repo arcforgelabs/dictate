@@ -16,7 +16,11 @@ for Dictate. Keep claims conservative and aligned with the current app behavior.
 - Package family name: `ArcForgeLabs.ArcForgeDictate_tbf7er950vsxw`
 - Package SID: `S-1-15-2-414942928-860362531-3808921871-2325232450-2546095560-3460849545-2812936032`
 - Category: `Productivity`
-- Pricing: Free
+- Pricing: Free base app. Dictate Pro is the planned handled subscription path
+  for hosted/frontier transcription. Do not present switchable hosted API
+  backends as the main Store-facing product flow. If Dictate Pro is enabled in
+  the Store build, disclose in-app purchases/subscriptions and price ranges in
+  Partner Center before submission.
 - Discoverability: Managed in Partner Center
 - Primary package path: Microsoft Store submission, with GitHub installer
   artifacts kept internal until signed.
@@ -48,10 +52,10 @@ Dictate is a desktop push-to-talk dictation app for Windows. It runs from the
 system tray, listens while you hold your configured shortcut, transcribes your
 speech, and types the result into the currently focused app.
 
-Dictate supports local transcription through faster-whisper and optional hosted
-transcription providers when you choose to configure an API key. The app includes
-model selection, push-to-talk controls, startup integration, and a small recent
-history view for recovering recent dictated text.
+Dictate supports local transcription through faster-whisper. Advanced users can
+configure their own transcription provider through the Dictate CLI, but the main
+desktop app keeps the dictation workflow simple: press the microphone control,
+dictate, and recover recent text from the local dictations view.
 
 Dictate is designed for people who want fast text entry without changing their
 current workflow. Use it for notes, drafts, forms, messages, and other everyday
@@ -62,9 +66,10 @@ typing tasks. Always review important transcriptions before relying on them.
 - Push-to-talk dictation from the Windows tray
 - Types transcribed text into the focused app
 - Local faster-whisper transcription option
-- Optional OpenAI, xAI, and Gemini provider support when configured by the user
-- Recent History for local copy/paste recovery
-- Configurable model and hotkey settings
+- Dictate Pro subscription path for handled hosted/frontier transcription when
+  enabled
+- Local dictations view for copy/paste recovery
+- Simple desktop controls with advanced configuration available through the CLI
 - API keys stored through the operating system secret store
 - Local config, logs, history, and model cache paths
 
@@ -105,6 +110,22 @@ Available icons:
 - `ui-shell/src-tauri/icons/icon.png`
 - `ui-shell/src-tauri/icons/icon.ico`
 
+Prepared Store logo upload artifacts:
+
+- `docs/msstore/assets/logos/dictate-store-logo-300.png`
+- `docs/msstore/assets/logos/dictate-store-logo-1080.png`
+- `docs/msstore/assets/logos/dictate-store-logo-150.png`
+- `docs/msstore/assets/logos/dictate-store-logo-71.png`
+- `docs/msstore/assets/logos/dictate-store-logo-512.png`
+- `docs/msstore/assets/logos/dictate-store-logo-600.png`
+- `docs/msstore/assets/logos/dictate-store-logo-1240.png`
+
+Known Store asset follow-up:
+
+- The live Microsoft Store listing is currently showing the old black
+  microphone logo. Replace it in Partner Center with the current Dictate app
+  identity before the next public listing refresh.
+
 Required before submission:
 
 - 1:1 Store logo / box art
@@ -115,12 +136,35 @@ Current Partner Center state changes over time. Check Partner Center or
 `.github/workflows/msstore-publish-msix.yml` in `mode=status` for live status;
 do not rely on committed docs for transient submission state.
 
+Partner Center read-only check on 2026-06-25:
+
+- Product overview URL:
+  `https://partner.microsoft.com/en-us/dashboard/products/9P5S7747V0BP/overview`
+- Product status shown: `In Microsoft Store`
+- Product type shown: `MSIX or PWA app`
+- Store presence shown: `Submission 1: Last modified on 06/05/2026`
+- An update draft was opened from `Product release` -> `Start update`.
+- Current draft shown: `Submission 2`
+- Draft submission ID:
+  `1152921505701298613`
+- Hold this draft until the next app version is bundled, tested, and ready for
+  the package upload step.
+- Store listing prep completed in draft on 2026-06-25:
+  - Updated English (United States) description, release notes, feature bullets,
+    and short description.
+  - Uploaded four Desktop screenshots.
+  - Uploaded square Store logo/display assets for 1:1 box art, 300 x 300 app
+    tile, 150 x 150, and 71 x 71.
+  - Left package upload and certification submission untouched.
+- Live Store URL shown:
+  `https://apps.microsoft.com/detail/9P5S7747V0BP`
+
 Suggested screenshots:
 
-1. Settings window with provider/model controls visible.
-2. Hotkey/settings view.
-3. Recent History view with safe sample text.
-4. Tray menu or app running from the Windows taskbar.
+1. Ready state: `docs/msstore/assets/screenshots/dictate-01-ready.png`
+2. Recording state: `docs/msstore/assets/screenshots/dictate-02-recording.png`
+3. Dictations view: `docs/msstore/assets/screenshots/dictate-03-dictations.png`
+4. Command palette: `docs/msstore/assets/screenshots/dictate-04-command-palette.png`
 
 Do not include real dictated user text, API keys, email addresses, tokens, or
 private workspace names in screenshots.
@@ -135,10 +179,13 @@ Use this wording as the basis for Partner Center privacy/certification answers:
   retained by Dictate.
 - The default local transcription path runs on the user's device after speech
   models are downloaded.
-- If the user selects a hosted transcription provider and configures an API key,
-  audio for that transcription request is sent to the selected provider.
-- Hosted-provider API keys are stored through the operating system secret store,
-  not intentionally written to `config.yaml`.
+- Advanced users can configure a hosted transcription provider through the CLI;
+  if they do, audio for that transcription request is sent to the configured
+  provider.
+- User-supplied hosted-provider API keys are stored through the operating system
+  secret store, not intentionally written to `config.yaml`.
+- Dictate Pro, when enabled, is a handled hosted transcription subscription
+  rather than a user-facing provider switcher.
 - Dictate stores local configuration, logs, downloaded model data, and a small
   recent transcript history on the user's device.
 - Users can remove local state using the documented uninstall flags.
@@ -153,7 +200,11 @@ from user-created dictation content.
 Recommended age-rating stance:
 
 - Not directed at children under 13.
-- No in-app purchases.
+- No in-app purchases in the current release. If Dictate Pro hosted/frontier
+  transcription is added, treat it as an in-app subscription for a digital
+  service and update Store listing metadata, price ranges, certification notes,
+  and age rating answers before submission. See
+  [msstore-in-app-subscriptions.md](msstore-in-app-subscriptions.md).
 - No advertising.
 - No social network or public content sharing features.
 - No location access.
@@ -166,12 +217,13 @@ Suggested Partner Center certification note:
 ```text
 Dictate is a desktop productivity utility for push-to-talk dictation. The app
 uses microphone input only for user-initiated dictation. The default local
-transcription backend runs on-device after model download. If a user explicitly
-selects and configures a hosted transcription provider, audio for that request is
-sent to the selected provider using the user's own API key. API keys are stored
-with the operating system secret store. Dictate does not intentionally retain raw
-audio; it stores local settings, logs, downloaded model data, and a small local
-recent transcript history for copy/paste recovery.
+transcription backend runs on-device after model download. Advanced users can
+configure hosted transcription through the Dictate CLI; if they do, audio for
+that request is sent to the configured provider using the user's own API key,
+which is stored with the operating system secret store. Dictate Pro, when
+enabled, is the handled hosted transcription subscription path. Dictate does not
+intentionally retain raw audio; it stores local settings, logs, downloaded model
+data, and a small local recent transcript history for copy/paste recovery.
 ```
 
 ## Submission Checklist
@@ -184,13 +236,15 @@ recent transcript history for copy/paste recovery.
 - Complete the draft gates currently shown by Partner Center.
 - Confirm `https://arcforge.au/privacy/dictate` is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
+- Test the new bundled version before upload.
 - Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
   direct-download fallback only.
 - Upload package.
-- Add Store logo / box art.
-- Add at least one clean screenshot.
-- Add short description, description, features, keywords, support URL, terms URL,
-  and privacy policy URL.
+- Store listing prep is already staged in Submission 2:
+  - The four clean current-UI screenshots from
+    `docs/msstore/assets/screenshots/`.
+  - Square Store display assets from `docs/msstore/assets/logos/`.
+  - Updated short description, description, feature bullets, and release notes.
 - Complete age ratings.
 - Complete microphone/privacy certification notes.
 - Submit through the manual Partner Center flow or through
@@ -202,7 +256,10 @@ recent transcript history for copy/paste recovery.
 
 - Microsoft Store MSI/EXE submission checklist: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/create-app-submission
 - Microsoft Store MSI/EXE listing info: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/add-and-edit-store-listing-info
+- Microsoft Store MSIX listing screenshots and images: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images
 - Microsoft Store policies: https://learn.microsoft.com/en-us/windows/apps/publish/store-policies
+- Microsoft Store in-app subscriptions policy note:
+  [msstore-in-app-subscriptions.md](msstore-in-app-subscriptions.md)
 - Device capabilities guidance: https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/enable-device-capabilities
 - Microsoft winapp CLI with Tauri: https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/guides/tauri
 - Tauri Microsoft Store guidance: https://v2.tauri.app/distribute/microsoft-store/

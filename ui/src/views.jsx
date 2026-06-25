@@ -5,6 +5,62 @@
 import { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
 import { useStore, formatHistoryTime } from "./store.jsx";
+import { ipc } from "./ipc.js";
+
+/* ============================== VIEW TOGGLE ============================== */
+
+export function NotebookToggle() {
+  const s = useStore();
+  const active = s.view === "history";
+  const inExpanded = s.noteView === "expanded";
+
+  const closeExpanded = () => {
+    s.setNoteView(null);
+    s.setView(s.expandedFrom === "history" ? "history" : "home");
+  };
+
+  if (inExpanded) {
+    return (
+      <button
+        type="button"
+        className="view-toggle"
+        aria-label="Close note"
+        title="Close"
+        onClick={closeExpanded}
+      >
+        <Icon name="x" size={17} />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={"view-toggle" + (active ? " on" : "")}
+      aria-label="Dictations"
+      aria-pressed={active}
+      title={active ? "Back to capture" : "Dictations"}
+      onClick={() => {
+        s.setNoteView(null);
+        s.setView(active ? "home" : "history");
+      }}
+    >
+      <Icon name="notebook" size={17} />
+    </button>
+  );
+}
+
+/** Shared top bar — same row geometry as `.notes-search` on the dictations view. */
+export function HomeBar({ left, right }) {
+  return (
+    <div className="notes-search home-bar">
+      {left}
+      <span className="notes-search-grow" aria-hidden="true" />
+      {right}
+      <NotebookToggle />
+    </div>
+  );
+}
 
 /* ============================== NOTES LIST + SEARCH ============================== */
 
@@ -34,7 +90,7 @@ function HistoryView() {
     return all.filter((n) => n.text.toLowerCase().includes(sq));
   }, [q, all]);
 
-  // Open a history note in the ExpandedNote read view; back will return here.
+  // Open a history note in the ExpandedNote read view.
   const openNote = (note) => {
     s.setCurrentNote(note);
     s.setExpandedFrom("history");
@@ -50,33 +106,37 @@ function HistoryView() {
     }
   };
 
+  const exportNote = async (note) => {
+    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const name = `dictate-note-${ts}.md`;
+    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    try {
+      const saved = await ipc.saveTextFile(name, md);
+      if (saved) s.toast("Saved as Markdown");
+    } catch {
+      s.toast("Could not save file", { bad: true });
+    }
+  };
+
   const empty = all.length === 0;
 
   return (
     <div className="notes">
-      {/* Own header: back → capture home, title. */}
-      <div className="notes-top">
-        <button className="ibtn" title="Back" onClick={() => s.setView("home")}>
-          <Icon name="back" size={17} />
-        </button>
-        <div className="notes-title">Notes</div>
-      </div>
-
-      {/* Search field — autofocused, with ×-clear when non-empty */}
       <div className="notes-search">
         <Icon name="search" size={15} />
         <input
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search notes"
-          aria-label="Search notes"
+          placeholder="Search dictations"
+          aria-label="Search dictations"
         />
         {q && (
           <button className="ibtn sm" onClick={() => setQ("")} title="Clear search">
             <Icon name="x" size={15} />
           </button>
         )}
+        <NotebookToggle />
       </div>
 
       {/* Notes list — three states: empty-ever / no-results / rows */}
@@ -109,11 +169,18 @@ function HistoryView() {
                 </div>
               </div>
               <button
-                className="ibtn nr-copy"
+                className="ibtn nr-action"
                 title="Copy note"
                 onClick={(e) => { e.stopPropagation(); copyNote(note); }}
               >
                 <Icon name="copy" size={16} />
+              </button>
+              <button
+                className="ibtn nr-action"
+                title="Export as Markdown"
+                onClick={(e) => { e.stopPropagation(); exportNote(note); }}
+              >
+                <Icon name="download" size={16} />
               </button>
             </div>
           ))

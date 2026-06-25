@@ -45,9 +45,6 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
             url="https://example.test/releases",
             platform="linux",
             install_kind="linux-package",
-            engine={"name": "engine", "current": RELEASE_VERSION, "latest": RELEASE_VERSION, "path": "/bin/dictate", "stale": False},
-            shell={"name": "shell", "current": "2026.4.0", "latest": RELEASE_VERSION, "path": "/usr/bin/dictate-ui-shell", "stale": True},
-            shell_stale=True,
             phase="available",
             step="ready",
             progress=0,
@@ -79,22 +76,46 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
 class _FakeNoteDaemon:
     def __init__(self) -> None:
         self.note_recording_active = False
+        self.note_recording_paused = False
         self.calls: list[str] = []
 
     def start_note_recording(self) -> bool:
         self.calls.append("start")
         self.note_recording_active = True
+        self.note_recording_paused = False
+        return True
+
+    def pause_note_recording(self) -> bool:
+        self.calls.append("pause")
+        if not self.note_recording_active:
+            return False
+        self.note_recording_paused = True
+        return True
+
+    def resume_note_recording(self) -> bool:
+        self.calls.append("resume")
+        if not self.note_recording_paused:
+            return False
+        self.note_recording_paused = False
         return True
 
     def stop_note_recording(self) -> bool:
         self.calls.append("stop")
         self.note_recording_active = False
+        self.note_recording_paused = False
         return True
 
     def toggle_note_recording(self) -> bool:
         self.calls.append("toggle")
-        self.note_recording_active = not self.note_recording_active
-        return self.note_recording_active
+        if self.note_recording_paused:
+            self.note_recording_paused = False
+            return True
+        if self.note_recording_active:
+            self.note_recording_active = False
+            self.note_recording_paused = False
+            return False
+        self.note_recording_active = True
+        return True
 
 
 class UiPrefsStoreTests(unittest.TestCase):
@@ -158,11 +179,11 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["model"]["backend"], "faster-whisper")
             self.assertEqual(state["model"]["model"], "turbo")
             self.assertEqual(state["model"]["id"], "faster-whisper/turbo")
-            # local model first, four providers present
+            # local models first, hosted providers present
             self.assertEqual(state["models"][0]["backend"], "faster-whisper")
             self.assertTrue(state["models"][0]["local"])
             backends = {m["backend"] for m in state["models"]}
-            self.assertEqual(backends, {"faster-whisper", "openai", "xai", "gemini"})
+            self.assertEqual(backends, {"faster-whisper", "whisperx", "openai", "xai", "gemini"})
             # default shortcut + activation
             self.assertEqual(state["shortcut"]["combo"], "ctrl_r")
             self.assertEqual(state["shortcut"]["display"], ["Ctrl (R)"])
@@ -270,10 +291,30 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             daemon = _FakeNoteDaemon()
             backend = _backend(d, daemon=daemon)
             self.assertFalse(backend.get_state()["notes"]["recording"])
-            self.assertTrue(backend.start_note_recording()["recording"])
+            started = backend.start_note_recording()
+            self.assertTrue(started["recording"])
+            self.assertFalse(started["paused"])
+            paused = backend.pause_note_recording()
+            self.assertTrue(paused["recording"])
+            self.assertTrue(paused["paused"])
+            resumed = backend.resume_note_recording()
+            self.assertTrue(resumed["recording"])
+            self.assertFalse(resumed["paused"])
             self.assertFalse(backend.stop_note_recording()["recording"])
             self.assertTrue(backend.toggle_note_recording()["recording"])
-            self.assertEqual(daemon.calls, ["start", "stop", "toggle"])
+            self.assertEqual(daemon.calls, ["start", "pause", "resume", "stop", "toggle"])
+
+    def test_note_pause_and_resume_endpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            backend.start_note_recording()
+            paused = backend.pause_note_recording()
+            self.assertTrue(paused["recording"])
+            self.assertTrue(paused["paused"])
+            resumed = backend.resume_note_recording()
+            self.assertTrue(resumed["recording"])
+            self.assertFalse(resumed["paused"])
 
     def test_note_controls_require_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -344,13 +385,11 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertEqual(status["url"], "https://example.test/releases")
             self.assertEqual(status["platform"], "linux")
             self.assertEqual(status["installKind"], "linux-package")
-            self.assertTrue(status["shellStale"])
             self.assertEqual(status["phase"], "available")
             self.assertEqual(status["step"], "ready")
             self.assertEqual(status["progress"], 0)
             self.assertEqual(status["missingDeps"], [])
-            self.assertEqual(status["engine"]["current"], RELEASE_VERSION)
-            self.assertEqual(status["shell"]["current"], "2026.4.0")
+            self.assertEqual(status["currentVersion"], RELEASE_VERSION)
             self.assertEqual(status["commands"]["release"], "https://example.test/releases")
 
     def test_start_update_shape(self) -> None:
@@ -464,6 +503,7 @@ class HandshakeTests(unittest.TestCase):
             self.assertEqual(data["url"], "http://127.0.0.1:9")
             self.assertEqual(data["token"], "tok")
             self.assertEqual(data["pid"], 42)
+            self.assertEqual(data["version"], RELEASE_VERSION)
 
 
 if __name__ == "__main__":

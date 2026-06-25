@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { Toggle, Combo, Chip, Seg } from "../primitives.jsx";
+import { Toggle, Combo, Chip, Seg, Tooltip } from "../primitives.jsx";
 
 describe("primitives", () => {
   it("Toggle reflects and reports state", () => {
@@ -30,5 +30,23 @@ describe("primitives", () => {
     render(<Seg options={[{ v: "hold", l: "Hold" }, { v: "toggle", l: "Toggle" }]} value="hold" onChange={onChange} />);
     fireEvent.click(screen.getByText("Toggle"));
     expect(onChange).toHaveBeenCalledWith("toggle");
+  });
+
+  it("Tooltip positions below trigger and stays visible on hover", () => {
+    const { container } = render(
+      <div className="win" style={{ width: 400, height: 300 }}>
+        <Tooltip label="Private mode">
+          <button type="button">Toggle</button>
+        </Tooltip>
+      </div>
+    );
+    const wrap = container.querySelector(".tip-wrap");
+    const tip = container.querySelector(".tip");
+    expect(wrap).not.toHaveClass("show");
+    fireEvent.mouseEnter(wrap);
+    expect(wrap).toHaveClass("show");
+    expect(tip).toBeVisible();
+    fireEvent.mouseLeave(wrap);
+    expect(wrap).not.toHaveClass("show");
   });
 });

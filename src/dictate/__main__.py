@@ -38,7 +38,6 @@ from dictate.config import (
     remove_hotwords,
     remove_lexicon_replacements,
     set_stt_backend,
-    set_stt_model,
     set_stt_selection,
 )
 from dictate.doctor import run_doctor
@@ -60,6 +59,7 @@ from dictate.stt import (
     GEMINI_MODELS,
     OPENAI_MODELS,
     STT_BACKENDS,
+    WHISPERX_MODELS,
     SpeechToText,
     SttBackend,
     XAI_MODELS,
@@ -112,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Model name. "
             "local example: turbo. "
+            f"whisperx examples: {', '.join(WHISPERX_MODELS)}. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
             f"xai examples: {', '.join(XAI_MODELS)}. "
             f"gemini examples: {', '.join(GEMINI_MODELS)}."
@@ -236,6 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not args.once:
         _acquire_daemon_lock_or_exit()
+        _ensure_desktop_integration()
 
     _run_preflight_or_exit(
         require_typing=not args.once,
@@ -294,6 +296,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         stt_backend=stt_backend,
     )
     return 0
+
+
+def _ensure_desktop_integration() -> None:
+    try:
+        from dictate import startup as startup_mod
+
+        startup_mod.ensure_desktop_integration_once()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _acquire_daemon_lock_or_exit() -> None:

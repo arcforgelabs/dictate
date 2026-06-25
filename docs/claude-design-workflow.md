@@ -37,8 +37,9 @@ every screen the user sees exists in Claude Design to mark up.
    then sync to `ui/src` — never restyle `ui/src` directly. Use the
    `claude-design` skill (`write_files` + `render_preview`), not hand-copied CDP.
    Note: `design/locks/note-capture-core/` already froze the *shipped core*, but
-   it predates this session's changes (capture-home top bar, standalone Notes
-   view, gear-menu refinement) — those still need to land in the cloud project.
+   it predates this session's release work. The cloud project still needs the
+   current capture home, Notes view, update controls, and Store-ready screenshots
+   reconciled against production.
 2. **Mark up** — the maintainer annotates items for improvement on the rendered
    prototypes.
 3. **Sync back** — changes land in `ui/src/` via `/design-sync` onto `master`
@@ -52,13 +53,14 @@ every screen the user sees exists in Claude Design to mark up.
 - Note ready (just-captured) — Insert · Open note · overflow (Copy / Copy as
   Markdown) · New note.
 - Expanded note (read) — back, copy, copy-as-Markdown.
-- **Settings / gear menu** — the dropdown (Always on-device · Appearance ·
-  Model · Push-to-talk · Hotwords · App update · Startup · Advanced · Status).
+- Settings entry points and panels — model/device status, push-to-talk,
+  hotwords, app update, startup, advanced, and health/status surfaces.
 - Settings views: Model, Push-to-talk, Hotwords, App update, Startup, Advanced,
   Status.
 - Command palette (⌘K) and overlays (ListeningHUD, Toasts).
 - Light + dark themes; native vs. custom (`DICTATE_CUSTOM_CHROME=1`) chrome.
 
-**First target — refine the Settings/gear menu.** It is the first surface to
-reconstruct and mark up: the current dropdown (production `GearMenu` in
-`ui/src/App.jsx`) needs design refinement before the rest of the sweep.
+**First target — release parity.** Reconstruct the current desktop app state
+needed for the upcoming Windows Store release: capture home, Notes, update
+controls, and settings/status surfaces. Use that pass to produce any replacement
+Store screenshots after the next version is bundled and tested.

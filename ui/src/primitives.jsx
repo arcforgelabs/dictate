@@ -1,5 +1,5 @@
 // primitives.jsx — small controlled UI atoms shared across views.
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 
 export function Kbd({ children, lg }) {
@@ -28,6 +28,31 @@ export function Toggle({ on, onChange }) {
   return (
     <button role="switch" aria-checked={!!on} className={"toggle" + (on ? " on" : "")}
       onClick={() => onChange && onChange(!on)}><span className="knob" /></button>
+  );
+}
+
+export function Tooltip({ label, children }) {
+  const [active, setActive] = useState(false);
+
+  const onBlur = (e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) setActive(false);
+  };
+
+  const onMouseLeave = (e) => {
+    if (!e.currentTarget.contains(document.activeElement)) setActive(false);
+  };
+
+  return (
+    <span
+      className={"tip-wrap" + (active ? " show" : "")}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={onMouseLeave}
+      onFocus={() => setActive(true)}
+      onBlur={onBlur}
+    >
+      {children}
+      <span className="tip" role="tooltip">{label}</span>
+    </span>
   );
 }
 

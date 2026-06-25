@@ -20,12 +20,17 @@ use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Deserialize, Debug, Clone)]
 struct Handshake {
     url: String,
     token: String,
     pid: Option<u32>,
+    // The engine's own version. The shell restarts the engine when this differs
+    // from its own version, so shell + engine never run mismatched code after an
+    // update (e.g. a stale engine orphaned by an abnormal shell exit).
+    version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -266,10 +271,69 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
     }
 }
 
+/// True when the live engine reports the same version as this shell. An engine
+/// with no version (or a different one) is a stale orphan from a previous build.
+fn handshake_version_matches(h: &Handshake, shell_version: &str) -> bool {
+    h.version.as_deref() == Some(shell_version)
+}
+
+/// Terminate an engine we did not spawn (an external orphan), by pid.
+fn kill_pid(pid: u32) {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+        for _ in 0..20 {
+            if !process_exists(pid) {
+                return;
+            }
+            sleep(Duration::from_millis(50));
+        }
+        let _ = Command::new("kill").arg("-KILL").arg(pid.to_string()).status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .status();
+    }
+}
+
+/// Best-effort path to the engine's daemon lock dir (mirrors process_lock.py).
+fn daemon_lock_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        return data_dir().map(|d| d.join("dictate-daemon.lockdir"));
+    }
+    env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|v| PathBuf::from(v).join("dictate-daemon.lockdir"))
+}
+
+/// Stop a stale (wrong-version) engine and clear its handshake + lock so a fresh
+/// engine of this version can take over cleanly.
+fn takeover_stale_engine(handshake: &Handshake) {
+    if let Some(pid) = handshake.pid {
+        kill_pid(pid);
+    }
+    remove_handshake();
+    if let Some(lockdir) = daemon_lock_dir() {
+        let _ = fs::remove_dir_all(lockdir);
+    }
+}
+
 /// Return a live handshake, starting the engine and polling briefly if needed.
+///
+/// The shell and engine always run the same version. If a live handshake points
+/// at an engine reporting a different version — a stale orphan left by an
+/// abnormal shell exit or an in-place update — stop it and start a fresh one so
+/// the two never run mismatched code.
 fn ensure_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<Handshake> {
+    let shell_version = env!("CARGO_PKG_VERSION");
     if let Some(h) = read_live_handshake() {
-        return Some(h);
+        if handshake_version_matches(&h, shell_version) {
+            return Some(h);
+        }
+        takeover_stale_engine(&h);
     }
     spawn_engine(app);
     for _ in 0..80 {
@@ -327,6 +391,36 @@ fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
     })
 }
 
+/// Relaunch the shell after an in-app update installed a new package. Stopping
+/// the engine first and re-exec'ing the (now-updated) shell binary brings shell
+/// and engine back up together at the new version.
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    kill_engine();
+    app.restart();
+}
+
+/// Native save dialog + write — GTK on Linux, Win32 on Windows, etc.
+#[tauri::command]
+async fn save_text_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    content: String,
+) -> Result<bool, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("Markdown", &["md"])
+        .blocking_save_file();
+    let Some(file_path) = picked else {
+        return Ok(false);
+    };
+    let path = file_path.into_path().map_err(|e| e.to_string())?;
+    fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 fn show_settings(app: &tauri::AppHandle) {
     let _ = ensure_engine(app);
     if let Some(window) = app.get_webview_window("main") {
@@ -341,8 +435,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_settings(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
-        .invoke_handler(tauri::generate_handler![refresh_bridge])
+        .invoke_handler(tauri::generate_handler![refresh_bridge, restart_app, save_text_file])
         .setup(|app| {
             let platform = detect_platform();
             let bridge = ensure_engine(app);
@@ -437,6 +532,7 @@ mod tests {
             url: "http://127.0.0.1:8765".into(),
             token: "secret".into(),
             pid: None,
+            version: None,
         };
         let script = build_init_script("kde", Some(&h), true);
         assert!(script.contains("http://127.0.0.1:8765"));
@@ -483,8 +579,24 @@ mod tests {
                 url: "http://127.0.0.1:9".into(),
                 token: "secret".into(),
                 pid: Some(u32::MAX),
+                version: None,
             };
             assert!(!handshake_is_live(&h));
         }
+    }
+
+    #[test]
+    fn version_guard_matches_only_exact_version() {
+        let mk = |v: Option<&str>| Handshake {
+            url: "http://127.0.0.1:1".into(),
+            token: "t".into(),
+            pid: None,
+            version: v.map(|s| s.to_string()),
+        };
+        assert!(handshake_version_matches(&mk(Some("2026.6.23")), "2026.6.23"));
+        // A different version is a stale orphan -> not a match.
+        assert!(!handshake_version_matches(&mk(Some("2026.6.20")), "2026.6.23"));
+        // A versionless handshake (pre-update engine) -> not a match.
+        assert!(!handshake_version_matches(&mk(None), "2026.6.23"));
     }
 }

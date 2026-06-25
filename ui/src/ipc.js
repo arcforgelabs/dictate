@@ -101,6 +101,12 @@ export const ipc = {
   async stopNoteRecording() {
     return call("POST", "/api/notes/stop");
   },
+  async pauseNoteRecording() {
+    return call("POST", "/api/notes/pause");
+  },
+  async resumeNoteRecording() {
+    return call("POST", "/api/notes/resume");
+  },
   async toggleNoteRecording() {
     return call("POST", "/api/notes/toggle");
   },
@@ -133,6 +139,42 @@ export const ipc = {
       }
     };
     return () => src.close();
+  },
+
+  // Save text through the OS-native file picker (Tauri) or a browser download fallback.
+  async saveTextFile(defaultName, content) {
+    const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+    const invoke = t && t.core && t.core.invoke;
+    if (invoke) {
+      return invoke("save_text_file", { defaultName, content });
+    }
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = defaultName;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return true;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
+  // Relaunch the app after an in-app update installed a new package.
+  async restartApp() {
+    const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+    const invoke = t && t.core && t.core.invoke;
+    if (!invoke) return false;
+    try {
+      await invoke("restart_app");
+      return true;
+    } catch (e) {
+      return false;
+    }
   },
 
   // Window controls — wired to the Tauri current window when available.

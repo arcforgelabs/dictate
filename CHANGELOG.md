@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-06-25
+
+### Added
+
+- The installed Linux app (`.deb`/AppImage) now registers its launcher and
+  start-on-sign-in autostart entry on first run, pointing at `dictate-ui-shell`.
+  Previously only the source `install.sh` set these up, so packaged installs
+  never started on login despite the docs saying they did. One-time and gated to
+  the frozen app, so it never overrides a user who later disables startup.
+
+### Fixed
+
+- Autostart/launcher `.desktop` entries written by the frozen app now target
+  `dictate-ui-shell` instead of a `~/.local/bin/dictate` console script that does
+  not exist in packaged installs — the cause of "Dictate doesn't start / the
+  hotkey does nothing" after switching from a source install to the `.deb`.
+- `dictate doctor` now flags launcher/startup entries whose `Exec` target is
+  missing (e.g. a stale pip-era `~/.local/bin/dictate` left behind after moving
+  to the package) and `dictate doctor --fix` repairs them.
+
 ## 2026-06-23 (later)
 
 ### Changed

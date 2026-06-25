@@ -6,10 +6,9 @@ Desktop dictation that types into the focused app.
 speak, and it transcribes into whatever app you are already using.
 
 Current status: early desktop app. Linux installs, Windows 11 source installs,
-tray controls, startup integration, recent history, model selection, API key
-storage, update, and uninstall paths are implemented. Microsoft Store packaging
-and submission automation are maintained separately from GitHub releases; see
-`docs/goal.md`.
+tray controls, startup integration, local dictation history, update, and
+uninstall paths are implemented. Microsoft Store packaging and submission
+automation are maintained separately from GitHub releases; see `docs/GOALS.md`.
 
 ## Install
 
@@ -60,15 +59,13 @@ npx @arcforgelabs/dictate install
 
 ```text
 Open Dictate
-Select Model
-Set API key if using a hosted model
-Set push-to-talk shortcut if desired
+Use the mic button or configured push-to-talk shortcut
 Hold shortcut, speak, release
-Review Recent History when needed
+Review Dictations when needed
 ```
 
 By default, Dictate installs a normal app launcher entry and starts on sign-in.
-Startup can be changed from Settings.
+Advanced configuration is available through the `dictate config` CLI.
 
 ## Update And Uninstall
 
@@ -102,23 +99,18 @@ also want to remove config, logs, history, and downloaded model data.
 - Runs as a tray app
 - Types dictated text into the focused app
 - Supports configurable push-to-talk
-- Shows selected model/status in the app UI
+- Presents a simple capture-first desktop UI
 - Supports launch on startup
-- Stores hosted-provider API keys in the OS secret store
-- Keeps a small Recent History for copy/paste recovery
+- Stores CLI-configured hosted-provider API keys in the OS secret store
+- Keeps a small local dictations history for copy/paste recovery
 - Provides installer, updater, uninstaller, and doctor paths
 
 ## Models
 
-Supported provider defaults:
-
-- `faster-whisper/turbo` for local transcription
-- `openai/gpt-4o-mini-transcribe`
-- `xai/grok-speech-to-text`
-- `gemini/gemini-3-flash-preview`
-
-Local transcription can use CPU or GPU where supported. Hosted providers require
-an API key before they can be selected.
+The default path uses local faster-whisper transcription. The desktop UI keeps
+model/provider choices out of the primary workflow. Advanced users and tests can
+still configure explicit local or hosted providers through CLI options and
+`dictate config`.
 
 ## Commands
 
@@ -132,11 +124,13 @@ dictate doctor --quick --fix
 dictate doctor --check-model-load
 ```
 
-Hotword and model options are available from Settings. CLI flags still exist for
-automation and testing:
+Advanced configuration remains available for automation and testing:
 
 ```bash
 dictate --stt-backend faster-whisper --model turbo
+dictate config show
+dictate config set-provider online
+dictate config set-key xai xai-YOUR_KEY_HERE
 dictate --stt-backend openai --model gpt-4o-mini-transcribe
 dictate --stt-backend xai --model grok-speech-to-text
 dictate --stt-backend gemini --model gemini-3-flash-preview
@@ -164,7 +158,7 @@ and should not be packaged into the public repo default config.
 ## Safety
 
 - Dictate does not intentionally write raw API keys to `config.yaml`.
-- API keys configured in the app use the OS secret store.
+- API keys configured through the CLI use the OS secret store.
 - Dictation text can be sensitive; check logs and issue reports before sharing.
 - Important transcriptions should be verified before relying on them.
 - Support and maintenance are best-effort.
@@ -181,7 +175,7 @@ the `dictate config` CLI).
   when to use the Tauri shell instead, are in that README's *Develop* section.
 - [`ui-shell/`](ui-shell/README.md) — Tauri 2 shell that hosts it on Linux.
 - `src/dictate/ui_server.py` — the loopback control server the UI talks to; the
-  tray's **Open Settings…** launches the shell (falling back to native dialogs).
+  tray can launch the shell for the desktop capture surface.
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
 **Install it like a normal app:** tagged releases attach a **self-contained**
@@ -193,8 +187,8 @@ speech models download on first use.
 sudo apt install ./Dictate_*_amd64.deb
 ```
 
-The app lives in the tray (Open Settings / Quit) and does push-to-talk straight
-away. Build the package yourself in one step with
+The app lives in the tray and desktop shell and does push-to-talk straight away.
+Build the package yourself in one step with
 [`scripts/build-linux-desktop.sh`](scripts/build-linux-desktop.sh) — see
 [`ui-shell/README.md`](ui-shell/README.md). The `pip`/`install.sh` route remains
 for source/dev installs.
@@ -207,7 +201,7 @@ for source/dev installs.
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Microsoft Store automation](docs/msstore-automation.md)
 - [Microsoft Store listing draft](docs/msstore-listing.md)
-- [Windows release goal](docs/goal.md)
+- [Goals](docs/GOALS.md)
 - [Development streams](docs/development-streams.md)
 - [Security policy](SECURITY.md)
 

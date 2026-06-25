@@ -9,6 +9,8 @@ export const useStore = () => useContext(StoreCtx);
 export const MODELS = [
   { id: "faster-whisper/turbo", name: "faster-whisper · turbo", provider: "Local", brand: null, local: true, backend: "faster-whisper",
     desc: "Runs on this machine — no key, nothing leaves your device." },
+  { id: "whisperx/large-v3", name: "whisperx · large-v3", provider: "Local", brand: null, local: true, backend: "whisperx",
+    desc: "Experimental local meeting diarization with WhisperX and pyannote." },
   { id: "openai/gpt-4o-mini-transcribe", name: "gpt-4o-mini-transcribe", provider: "OpenAI", brand: "openai", backend: "openai",
     desc: "Fast, accurate hosted transcription.", keyName: "OpenAI API key", keyPrefix: "sk-" },
   { id: "xai/grok-speech-to-text", name: "grok-speech-to-text", provider: "xAI", brand: "xai", backend: "xai",
@@ -20,12 +22,29 @@ export const modelById = (id) => MODELS.find((m) => m.id === id) || MODELS[0];
 
 export const DEMO_PHRASES = [
   "Can you push the release branch and tag it before the standup at ten.",
-  "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon.",
-  "Let's move the sync to Thursday and keep Friday clear for the demo build.",
-  "Draft a short note thanking the beta testers and ask them for crash reports.",
+  "Reminder to send the meeting summary to the team this afternoon.",
+  "Let's move the planning session to Thursday and keep Friday clear for focused work.",
+  "Draft a short note thanking the reviewers and ask them for feedback.",
   "Add a section to the doctor command that checks the microphone permissions.",
   "The turbo model feels noticeably faster on this machine than the hosted ones.",
 ];
+
+// Clipboard payload when cloud transcription is blocked — paste into an AI agent.
+export const XAI_API_KEY_AGENT_INSTRUCTIONS = `Dictate needs an xAI API key before cloud transcription can be enabled.
+
+What to do:
+1. Ask the user for their xAI API key from https://console.x.ai/ (keys start with xai-).
+2. Save it to the OS secret store and switch Dictate to the online provider:
+
+   dictate config set-key xai xai-YOUR_KEY_HERE
+   dictate config set-provider online
+
+3. Verify setup:
+
+   dictate config show
+
+Expected: key.xai shows "set" and provider shows "online".
+After that, the user can turn off Private mode in Dictate to use cloud transcription.`;
 
 export function nowLabel() {
   const d = new Date();

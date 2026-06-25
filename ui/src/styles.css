@@ -75,18 +75,12 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .tb-left{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;}
 .tb-mark{width:16px;height:16px;color:var(--fg);display:flex;}
 .tb-mark svg{width:100%;height:100%;}
-.tb-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);}
-.tb-search{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px 0 10px;border-radius:8px;
-  background:var(--surface-3);border:1px solid transparent;color:var(--muted);font-size:12.5px;min-width:240px;
-  transition:var(--t-fast);-webkit-app-region:no-drag;}
-.tb-search:hover{background:var(--surface);border-color:var(--border);}
-.tb-search .kbd{margin-left:auto;}
 .tb-ctrls{display:flex;gap:2px;-webkit-app-region:no-drag;}
 .tb-btn{width:30px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--muted);transition:var(--t-fast);}
 .tb-btn:hover{background:var(--surface-3);color:var(--fg);}
 .tb-btn.close:hover{background:var(--danger-bg);color:var(--danger);}
 
-.shell{flex:1;min-height:0;display:flex;}
+.shell{flex:1;min-height:0;min-width:0;display:flex;}
 
 /* ===== sidebar rail ===== */
 .rail{width:236px;flex:0 0 236px;background:var(--surface-2);border-right:1px solid var(--hairline);
@@ -377,12 +371,13 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 /* ===== toasts ===== */
 .toasts{position:absolute;right:20px;bottom:20px;z-index:60;display:flex;flex-direction:column;gap:10px;align-items:flex-end;}
 .toast{display:flex;align-items:center;gap:11px;padding:11px 14px;background:var(--surface);border:1px solid var(--border-2);
-  border-radius:var(--r-md);box-shadow:var(--shadow-lg);font-size:13px;animation:toastIn .3s var(--ease-out);max-width:330px;}
+  border-radius:var(--r-md);box-shadow:var(--shadow-lg);font-size:13px;animation:toastIn .3s var(--ease-out);max-width:480px;}
 .toast .ic{color:var(--live);display:flex;flex:0 0 auto;}
 .toast.amber{border-color:var(--amber-line);}
 .toast.amber .ic{color:var(--amber);}
-.toast .undo{margin-left:6px;color:var(--muted);font-weight:600;font-size:12.5px;}
-.toast .undo:hover{color:var(--fg);}
+.toast .toast-act{margin-left:6px;padding:4px;border-radius:6px;color:var(--muted);display:flex;align-items:center;
+  justify-content:center;background:none;border:none;cursor:pointer;flex:0 0 auto;transition:var(--t-fast);}
+.toast .toast-act:hover{color:var(--fg);background:var(--surface-3);}
 @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 
 /* brand mark swatch helpers */
@@ -424,7 +419,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .win.win10 .wincaps button.x:hover{background:#e81123;color:#fff;}
 .win.win11 .wincaps button:last-child{border-top-right-radius:7px;}
 
-/* GNOME / Adwaita: round close (min/max hidden by default) */
+/* GNOME / Adwaita: round min, max, close */
 .adw{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag;}
 .adw button{width:26px;height:26px;border-radius:50%;background:rgba(27,26,22,.08);color:var(--fg);
   display:flex;align-items:center;justify-content:center;transition:background var(--t-fast);}
@@ -432,6 +427,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .adw button:hover{background:rgba(27,26,22,.16);}
 [data-theme="dark"] .adw button{background:rgba(243,241,236,.10);}
 [data-theme="dark"] .adw button:hover{background:rgba(243,241,236,.18);}
+.adw button.x:hover{background:#c5402c;color:#fff;}
 
 /* KDE / Breeze: min · max · close, round hover, close goes red */
 .breeze{display:flex;align-items:center;gap:4px;-webkit-app-region:no-drag;}
@@ -474,6 +470,11 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .ibtn{width:30px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;
   color:var(--muted);background:none;border:none;cursor:pointer;transition:var(--t-fast);position:relative;}
 .ibtn:hover{background:var(--surface-3);color:var(--fg);}
+/* Notebook view toggle — capture home ↔ dictations list */
+.view-toggle{width:30px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+  color:var(--subtle);background:none;border:none;cursor:pointer;flex:0 0 auto;transition:var(--t-fast);}
+.view-toggle:hover{background:var(--surface-3);color:var(--fg);}
+.view-toggle.on{background:var(--surface-3);color:var(--fg);box-shadow:inset 0 0 0 1px var(--border-2);}
 /* Quiet update-available indicator — small dot, not alarm-red */
 .update-dot{position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;
   background:var(--fg);opacity:.45;border:1.5px solid var(--surface-2);pointer-events:none;}
@@ -483,16 +484,43 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 
 /* ── capture home layout ── */
 .note-home{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
-/* Quiet home chrome: settings (left) + notes (right) above the cradle. */
-.home-top{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;}
-/* Privacy pill — the one human control on the home (trust, not config). */
-.privpill{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:var(--r-pill);
-  background:var(--surface-2);border:1px solid var(--border);color:var(--fg);font-size:12px;font-weight:600;
-  cursor:pointer;transition:var(--t-fast);}
-.privpill:hover{background:var(--surface-3);}
-.pp-dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 3px var(--live-bg);flex:0 0 auto;}
-.privpill.amber{color:var(--amber-text);}
-.privpill.amber .pp-dot{background:var(--amber);box-shadow:0 0 0 3px var(--amber-bg);}
+/* Privacy control — icon + toggle on the home chrome. */
+.privpill{display:inline-flex;align-items:center;gap:10px;color:var(--fg);}
+.priv-icon{display:inline-flex;align-items:center;color:var(--muted);line-height:0;height:23px;}
+.priv-icon svg{width:23px;height:23px;}
+.privpill.degraded .priv-icon{color:var(--amber-text);}
+/* Update affordance — one quiet pill; Skip/Later revealed on proximity. */
+.updpill{display:inline-flex;align-items:center;gap:4px;-webkit-app-region:no-drag;}
+.upd-main{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:var(--r-pill);
+  background:var(--surface-2);border:1px solid var(--border);color:var(--fg);font-family:var(--font-ui);
+  font-size:11.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:var(--t-fast);}
+.upd-main:hover{background:var(--surface-3);border-color:var(--border-2);}
+.upd-main[disabled]{opacity:.7;cursor:default;}
+.upd-dot{width:7px;height:7px;border-radius:50%;background:var(--amber-dot);flex:0 0 auto;}
+.updpill.phase-ready .upd-main{background:var(--live-bg);border-color:var(--live);color:var(--live-text);}
+.updpill.phase-ready .upd-dot{background:var(--live);}
+.updpill.phase-error .upd-main{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
+.updpill.phase-error .upd-dot{background:var(--danger);}
+.updpill.phase-preparing .upd-dot,.updpill.phase-installing .upd-dot{animation:updpulse 1.1s var(--ease) infinite;}
+@keyframes updpulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+/* secondary actions: collapsed until hover / keyboard focus (proximity reveal) */
+.upd-more{display:flex;align-items:center;gap:2px;max-width:0;overflow:hidden;opacity:0;
+  transition:max-width var(--t),opacity var(--t-fast);}
+.updpill:hover .upd-more,.updpill:focus-within .upd-more{max-width:130px;opacity:1;}
+.upd-mini{height:24px;padding:0 8px;border:none;background:none;border-radius:var(--r-pill);color:var(--subtle);
+  font-family:var(--font-ui);font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer;transition:var(--t-fast);}
+.upd-mini:hover{background:var(--surface-3);color:var(--fg);}
+@media (prefers-reduced-motion:reduce){.updpill .upd-dot{animation:none!important;}}
+.reduce-motion .updpill .upd-dot{animation:none!important;}
+/* Themed tooltip — matches toast/surface tokens. */
+.tip-wrap{position:relative;display:inline-flex;vertical-align:middle;}
+.tip-wrap .tip{position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);
+  padding:5px 10px;border-radius:var(--r-sm);background:var(--surface);color:var(--fg);
+  border:1px solid var(--border-2);box-shadow:var(--shadow-pop);font-size:11.5px;font-weight:600;
+  letter-spacing:-.01em;white-space:nowrap;pointer-events:none;opacity:0;visibility:hidden;
+  transition:opacity var(--t-fast),visibility var(--t-fast);z-index:30;}
+.tip-wrap.show .tip{opacity:1;visibility:visible;}
+@media (prefers-reduced-motion:reduce){.tip-wrap .tip{transition:opacity var(--t-fast),visibility var(--t-fast);}}
 /* Getting-started keyboard — quiet, flex-aligned rows; points at Right Ctrl. */
 .gs-kbd{width:228px;margin:6px auto 0;display:flex;flex-direction:column;gap:4px;padding:11px;border-radius:10px;
   background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow-sm);}
@@ -521,6 +549,10 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-feedback{display:flex;flex-direction:column;align-items:center;gap:8px;min-height:110px;}
 .note-status{font-size:19px;font-weight:800;letter-spacing:-.02em;}
 .note-status.live{color:var(--live);}
+.note-status.paused{color:var(--muted);}
+.note-finish-btn{margin-top:4px;padding:6px 14px;border-radius:var(--r-pill);border:1px solid var(--border-2);
+  background:var(--surface-2);color:var(--fg);font-size:12.5px;font-weight:600;transition:var(--t-fast);}
+.note-finish-btn:hover{background:var(--surface-3);}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
 /* Config-gap: quiet amber pill on home when online mode but no API key configured */
@@ -542,13 +574,20 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 /* ── Breath Cradle (cradle-wrap / recwrap / recbtn / cradle-halo / cradle-ring) ── */
 /* cradle-wrap: positions the flash ring relative to the cradle */
 .cradle-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
-.recwrap{position:relative;width:108px;height:108px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.recwrap{position:relative;width:108px;height:108px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;cursor:pointer;}
+.recwrap::before{content:"";position:absolute;inset:-28px;border-radius:50%;pointer-events:auto;}
+.recwrap:focus-visible{outline:2px solid var(--live);outline-offset:6px;border-radius:50%;}
 .recbtn{position:relative;z-index:2;width:108px;height:108px;border-radius:50%;border:1px solid var(--border-2);
-  background:var(--surface-2);color:var(--fg);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  background:var(--surface-2);color:var(--fg);pointer-events:none;display:flex;align-items:center;justify-content:center;
   box-shadow:var(--shadow-md);transition:background var(--t),border-color var(--t),color var(--t),transform var(--t-fast);}
-.recbtn:hover{transform:translateY(-2px);}
-.recbtn:active{transform:scale(.97);}
+.recwrap:hover .recbtn{transform:translateY(-2px);}
+.recwrap:active .recbtn{transform:scale(.97);}
 .recbtn.rec{background:var(--live-bg);border-color:var(--live);color:var(--live);}
+.recwrap.live.stop-hint .recbtn.rec,.recwrap.live:hover .recbtn.rec{
+  background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
+.recbtn.paused{background:var(--surface-3);border-color:var(--border-2);color:var(--muted);}
+.recwrap.paused.resume-hint .recbtn.paused,.recwrap.paused:hover .recbtn.paused{
+  background:var(--live-bg);border-color:var(--live);color:var(--live);}
 .rb-ico{display:flex;color:inherit;}
 /* The halo and bloom rings emanate from the cradle, behind the button */
 .cradle-halo,.cradle-ring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;
@@ -567,7 +606,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 }
 
 /* ── Settings view wrapper (replaces .rail + .content) ── */
-.note-settings-wrap{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
+.note-settings-wrap{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;}
 .note-settings-bar{display:flex;align-items:center;gap:12px;padding:8px 16px;flex:0 0 auto;
   border-bottom:1px solid var(--hairline);background:var(--surface-2);}
 .note-settings-title{font-size:13px;font-weight:600;color:var(--muted);}
@@ -607,7 +646,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .reduce-motion .flashring{animation:none!important;opacity:.6;transform:translate(-50%,-50%) scale(1.2);}
 
 /* ===========================================================================
-   NOTE CAPTURE — Stage 2: Processing / NoteReady / ExpandedNote
+   NOTE CAPTURE — Stage 2: Processing / ExpandedNote
    =========================================================================== */
 
 /* ── Transcribing… (indeterminate) ── */
@@ -619,43 +658,12 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   animation:indeterminate 1.4s ease-in-out infinite;}
 @keyframes indeterminate{0%{transform:translateX(-120%)}60%{transform:translateX(280%)}100%{transform:translateX(280%)}}
 
-/* ── Note ready ── */
-.note-ready-wrap{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
-.note-ready-inner{max-width:460px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;min-height:0;}
-.note-ready-label{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em;}
-/* Note text preview — clamped to 4 lines */
-.note-ready-body{flex:1;min-height:0;padding:20px 20px 16px;overflow:hidden;}
-.note-ready-text{font-size:14px;line-height:1.6;color:var(--fg);margin:0;
-  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
-/* CTA bar */
-.note-ready-cta{padding:0 20px 12px;display:flex;flex-direction:column;gap:10px;}
-.note-insert-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:44px;
-  border-radius:var(--r-md);font-size:14px;font-weight:700;}
-/* Sub-actions row: Open note + overflow */
-.note-ready-sub{display:flex;align-items:center;gap:8px;}
-.note-ready-sub>.btn{flex:1;justify-content:center;}
-/* Overflow menu */
-.ovf-scrim{position:fixed;inset:0;z-index:30;}
-.ovf-menu{position:absolute;bottom:calc(100% + 6px);right:0;background:var(--surface);
-  border:1px solid var(--border-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);
-  z-index:31;overflow:hidden;padding:4px;min-width:140px;animation:menuIn .14s var(--ease-out);
-  transform-origin:bottom right;}
-.ovf-menu button{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 10px;
-  border:none;background:none;border-radius:7px;cursor:pointer;color:var(--fg);font-size:13px;
-  font-weight:500;transition:var(--t-fast);}
-.ovf-menu button:hover{background:var(--surface-2);}
-/* New note link */
-.note-new-btn{height:40px;background:none;border:none;cursor:pointer;color:var(--subtle);font-size:13px;
-  font-family:var(--font-ui);transition:var(--t-fast);margin-bottom:12px;}
-.note-new-btn:hover{color:var(--fg);}
-
 /* ── Expanded note ── */
 .note-exp-wrap{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);}
-.note-exp-top{height:50px;flex:0 0 50px;display:flex;align-items:center;gap:8px;padding:0 12px 0 10px;
-  border-bottom:1px solid var(--hairline);background:var(--surface);}
-.note-exp-title{flex:1;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.note-exp-tools{display:flex;align-items:center;gap:2px;}
-.note-exp-body{flex:1;min-height:0;overflow-y:auto;padding:24px 24px 32px;}
+.note-exp-top{flex:0 0 auto;background:var(--bg);color:var(--muted);}
+.note-exp-title{flex:0 1 auto;min-width:0;font-size:13px;font-weight:600;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.note-exp-body{flex:1;min-height:0;overflow-y:auto;padding:24px 16px 32px;}
 .note-exp-text{font-size:14px;line-height:1.72;color:var(--fg);margin:0;white-space:pre-wrap;word-break:break-word;}
 
 /* ===========================================================================
@@ -674,17 +682,18 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 
 /* ===========================================================================
    NOTES LIST + SEARCH — redesigned "history" settings view.
-   Full-height flex column; own .notes-top header replaces the shared
-   .note-settings-bar for this one view.
+   Full-height flex column; search row carries the notebook view toggle.
    =========================================================================== */
 .ibtn.sm{width:24px;height:24px;}
-.notes{flex:1;min-height:0;display:flex;flex-direction:column;}
-.notes-top{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--hairline);background:var(--surface-2);}
-.notes-title{flex:1;font-size:15px;font-weight:700;letter-spacing:-.01em;}
-.notes-count{color:var(--subtle);}
-.notes-search{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--hairline);color:var(--subtle);}
-.notes-search:focus-within{border-bottom-color:var(--fg);box-shadow:0 0 0 3px var(--surface-3);}
-.notes-search input{flex:1;min-width:0;border:none;background:none;font:inherit;font-size:13.5px;color:var(--fg);outline:none;}
+.notes{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden;}
+.notes-search{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid transparent;color:var(--subtle);
+  flex:0 0 auto;min-width:0;width:100%;max-width:100%;overflow:hidden;}
+.notes-search-grow{flex:1;min-width:0;}
+.home-bar{border-bottom-color:transparent;overflow:visible;}
+.home-bar:focus-within{border-bottom-color:transparent;box-shadow:none;}
+.notes-search:focus-within{border-bottom-color:transparent;box-shadow:none;}
+.notes-search input{flex:1 1 0;width:0;min-width:0;max-width:100%;border:none;background:none;font:inherit;font-size:13.5px;color:var(--fg);outline:none;}
+.notes-search > :not(input){flex-shrink:0;}
 .notes-search input::placeholder{color:var(--subtle);}
 .notes-list{flex:1;min-height:0;overflow-y:auto;padding:8px;display:flex;flex-direction:column;}
 .note-row{display:flex;align-items:center;gap:8px;padding:12px;border-radius:var(--r-sm);cursor:pointer;border:1px solid transparent;transition:var(--t-fast);}
@@ -694,8 +703,8 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .nr-text{font-size:13.5px;line-height:1.45;color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .nr-meta{display:flex;align-items:center;gap:6px;color:var(--subtle);}
 .nr-dot{color:var(--faint);}
-.nr-copy{flex:0 0 auto;opacity:0;transition:opacity var(--t-fast);}
-.note-row:hover .nr-copy,.note-row:focus-within .nr-copy{opacity:1;}
+.nr-action{flex:0 0 auto;opacity:0;transition:opacity var(--t-fast);}
+.note-row:hover .nr-action,.note-row:focus-within .nr-action{opacity:1;}
 .hl{background:var(--live-bg);color:var(--live-text);border-radius:3px;padding:0 1px;}
 .notes-blank{margin:auto;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:40px;color:var(--muted);}
 .nb-ico{color:var(--subtle);margin-bottom:8px;display:flex;}

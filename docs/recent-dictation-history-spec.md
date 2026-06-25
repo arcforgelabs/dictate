@@ -1,5 +1,10 @@
 # Recent Dictation History Recovery (Feature Scope)
 
+Status: historical implementation spec. The recovery mechanism now surfaces in
+the desktop UI as local dictation history / Notes rather than as the primary
+product direction. Keep this file for implementation context; use
+[GOALS.md](GOALS.md) for current transcript-first goals.
+
 ## Why this exists
 
 Current dictation flow is:

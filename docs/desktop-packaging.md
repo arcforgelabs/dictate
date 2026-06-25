@@ -70,7 +70,7 @@ scripts/build-windows-desktop.ps1
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
 - These artifacts are for internal validation and signed direct-download fallback.
   The target public Windows channel is Microsoft Store distribution, tracked in
-  [goal.md](goal.md).
+  [GOALS.md](GOALS.md).
 - The Tauri shell looks for `dictate-engine.exe` on Windows and for
   `dictate-engine` elsewhere. It also reads the UI handshake from
   `%LOCALAPPDATA%\dictate`, matching `src/dictate/platform_paths.py`.
@@ -197,5 +197,11 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
 
 - **npm publishing**: the `arcforgelabs` org exists, but CI needs an **automation
   token** in the `NPM_TOKEN` secret. Until set, npm publish just warns.
-- **Autostart**: the package installs an app-menu entry but no login autostart
-  (enable via Settings → "Launch on sign-in", or ship `/etc/xdg/autostart`).
+- **Autostart**: on its first run the packaged engine self-registers both the
+  app-menu launcher and a per-user login autostart entry
+  (`~/.config/autostart/dictate.desktop`, `Exec=dictate-ui-shell`), gated by a
+  `~/.local/share/dictate/.desktop-integrated` marker so it runs once and never
+  overrides a user who later disables startup (`dictate config set-startup off`).
+  `dictate doctor` flags a launcher/startup entry whose `Exec` target is missing
+  (e.g. a stale pip-era `~/.local/bin/dictate` after migrating to the package),
+  and `dictate doctor --fix` repairs it.

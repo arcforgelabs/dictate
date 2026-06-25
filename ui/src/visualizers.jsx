@@ -4,8 +4,8 @@
 // stays calm; a ring blooms outward from the cradle ONLY on real emphasis; in
 // silence the breath recedes until summoned. Reduced motion → a static
 // state-colour cradle (steady ring, no loop).
-import { useRef, useEffect } from "react";
-import { Mark } from "./icons.jsx";
+import { useRef, useEffect, useState } from "react";
+import { Icon, Mark } from "./icons.jsx";
 
 // Synthetic speech envelope → 0..1 with ~2 s pauses between phrases (recede),
 // a calm conversational floor, and an emphasis peak ~every 5 s that summons a ring.
@@ -34,9 +34,10 @@ function spawnRing(wrap, born, mag0) {
   requestAnimationFrame(step);
 }
 
-export function BreathCradle({ active, reduced, onToggle }) {
+export function BreathCradle({ active, paused, session, reduced, onStart, onPause, onResume }) {
   const wrapRef = useRef(null), btnRef = useRef(null), haloRef = useRef(null);
   const S = useRef({ amp: 0, armed: true, last: 0, raf: 0 });
+  const [near, setNear] = useState(false);
 
   useEffect(() => {
     const wrap = wrapRef.current, btn = btnRef.current, halo = haloRef.current;
@@ -82,19 +83,62 @@ export function BreathCradle({ active, reduced, onToggle }) {
     return () => { mounted = false; cancelAnimationFrame(st.raf); };
   }, [active, reduced]);
 
+  const handleClick = () => {
+    if (!session) onStart && onStart();
+    else if (paused) onResume && onResume();
+    else onPause && onPause();
+  };
+
+  const showStopHint = active && near;
+  const showResumeHint = paused && near;
+  const wrapClass = "recwrap"
+    + (session ? " session" : "")
+    + (active ? " live" : "")
+    + (paused ? " paused" : "")
+    + (showStopHint ? " stop-hint" : "")
+    + (showResumeHint ? " resume-hint" : "");
+
+  const btnClass = "recbtn"
+    + (active ? " rec" : "")
+    + (paused ? " paused" : "")
+    + (showStopHint ? " stop-hint" : "")
+    + (showResumeHint ? " resume-hint" : "");
+
+  const label = !session
+    ? "Start recording"
+    : paused
+      ? "Resume recording"
+      : "Pause recording";
+
+  const icon = showStopHint
+    ? <Icon name="square" size={34} />
+    : showResumeHint || paused
+      ? <Icon name="mic" size={38} />
+      : <Mark size={42} />;
+
   return (
-    <div className="recwrap" ref={wrapRef}>
+    <div
+      className={wrapClass}
+      ref={wrapRef}
+      onMouseEnter={() => setNear(true)}
+      onMouseLeave={() => setNear(false)}
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); }
+      }}
+    >
       <div className="cradle-halo" ref={haloRef} aria-hidden="true" />
-      <button
-        className={"recbtn" + (active ? " rec" : "")}
+      <div
+        className={btnClass}
         ref={btnRef}
-        style={active ? { background: "var(--live-bg)", borderColor: "var(--live)", color: "var(--live)" } : undefined}
-        onClick={onToggle}
-        title={active ? "Stop" : "Record"}
-        aria-label={active ? "Stop recording" : "Start recording"}
+        aria-hidden="true"
+        style={active && !showStopHint ? { background: "var(--live-bg)", borderColor: "var(--live)", color: "var(--live)" } : undefined}
       >
-        <span className="rb-ico"><Mark size={42} /></span>
-      </button>
+        <span className="rb-ico">{icon}</span>
+      </div>
     </div>
   );
 }

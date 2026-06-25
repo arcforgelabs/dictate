@@ -21,6 +21,7 @@ from dictate.stt import (
     GEMINI_MODELS,
     OPENAI_MODELS,
     STT_BACKENDS,
+    WHISPERX_MODELS,
     XAI_MODELS,
     create_speech_to_text,
     resolve_model_name,
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Model name override for diagnosis. "
             "local example: turbo. "
+            f"whisperx examples: {', '.join(WHISPERX_MODELS)}. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
             f"xai examples: {', '.join(XAI_MODELS)}. "
             f"gemini examples: {', '.join(GEMINI_MODELS)}."
@@ -145,6 +147,15 @@ def _check_runtime_paths(report) -> None:  # noqa: ANN001
     else:
         report.warnings.append(f"Startup entry not found: {startup_path}")
 
+    for label, path in (("Desktop entry", desktop_path), ("Startup entry", startup_path)):
+        if path.exists():
+            stale_target = _desktop_exec_target_missing(path)
+            if stale_target is not None:
+                report.warnings.append(
+                    f"{label} points to a missing target ({stale_target}); "
+                    "it will not launch."
+                )
+
     primary_log_writable = False
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -170,6 +181,32 @@ def _check_runtime_paths(report) -> None:  # noqa: ANN001
         report.notes.append(f"Last failure log: {last_failure_log_path}")
     if not primary_log_writable and latest_log_path.parent == FALLBACK_LOG_DIR:
         report.warnings.append(f"Using fallback log directory: {FALLBACK_LOG_DIR}")
+
+
+def _desktop_exec_target_missing(path) -> str | None:  # noqa: ANN001
+    """Return the Exec target of a .desktop file if its binary is missing, else None.
+
+    Catches the legacy/migration case where a pip-era entry points at a removed
+    ``~/.local/bin/dictate`` after switching to the packaged app.
+    """
+    if sys.platform.startswith("win"):
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    target = ""
+    for line in lines:
+        if line.startswith("Exec="):
+            value = line[len("Exec=") :].strip()
+            target = value.split()[0] if value else ""
+            break
+    if not target:
+        return None
+    resolved = target if os.path.sep in target else shutil.which(target)
+    if resolved is None or not Path(resolved).exists():
+        return target
+    return None
 
 
 def _check_model_load(report, *, backend: str, model_name: str, device: str) -> None:  # noqa: ANN001
@@ -316,6 +353,11 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
             items.append("Run `dictate doctor --fix` to recreate Start Menu/Desktop launchers.")
         if "Startup entry not found" in warning:
             items.append("Run `dictate doctor --fix` to restore launch-on-startup integration.")
+        if "points to a missing target" in warning:
+            items.append(
+                "Run `dictate doctor --fix` to repair launcher/startup entries left by a "
+                "previous install."
+            )
         if "Log directory is not writable" in warning or "fallback log directory" in warning:
             items.append("Run `dictate doctor --fix` to recreate writable log/config directories.")
         if "CUDA" in warning:

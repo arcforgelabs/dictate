@@ -5,9 +5,9 @@
 // `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon } from "./icons.jsx";
-import { Kbd } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
-import { VIEWS } from "./views.jsx";
+import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS } from "./store.jsx";
+import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle } from "./visualizers.jsx";
@@ -24,27 +24,76 @@ function fmtSecs(s) {
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
 }
 
-/* ── Privacy pill: the one human control on the home — trust, not config.
-   Shows whether audio stays on-device; tapping an online session drops back to
-   private instantly. Online setup itself is a CLI action (dictate config). ──── */
+/* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
+const ONLINE_MODEL = "xai/grok-speech-to-text";
+const PRIVATE_MODEL = "faster-whisper/turbo";
+
 function PrivacyPill() {
   const s = useStore();
   const online = s.providerMode === "online";
   const degraded = s.providerDegraded;
-  const onClick = () => {
-    if (online) {
-      s.setModel("faster-whisper/turbo");
-      s.toast("Switched to on-device · private");
-    } else {
-      s.toast("Online transcription is set up with: dictate config set-provider online");
+  const privateOn = !online || degraded;
+
+  const onToggle = (on) => {
+    if (on === privateOn) return;
+    if (on) {
+      s.setModel(PRIVATE_MODEL);
+      return;
     }
+    if (!s.keys.xai) {
+      s.toast("Requires Dictate Pro or API key.", {
+        bad: true,
+        ms: 12_000,
+        copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
+      });
+      return;
+    }
+    s.setModel(ONLINE_MODEL);
   };
-  const label = degraded ? "On-device · reconnecting" : online ? "Online" : "On-device · private";
-  const cls = "privpill" + (degraded ? " amber" : online ? " online" : "");
+
   return (
-    <button className={cls} onClick={onClick} title="Privacy — where your audio is transcribed">
-      <span className="pp-dot" />{label}
-    </button>
+    <Tooltip label={privateOn ? "Private mode" : "Cloud mode"}>
+      <div className={"privpill" + (degraded ? " degraded" : "")}>
+        <Toggle on={privateOn} onChange={onToggle} />
+        <span className="priv-icon" aria-label={privateOn ? "Private mode" : "Cloud mode"}>
+          <Icon name={privateOn ? "shield" : "cloud"} size={23} />
+        </span>
+      </div>
+    </Tooltip>
+  );
+}
+
+/* ── Update affordance: one quiet pill in the home bar. The primary action is
+   the only thing shown; Skip / Later are revealed on proximity (hover/focus).
+   Skip suppresses until a newer version; Later returns on next launch. ─────── */
+const UPDATE_LABEL = {
+  available: "Update available",
+  preparing: "Preparing update…",
+  ready: "Update & restart",
+  installing: "Updating…",
+  error: "Update failed",
+};
+function UpdatePill() {
+  const s = useStore();
+  if (!s.updateVisible) return null;
+  const phase = s.updatePhase;
+  return (
+    <div className={"updpill phase-" + phase}>
+      {/* Revealed to the LEFT on proximity so the primary button never moves. */}
+      <div className="upd-more">
+        <button className="upd-mini" onClick={s.dismissUpdate} title="Remind me on next launch">Later</button>
+        <button className="upd-mini" onClick={s.skipUpdate} title="Skip this version">Skip</button>
+      </div>
+      <button
+        className="upd-main"
+        onClick={s.runUpdate}
+        disabled={phase === "installing"}
+        title={phase === "ready" ? "Install the update and restart" : "Update Dictate"}
+      >
+        <span className="upd-dot" aria-hidden="true" />
+        <span className="upd-label">{UPDATE_LABEL[phase] || "Update available"}</span>
+      </button>
+    </div>
   );
 }
 
@@ -77,12 +126,7 @@ function CaptureHome() {
     <div className="note-home">
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
-      <div className="home-top">
-        <PrivacyPill />
-        <button className="ibtn" title="Notes" onClick={() => s.setView("history")}>
-          <Icon name="history" size={17} />
-        </button>
-      </div>
+      <HomeBar left={<PrivacyPill />} right={<UpdatePill />} />
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">
@@ -92,28 +136,41 @@ function CaptureHome() {
               <span className={"flashring " + s.flash.to} key={s.flash.id} aria-hidden="true" />
             )}
             <BreathCradle
-              active={s.noteRecording}
+              session={s.noteRecording}
+              active={s.noteRecording && !s.notePaused}
+              paused={s.notePaused}
               reduced={s.reduced}
-              onToggle={s.toggleNoteRecording}
+              onStart={s.startNoteRecording}
+              onPause={s.pauseNoteRecording}
+              onResume={s.resumeNoteRecording}
             />
           </div>
           <div className="note-feedback">
-            {s.noteRecording ? (
+            {s.noteRecording && !s.notePaused ? (
               <>
                 <div className="note-status live">Recording</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
                 <div className="note-preview" aria-live="polite">
                   {s.providerDegraded
-                    ? <span className="note-preview-wait">On-device transcript — ready when you stop.</span>
+                    ? <span className="note-preview-wait">On-device transcript — ready when you finish.</span>
                     : s.transcript?.text
                       ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
                       : <span className="note-preview-wait">Listening for speech…</span>}
                 </div>
               </>
+            ) : s.noteRecording && s.notePaused ? (
+              <>
+                <div className="note-status paused">Paused</div>
+                <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
+                <div className="note-status-sub t-mono">Hover the mic to resume, or finish the note.</div>
+                <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
+                  Finish note
+                </button>
+              </>
             ) : (
               <>
-                <div className="note-status">Ready to capture</div>
-                <div className="note-status-sub">Press the mic and speak.</div>
+                <div className="note-status">Ready to dictate</div>
+                <div className="note-status-sub t-mono">Press the mic and speak.</div>
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
                 {/* Getting started: teach the key when there are no notes yet */}
                 {(!s.history || s.history.length === 0) && <GsKeyboard />}
@@ -130,7 +187,7 @@ function CaptureHome() {
           {/* Copy-last: quiet row beneath the cradle; hidden while recording or when empty */}
           <CopyLastNote />
           {/* Degraded recording strip: amber, visible while recording on local fallback */}
-          {s.noteRecording && s.providerDegraded && (
+          {s.noteRecording && !s.notePaused && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
               <span className="wdot" />
               On-device · reconnecting…
@@ -172,101 +229,8 @@ function NoteProcessing() {
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
-        <div className="note-status-sub">Turning your words into a note.</div>
+        <div className="note-status-sub t-mono">Turning your words into a note.</div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Note ready: Insert · Open note · overflow (Copy / Export) ──────── */
-function NoteReady() {
-  const s = useStore();
-  const [ovfOpen, setOvfOpen] = useState(false);
-  const note = s.currentNote;
-  if (!note) return null;
-
-  const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
-
-  // TODO(backend): No /api/insert endpoint exists in ui_server.py — the typing
-  // daemon path (outputs.py) is invoked internally and is not reachable via HTTP
-  // from the webview. Until a POST /api/insert route is added to ui_server.py +
-  // backed by UiBackend.insert_text(), "Insert" copies to clipboard instead.
-  const handleInsert = () => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(note.text)
-        .then(() => s.toast("Copied — paste it where you want"))
-        .catch(() => s.toast("Could not copy to clipboard", { bad: true }));
-    } else {
-      s.toast("Clipboard not available", { bad: true });
-    }
-  };
-
-  const handleCopy = () => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(note.text)
-        .then(() => { setOvfOpen(false); s.toast("Copied to clipboard"); })
-        .catch(() => s.toast("Could not copy", { bad: true }));
-    }
-  };
-
-  // No webview file-download or fs plugin is wired, so a blob "download" silently
-  // does nothing in the packaged app. Copy the Markdown to the clipboard instead —
-  // truthful and works everywhere. (A real save-to-file path can come via a backend route.)
-  const handleExport = () => {
-    const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
-    const md = `# Note — ${ts}\n\n${note.text}\n`;
-    setOvfOpen(false);
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(md)
-        .then(() => s.toast("Copied as Markdown"))
-        .catch(() => s.toast("Could not copy", { bad: true }));
-    } else {
-      s.toast("Clipboard not available", { bad: true });
-    }
-  };
-
-  return (
-    <div className="note-ready-wrap">
-      <div className="note-ready-inner">
-        {/* Minimal header */}
-        <div className="note-hdr">
-          <span className="note-ready-label">{noteLabel}</span>
-        </div>
-
-        {/* Note text preview (max 4 lines) */}
-        <div className="note-ready-body">
-          <p className="note-ready-text">{note.text}</p>
-        </div>
-
-        {/* Action hierarchy: Insert (single filled primary) > Open note > overflow */}
-        <div className="note-ready-cta">
-          <button className="btn primary block note-insert-btn" onClick={handleInsert}>
-            <Icon name="copy" size={15} /> Insert
-          </button>
-          <div className="note-ready-sub">
-            <button className="btn sm" onClick={() => { s.setExpandedFrom("ready"); s.setNoteView("expanded"); }}>
-              <Icon name="external" size={14} /> Open note
-            </button>
-            <div className="ovf-wrap" style={{ position: "relative" }}>
-              <button className="btn sm ghost" aria-label="More — Copy, Export"
-                aria-expanded={ovfOpen} onClick={() => setOvfOpen((v) => !v)}>
-                <Icon name="more" size={15} />
-              </button>
-              {ovfOpen && (
-                <>
-                  <div className="ovf-scrim" onClick={() => setOvfOpen(false)} />
-                  <div className="ovf-menu">
-                    <button onClick={handleCopy}><Icon name="copy" size={14} /> Copy text</button>
-                    <button onClick={handleExport}><Icon name="download" size={14} /> Copy as Markdown</button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <button className="note-new-btn" onClick={() => s.setNoteView(null)}>New note</button>
       </div>
     </div>
   );
@@ -280,16 +244,6 @@ function ExpandedNote() {
 
   const noteLabel = note.createdAt ? `Note · ${formatHistoryTime(note.createdAt)}` : "Note";
 
-  // Back routing: return to the notes list when opened from there, else to note-ready.
-  const handleBack = () => {
-    if (s.expandedFrom === "history") {
-      s.setNoteView(null);
-      s.setView("history");
-    } else {
-      s.setNoteView("ready");
-    }
-  };
-
   const handleCopy = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(note.text)
@@ -298,30 +252,27 @@ function ExpandedNote() {
     }
   };
 
-  // See NoteReady.handleExport — copy Markdown to clipboard rather than a no-op blob download.
-  const handleExport = () => {
+  // Export dictation as a Markdown file via the OS save dialog.
+  const handleExport = async () => {
     const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
+    const name = `dictate-note-${ts}.md`;
     const md = `# Note — ${ts}\n\n${note.text}\n`;
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(md)
-        .then(() => s.toast("Copied as Markdown"))
-        .catch(() => s.toast("Could not copy", { bad: true }));
-    } else {
-      s.toast("Clipboard not available", { bad: true });
+    try {
+      const saved = await ipc.saveTextFile(name, md);
+      if (saved) s.toast("Saved as Markdown");
+    } catch {
+      s.toast("Could not save file", { bad: true });
     }
   };
 
   return (
     <div className="note-exp-wrap">
-      <div className="note-exp-top">
-        <button className="ibtn" title="Back" onClick={handleBack}>
-          <Icon name="back" size={17} />
-        </button>
+      <div className="notes-search note-exp-top">
         <span className="note-exp-title">{noteLabel}</span>
-        <div className="note-exp-tools">
-          <button className="ibtn" title="Copy" onClick={handleCopy}><Icon name="copy" size={16} /></button>
-          <button className="ibtn" title="Copy as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
-        </div>
+        <span className="notes-search-grow" aria-hidden="true" />
+        <button className="ibtn" title="Copy" onClick={handleCopy}><Icon name="copy" size={16} /></button>
+        <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
+        <NotebookToggle />
       </div>
       {/* Search + Times omitted: real data is plain text, no timestamps or speaker lines */}
       {/* TODO(backend): Add search once the engine exposes segment-level data */}
@@ -350,9 +301,9 @@ export default function App() {
     const now = Date.now();
     // Newest-first: matches the real backend ordering and pushHistory behaviour.
     return [
-      { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to follow up with the Stalwart team about the OAuth scopes this afternoon." },
-      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the sync to Thursday and keep Friday clear for the demo build." },
-      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the beta testers and ask them for crash reports." },
+      { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
+      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
+      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
     ];
   });
   // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
@@ -367,6 +318,7 @@ export default function App() {
   const [ambient, setAmbientState] = useState(true);
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
+  const [notePaused, setNotePaused] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
@@ -377,9 +329,18 @@ export default function App() {
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
+  // Update affordance state machine: idle → available → preparing → ready → installing (→ error).
+  // The update prepares in the background so the click is instant once "ready".
+  const [updatePhase, setUpdatePhase] = useState("idle");
+  // Skip persists across launches (suppress until a newer version); Dismiss is session-only.
+  const [skippedVersion, setSkippedVersion] = useState(() => {
+    try { return (typeof localStorage !== "undefined" && localStorage.getItem("dictate.skippedVersion")) || null; }
+    catch { return null; }
+  });
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [platform, setPlatform] = useState("gnome");
   const [live, setLive] = useState(false);
-  // Note surface state machine: null=home, "processing"=transcribing, "ready"=note, "expanded"=full view
+  // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
   // Provider health: on-device is always-available floor; degraded = fell back from the online provider.
@@ -391,9 +352,9 @@ export default function App() {
   const [providerActive, setProviderActive] = useState(null);
   // flash: one-shot ring pulse on provider switch (local=amber, remote=green). Never silent.
   const [flash, setFlash] = useState(null);
-  // expandedFrom: where the expanded view was opened from — "ready" (note-ready surface) or
-  // "history" (notes list). Controls what the back button does when leaving ExpandedNote.
-  const [expandedFrom, setExpandedFrom] = useState("ready");
+  // expandedFrom: where the expanded view was opened from — "capture" (just dictated) or
+  // "history" (notes list).
+  const [expandedFrom, setExpandedFrom] = useState("capture");
 
   // Detect prefers-reduced-motion for the BreathCradle.
   const [reduced, setReduced] = useState(() => {
@@ -445,10 +406,10 @@ export default function App() {
 
   // ---- note-recording elapsed timer ----
   useEffect(() => {
-    if (!noteRecording) { setNoteElapsed(0); return; }
+    if (!noteRecording || notePaused) { if (!noteRecording) setNoteElapsed(0); return; }
     const id = setInterval(() => setNoteElapsed((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [noteRecording]);
+  }, [noteRecording, notePaused]);
 
   // ---- hydrate from the engine + subscribe to live events ----
   useEffect(() => {
@@ -466,14 +427,20 @@ export default function App() {
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
       }
       else if (ev.type === "note-recording") {
-        setNoteRecording(!!ev.active);
-        if (ev.active) {
+        if (ev.paused) {
+          setNoteRecording(true);
+          setNotePaused(true);
+        } else if (ev.active) {
+          setNoteRecording(true);
+          setNotePaused(false);
           // New recording started — clear any stale watchdog, reset note surface.
           clearWatchdog();
           setNoteView(null);
           setCurrentNote(null);
         } else {
-          // Recording stopped — show Transcribing… and arm the safety-net watchdog.
+          setNoteRecording(false);
+          setNotePaused(false);
+          // Recording finished — show Transcribing… and arm the safety-net watchdog.
           setNoteView("processing");
           armWatchdog();
         }
@@ -487,7 +454,8 @@ export default function App() {
           setNoteText(ev.text);
           const note = { id: ev.id || "n" + Date.now(), text: ev.text, createdAt: ev.createdAt || new Date().toISOString() };
           setCurrentNote(note);
-          setNoteView("ready");
+          setExpandedFrom("capture");
+          setNoteView("expanded");
           toast("Conversation note saved");
         } else if (status === "empty") {
           setNoteView(null);
@@ -543,7 +511,8 @@ export default function App() {
             if (nv === "processing" && entries.length > 0) {
               clearWatchdog();
               setCurrentNote(entries[0]);
-              return "ready";
+              setExpandedFrom("capture");
+              return "expanded";
             }
             return nv;
           });
@@ -587,6 +556,7 @@ export default function App() {
       });
     }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
+    if (st.notes && typeof st.notes.paused === "boolean") setNotePaused(st.notes.paused);
     if (st.prefs) {
       if (st.prefs.theme && st.prefs.theme !== "system") { explicitThemeRef.current = true; setThemeState(st.prefs.theme); }
       setTrayOnlyState(!!st.prefs.trayOnly);
@@ -616,7 +586,8 @@ export default function App() {
   const toast = useCallback((msg, opts = {}) => {
     const id = "t" + Date.now() + Math.random();
     setToasts((ts) => [...ts, { id, msg, ...opts }]);
-    setTimeout(() => dismiss(id), opts.undo ? 5000 : 2600);
+    const ms = opts.ms ?? (opts.undo ? 5000 : 2600);
+    setTimeout(() => dismiss(id), ms);
   }, []);
 
   // ---- Note-surface watchdog (60 s safety net for missing terminal events) ----
@@ -629,7 +600,7 @@ export default function App() {
     clearWatchdog();
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null;
-      // Return to home only if we're still stuck in processing — never abort a ready/expanded note.
+      // Return to home only if we're still stuck in processing — never abort an expanded note.
       setNoteView((nv) => {
         if (nv === "processing") toast("Transcription timed out — try again", { bad: true });
         return nv === "processing" ? null : nv;
@@ -722,35 +693,79 @@ export default function App() {
     if (ph.active) setProviderActive(ph.active);
   }, []);
 
-  const toggleNoteRecording = () => {
+  const applyNoteState = (r) => {
+    if (!r) return;
+    if (typeof r.recording === "boolean") setNoteRecording(r.recording);
+    if (typeof r.paused === "boolean") setNotePaused(r.paused);
+  };
+
+  const startNoteRecording = () => {
+    if (noteRecording) return;
     if (!ipc.isLive()) {
-      if (noteRecording) {
-        // Stop: show Processing surface briefly, then resolve to note-ready.
-        setNoteRecording(false);
-        setNoteView("processing");
-        armWatchdog();
-        const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
-        setTimeout(() => {
-          clearWatchdog();
-          const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
-          setNoteText(demo);
-          setCurrentNote(note);
-          pushHistory(demo);
-          setNoteView("ready");
-          toast("Conversation note saved");
-        }, 800);
-      } else {
-        clearWatchdog();
-        setNoteRecording(true);
-        setNoteView(null);
-        setCurrentNote(null);
-        toast("Note recording started");
-      }
+      clearWatchdog();
+      setNotePaused(false);
+      setNoteRecording(true);
+      setNoteView(null);
+      setCurrentNote(null);
+      toast("Note recording started");
       return;
     }
-    ipc.toggleNoteRecording()
-      .then((r) => setNoteRecording(!!r.recording))
-      .catch((e) => toast(e.message || "Could not toggle note recording", { bad: true }));
+    ipc.startNoteRecording()
+      .then(applyNoteState)
+      .catch((e) => toast(e.message || "Could not start note recording", { bad: true }));
+  };
+
+  const pauseNoteRecording = () => {
+    if (!noteRecording || notePaused) return;
+    if (!ipc.isLive()) {
+      setNotePaused(true);
+      return;
+    }
+    ipc.pauseNoteRecording()
+      .then(applyNoteState)
+      .catch((e) => toast(e.message || "Could not pause note recording", { bad: true }));
+  };
+
+  const resumeNoteRecording = () => {
+    if (!noteRecording || !notePaused) return;
+    if (!ipc.isLive()) {
+      setNotePaused(false);
+      return;
+    }
+    ipc.resumeNoteRecording()
+      .then(applyNoteState)
+      .catch((e) => toast(e.message || "Could not resume note recording", { bad: true }));
+  };
+
+  const finishNoteRecording = () => {
+    if (!noteRecording) return;
+    if (!ipc.isLive()) {
+      setNotePaused(false);
+      setNoteRecording(false);
+      setNoteView("processing");
+      armWatchdog();
+      const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+      setTimeout(() => {
+        clearWatchdog();
+        const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
+        setNoteText(demo);
+        setCurrentNote(note);
+        pushHistory(demo);
+        setExpandedFrom("capture");
+        setNoteView("expanded");
+        toast("Conversation note saved");
+      }, 800);
+      return;
+    }
+    ipc.stopNoteRecording()
+      .then(applyNoteState)
+      .catch((e) => toast(e.message || "Could not finish note recording", { bad: true }));
+  };
+
+  const toggleNoteRecording = () => {
+    if (!noteRecording) startNoteRecording();
+    else if (notePaused) resumeNoteRecording();
+    else finishNoteRecording();
   };
 
   const runDoctor = (cb) => {
@@ -789,6 +804,18 @@ export default function App() {
     ipc.startUpdate()
       .then((flow) => {
         setUpdateStatus((u) => ({ ...u, updating: false }));
+        // Installed in-app: bring the new shell + engine up together.
+        if (flow?.mode === "installed" || (flow?.actions || []).includes("restart")) {
+          toast(flow?.message || "Update installed — restarting…");
+          ipc.restartApp();
+          return;
+        }
+        if (flow?.mode === "error") {
+          const detail = flow.errorDetail || flow.message || "Could not complete the update";
+          setUpdateStatus((u) => ({ ...u, error: detail }));
+          toast(flow?.message || "Could not complete the update", { bad: true });
+          return;
+        }
         if (flow?.url) {
           window.open(flow.url, "_blank", "noopener,noreferrer");
         }
@@ -811,15 +838,60 @@ export default function App() {
   });
 
   function mockUpdateStatus(v) {
+    // Shell + engine are one unit at one version — no separate component tracking.
     return {
       currentVersion: v, latestVersion: v, updateAvailable: false, checked: false,
       platform: "linux", installKind: "linux-package",
-      engine: { name: "engine", current: v, latest: v, path: "~/.local/bin/dictate", stale: false },
-      shell: { name: "shell", current: v, latest: v, path: "/usr/bin/dictate-ui-shell", stale: false },
-      shellStale: false, phase: "current", actions: ["check", "open_docs"],
+      phase: "current", actions: ["check", "open_docs"],
       commands: { release: "https://github.com/arcforgelabs/dictate/releases" },
     };
   }
+
+  // ---- update affordance: skip / dismiss / run ----
+  // Skip = suppress until a newer version (persisted). Dismiss = until next launch (session).
+  const skipUpdate = () => {
+    const v = updateStatus.latestVersion;
+    if (v) { setSkippedVersion(v); try { localStorage.setItem("dictate.skippedVersion", v); } catch { /* ignore */ } }
+    setUpdatePhase("idle");
+    toast("Skipped this version");
+  };
+  const dismissUpdate = () => { setUpdateDismissed(true); };
+  const runUpdate = () => {
+    if (updatePhase === "installing") return;
+    setUpdatePhase("installing");
+    if (!ipc.isLive()) {
+      // Mock: can't actually restart a browser tab — simulate the install + handoff.
+      setTimeout(() => { toast("Updated — restarting…"); setUpdateDismissed(true); setUpdatePhase("idle"); }, 1600);
+      return;
+    }
+    startUpdate(); // download (if not prepared) → pkexec install → restart_app
+  };
+
+  // ---- launch-time update flow: silent check, prepare in the background ----
+  useEffect(() => {
+    if (!ipc.isLive()) {
+      // Mock so the affordance is reviewable on the dev server: available → preparing → ready.
+      const t1 = setTimeout(() => {
+        setUpdateStatus((u) => ({ ...u, updateAvailable: true, latestVersion: "2026.7.1", checked: true }));
+        setUpdatePhase((p) => (p === "idle" ? "available" : p));
+      }, 900);
+      const t2 = setTimeout(() => setUpdatePhase((p) => (p === "available" ? "preparing" : p)), 2600);
+      const t3 = setTimeout(() => setUpdatePhase((p) => (p === "preparing" ? "ready" : p)), 5200);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+    // Live: silent check (no toast); surface the pill if an update exists.
+    let cancelled = false;
+    ipc.checkUpdates().then((st) => {
+      if (cancelled || !st || !st.updateAvailable) return;
+      setUpdateStatus((u) => ({ ...u, ...st }));
+      setUpdatePhase("available");
+      // TODO(backend): a /api/update/prepare endpoint can pre-download in the
+      // background and flip the phase to "ready"; until then the Update click
+      // runs prepare+install in one step via startUpdate().
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- dictation demo (mock mode only; live mode is driven by SSE) ----
   const typeText = (phrase) => {
@@ -877,15 +949,23 @@ export default function App() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
+  // The pill shows only when an update exists, isn't skipped, and isn't dismissed this session.
+  const updateVisible = updatePhase !== "idle" && !updateDismissed
+    && !!updateStatus.updateAvailable
+    && (!skippedVersion || updateStatus.latestVersion !== skippedVersion);
+
   const store = {
     view, setView, model, setModel, keys, addKey, saveKey, shortcut, setShortcut, activation, setActivation,
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, noteText, toggleNoteRecording,
+    recording, noteRecording, notePaused, noteText,
+    startNoteRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
+    // Update affordance
+    updatePhase, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
     noteElapsed, reduced,
     noteView, setNoteView, currentNote, setCurrentNote,
@@ -904,14 +984,12 @@ export default function App() {
       <div className={"win " + platform} ref={winRef}>
         <TitleBar
           platform={platform}
-          onSearch={() => setPalette(true)}
-          hasUpdate={!!(updateStatus.updateAvailable || updateStatus.shellStale)}
+          hasUpdate={!!updateStatus.updateAvailable}
         />
 
         <div className="shell">
           {view === "home" ? (
             noteView === "processing" ? <NoteProcessing /> :
-            noteView === "ready"      ? <NoteReady /> :
             noteView === "expanded"   ? <ExpandedNote /> :
             <CaptureHome />
           ) : (

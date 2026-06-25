@@ -93,6 +93,17 @@ export function CommandPalette() {
 
 export function Toasts() {
   const s = useStore();
+
+  const copyToast = (t) => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      s.toast("Clipboard not available", { bad: true });
+      return;
+    }
+    navigator.clipboard.writeText(t.copy)
+      .then(() => s.toast("Copied"))
+      .catch(() => s.toast("Could not copy", { bad: true }));
+  };
+
   return (
     <div className="toasts">{s.toasts.map((t) => {
       const iconName = t.icon || (t.bad ? "x" : "check");
@@ -102,7 +113,12 @@ export function Toasts() {
           <span className="ic" style={icColor ? { color: icColor } : null}>
             <Icon name={iconName} size={16} /></span>
           <span>{t.msg}</span>
-          {t.undo && <button className="undo" onClick={() => { t.undo(); s.dismiss(t.id); }}>Undo</button>}
+          {t.copy && (
+            <button className="toast-act" type="button" title="Copy" aria-label="Copy" onClick={() => copyToast(t)}>
+              <Icon name="copy" size={15} />
+            </button>
+          )}
+          {t.undo && <button className="toast-act" type="button" onClick={() => { t.undo(); s.dismiss(t.id); }}>Undo</button>}
         </div>
       );
     })}</div>

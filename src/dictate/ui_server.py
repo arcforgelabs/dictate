@@ -72,6 +72,13 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "local": True,
         "desc": "Runs on this machine — no key, nothing leaves your device.",
     },
+    "whisperx": {
+        "provider": "Local",
+        "brand": None,
+        "local": True,
+        "experimental": True,
+        "desc": "Experimental local meeting diarization with WhisperX and pyannote.",
+    },
     "openai": {
         "provider": "OpenAI",
         "brand": "openai",
@@ -98,7 +105,7 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
     },
 }
 # Order shown in the Model view (local first, matching the design).
-PROVIDER_ORDER = ("faster-whisper", "openai", "xai", "gemini")
+PROVIDER_ORDER = ("faster-whisper", "whisperx", "openai", "xai", "gemini")
 
 
 class ApiError(Exception):
@@ -284,7 +291,10 @@ class UiBackend:
             },
             "providers": self._providers(cfg),
             "prefs": prefs,
-            "notes": {"recording": self._note_recording_active()},
+            "notes": {
+                "recording": self._note_recording_active(),
+                "paused": self._note_recording_paused(),
+            },
             "startup": bool(self._safe(self.startup_enabled, False)),
             "secretStore": self._safe(self.secret_store_description, "OS secret store"),
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
@@ -313,6 +323,7 @@ class UiBackend:
                 "provider": meta.get("provider", backend),
                 "brand": meta.get("brand"),
                 "local": bool(meta.get("local")),
+                "experimental": bool(meta.get("experimental")),
                 "desc": meta.get("desc", ""),
             }
             if not meta.get("local"):
@@ -323,7 +334,7 @@ class UiBackend:
         # The local provider's display name keeps the "provider · model" form.
         for entry in models:
             if entry["local"]:
-                entry["name"] = f"faster-whisper · {entry['model']}"
+                entry["name"] = f"{entry['backend']} · {entry['model']}"
         return models
 
     def _providers(self, cfg: config_mod.Config) -> dict[str, dict[str, Any]]:
@@ -488,17 +499,42 @@ class UiBackend:
     def start_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         started = bool(daemon.start_note_recording())
-        return {"recording": bool(getattr(daemon, "note_recording_active", started))}
+        return {
+            "recording": bool(getattr(daemon, "note_recording_active", started)),
+            "paused": bool(getattr(daemon, "note_recording_paused", False)),
+        }
 
     def stop_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         stopped = bool(daemon.stop_note_recording())
-        return {"recording": bool(getattr(daemon, "note_recording_active", not stopped))}
+        return {
+            "recording": bool(getattr(daemon, "note_recording_active", not stopped)),
+            "paused": bool(getattr(daemon, "note_recording_paused", False)),
+        }
+
+    def pause_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        paused = bool(daemon.pause_note_recording())
+        return {
+            "recording": bool(getattr(daemon, "note_recording_active", paused)),
+            "paused": bool(getattr(daemon, "note_recording_paused", paused)),
+        }
+
+    def resume_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        resumed = bool(daemon.resume_note_recording())
+        return {
+            "recording": bool(getattr(daemon, "note_recording_active", resumed)),
+            "paused": bool(getattr(daemon, "note_recording_paused", False)),
+        }
 
     def toggle_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         active = bool(daemon.toggle_note_recording())
-        return {"recording": active}
+        return {
+            "recording": active or bool(getattr(daemon, "note_recording_active", False)),
+            "paused": bool(getattr(daemon, "note_recording_paused", False)),
+        }
 
     def save_provider_key(self, backend: str, api_key: str) -> dict[str, Any]:
         if backend not in api_keys_mod.API_BACKENDS:
@@ -558,9 +594,6 @@ class UiBackend:
             "url": status.url,
             "platform": status.platform,
             "installKind": status.install_kind,
-            "engine": status.engine,
-            "shell": status.shell,
-            "shellStale": status.shell_stale,
             "phase": status.phase,
             "step": status.step,
             "progress": status.progress,
@@ -602,6 +635,9 @@ class UiBackend:
 
     def _note_recording_active(self) -> bool:
         return bool(self.daemon is not None and getattr(self.daemon, "note_recording_active", False))
+
+    def _note_recording_paused(self) -> bool:
+        return bool(self.daemon is not None and getattr(self.daemon, "note_recording_paused", False))
 
     # ----- provider health ------------------------------------------------ #
     def _compute_provider_health(self, cfg: config_mod.Config) -> dict[str, Any]:
@@ -904,6 +940,10 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.start_note_recording())
         if path == "/api/notes/stop" and method == "POST":
             return _Response(200, backend.stop_note_recording())
+        if path == "/api/notes/pause" and method == "POST":
+            return _Response(200, backend.pause_note_recording())
+        if path == "/api/notes/resume" and method == "POST":
+            return _Response(200, backend.resume_note_recording())
         if path == "/api/notes/toggle" and method == "POST":
             return _Response(200, backend.toggle_note_recording())
         if path == "/api/api-keys" and method == "POST":
@@ -956,7 +996,14 @@ def write_runtime_handshake(
     import os
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"url": url, "token": token, "pid": pid if pid is not None else os.getpid()}
+    payload = {
+        "url": url,
+        "token": token,
+        "pid": pid if pid is not None else os.getpid(),
+        # The shell compares this against its own version and restarts a stale
+        # engine after an update — shell + engine always run the same version.
+        "version": RELEASE_VERSION,
+    }
     path.write_text(json.dumps(payload, indent=2))
     try:
         path.chmod(0o600)

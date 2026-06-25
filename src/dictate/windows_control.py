@@ -37,13 +37,14 @@ from dictate.version import RELEASE_VERSION
 HOSTED_WINDOWS_UPDATE_COMMAND = (
     "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1 | iex"
 )
-BACKEND_CHOICES = ("faster-whisper", "openai", "xai", "gemini")
+BACKEND_CHOICES = tuple(BACKEND_REGISTRY.keys())
 DEFAULT_BACKEND = "faster-whisper"
 MODEL_CHOICES = {
     backend: spec.model_examples for backend, spec in BACKEND_REGISTRY.items()
 }
 DEFAULT_MODELS = {
     "faster-whisper": "turbo",
+    "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
     "gemini": "gemini-3-flash-preview",

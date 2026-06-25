@@ -14,9 +14,14 @@ afterEach(() => {
 // then press Enter to execute. The palette closes and the view renders.
 function navTo(label) {
   fireEvent.keyDown(window, { ctrlKey: true, key: "k", bubbles: true });
-  const input = screen.getByPlaceholderText(/Search notes/i);
+  const input = screen.getByPlaceholderText(/Search notes, run an action/i);
   fireEvent.change(input, { target: { value: label } });
   fireEvent.keyDown(input, { key: "Enter" });
+}
+
+function finishCapture() {
+  fireEvent.click(screen.getByLabelText("Pause recording"));
+  fireEvent.click(screen.getByText("Finish note"));
 }
 
 describe("Quiet Console app (mock mode)", () => {
@@ -24,24 +29,38 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     // Home is the capture surface: the cradle mic, ready status, and a Notes button.
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
-    expect(screen.getByTitle("Notes")).toBeInTheDocument();
+    expect(screen.getByText("Ready to dictate")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "false");
   });
 
   it("has no settings gear — config lives in the dictate config CLI", () => {
     render(<App />);
     expect(screen.queryByTitle("Settings")).not.toBeInTheDocument();
-    // The one survivor on the home is the privacy pill.
-    expect(screen.getByText("On-device · private")).toBeInTheDocument();
+    // The one survivor on the home is the privacy toggle.
+    expect(screen.getByLabelText("Private mode")).toBeInTheDocument();
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
   });
 
-  it("back button returns to the capture home from the Notes view", () => {
+  it("shows API key toast with copy instructions when enabling cloud without a key", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
     render(<App />);
-    navTo("Notes");
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Back"));
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Copy"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("dictate config set-key xai")));
+    expect(writeText.mock.calls[0][0]).toContain("dictate config set-provider online");
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("notebook toggle returns to the capture home from the dictations view", () => {
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Dictations"));
+    expect(screen.getByPlaceholderText("Search dictations")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByLabelText("Dictations"));
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    expect(screen.getByText("Ready to dictate")).toBeInTheDocument();
   });
 
   it("toggles the theme via the command palette", () => {
@@ -51,59 +70,62 @@ describe("Quiet Console app (mock mode)", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
 
-  it("wears GNOME chrome by default (close-only control)", () => {
+  it("wears GNOME chrome by default", () => {
     const { container } = render(<App />);
     expect(container.querySelector(".win")).toHaveClass("gnome");
     expect(container.querySelector(".adw")).toBeInTheDocument();
     expect(container.querySelector(".wincaps")).toBeNull();
   });
 
-  it("opens the command palette with the title-bar search", () => {
+  it("pauses and resumes a mock capture from the cradle", () => {
     render(<App />);
-    fireEvent.click(screen.getByText("Search notes & actions"));
-    expect(screen.getByPlaceholderText(/Search notes/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    fireEvent.click(screen.getByLabelText("Pause recording"));
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("Finish note")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Resume recording"));
+    expect(screen.getByText("Recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
 
-  it("shows Transcribing… then note-ready surface after a mock capture", async () => {
+  it("shows Transcribing… then expanded note after a mock capture", async () => {
     render(<App />);
     // Start recording
     fireEvent.click(screen.getByLabelText("Start recording"));
-    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
-    // Stop recording — transitions to "Transcribing…"
-    fireEvent.click(screen.getByLabelText("Stop recording"));
+    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
+    finishCapture();
     expect(screen.getByText("Transcribing…")).toBeInTheDocument();
-    // After the 800 ms mock delay the note-ready surface appears
-    await waitFor(() => expect(screen.getByText("Insert")).toBeInTheDocument(), { timeout: 2000 });
-    // CTA hierarchy: Insert primary, Open note, New note
-    expect(screen.getByText("Open note")).toBeInTheDocument();
-    expect(screen.getByText("New note")).toBeInTheDocument();
+    // After the 800 ms mock delay the expanded note view appears
+    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getByTitle("Copy")).toBeInTheDocument();
+    expect(screen.getByLabelText("Close note")).toBeInTheDocument();
     // The note text from the mock is visible
     expect(screen.getByText(/project note/i)).toBeInTheDocument();
   });
 
-  it("opens the expanded note from note-ready and returns with back", async () => {
+  it("close from expanded note (after capture) returns to capture home", async () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
-    fireEvent.click(screen.getByLabelText("Stop recording"));
-    // Wait for note-ready
-    await waitFor(() => expect(screen.getByText("Open note")).toBeInTheDocument(), { timeout: 2000 });
-    fireEvent.click(screen.getByText("Open note"));
-    // Expanded: back button present, note text present
-    expect(screen.getByTitle("Back")).toBeInTheDocument();
-    const backBtn = screen.getByTitle("Back");
-    fireEvent.click(backBtn);
-    // Returns to note-ready
-    expect(screen.getByText("Insert")).toBeInTheDocument();
+    finishCapture();
+    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByLabelText("Close note"));
+    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
+    expect(screen.getByText("Ready to dictate")).toBeInTheDocument();
   });
 
-  it("New note returns to the capture home", async () => {
+  it("exports expanded note as markdown through the native save bridge", async () => {
+    const invoke = vi.fn().mockResolvedValue(true);
+    window.__TAURI__ = { core: { invoke } };
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
-    fireEvent.click(screen.getByLabelText("Stop recording"));
-    await waitFor(() => expect(screen.getByText("New note")).toBeInTheDocument(), { timeout: 2000 });
-    fireEvent.click(screen.getByText("New note"));
-    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    finishCapture();
+    await waitFor(() => expect(screen.getByTitle("Export as Markdown")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByTitle("Export as Markdown"));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
+      defaultName: expect.stringMatching(/^dictate-note-\d{4}-\d{2}-\d{2}\.md$/),
+      content: expect.stringContaining("# Note —"),
+    })));
+    expect(screen.getByText("Saved as Markdown")).toBeInTheDocument();
   });
 
   it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
@@ -418,37 +440,37 @@ describe("Quiet Console app (mock mode)", () => {
    Feature: Notes list + search (reachable from the capture home)
    ===================================================================== */
 describe("Notes list (history view)", () => {
-  it("renders the Notes list with search field", () => {
+  it("renders the dictations list with search field", () => {
     render(<App />);
     navTo("Notes");
-    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search dictations")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("shows all three mock notes in the list", () => {
     render(<App />);
     navTo("Notes");
-    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
-    expect(screen.getByText(/sync to Thursday/i)).toBeInTheDocument();
-    expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
+    expect(screen.getByText(/meeting summary/i)).toBeInTheDocument();
+    expect(screen.getByText(/planning session/i)).toBeInTheDocument();
+    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
   });
 
   it("search filters notes by text", () => {
     render(<App />);
     navTo("Notes");
-    const input = screen.getByPlaceholderText("Search notes");
-    fireEvent.change(input, { target: { value: "Stalwart" } });
+    const input = screen.getByPlaceholderText("Search dictations");
+    fireEvent.change(input, { target: { value: "summary" } });
     // Matching note visible
-    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reminder to send/i)).toBeInTheDocument();
     // Non-matching notes absent
-    expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/sync to Thursday/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/reviewers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/planning session/i)).not.toBeInTheDocument();
   });
 
   it("shows no-results state when search has no matches", () => {
     render(<App />);
     navTo("Notes");
-    const input = screen.getByPlaceholderText("Search notes");
+    const input = screen.getByPlaceholderText("Search dictations");
     fireEvent.change(input, { target: { value: "xyzzy" } });
     expect(screen.getByText(/No notes match/i)).toBeInTheDocument();
   });
@@ -456,58 +478,41 @@ describe("Notes list (history view)", () => {
   it("clear button removes the search query and shows all notes again", () => {
     render(<App />);
     navTo("Notes");
-    const input = screen.getByPlaceholderText("Search notes");
-    fireEvent.change(input, { target: { value: "Stalwart" } });
-    expect(screen.queryByText(/beta testers/i)).not.toBeInTheDocument();
+    const input = screen.getByPlaceholderText("Search dictations");
+    fireEvent.change(input, { target: { value: "summary" } });
+    expect(screen.queryByText(/reviewers/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByTitle("Clear search"));
-    expect(screen.getByText(/beta testers/i)).toBeInTheDocument();
+    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
   });
 
   it("tapping a note row opens it in the expanded view", () => {
     render(<App />);
     navTo("Notes");
-    // Click the Stalwart note row (its text bubbles the click up to note-row)
-    fireEvent.click(screen.getByText(/Stalwart/i));
+    // Click the summary note row (its text bubbles the click up to note-row)
+    fireEvent.click(screen.getByText(/meeting summary/i));
     // Should now be in the ExpandedNote view
-    expect(screen.getByTitle("Back")).toBeInTheDocument();
+    expect(screen.getByTitle("Copy")).toBeInTheDocument();
     // The note text appears in the expanded body
-    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+    expect(screen.getByText(/meeting summary/i)).toBeInTheDocument();
   });
 
   it("Space key on a note row opens it in the expanded view (role=button a11y)", () => {
     render(<App />);
     navTo("Notes");
-    // Find the note-row div via its role="button" that contains the Stalwart text
-    const noteRow = screen.getByText(/Stalwart/i).closest('[role="button"]');
+    // Find the note-row div via its role="button" that contains the summary text
+    const noteRow = screen.getByText(/meeting summary/i).closest('[role="button"]');
     fireEvent.keyDown(noteRow, { key: " " });
-    expect(screen.getByTitle("Back")).toBeInTheDocument();
-    expect(screen.getByText(/Stalwart/i)).toBeInTheDocument();
+    expect(screen.getByTitle("Copy")).toBeInTheDocument();
+    expect(screen.getByText(/meeting summary/i)).toBeInTheDocument();
   });
 
-  it("back from expanded note (opened from notes list) returns to the notes list", () => {
+  it("close from expanded note (opened from notes list) returns to the notes list", () => {
     render(<App />);
     navTo("Notes");
-    fireEvent.click(screen.getByText(/Stalwart/i));
-    // In expanded view; click Back
-    fireEvent.click(screen.getByTitle("Back"));
-    // Should be back at the notes list
-    expect(screen.getByPlaceholderText("Search notes")).toBeInTheDocument();
-    expect(screen.getByText("Notes", { selector: ".notes-title" })).toBeInTheDocument();
-  });
-
-  it("back from expanded note (opened from note-ready) still returns to note-ready", async () => {
-    render(<App />);
-    // Do a mock capture to get to note-ready
-    fireEvent.click(screen.getByLabelText("Start recording"));
-    fireEvent.click(screen.getByLabelText("Stop recording"));
-    await waitFor(() => expect(screen.getByText("Open note")).toBeInTheDocument(), { timeout: 2000 });
-    // Open expanded from note-ready
-    fireEvent.click(screen.getByText("Open note"));
-    expect(screen.getByTitle("Back")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Back"));
-    // Back at note-ready, not notes list
-    expect(screen.getByText("Insert")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Search notes")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/meeting summary/i));
+    fireEvent.click(screen.getByLabelText("Close note"));
+    expect(screen.getByPlaceholderText("Search dictations")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "true");
   });
 });
 
@@ -519,7 +524,7 @@ describe("Provider resilience — graceful degradation", () => {
   it("shows the capture home by default with mic always enabled", () => {
     render(<App />);
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Ready to capture")).toBeInTheDocument();
+    expect(screen.getByText("Ready to dictate")).toBeInTheDocument();
     // BlockedHome is gone — these strings must never appear
     expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
@@ -571,7 +576,7 @@ describe("Provider resilience — graceful degradation", () => {
         data: JSON.stringify({ type: "note-recording", active: true }),
       });
     });
-    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
 
     // Fire provider-degraded SSE
     act(() => {
@@ -585,11 +590,12 @@ describe("Provider resilience — graceful degradation", () => {
       expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument()
     );
 
-    // Degraded strip shows during recording
-    expect(screen.getByText(/On-device · reconnecting…/)).toBeInTheDocument();
+    // Privacy toggle stays on (on-device fallback) and shows degraded styling
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    expect(document.querySelector(".privpill.degraded")).toBeInTheDocument();
 
     // Mic remains functional (recording still active)
-    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
 
   it("provider-recovered SSE clears degraded state and shows recovery toast", async () => {
@@ -654,8 +660,8 @@ describe("Provider resilience — graceful degradation", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText(/On-device · reconnecting…/)).toBeInTheDocument()
+      expect(document.querySelector(".privpill.degraded")).toBeInTheDocument()
     );
-    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
 });
