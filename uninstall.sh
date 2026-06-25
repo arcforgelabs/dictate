@@ -95,6 +95,7 @@ remove_managed_symlink() {
 stop_source_processes
 
 remove_file "$DESKTOP_DIR/dictate.desktop"
+remove_file "$DESKTOP_DIR/Dictate.desktop"
 remove_file "$DESKTOP_DIR/dictate-settings.desktop"
 remove_file "$AUTOSTART_DIR/dictate.desktop"
 

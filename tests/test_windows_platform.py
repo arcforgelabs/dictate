@@ -232,8 +232,11 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
         self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
-        self.assertIn('DESKTOP_PATH="$DESKTOP_DIR/Dictate.desktop"', script)
-        self.assertIn('rm -f "$DESKTOP_DIR/dictate-settings.desktop" "$DESKTOP_DIR/dictate.desktop"', script)
+        self.assertIn('DESKTOP_PATH="$DESKTOP_DIR/dictate.desktop"', script)
+        self.assertIn(
+            'rm -f "$DESKTOP_DIR/dictate-settings.desktop" "$DESKTOP_DIR/Dictate.desktop" "$DESKTOP_DIR/dictate.desktop"',
+            script,
+        )
         self.assertIn('cat > "$DESKTOP_PATH"', script)
         self.assertIn('cat > "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn("X-GNOME-Autostart-enabled=true", script)
@@ -258,6 +261,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("--remove-user-data", script)
         self.assertIn('remove_file "$DESKTOP_DIR/dictate.desktop"', script)
+        self.assertIn('remove_file "$DESKTOP_DIR/Dictate.desktop"', script)
         self.assertIn('remove_file "$DESKTOP_DIR/dictate-settings.desktop"', script)
         self.assertIn('remove_file "$AUTOSTART_DIR/dictate.desktop"', script)
         self.assertIn('rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/share/icons"', script)
