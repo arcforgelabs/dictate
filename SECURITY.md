@@ -20,3 +20,19 @@ Use GitHub private vulnerability reporting for this repository when it is availa
 - Exploit details for an unpatched issue.
 
 Dictate is a local desktop app. A trusted local user intentionally installing, configuring, or running local commands is usually not a vulnerability by itself. Reports are most useful when they show an unintended path from untrusted input to credential exposure, command execution, data exposure, privilege escalation, or update/install compromise.
+
+## Accepted Risks (tracked)
+
+These known advisories are accepted for now because no fix is available and the
+vulnerable code is not reachable in Dictate's usage. Revisit when upstream ships
+a patched release.
+
+- **nltk path traversal in `nltk.data.load()`** — GHSA-p4gq-832x-fm9v (HIGH).
+  No patched release exists (advisory covers `<= 3.9.4`, the current latest).
+  `nltk` is only a transitive dependency of the optional `[whisperx]` extra
+  (`nltk` ← `whisperx`); it is **not** included in the shipped `.deb` (frozen
+  from `[x11,wayland]`) and the default faster-whisper path never installs it.
+  Dictate never calls `nltk` directly, and whisperx's internal use loads fixed
+  resources rather than user-controlled URL-encoded paths, so the traversal sink
+  is not reachable from untrusted input. **Action:** pin `nltk` to the first
+  patched version once released, and remove this note.
