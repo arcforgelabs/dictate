@@ -195,6 +195,33 @@ class _StopErrorRecorder(_FakeRecorder):
         raise AudioCaptureError("stop failed")
 
 
+class _StopCallbackRecorder(_FakeRecorder):
+    def stop(self) -> np.ndarray:
+        self.is_recording = False
+        callback = getattr(self, "on_chunk", None)
+        if callback is None:
+            return np.array([], dtype=np.float32)
+
+        def _invoke_callback() -> None:
+            callback(
+                AudioChunk(
+                    samples=np.ones(4, dtype=np.float32),
+                    final=False,
+                    sequence=0,
+                    recording_id=self.recording_id or 0,
+                    t_start=0.0,
+                    t_end=0.25,
+                )
+            )
+
+        thread = threading.Thread(target=_invoke_callback)
+        thread.start()
+        thread.join(timeout=1.0)
+        if thread.is_alive():
+            raise RuntimeError("callback did not finish")
+        return np.array([], dtype=np.float32)
+
+
 class _TruncatedRecorder(_FakeRecorder):
     truncated = True
 
@@ -690,6 +717,44 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertFalse(daemon.note_recording_paused)
             self.assertEqual(recording_events[-1], False)
             self.assertEqual(note_events[-1], (False, False, None))
+            self.assertTrue(daemon._is_recording_failed(recording_id))
+
+            note = notes.load_note(note_id)
+            assert note is not None
+            self.assertEqual(note.status, "failed")
+
+    def test_note_pause_stop_callback_backpressure_does_not_deadlock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _StopCallbackRecorder()
+            daemon = Daemon(
+                _FakeFasterWhisperStt({}),
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            note_id = daemon._recording_note_ids[recording_id]
+            daemon._partial_audio_queue = queue.Queue(maxsize=1)
+            daemon._partial_audio_queue.put_nowait(
+                AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=recording_id)
+            )
+
+            self.assertFalse(daemon.pause_note_recording())
+            self.assertFalse(recorder.is_recording)
+            self.assertFalse(daemon.note_recording_paused)
+            self.assertIsNone(daemon._active_recording_id)
             self.assertTrue(daemon._is_recording_failed(recording_id))
 
             note = notes.load_note(note_id)
