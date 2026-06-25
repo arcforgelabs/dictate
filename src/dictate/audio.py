@@ -77,6 +77,7 @@ class SoundDeviceRecorder:
         self._window_buffer = np.zeros(self._window_samples, dtype=np.float32)
         self._window_count = 0
         self._on_chunk: Callable[[AudioChunk], None] | None = None
+        self._on_samples: Callable[[np.ndarray], None] | None = None
         self._stream: Any | None = None
         self._recording = False
         self._note_chunks = False
@@ -98,6 +99,7 @@ class SoundDeviceRecorder:
         note_chunks: bool = False,
         note_chunk_seq_offset: int = 0,
         note_time_offset_s: float = 0.0,
+        on_samples: Callable[[np.ndarray], None] | None = None,
     ) -> None:
         """Start recording."""
         if self._recording:
@@ -111,6 +113,7 @@ class SoundDeviceRecorder:
         self._recording_id = 0 if recording_id is None else int(recording_id)
         self._window_count = 0
         self._on_chunk = on_chunk
+        self._on_samples = on_samples
         self._note_chunks = bool(note_chunks)
         self._note_accumulator = (
             NoteChunkAccumulator(
@@ -163,6 +166,7 @@ class SoundDeviceRecorder:
         with self._lock:
             callback = self._on_chunk
             self._on_chunk = None
+            self._on_samples = None
             if self._note_accumulator is not None:
                 for emitted in self._note_accumulator.flush(final=True):
                     chunk_events.append(
@@ -244,6 +248,12 @@ class SoundDeviceRecorder:
                 self._write_capture(samples)
             self._append_stream_samples(samples, chunk_events)
             callback = self._on_chunk
+            samples_cb = self._on_samples
+        if samples_cb is not None:
+            try:
+                samples_cb(samples)
+            except Exception:  # noqa: BLE001
+                pass
         if callback is not None:
             for chunk_event in chunk_events:
                 try:

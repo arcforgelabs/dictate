@@ -6,6 +6,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -132,6 +133,17 @@ class _NoteStreamingRecorder(_FakeRecorder):
     def stop(self) -> np.ndarray:
         self.is_recording = False
         return np.array([], dtype=np.float32)
+
+
+class _SilenceHookRecorder(_FakeRecorder):
+    def start(self, on_chunk=None, recording_id=None, **kwargs) -> None:  # noqa: ANN001
+        super().start(on_chunk=on_chunk, recording_id=recording_id, **kwargs)
+        self.on_samples = kwargs.get("on_samples")
+
+    def emit_samples(self, samples: np.ndarray) -> None:
+        hook = getattr(self, "on_samples", None)
+        if hook is not None:
+            hook(samples)
 
 
 class _NoCallbackRecorder(_FakeRecorder):
@@ -395,6 +407,32 @@ class DaemonHistoryTests(unittest.TestCase):
 
             segments = notes.load_segments(note_id)
             self.assertEqual([segment.seq for segment in segments], [0, 1])
+
+    def test_note_auto_pause_after_sustained_silence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from unittest.mock import patch
+
+            from dictate.daemon import Daemon
+            from dictate.note_silence import NoteSilenceMonitor
+
+            recorder = _SilenceHookRecorder()
+            monitor = NoteSilenceMonitor(sample_rate=16000, pause_after_seconds=0.05, silence_rms=0.05)
+            daemon = Daemon(
+                _FakeStt(),
+                output=MagicMock(),
+                history_store=HistoryStore(path=Path(tmp) / "h.json"),
+                recorder=recorder,
+                note_silence_monitor=monitor,
+            )
+            with patch("dictate.daemon.play_pause_cue"):
+                self.assertTrue(daemon.start_note_recording())
+                recorder.emit_samples(np.zeros(500, dtype=np.float32))
+                recorder.emit_samples(np.zeros(500, dtype=np.float32))
+                deadline = time.time() + 1.0
+                while time.time() < deadline and not daemon.note_recording_paused:
+                    time.sleep(0.01)
+            self.assertTrue(daemon.note_recording_paused)
+            self.assertEqual(daemon.note_pause_reason, "silence")
 
     def test_note_store_failure_fails_recording_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

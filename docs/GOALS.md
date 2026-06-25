@@ -127,8 +127,9 @@ Deferred local meeting diarization:
 
 ### Silence auto-pause (note recording)
 
-**Status:** Not implemented. Manual pause/finish exists; VAD-at-transcribe does
-not replace this.
+**Status:** Partial. Auto-pause after 120s sustained silence, shared pause click,
+and UI copy for silence-triggered pause are implemented. Manual pause/finish and
+chunked local transcription are in place.
 
 Long note sessions should not hold the mic open indefinitely during silence.
 Quiet meetings must not fail silently — the user should get a clear, gentle

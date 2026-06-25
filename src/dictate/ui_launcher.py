@@ -290,18 +290,26 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
     daemon.status_callback = on_status
     daemon.recording_callback = on_recording
 
-    def on_note_recording(active: bool, *, paused: bool = False) -> None:
+    def on_note_recording(active: bool, *, paused: bool = False, pause_reason: str | None = None) -> None:
         if prev_note_recording is not None:
             try:
-                prev_note_recording(active, paused=paused)
+                prev_note_recording(active, paused=paused, pause_reason=pause_reason)
             except TypeError:
                 try:
-                    prev_note_recording(active)
+                    prev_note_recording(active, paused=paused)
+                except TypeError:
+                    try:
+                        prev_note_recording(active)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("prior note recording callback failed")
                 except Exception:  # noqa: BLE001
                     logger.exception("prior note recording callback failed")
             except Exception:  # noqa: BLE001
                 logger.exception("prior note recording callback failed")
-        broker.publish("note-recording", active=bool(active), paused=bool(paused))
+        payload: dict[str, object] = {"active": bool(active), "paused": bool(paused)}
+        if pause_reason:
+            payload["pauseReason"] = pause_reason
+        broker.publish("note-recording", **payload)
 
     daemon.note_recording_callback = on_note_recording
 

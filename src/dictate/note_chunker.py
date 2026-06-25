@@ -44,20 +44,20 @@ class NoteChunkAccumulator:
         self.silence_gap_samples = max(1, int(sample_rate * silence_gap_seconds))
         self.overlap_samples = max(0, int(sample_rate * overlap_seconds))
         self.silence_rms = silence_rms
-        self._buffer = np.array([], dtype=np.float32)
+        self._parts: list[np.ndarray] = []
         self._sequence = max(0, int(seq_offset))
         self._cursor_samples = max(0, int(sample_rate * float(time_offset_s)))
         self._trailing_silence = 0
 
     @property
     def pending_samples(self) -> int:
-        return int(self._buffer.size)
+        return sum(int(part.size) for part in self._parts)
 
     def push(self, samples: np.ndarray) -> list[EmittedNoteChunk]:
         if samples.size == 0:
             return []
         chunk = np.asarray(samples, dtype=np.float32).reshape(-1)
-        self._buffer = np.concatenate((self._buffer, chunk))
+        self._parts.append(chunk)
         emitted: list[EmittedNoteChunk] = []
         while True:
             ready = self._maybe_emit(force=False)
@@ -73,38 +73,42 @@ class NoteChunkAccumulator:
             if ready is None:
                 break
             emitted.append(ready)
-        if final and self._buffer.size > 0:
+        if final and self.pending_samples > 0:
             emitted.append(self._emit_buffer(reason="final"))
         return emitted
 
     def _maybe_emit(self, *, force: bool) -> EmittedNoteChunk | None:
-        if self._buffer.size == 0:
+        if self.pending_samples == 0:
             return None
-        self._trailing_silence = self._measure_trailing_silence(self._buffer)
-        if force and self._buffer.size > 0:
+        self._trailing_silence = self._measure_trailing_silence()
+        if force and self.pending_samples > 0:
             return self._emit_buffer(reason="final")
-        if self._buffer.size < self.min_samples:
+        if self.pending_samples < self.min_samples:
             return None
-        if self._buffer.size >= self.max_samples:
+        if self.pending_samples >= self.max_samples:
             return self._emit_buffer(reason="cap")
         if self._trailing_silence >= self.silence_gap_samples:
             return self._emit_buffer(reason="silence")
         return None
 
     def _emit_buffer(self, *, reason: str) -> EmittedNoteChunk:
+        total = self.pending_samples
         if reason == "cap":
-            emit_count = min(int(self._buffer.size), self.max_samples)
+            emit_count = min(total, self.max_samples)
         elif self._trailing_silence >= self.silence_gap_samples:
-            emit_count = int(self._buffer.size) - self._trailing_silence
+            emit_count = total - self._trailing_silence
         else:
-            emit_count = int(self._buffer.size)
-        emit_count = max(1, min(emit_count, int(self._buffer.size)))
-        audio = self._buffer[:emit_count].copy()
+            emit_count = total
+        emit_count = max(1, min(emit_count, total))
+        audio = self._take_samples(emit_count)
         t_start = self._cursor_samples / self.sample_rate
         t_end = (self._cursor_samples + emit_count) / self.sample_rate
         self._cursor_samples += emit_count
-        overlap = self._buffer[emit_count - self.overlap_samples : emit_count].copy() if self.overlap_samples else np.array([], dtype=np.float32)
-        self._buffer = overlap if overlap.size else np.array([], dtype=np.float32)
+        if self.overlap_samples > 0 and emit_count > 0:
+            overlap = audio[emit_count - self.overlap_samples : emit_count].copy()
+            self._parts = [overlap] if overlap.size else []
+        else:
+            self._parts = []
         self._trailing_silence = 0
         chunk = EmittedNoteChunk(
             samples=audio,
@@ -115,7 +119,37 @@ class NoteChunkAccumulator:
         self._sequence += 1
         return chunk
 
-    def _measure_trailing_silence(self, audio: np.ndarray) -> int:
+    def _take_samples(self, count: int) -> np.ndarray:
+        if count <= 0 or not self._parts:
+            return np.array([], dtype=np.float32)
+        remaining = count
+        taken: list[np.ndarray] = []
+        while remaining > 0 and self._parts:
+            head = self._parts[0]
+            if head.size <= remaining:
+                taken.append(head)
+                self._parts.pop(0)
+                remaining -= int(head.size)
+                continue
+            taken.append(head[:remaining].copy())
+            self._parts[0] = head[remaining:]
+            remaining = 0
+        if not taken:
+            return np.array([], dtype=np.float32)
+        if len(taken) == 1:
+            return taken[0]
+        return np.concatenate(taken)
+
+    def _measure_trailing_silence(self) -> int:
+        silent = 0
+        for part in reversed(self._parts):
+            part_silent = self._measure_trailing_silence_in(part)
+            silent += part_silent
+            if part_silent < part.size:
+                break
+        return min(self.pending_samples, silent)
+
+    def _measure_trailing_silence_in(self, audio: np.ndarray) -> int:
         frame = self._frame_samples
         if audio.size < frame:
             return 0 if self._frame_rms(audio) >= self.silence_rms else int(audio.size)

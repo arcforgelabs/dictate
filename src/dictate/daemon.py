@@ -16,9 +16,11 @@ logger = logging.getLogger(__name__)
 import numpy as np
 
 from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
+from dictate.cue_sound import play_pause_cue
 from dictate.engine import DictationEngine, TranscriptionResult
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
+from dictate.note_silence import NoteSilenceMonitor
 from dictate.transcript_merge import merge_transcript_piece, prompt_tail
 from dictate.hotkey import format_hotkey_combo, normalize_push_to_talk_combo
 from dictate.hotkey_backend import (
@@ -57,6 +59,7 @@ class Daemon:
         lexicon_replacements: dict[str, str] | None = None,
         history_store: HistoryStore | None = None,
         note_store: NoteStore | None = None,
+        note_silence_monitor: NoteSilenceMonitor | None = None,
         push_to_talk_combo: str = "ctrl_r",
         status_callback: Callable[[str | None], None] | None = None,
         recording_callback: Callable[[bool], None] | None = None,
@@ -118,6 +121,9 @@ class Daemon:
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
         self._note_recording_paused = False
+        self._note_pause_reason: str | None = None
+        self._note_silence_monitor = note_silence_monitor or NoteSilenceMonitor(sample_rate=SAMPLE_RATE)
+        self._note_auto_pause_pending = False
         self._queue_lock = threading.Lock()
 
     def pause(self) -> None:
@@ -163,7 +169,7 @@ class Daemon:
                 return self.resume_note_recording()
         return self._start_recording(mode="note")
 
-    def pause_note_recording(self) -> bool:
+    def pause_note_recording(self, *, pause_reason: str = "manual") -> bool:
         """Pause an active note recording without finalizing the session."""
         with self._recording_lock:
             recording_id = self._active_recording_id
@@ -189,8 +195,11 @@ class Daemon:
                     )
                 )
             self._note_recording_paused = True
+            self._note_pause_reason = pause_reason
+            self._note_silence_monitor.reset()
+            play_pause_cue()
             self._notify_recording(False)
-            self._notify_note_recording(False, paused=True)
+            self._notify_note_recording(False, paused=True, pause_reason=pause_reason)
             return True
 
     def resume_note_recording(self) -> bool:
@@ -212,6 +221,7 @@ class Daemon:
                     note_chunks=self._is_note_streaming(recording_id),
                     note_chunk_seq_offset=seq_offset,
                     note_time_offset_s=time_offset_s,
+                    on_samples=self._track_note_silence,
                 )
             except TypeError:
                 try:
@@ -225,6 +235,8 @@ class Daemon:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 return False
             self._note_recording_paused = False
+            self._note_pause_reason = None
+            self._note_silence_monitor.reset()
             self._notify_recording(True)
             self._notify_note_recording(True, paused=False)
             return True
@@ -243,6 +255,7 @@ class Daemon:
 
     def _finish_paused_note_recording(self, recording_id: int) -> None:
         self._note_recording_paused = False
+        self._note_pause_reason = None
         if self._should_queue_final_marker(recording_id):
             self._queue_final_marker(recording_id)
         else:
@@ -283,6 +296,12 @@ class Daemon:
     @property
     def note_recording_paused(self) -> bool:
         return self._note_recording_paused
+
+    @property
+    def note_pause_reason(self) -> str | None:
+        if not self._note_recording_paused:
+            return None
+        return self._note_pause_reason
 
     def switch_speech_to_text(self, stt: SpeechToText, *, hotwords: str | None = None) -> None:
         """Swap STT backend/model at runtime."""
@@ -351,6 +370,8 @@ class Daemon:
             if self._note_recording_paused:
                 return False
 
+            self._note_pause_reason = None
+            self._note_silence_monitor.reset()
             try:
                 self._recording_generation += 1
                 self._active_recording_id = self._recording_generation
@@ -400,12 +421,14 @@ class Daemon:
                         on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                         recording_id=self._active_recording_id,
                         note_chunks=note_streaming,
+                        on_samples=self._track_note_silence if mode == "note" else None,
                     )
                 except TypeError:
                     try:
                         self.recorder.start(
                             on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                             recording_id=self._active_recording_id,
+                            on_samples=self._track_note_silence if mode == "note" else None,
                         )
                     except TypeError:
                         self.recorder.start()
@@ -716,6 +739,29 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Status callback failed: {exc}", file=sys.stderr)
 
+    def _track_note_silence(self, samples: np.ndarray) -> None:
+        if self._note_recording_paused or self._note_auto_pause_pending:
+            return
+        recording_id = self._active_recording_id
+        if recording_id is None or self._recording_mode(recording_id) != "note":
+            return
+        if not self._note_silence_monitor.push(samples):
+            return
+        self._note_silence_monitor.reset()
+        self._schedule_note_auto_pause()
+
+    def _schedule_note_auto_pause(self) -> None:
+        if self._note_auto_pause_pending:
+            return
+        self._note_auto_pause_pending = True
+        threading.Thread(target=self._run_note_auto_pause, name="dictate-note-auto-pause", daemon=True).start()
+
+    def _run_note_auto_pause(self) -> None:
+        try:
+            self.pause_note_recording(pause_reason="silence")
+        finally:
+            self._note_auto_pause_pending = False
+
     def _notify_recording(self, recording: bool) -> None:
         if self.recording_callback is None:
             return
@@ -724,13 +770,22 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Recording callback failed: {exc}", file=sys.stderr)
 
-    def _notify_note_recording(self, recording: bool, *, paused: bool = False) -> None:
+    def _notify_note_recording(
+        self,
+        recording: bool,
+        *,
+        paused: bool = False,
+        pause_reason: str | None = None,
+    ) -> None:
         if self.note_recording_callback is None:
             return
         try:
-            self.note_recording_callback(recording, paused=paused)
+            self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason)
         except TypeError:
-            self.note_recording_callback(recording)
+            try:
+                self.note_recording_callback(recording, paused=paused)
+            except TypeError:
+                self.note_recording_callback(recording)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Note recording callback failed: {exc}", file=sys.stderr)
 

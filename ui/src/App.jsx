@@ -160,7 +160,9 @@ function CaptureHome() {
               </>
             ) : s.noteRecording && s.notePaused ? (
               <>
-                <div className="note-status paused">Paused</div>
+                <div className="note-status paused">
+                  {s.notePauseReason === "silence" ? "Paused — no speech detected" : "Paused"}
+                </div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
                 <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
                   Finish note
@@ -332,6 +334,7 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
   const [notePaused, setNotePaused] = useState(false);
+  const [notePauseReason, setNotePauseReason] = useState(null);
   const [noteText, setNoteText] = useState("");
   const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
@@ -443,9 +446,11 @@ export default function App() {
         if (ev.paused) {
           setNoteRecording(true);
           setNotePaused(true);
+          setNotePauseReason(ev.pauseReason || null);
         } else if (ev.active) {
           setNoteRecording(true);
           setNotePaused(false);
+          setNotePauseReason(null);
           // New recording started — clear any stale watchdog, reset note surface.
           clearWatchdog();
           setNoteView(null);
@@ -453,6 +458,7 @@ export default function App() {
         } else {
           setNoteRecording(false);
           setNotePaused(false);
+          setNotePauseReason(null);
           // Recording finished — show Transcribing… and arm the safety-net watchdog.
           setNoteView("processing");
           armWatchdog();
@@ -570,6 +576,8 @@ export default function App() {
     }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.notes && typeof st.notes.paused === "boolean") setNotePaused(st.notes.paused);
+    if (st.notes && typeof st.notes.pauseReason === "string") setNotePauseReason(st.notes.pauseReason);
+    else if (st.notes && !st.notes.paused) setNotePauseReason(null);
     if (st.prefs) {
       if (st.prefs.theme && st.prefs.theme !== "system") { explicitThemeRef.current = true; setThemeState(st.prefs.theme); }
       setTrayOnlyState(!!st.prefs.trayOnly);
@@ -710,6 +718,8 @@ export default function App() {
     if (!r) return;
     if (typeof r.recording === "boolean") setNoteRecording(r.recording);
     if (typeof r.paused === "boolean") setNotePaused(r.paused);
+    if (typeof r.pauseReason === "string") setNotePauseReason(r.pauseReason);
+    else if (r.paused === false) setNotePauseReason(null);
   };
 
   const startNoteRecording = () => {
@@ -717,6 +727,7 @@ export default function App() {
     if (!ipc.isLive()) {
       clearWatchdog();
       setNotePaused(false);
+      setNotePauseReason(null);
       setNoteRecording(true);
       setNoteView(null);
       setCurrentNote(null);
@@ -972,7 +983,7 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, notePaused, noteText,
+    recording, noteRecording, notePaused, notePauseReason, noteText,
     startNoteRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,

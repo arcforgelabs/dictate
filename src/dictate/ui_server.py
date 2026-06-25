@@ -291,10 +291,7 @@ class UiBackend:
             },
             "providers": self._providers(cfg),
             "prefs": prefs,
-            "notes": {
-                "recording": self._note_recording_active(),
-                "paused": self._note_recording_paused(),
-            },
+            "notes": self._notes_payload(),
             "startup": bool(self._safe(self.startup_enabled, False)),
             "secretStore": self._safe(self.secret_store_description, "OS secret store"),
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
@@ -501,42 +498,27 @@ class UiBackend:
     def start_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         started = bool(daemon.start_note_recording())
-        return {
-            "recording": bool(getattr(daemon, "note_recording_active", started)),
-            "paused": bool(getattr(daemon, "note_recording_paused", False)),
-        }
+        return self._notes_payload()
 
     def stop_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
-        stopped = bool(daemon.stop_note_recording())
-        return {
-            "recording": bool(getattr(daemon, "note_recording_active", not stopped)),
-            "paused": bool(getattr(daemon, "note_recording_paused", False)),
-        }
+        daemon.stop_note_recording()
+        return self._notes_payload()
 
     def pause_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
-        paused = bool(daemon.pause_note_recording())
-        return {
-            "recording": bool(getattr(daemon, "note_recording_active", paused)),
-            "paused": bool(getattr(daemon, "note_recording_paused", paused)),
-        }
+        daemon.pause_note_recording()
+        return self._notes_payload()
 
     def resume_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
-        resumed = bool(daemon.resume_note_recording())
-        return {
-            "recording": bool(getattr(daemon, "note_recording_active", resumed)),
-            "paused": bool(getattr(daemon, "note_recording_paused", False)),
-        }
+        daemon.resume_note_recording()
+        return self._notes_payload()
 
     def toggle_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
-        active = bool(daemon.toggle_note_recording())
-        return {
-            "recording": active or bool(getattr(daemon, "note_recording_active", False)),
-            "paused": bool(getattr(daemon, "note_recording_paused", False)),
-        }
+        daemon.toggle_note_recording()
+        return self._notes_payload()
 
     def save_provider_key(self, backend: str, api_key: str) -> dict[str, Any]:
         if backend not in api_keys_mod.API_BACKENDS:
@@ -640,6 +622,18 @@ class UiBackend:
 
     def _note_recording_paused(self) -> bool:
         return bool(self.daemon is not None and getattr(self.daemon, "note_recording_paused", False))
+
+    def _notes_payload(self) -> dict[str, Any]:
+        paused = self._note_recording_paused()
+        payload: dict[str, Any] = {
+            "recording": self._note_recording_active(),
+            "paused": paused,
+        }
+        if paused and self.daemon is not None:
+            reason = getattr(self.daemon, "note_pause_reason", None)
+            if isinstance(reason, str) and reason:
+                payload["pauseReason"] = reason
+        return payload
 
     # ----- provider health ------------------------------------------------ #
     def _compute_provider_health(self, cfg: config_mod.Config) -> dict[str, Any]:
