@@ -23,16 +23,39 @@ Dictate is a local desktop app. A trusted local user intentionally installing, c
 
 ## Accepted Risks (tracked)
 
-These known advisories are accepted for now because no fix is available and the
-vulnerable code is not reachable in Dictate's usage. Revisit when upstream ships
-a patched release.
+These advisories are accepted for now. They share a common cause: they all come
+from the optional `[whisperx]` extra's pinned dependency stack, none of them are
+shipped in the release artifact, and none are reachable from untrusted input in
+how Dictate uses them.
 
-- **nltk path traversal in `nltk.data.load()`** — GHSA-p4gq-832x-fm9v (HIGH).
-  No patched release exists (advisory covers `<= 3.9.4`, the current latest).
-  `nltk` is only a transitive dependency of the optional `[whisperx]` extra
-  (`nltk` ← `whisperx`); it is **not** included in the shipped `.deb` (frozen
-  from `[x11,wayland]`) and the default faster-whisper path never installs it.
-  Dictate never calls `nltk` directly, and whisperx's internal use loads fixed
-  resources rather than user-controlled URL-encoded paths, so the traversal sink
-  is not reachable from untrusted input. **Action:** pin `nltk` to the first
-  patched version once released, and remove this note.
+Why they cannot simply be upgraded: **whisperx 3.8.6 (the latest published
+release) pins `torch~=2.8.0` and `huggingface-hub<1.0.0`.** Those pins cap the
+whole resolution — torch cannot move to a patched 2.9+/2.12+, and transformers
+cannot move to the patched 5.x line (transformers 5 requires
+`huggingface-hub>=1.0.0`). whisperx is a needed, in-progress feature, so we keep
+it rather than drop it to force the upgrades.
+
+Common mitigating facts for all entries below:
+- `[whisperx]` (and `[gpu]`) are **not** in the shipped `.deb`/AppImage, which is
+  frozen from `[x11,wayland]`; the default product uses faster-whisper
+  (CTranslate2), which pulls none of these packages.
+- Dictate is a local app processing the user's own audio — there is no untrusted
+  remote input feeding these libraries.
+
+Advisories:
+
+- **torch memory corruption** — GHSA-vgrw-7cvw-pwgx (medium, fix 2.9.1),
+  GHSA-qfhq-4f3w-5fph (low, fix 2.10.0), GHSA-rrmf-rvhw-rf47 (low).
+  In `torch.lstm_cell` / `torch.jit.script` / `unpack_sequence`. Blocked at
+  torch 2.8.x by whisperx's `torch~=2.8.0` pin.
+- **transformers `Trainer` RCE** — GHSA-69w3-r845-3855 (medium, fix 5.x).
+  Reachable only via the `Trainer` (training) class; Dictate only runs inference
+  and never trains. Blocked below 5.x by whisperx's `huggingface-hub<1.0.0` pin.
+- **nltk path traversal in `nltk.data.load()`** — GHSA-p4gq-832x-fm9v (high).
+  No patched nltk release exists (`<= 3.9.4`, the current latest). Transitive via
+  whisperx; whisperx's internal use loads fixed resources, not user-controlled
+  URL-encoded paths.
+
+**Action:** when whisperx publishes a release that lifts its `torch` /
+`huggingface-hub` pins, bump it, re-pin torch (`>=2.12.1`) and transformers
+(`>=5.x`) and nltk (first patched), re-lock, and remove the cleared entries here.
