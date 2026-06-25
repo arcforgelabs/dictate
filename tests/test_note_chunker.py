@@ -135,6 +135,26 @@ class NoteChunkAccumulatorTests(unittest.TestCase):
         self.assertAlmostEqual(second[0].t_start, 0.3)
         self.assertAlmostEqual(second[0].t_end, 0.8)
 
+    def test_cap_emissions_preserve_suffix_with_overlap(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=0.1,
+            max_chunk_seconds=0.5,
+            silence_gap_seconds=0.2,
+            overlap_seconds=0.2,
+            silence_rms=0.01,
+        )
+
+        emitted = acc.push(np.arange(1, 9, dtype=np.float32))
+        self.assertEqual(len(emitted), 2)
+        self.assertListEqual(emitted[0].samples.tolist(), [1.0, 2.0, 3.0, 4.0, 5.0])
+        self.assertListEqual(emitted[1].samples.tolist(), [4.0, 5.0, 6.0, 7.0, 8.0])
+        self.assertEqual(acc.pending_samples, 2)
+
+        flushed = acc.flush(final=True)
+        self.assertEqual(flushed, [])
+        self.assertEqual(acc.pending_samples, 0)
+
     def test_resume_offsets_continue_sequence_and_time(self) -> None:
         acc = NoteChunkAccumulator(
             sample_rate=10,
