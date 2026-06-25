@@ -116,6 +116,7 @@ class Daemon:
         self._recording_modes: dict[int, RecordingMode] = {}
         self._recording_note_ids: dict[int, str] = {}
         self._recording_prompt_tails: dict[int, str] = {}
+        self._recording_note_chunk_cursors: dict[int, tuple[int, float]] = {}
         self._note_streaming_recordings: set[int] = set()
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
@@ -185,15 +186,20 @@ class Daemon:
             except AudioCaptureError as exc:
                 print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 return False
+            if self._is_recording_failed(recording_id):
+                return False
             if audio.size > 0:
-                self._queue_partial_audio(
+                if not self._queue_partial_audio(
                     AudioChunk(
                         samples=audio,
                         final=False,
                         sequence=0,
                         recording_id=recording_id,
                     )
-                )
+                ):
+                    return False
+            if self._is_recording_failed(recording_id):
+                return False
             self._note_recording_paused = True
             self._note_pause_reason = pause_reason
             self._note_silence_monitor.reset()
@@ -412,6 +418,7 @@ class Daemon:
                         )
                         self._recording_note_ids[self._active_recording_id] = note_id
                         self._recording_prompt_tails[self._active_recording_id] = ""
+                        self._recording_note_chunk_cursors[self._active_recording_id] = (0, 0.0)
                         self._note_streaming_recordings.add(self._active_recording_id)
                     else:
                         self._note_streaming_recordings.discard(self._active_recording_id)
@@ -833,6 +840,8 @@ class Daemon:
                     self._recording_chunk_counts[chunk.recording_id] = previous_count
                 if chunk.final and not previous_final:
                     self._recording_final_chunks.discard(chunk.recording_id)
+        if self._is_note_streaming(chunk.recording_id):
+            self._update_note_chunk_cursor(chunk)
 
     def _queue_partial_audio(self, chunk: AudioChunk) -> bool:
         if chunk.recording_id != 0 and not self._recording_session_known(chunk.recording_id):
@@ -1157,6 +1166,7 @@ class Daemon:
             self._recording_modes.pop(recording_id, None)
             self._recording_note_ids.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
+            self._recording_note_chunk_cursors.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
 
     def _mark_recording_completed(self, recording_id: int) -> None:
@@ -1203,12 +1213,16 @@ class Daemon:
     def _note_chunk_resume_offsets(self, recording_id: int) -> tuple[int, float]:
         with self._queue_lock:
             note_id = self._recording_note_ids.get(recording_id)
+            queued_seq, queued_time = self._recording_note_chunk_cursors.get(recording_id, (0, 0.0))
         if not note_id:
-            return 0, 0.0
+            return queued_seq, queued_time
         segments = self.note_store.load_segments(note_id)
         if not segments:
-            return 0, 0.0
-        return max(segment.seq for segment in segments) + 1, max(segment.t_end for segment in segments)
+            return queued_seq, queued_time
+        return (
+            max(max(segment.seq for segment in segments) + 1, queued_seq),
+            max(max(segment.t_end for segment in segments), queued_time),
+        )
 
     def _stt_labels(self) -> tuple[str, str]:
         with self._engine_lock:
@@ -1246,10 +1260,22 @@ class Daemon:
                 logger.exception("Could not persist note segment for %s", note_id)
                 self._fail_recording_session(recording_id, f"Note storage failed: {exc}")
                 return ""
+        self._update_note_chunk_cursor(chunk)
         with self._queue_lock:
             combined = f"{tail} {merged}".strip() if tail else merged
             self._recording_prompt_tails[recording_id] = prompt_tail(combined)
         return merged
+
+    def _update_note_chunk_cursor(self, chunk: AudioChunk) -> None:
+        if not self._is_note_streaming(chunk.recording_id):
+            return
+        t_end = chunk.t_end if chunk.t_end is not None else self.engine.duration_s(chunk.samples)
+        with self._queue_lock:
+            previous_seq, previous_time = self._recording_note_chunk_cursors.get(chunk.recording_id, (0, 0.0))
+            self._recording_note_chunk_cursors[chunk.recording_id] = (
+                max(previous_seq, chunk.sequence + 1),
+                max(previous_time, t_end),
+            )
 
     def _transcribe_recording_audio(
         self,
