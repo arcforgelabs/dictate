@@ -113,6 +113,30 @@ class NoteChunkAccumulatorTests(unittest.TestCase):
         self.assertEqual(emitted[0].samples.shape[0], 4)
         self.assertEqual(acc.pending_samples, 0)
 
+    def test_push_with_silence_split_returns_promptly(self) -> None:
+        acc = NoteChunkAccumulator(
+            sample_rate=10,
+            min_chunk_seconds=0.1,
+            max_chunk_seconds=1.0,
+            silence_gap_seconds=0.2,
+            overlap_seconds=0.2,
+            silence_rms=0.01,
+        )
+        result: list[list[object]] = []
+
+        def _push() -> None:
+            result.append(acc.push(np.array([1, 1, 1, 1, 1, 0, 0, 0], dtype=np.float32)))
+
+        thread = threading.Thread(target=_push)
+        thread.start()
+        thread.join(timeout=1.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result[0]), 1)
+        self.assertEqual(result[0][0].samples.tolist(), [1.0, 1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(acc.pending_samples, 2)
+
     def test_cap_emissions_keep_monotonic_time_with_overlap(self) -> None:
         acc = NoteChunkAccumulator(
             sample_rate=10,

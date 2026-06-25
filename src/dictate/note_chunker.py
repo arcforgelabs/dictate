@@ -116,9 +116,13 @@ class NoteChunkAccumulator:
             self._overlap_only_buffer = False
         elif self.overlap_samples > 0 and emit_count > 0:
             overlap = audio[emit_count - self.overlap_samples : emit_count].copy()
-            suffix = self._parts
-            self._parts = ([overlap] if overlap.size else []) + suffix
-            self._overlap_only_buffer = bool(overlap.size and not suffix)
+            if reason == "silence":
+                self._parts = [overlap] if overlap.size else []
+                self._overlap_only_buffer = bool(overlap.size)
+            else:
+                suffix = self._parts
+                self._parts = ([overlap] if overlap.size else []) + suffix
+                self._overlap_only_buffer = bool(overlap.size and not suffix)
             self._cursor_samples += max(0, emit_count - overlap.size)
         else:
             self._parts = []

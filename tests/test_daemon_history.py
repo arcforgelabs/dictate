@@ -222,6 +222,24 @@ class _StopCallbackRecorder(_FakeRecorder):
         return np.array([], dtype=np.float32)
 
 
+class _BlockingStopRecorder(_FakeRecorder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_entered = threading.Event()
+        self.stop_release = threading.Event()
+        self.start_called = threading.Event()
+
+    def start(self, on_chunk=None, recording_id=None, **kwargs) -> None:  # noqa: ANN001
+        super().start(on_chunk=on_chunk, recording_id=recording_id, **kwargs)
+        self.start_called.set()
+
+    def stop(self) -> np.ndarray:
+        self.stop_entered.set()
+        self.stop_release.wait(timeout=2.0)
+        self.is_recording = False
+        return np.array([], dtype=np.float32)
+
+
 class _TruncatedRecorder(_FakeRecorder):
     truncated = True
 
@@ -760,6 +778,59 @@ class DaemonHistoryTests(unittest.TestCase):
             note = notes.load_note(note_id)
             assert note is not None
             self.assertEqual(note.status, "failed")
+
+    def test_start_waits_for_stop_to_finish(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            recorder = _BlockingStopRecorder()
+            daemon = Daemon(
+                _FakeFasterWhisperStt({}),
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_note_recording())
+            recorder.start_called.clear()
+
+            stop_result: list[bool] = []
+
+            def _stop() -> None:
+                stop_result.append(daemon.stop_note_recording())
+
+            stop_thread = threading.Thread(target=_stop)
+            stop_thread.start()
+            self.assertTrue(recorder.stop_entered.wait(timeout=1.0))
+
+            start_result: list[bool] = []
+
+            def _start() -> None:
+                start_result.append(daemon.start_note_recording())
+
+            start_thread = threading.Thread(target=_start)
+            start_thread.start()
+            time.sleep(0.1)
+
+            self.assertFalse(recorder.start_called.is_set())
+            self.assertTrue(start_thread.is_alive())
+
+            recorder.stop_release.set()
+            stop_thread.join(timeout=1.0)
+            start_thread.join(timeout=1.0)
+
+            self.assertFalse(stop_thread.is_alive())
+            self.assertFalse(start_thread.is_alive())
+            self.assertEqual(stop_result, [True])
+            self.assertEqual(start_result, [True])
+            self.assertTrue(recorder.start_called.is_set())
 
     def test_failed_note_recording_remains_stoppable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
