@@ -186,6 +186,19 @@ class ProService:
 
         subscription = self._require_active_subscription(account_id)
         plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
+        self.store.ensure_usage_period(
+            account_id=account_id,
+            plan_id=plan.plan_id,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+            included_seconds=plan.included_batch_meeting_seconds,
+        )
+
+        if not self.store.claim_meeting_job(job_id, from_statuses=("queued", "failed"), to="processing"):
+            refreshed = self.store.get_meeting_job(job_id)
+            status = refreshed.status if refreshed else job.status
+            raise ProServiceError(409, f"meeting job is not accepting audio in status {status}")
+
         usage = self.store.ensure_usage_period(
             account_id=account_id,
             plan_id=plan.plan_id,
@@ -196,11 +209,6 @@ class ProService:
         if usage.used_seconds >= USAGE_THRESHOLDS.hard_stop_seconds:
             self.store.update_meeting_job(job_id, status="quota_exceeded", error="quota exhausted")
             raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
-
-        if not self.store.claim_meeting_job(job_id, from_statuses=("queued", "failed"), to="processing"):
-            refreshed = self.store.get_meeting_job(job_id)
-            status = refreshed.status if refreshed else job.status
-            raise ProServiceError(409, f"meeting job is not accepting audio in status {status}")
 
         reserved_seconds = 0
         try:

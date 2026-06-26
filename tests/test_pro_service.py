@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import wave
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -139,6 +140,44 @@ class ProServiceTests(unittest.TestCase):
                 )
         self.assertEqual(ctx.exception.status, 409)
         transcribe.assert_not_called()
+
+    def test_hard_stop_does_not_clobber_ready_job_under_stale_queued_read(self) -> None:
+        job = self.service.create_meeting_job(
+            account_id=self.account_id,
+            device_id=self.device_id,
+            language="en",
+        )
+        self.service.store.update_meeting_job(job["job_id"], status="ready")
+        subscription = self.service.store.get_active_subscription(self.account_id)
+        assert subscription is not None
+        usage = self.service.store.ensure_usage_period(
+            account_id=self.account_id,
+            plan_id=subscription.plan_id,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+            included_seconds=90_000,
+        )
+        self.service.store.reserve_usage_seconds(
+            account_id=self.account_id,
+            period_start=usage.period_start,
+            seconds=90_000,
+            hard_stop_seconds=90_000,
+        )
+        ready_job = self.service.store.get_meeting_job(job["job_id"])
+        assert ready_job is not None
+        stale_queued_job = replace(ready_job, status="queued")
+        wav = self._write_wav(seconds=1)
+        with patch.object(self.service, "_owned_job", return_value=stale_queued_job):
+            with self.assertRaises(ProServiceError) as ctx:
+                self.service.upload_meeting_audio(
+                    account_id=self.account_id,
+                    job_id=job["job_id"],
+                    audio_path=wav,
+                )
+        self.assertEqual(ctx.exception.status, 409)
+        refreshed = self.service.store.get_meeting_job(job["job_id"])
+        assert refreshed is not None
+        self.assertEqual(refreshed.status, "ready")
 
     def test_ready_job_rejected_under_exhausted_quota_without_mutation(self) -> None:
         job = self.service.create_meeting_job(
