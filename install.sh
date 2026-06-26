@@ -20,6 +20,7 @@ PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
+INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # Prefer the distro Python so --system-site-packages can see modules such as
@@ -30,15 +31,49 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
+Usage: $0 [--user|--system] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
-Installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate and
+Default: --user.
+
+--user installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate and
 ~/.local/bin/dictate-ui-server, seeds the default config on first install,
 creates app launcher/autostart entries, prepares the faster-whisper turbo model,
 and installs the desktop "Quiet Console" UI shell when a build toolchain is
 present (unless disabled). All steps degrade gracefully when prerequisites are
 missing.
+
+--system installs a Linux desktop package into system paths using apt/pkexec or
+sudo. It is intentionally explicit because it requires administrator approval.
 EOF
+}
+
+install_system_package() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "--system is only supported by this installer on Linux."
+    exit 2
+  fi
+
+  local deb_path="${DICTATE_DEB:-}"
+  if [ -z "$deb_path" ]; then
+    deb_path="$(find "$SCRIPT_DIR/ui-shell/src-tauri/target/release/bundle/deb" -maxdepth 1 -name 'Dictate_*_amd64.deb' 2>/dev/null | sort | tail -n 1 || true)"
+  fi
+  if [ -z "$deb_path" ] || [ ! -f "$deb_path" ]; then
+    echo "No local .deb found. Build one first:"
+    echo "  DICTATE_BUNDLES=deb scripts/build-linux-desktop.sh"
+    echo "Or pass one explicitly:"
+    echo "  DICTATE_DEB=/path/to/Dictate_..._amd64.deb $0 --system"
+    exit 1
+  fi
+
+  echo "Installing system package: $deb_path"
+  if command -v pkexec >/dev/null 2>&1; then
+    pkexec apt-get install -y "$deb_path"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo apt-get install -y "$deb_path"
+  else
+    echo "Need pkexec or sudo to install a system package."
+    exit 1
+  fi
 }
 
 detect_session_backend() {
@@ -80,6 +115,12 @@ while [ "$#" -gt 0 ]; do
     --no-ui)
       INSTALL_UI=0
       ;;
+    --user)
+      INSTALL_SCOPE="user"
+      ;;
+    --system)
+      INSTALL_SCOPE="system"
+      ;;
     --session-backend)
       shift
       SESSION_BACKEND="${1:-}"
@@ -98,6 +139,11 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$INSTALL_SCOPE" = "system" ]; then
+  install_system_package
+  exit 0
+fi
 
 if [ "$SESSION_BACKEND" = "auto" ]; then
   SESSION_BACKEND="$(detect_session_backend)"
@@ -248,6 +294,14 @@ install_desktop_ui() {
 
 if [ "$INSTALL_UI" -eq 1 ]; then
   install_desktop_ui
+fi
+
+if [ -x "$BIN_DIR/dictate-ui-shell" ]; then
+  echo "Pointing launcher entries at the desktop UI shell ..."
+  sed -i "s|^Exec=.*|Exec=$BIN_DIR/dictate-ui-shell|" "$DESKTOP_PATH"
+  if [ "$STARTUP" -eq 1 ] && [ -f "$AUTOSTART_DIR/dictate.desktop" ]; then
+    sed -i "s|^Exec=.*|Exec=$BIN_DIR/dictate-ui-shell|" "$AUTOSTART_DIR/dictate.desktop"
+  fi
 fi
 
 if [ "$SEED_DEFAULT_CONFIG" -eq 1 ]; then

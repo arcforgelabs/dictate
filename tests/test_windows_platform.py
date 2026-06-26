@@ -250,7 +250,8 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('git -C "$SCRIPT_DIR" pull --ff-only', script)
         self.assertIn('AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"', script)
         self.assertIn('AUTOSTART_PATH="$AUTOSTART_DIR/dictate.desktop"', script)
-        self.assertIn('args=("$@")', script)
+        self.assertIn('UPDATE_SCOPE="user"', script)
+        self.assertIn('"$SCRIPT_DIR/install.sh" --system "${args[@]}"', script)
         self.assertIn('args+=("--no-startup")', script)
         self.assertIn('"$SCRIPT_DIR/install.sh" "${args[@]}"', script)
 
@@ -281,6 +282,8 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         # Source install should warn (not silently double up) when the .deb/.rpm
         # package is already installed.
+        self.assertIn('INSTALL_SCOPE="user"', script)
+        self.assertIn("install_system_package", script)
         self.assertIn("dpkg-query -W -f='${Status}' dictate", script)
         self.assertIn("rpm -q dictate", script)
         self.assertIn("sudo apt remove dictate", script)

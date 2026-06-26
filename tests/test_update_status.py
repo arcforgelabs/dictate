@@ -58,6 +58,7 @@ class UpdateStatusTests(unittest.TestCase):
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
             patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
             patch("dictate.update_status.sys.platform", "linux"),
         ):
             status = check_update_status()
@@ -81,6 +82,7 @@ class UpdateStatusTests(unittest.TestCase):
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
             patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
         ):
             status = check_update_status()
 
@@ -95,6 +97,7 @@ class UpdateStatusTests(unittest.TestCase):
                 side_effect=urllib.error.URLError("offline"),
             ),
             patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
         ):
             status = check_update_status()
 
@@ -130,14 +133,57 @@ class UpdateStatusTests(unittest.TestCase):
         return (
             patch("dictate.update_status.sys.platform", "linux"),
             patch("dictate.update_status._candidate_source_roots", return_value=[]),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
         )
 
-    def test_linux_package_update_downloads_and_installs(self) -> None:
-        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        plat, roots = self._linux_package()
+    def _linux_user(self):  # noqa: ANN202
+        return (
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch("dictate.update_status._candidate_source_roots", return_value=[]),
+            patch("dictate.update_status._is_linux_user_install", return_value=True),
+        )
+
+    def test_linux_user_update_runs_npm_bootstrap_without_pkexec(self) -> None:
+        calls = []
+
+        def fake_popen(command):  # noqa: ANN001
+            calls.append(command)
+            return object()
+
+        plat, roots, user = self._linux_user()
         with (
             plat,
             roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/npx"),
+            patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen),
+        ):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "command")
+        self.assertTrue(flow.started)
+        self.assertEqual(flow.install_kind, "linux-user")
+        self.assertEqual(
+            calls,
+            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@latest", "update", "--user"]],
+        )
+
+    def test_linux_user_update_requires_npx(self) -> None:
+        plat, roots, user = self._linux_user()
+        with plat, roots, user, patch("dictate.update_status.shutil.which", return_value=None):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "error")
+        self.assertEqual(flow.error_code, "missing_deps")
+        self.assertEqual(flow.missing_deps, ["npx"])
+
+    def test_linux_package_update_downloads_and_installs(self) -> None:
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status._find_release_asset",
@@ -158,10 +204,11 @@ class UpdateStatusTests(unittest.TestCase):
 
     def test_linux_package_update_reports_cancelled(self) -> None:
         cancelled = subprocess.CompletedProcess(args=[], returncode=126, stdout="", stderr="dismissed")
-        plat, roots = self._linux_package()
+        plat, roots, user = self._linux_package()
         with (
             plat,
             roots,
+            user,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status._find_release_asset",
@@ -178,8 +225,8 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(flow.error_code, "cancelled")
 
     def test_linux_package_update_requires_pkexec(self) -> None:
-        plat, roots = self._linux_package()
-        with plat, roots, patch("dictate.update_status.shutil.which", return_value=None):
+        plat, roots, user = self._linux_package()
+        with plat, roots, user, patch("dictate.update_status.shutil.which", return_value=None):
             flow = start_update_flow()
 
         self.assertEqual(flow.mode, "error")

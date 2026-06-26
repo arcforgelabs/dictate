@@ -26,19 +26,27 @@ powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/
 
 Open **Dictate** from the Start Menu after install.
 
-Ubuntu/Debian source install:
+Linux default install (per-user, no sudo for app updates):
 
 ```bash
 ./install-ubuntu.sh
 ```
 
-Generic Linux source install:
+Generic Linux user install:
 
 ```bash
 ./install.sh
 ```
 
 Open **Dictate** from the app launcher after install.
+
+Linux system package install is also supported when you explicitly want a
+machine-wide `.deb` install:
+
+```bash
+DICTATE_BUNDLES=deb scripts/build-linux-desktop.sh
+./install.sh --system
+```
 
 Windows developer/source install, from the repo/source directory:
 
@@ -83,11 +91,17 @@ powershell -ExecutionPolicy Bypass -File .\update-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1
 ```
 
-Linux:
+Linux user install:
 
 ```bash
 ./update.sh
 ./uninstall.sh
+```
+
+Linux system package update:
+
+```bash
+./update.sh --system
 ```
 
 Use `-RemoveUserData` on Windows or `--remove-user-data` on Linux only when you
@@ -178,10 +192,18 @@ the `dictate config` CLI).
   tray can launch the shell for the desktop capture surface.
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
-**Install it like a normal app:** tagged releases attach a **self-contained**
-Linux **`.deb`** — it bundles the frozen Python engine inside (PyInstaller
-sidecar), so there's no separate Python/pip step. Download, install, launch;
-speech models download on first use.
+**Install it like a normal app:** the default Linux channel is a per-user install
+under `~/.local/share/dictate` with launchers in `~/.local/bin` and
+`~/.local/share/applications`. App updates do not need sudo.
+
+```bash
+./install.sh
+./update.sh
+```
+
+Tagged releases can also attach a **self-contained** Linux **`.deb`** for users
+who explicitly want a system package. It bundles the frozen Python engine inside
+(PyInstaller sidecar), so there's no separate Python/pip step:
 
 ```bash
 sudo apt install ./Dictate_*_amd64.deb

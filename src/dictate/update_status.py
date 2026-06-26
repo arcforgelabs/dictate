@@ -123,13 +123,15 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
 def start_update_flow() -> UpdateFlow:
     """Start the safest available update path for this install.
 
-    A packaged Linux install (.deb) updates in-app and as one unit: download the
-    new package from the official release, install it via ``pkexec`` (one polkit
-    prompt), then the shell restarts so the new shell + engine come up together.
-    Source checkouts run the repository's own update.sh after validating the root.
+    User Linux installs update without elevation via the npm bootstrap package.
+    System Linux installs (.deb) download the new package from the official
+    release and install it via ``pkexec`` (one polkit prompt). Source checkouts
+    run the repository's own update.sh after validating the root.
     Windows updates through the Microsoft Store; macOS through its bundle.
     """
     context = _update_context()
+    if context["install_kind"] == "linux-user":
+        return _run_linux_user_update(context)
     if context["install_kind"] == "linux-package":
         return _run_linux_package_update(context)
     if context["install_kind"] == "linux-source":
@@ -187,6 +189,29 @@ def start_update_flow() -> UpdateFlow:
 
 DEB_ASSET_SUFFIX = "_amd64.deb"
 _DOWNLOAD_TIMEOUT = 600.0
+NPM_PACKAGE = "@arcforgelabs/dictate@latest"
+
+
+def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
+    """Start the no-sudo per-user updater."""
+    npx = shutil.which("npx")
+    if not npx:
+        return _missing_deps_flow(context, ["npx"])
+    command = [npx, "-y", NPM_PACKAGE, "update", "--user"]
+    subprocess.Popen(command)  # noqa: S603
+    return UpdateFlow(
+        mode="command",
+        started=True,
+        platform=str(context["platform"]),
+        install_kind=str(context["install_kind"]),
+        phase="working",
+        step="update",
+        progress=0,
+        actions=["restart"],
+        commands={"update": " ".join(command)},
+        missing_deps=[],
+        message="Started the Linux user updater.",
+    )
 
 
 def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
@@ -343,6 +368,8 @@ def _install_kind(platform: str, source_root: Path | None) -> str:
     if source_root is not None:
         return f"{platform}-source" if platform in {"linux", "windows"} else "source"
     if platform == "linux":
+        if _is_linux_user_install():
+            return "linux-user"
         return "linux-package"
     if platform == "windows":
         return "windows-package"
@@ -354,9 +381,10 @@ def _install_kind(platform: str, source_root: Path | None) -> str:
 def _available_actions(install_kind: str, has_update: bool) -> list[str]:
     actions = ["check"]
     if has_update:
-        # In-app update for source checkouts and the Linux .deb; Windows (Store)
-        # and macOS (bundle) still open the release page.
-        if install_kind.endswith("-source") or install_kind == "linux-package":
+        # In-app update for source checkouts, Linux user installs, and Linux
+        # system packages; Windows (Store) and macOS (bundle) still open the
+        # release page.
+        if install_kind.endswith("-source") or install_kind in {"linux-user", "linux-package"}:
             actions.append("update")
         else:
             actions.append("open_release")
@@ -369,6 +397,10 @@ def _commands_for_context(context: dict[str, object]) -> dict[str, str]:
     install_kind = str(context.get("install_kind") or "manual")
     if install_kind == "linux-source" and isinstance(source_root, Path):
         return {"update": f"bash {source_root / 'update.sh'}"}
+    if install_kind == "linux-user":
+        return {"update": f"npx -y {NPM_PACKAGE} update --user"}
+    if install_kind == "linux-package":
+        return {"update": "download latest .deb and install with pkexec/apt"}
     if install_kind == "windows-source" and isinstance(source_root, Path):
         return {
             "update": (
@@ -382,7 +414,9 @@ def _commands_for_context(context: dict[str, object]) -> dict[str, str]:
 def _manual_update_message(context: dict[str, object]) -> str:
     install_kind = str(context.get("install_kind") or "manual")
     if install_kind == "linux-package":
-        return "Open the latest Linux package from GitHub releases."
+        return "Open the latest Linux system package from GitHub releases."
+    if install_kind == "linux-user":
+        return "Run the Linux user updater."
     if install_kind == "windows-package":
         return "Open the latest signed Windows installer from GitHub releases."
     if install_kind == "mac-package":
@@ -406,6 +440,24 @@ def _find_source_root() -> Path | None:
         if _is_source_root(root):
             return root
     return None
+
+
+def _is_linux_user_install() -> bool:
+    install_root = Path.home() / ".local" / "share" / "dictate"
+    try:
+        executable = Path(sys.executable).resolve()
+    except OSError:
+        executable = Path(sys.executable)
+    if install_root in executable.parents:
+        return True
+
+    user_bin = Path.home() / ".local" / "bin" / "dictate"
+    if user_bin.is_symlink():
+        try:
+            return install_root in user_bin.resolve().parents
+        except OSError:
+            return False
+    return False
 
 
 def _is_source_root(root: Path) -> bool:

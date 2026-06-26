@@ -180,14 +180,19 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
 
 ## Install, update, conflicts
 
-- **Canonical Linux release install** is the `.deb`. `apt` handles updates
-  cleanly: dpkg replaces the old version and drops files no longer in the
-  package.
-- **`install.sh` (source/dev) and the package both ship a daemon** and would fight
-  over the push-to-talk key. `install.sh` now warns when a package is installed;
-  `uninstall.sh` stops a running source daemon and removes the `dictate-ui-server`
-  symlink + logs, **preserving `~/.config/dictate` and history by default**
-  (`--remove-user-data` to wipe).
+- **Default Linux release install is per-user**. `./install.sh` installs into
+  `~/.local/share/dictate`, links commands into `~/.local/bin`, and creates a
+  per-user desktop launcher/autostart entry. `./update.sh` stays on this channel
+  by default and does not require sudo.
+- **System Linux package install is explicit**. `./install.sh --system` or
+  `./update.sh --system` installs a local `.deb` into `/usr` through `pkexec` or
+  `sudo`. Use this channel for managed machine-wide installs, not as the default
+  developer/user update path.
+- **The user install and the package both ship a daemon** and would fight over the
+  push-to-talk key. `install.sh` warns when a package is installed;
+  `uninstall.sh` stops a running source/user daemon and removes the
+  `dictate-ui-server` symlink + logs, **preserving `~/.config/dictate` and
+  history by default** (`--remove-user-data` to wipe).
 - Same-version reinstall (e.g. swapping an onedir `.deb` for a onefile one with the
   same version string) needs `sudo apt install --reinstall ./<file>.deb` — apt
   skips an equal version otherwise. Download the asset first; `apt install
