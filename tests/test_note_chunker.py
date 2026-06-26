@@ -9,6 +9,15 @@ from dictate.note_chunker import NoteChunkAccumulator
 
 
 class NoteChunkAccumulatorTests(unittest.TestCase):
+    def test_default_note_chunks_emit_before_short_note_finishes(self) -> None:
+        acc = NoteChunkAccumulator(sample_rate=10, silence_rms=0.01)
+
+        emitted = acc.push(np.ones(60, dtype=np.float32))
+
+        self.assertEqual(len(emitted), 1)
+        self.assertAlmostEqual(emitted[0].t_start, 0.0)
+        self.assertAlmostEqual(emitted[0].t_end, 6.0)
+
     def test_emits_after_silence_gap_when_min_duration_met(self) -> None:
         acc = NoteChunkAccumulator(
             sample_rate=100,

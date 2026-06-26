@@ -77,7 +77,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 )
 
         self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "turbo")
+        self.assertEqual(model, "small")
 
     def test_default_startup_stt_prefers_turbo_when_cuda_is_available(self) -> None:
         parser = main_module.build_parser()
@@ -94,7 +94,7 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(backend, "faster-whisper")
         self.assertEqual(model, "turbo")
 
-    def test_default_startup_stt_uses_single_local_turbo_model_without_cuda(self) -> None:
+    def test_default_startup_stt_prefers_small_local_model_without_cuda(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -107,7 +107,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 )
 
         self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "turbo")
+        self.assertEqual(model, "small")
 
     def test_saved_backend_without_model_uses_auto_recommended_model(self) -> None:
         parser = main_module.build_parser()
@@ -123,6 +123,21 @@ class MainSttSelectionTests(unittest.TestCase):
 
         self.assertEqual(backend, "faster-whisper")
         self.assertEqual(model, "turbo")
+
+    def test_saved_backend_without_model_uses_small_local_model_without_cuda(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+
+        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=False):
+            with contextlib.redirect_stderr(io.StringIO()):
+                backend, model = main_module._resolve_startup_stt(
+                    args=args,
+                    cli_args=[],
+                    config=Config(stt_backend="faster-whisper"),
+                )
+
+        self.assertEqual(backend, "faster-whisper")
+        self.assertEqual(model, "small")
 
     def test_saved_non_example_model_name_is_preserved(self) -> None:
         parser = main_module.build_parser()

@@ -43,7 +43,7 @@ MODEL_CHOICES = {
     backend: spec.model_examples for backend, spec in BACKEND_REGISTRY.items()
 }
 DEFAULT_MODELS = {
-    "faster-whisper": "turbo",
+    "faster-whisper": "small",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",

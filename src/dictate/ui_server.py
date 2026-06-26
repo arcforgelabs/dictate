@@ -310,24 +310,25 @@ class UiBackend:
         for backend in PROVIDER_ORDER:
             if backend not in BACKEND_REGISTRY:
                 continue
-            model = DEFAULT_MODELS[backend]
             meta = PROVIDER_META.get(backend, {})
-            entry: dict[str, Any] = {
-                "id": f"{backend}/{model}",
-                "backend": backend,
-                "model": model,
-                "name": model if meta.get("local") else model,
-                "provider": meta.get("provider", backend),
-                "brand": meta.get("brand"),
-                "local": bool(meta.get("local")),
-                "experimental": bool(meta.get("experimental")),
-                "desc": meta.get("desc", ""),
-            }
-            if not meta.get("local"):
-                entry["keyName"] = meta.get("keyName", f"{backend} API key")
-                entry["keyPrefix"] = meta.get("keyPrefix", "")
-                entry["configured"] = self._provider_ready(backend, cfg)
-            models.append(entry)
+            for model in BACKEND_REGISTRY[backend].model_examples:
+                entry: dict[str, Any] = {
+                    "id": f"{backend}/{model}",
+                    "backend": backend,
+                    "model": model,
+                    "name": model,
+                    "provider": meta.get("provider", backend),
+                    "brand": meta.get("brand"),
+                    "local": bool(meta.get("local")),
+                    "experimental": bool(meta.get("experimental")),
+                    "desc": meta.get("desc", ""),
+                    "default": model == DEFAULT_MODELS[backend],
+                }
+                if not meta.get("local"):
+                    entry["keyName"] = meta.get("keyName", f"{backend} API key")
+                    entry["keyPrefix"] = meta.get("keyPrefix", "")
+                    entry["configured"] = self._provider_ready(backend, cfg)
+                models.append(entry)
         # The local provider's display name keeps the "provider · model" form.
         for entry in models:
             if entry["local"]:

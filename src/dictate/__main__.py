@@ -424,7 +424,7 @@ def _resolve_saved_model_name(backend: SttBackend, configured_model: str | None)
 
 def _default_model_for_backend(backend: SttBackend) -> str:
     if backend == "faster-whisper":
-        return "turbo"
+        return "turbo" if _cuda_available_for_faster_whisper() else "small"
     return resolve_model_name(backend, None)
 
 

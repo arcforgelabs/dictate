@@ -165,7 +165,7 @@ class WindowsPlatformTests(unittest.TestCase):
         }
 
         self.assertEqual(assignments["DEFAULT_BACKEND"], "faster-whisper")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "turbo")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "small")
 
     def test_windows_controls_apply_configured_key_command(self) -> None:
         fake_tkinter = types.ModuleType("tkinter")

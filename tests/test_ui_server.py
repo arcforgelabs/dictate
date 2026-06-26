@@ -177,11 +177,15 @@ class UiBackendStateTests(unittest.TestCase):
             state = _backend(d).get_state()
             self.assertIn("version", state)
             self.assertEqual(state["model"]["backend"], "faster-whisper")
-            self.assertEqual(state["model"]["model"], "turbo")
-            self.assertEqual(state["model"]["id"], "faster-whisper/turbo")
+            self.assertEqual(state["model"]["model"], "small")
+            self.assertEqual(state["model"]["id"], "faster-whisper/small")
             # local models first, hosted providers present
             self.assertEqual(state["models"][0]["backend"], "faster-whisper")
             self.assertTrue(state["models"][0]["local"])
+            local_models = [
+                model["model"] for model in state["models"] if model["backend"] == "faster-whisper"
+            ]
+            self.assertEqual(local_models, ["tiny", "base", "small", "medium", "turbo", "large-v3-turbo"])
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(backends, {"faster-whisper", "whisperx", "openai", "xai", "gemini"})
             # default shortcut + activation

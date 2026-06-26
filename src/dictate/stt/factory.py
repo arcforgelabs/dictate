@@ -21,14 +21,19 @@ from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_availabl
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
-    "faster-whisper": "turbo",
+    "faster-whisper": "small",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
     "gemini": "gemini-3-flash-preview",
 }
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
+    "tiny",
+    "base",
+    "small",
+    "medium",
     "turbo",
+    "large-v3-turbo",
 )
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
