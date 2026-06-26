@@ -259,6 +259,10 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             raise ApiError(401, "unauthorized")
 
     def _handle_stripe_webhook(self, service: ProService) -> _Response:
+        max_bytes = int(os.environ.get("DICTATE_PRO_WEBHOOK_MAX_BYTES", "1000000"))
+        content_length = int(self.headers.get("Content-Length") or "0")
+        if content_length > max_bytes:
+            raise ApiError(413, "webhook payload too large")
         settings = load_stripe_settings()
         payload = self._read_body()
         signature = self.headers.get("Stripe-Signature", "")

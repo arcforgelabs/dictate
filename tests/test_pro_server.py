@@ -181,6 +181,23 @@ class ProServerTests(unittest.TestCase):
             server_module._rate_limiter = original
             os.environ.pop("DICTATE_PRO_STRIPE_DEV", None)
 
+    def test_stripe_webhook_rejects_oversized_body(self) -> None:
+        os.environ["DICTATE_PRO_STRIPE_DEV"] = "1"
+        os.environ["DICTATE_PRO_WEBHOOK_MAX_BYTES"] = "10"
+        try:
+            status, body = _request(
+                self.base_url,
+                "POST",
+                "/v1/webhooks/stripe",
+                {"id": "evt_big", "type": "ping", "created": 1, "data": {"object": {}}},
+                content_type="application/json",
+            )
+            self.assertEqual(status, 413)
+            self.assertIn("too large", body["error"])
+        finally:
+            os.environ.pop("DICTATE_PRO_STRIPE_DEV", None)
+            os.environ.pop("DICTATE_PRO_WEBHOOK_MAX_BYTES", None)
+
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"
         sample_rate = 16000

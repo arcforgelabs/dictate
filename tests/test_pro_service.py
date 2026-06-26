@@ -140,6 +140,60 @@ class ProServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 409)
         transcribe.assert_not_called()
 
+    def test_ready_job_rejected_under_exhausted_quota_without_mutation(self) -> None:
+        job = self.service.create_meeting_job(
+            account_id=self.account_id,
+            device_id=self.device_id,
+            language="en",
+        )
+        self.service.store.update_meeting_job(job["job_id"], status="ready")
+        subscription = self.service.store.get_active_subscription(self.account_id)
+        assert subscription is not None
+        usage = self.service.store.ensure_usage_period(
+            account_id=self.account_id,
+            plan_id=subscription.plan_id,
+            period_start=subscription.current_period_start,
+            period_end=subscription.current_period_end,
+            included_seconds=90_000,
+        )
+        self.service.store.reserve_usage_seconds(
+            account_id=self.account_id,
+            period_start=usage.period_start,
+            seconds=90_000,
+            hard_stop_seconds=90_000,
+        )
+        wav = self._write_wav(seconds=1)
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.upload_meeting_audio(
+                account_id=self.account_id,
+                job_id=job["job_id"],
+                audio_path=wav,
+            )
+        self.assertEqual(ctx.exception.status, 409)
+        refreshed = self.service.store.get_meeting_job(job["job_id"])
+        assert refreshed is not None
+        self.assertEqual(refreshed.status, "ready")
+
+    def test_malformed_audio_resets_job_to_failed(self) -> None:
+        job = self.service.create_meeting_job(
+            account_id=self.account_id,
+            device_id=self.device_id,
+            language="en",
+        )
+        bad_audio = Path(self._tmp.name) / "not-a-wav.bin"
+        bad_audio.write_bytes(b"not wav data")
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.upload_meeting_audio(
+                account_id=self.account_id,
+                job_id=job["job_id"],
+                audio_path=bad_audio,
+            )
+        self.assertEqual(ctx.exception.status, 400)
+        refreshed = self.service.store.get_meeting_job(job["job_id"])
+        assert refreshed is not None
+        self.assertEqual(refreshed.status, "failed")
+        self.assertGreater(refreshed.retry_count, 0)
+
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"
         sample_rate = 16000

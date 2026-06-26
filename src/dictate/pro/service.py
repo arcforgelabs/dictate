@@ -181,6 +181,8 @@ class ProService:
         hotwords: str | None = None,
     ) -> dict[str, Any]:
         job = self._owned_job(account_id, job_id)
+        if job.status not in {"queued", "failed"}:
+            raise ProServiceError(409, f"meeting job is not accepting audio in status {job.status}")
 
         subscription = self._require_active_subscription(account_id)
         plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
@@ -200,36 +202,40 @@ class ProService:
             status = refreshed.status if refreshed else job.status
             raise ProServiceError(409, f"meeting job is not accepting audio in status {status}")
 
-        probed_duration = audio_duration_seconds(audio_path)
-        estimated_seconds = billable_seconds_for_duration(probed_duration)
-        if not self.store.reserve_usage_seconds(
-            account_id=account_id,
-            period_start=subscription.current_period_start,
-            seconds=estimated_seconds,
-            hard_stop_seconds=USAGE_THRESHOLDS.hard_stop_seconds,
-        ):
-            self.store.update_meeting_job(
-                job_id,
-                status="quota_exceeded",
-                audio_duration_seconds=probed_duration,
-                error="quota exhausted",
-                completed_at=iso(),
-            )
-            raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
-
+        reserved_seconds = 0
         try:
+            probed_duration = audio_duration_seconds(audio_path)
+            estimated_seconds = billable_seconds_for_duration(probed_duration)
+            if not self.store.reserve_usage_seconds(
+                account_id=account_id,
+                period_start=subscription.current_period_start,
+                seconds=estimated_seconds,
+                hard_stop_seconds=USAGE_THRESHOLDS.hard_stop_seconds,
+            ):
+                self.store.update_meeting_job(
+                    job_id,
+                    status="quota_exceeded",
+                    audio_duration_seconds=probed_duration,
+                    error="quota exhausted",
+                    completed_at=iso(),
+                )
+                raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
+            reserved_seconds = estimated_seconds
             result = self._settings.transcribe(
                 audio_path,
                 language=job.language,
                 hotwords=hotwords,
                 diarize=job.requested_diarization,
             )
+        except ProServiceError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            self.store.release_usage_seconds(
-                account_id=account_id,
-                period_start=subscription.current_period_start,
-                seconds=estimated_seconds,
-            )
+            if reserved_seconds:
+                self.store.release_usage_seconds(
+                    account_id=account_id,
+                    period_start=subscription.current_period_start,
+                    seconds=reserved_seconds,
+                )
             self.store.update_meeting_job(
                 job_id,
                 status="failed",
@@ -237,7 +243,9 @@ class ProService:
                 retry_count=job.retry_count + 1,
                 completed_at=iso(),
             )
-            raise ProServiceError(502, f"transcription failed: {exc}") from exc
+            if reserved_seconds:
+                raise ProServiceError(502, f"transcription failed: {exc}") from exc
+            raise ProServiceError(400, f"unreadable audio: {exc}") from exc
 
         usage_delta = result.billable_seconds - estimated_seconds
         if usage_delta != 0:
