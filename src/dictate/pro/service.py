@@ -264,6 +264,7 @@ class ProService:
 
         usage_delta = result.billable_seconds - estimated_seconds
         usage_delta_applied = 0
+        usage_event_id = f"usage_{job_id}"
         try:
             if usage_delta != 0:
                 self.store.adjust_usage_seconds(
@@ -273,9 +274,8 @@ class ProService:
                 )
                 usage_delta_applied = usage_delta
 
-            event_id = f"usage_{job_id}"
             self.store.record_usage_event(
-                event_id=event_id,
+                event_id=usage_event_id,
                 account_id=account_id,
                 job_id=job_id,
                 billable_seconds=result.billable_seconds,
@@ -292,6 +292,7 @@ class ProService:
                 error=None,
             )
         except Exception as exc:  # noqa: BLE001
+            self.store.delete_usage_event(usage_event_id)
             net_charged = reserved_seconds + usage_delta_applied
             if net_charged:
                 self.store.release_usage_seconds(

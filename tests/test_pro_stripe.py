@@ -192,6 +192,52 @@ class StripeWebhookTests(unittest.TestCase):
         subscription = self.store.get_active_subscription(account.account_id)
         self.assertIsNone(subscription)
 
+    def test_subscription_before_account_link_is_retryable(self) -> None:
+        subscription_event = {
+            "id": "sub_early",
+            "customer": "cus_early",
+            "status": "active",
+            "current_period_start": 1_700_000_000,
+            "current_period_end": 1_700_086_400,
+            "cancel_at_period_end": False,
+            "items": {"data": [{"price": {"id": "price_pro"}}]},
+        }
+        result = self.handler.handle(
+            event_id="evt_sub_early",
+            event_type="customer.subscription.created",
+            payload=subscription_event,
+            event_created=1_700,
+        )
+        self.assertEqual(result["status"], "ignored")
+        self.assertEqual(result["reason"], "account not found")
+        self.assertFalse(self.store.billing_event_exists("evt_sub_early"))
+
+        checkout = {
+            "customer": "cus_early",
+            "customer_details": {"email": "early@example.com"},
+        }
+        link_result = self.handler.handle(
+            event_id="evt_checkout_early",
+            event_type="checkout.session.completed",
+            payload=checkout,
+        )
+        self.assertEqual(link_result["status"], "ok")
+
+        replay = self.handler.handle(
+            event_id="evt_sub_early",
+            event_type="customer.subscription.created",
+            payload=subscription_event,
+            event_created=1_700,
+        )
+        self.assertEqual(replay["status"], "ok")
+        self.assertTrue(self.store.billing_event_exists("evt_sub_early"))
+        account = self.store.get_account_by_stripe_customer("cus_early")
+        assert account is not None
+        subscription = self.store.get_active_subscription(account.account_id)
+        self.assertIsNotNone(subscription)
+        assert subscription is not None
+        self.assertEqual(subscription.plan_id, "dictate_pro_monthly")
+
 
 if __name__ == "__main__":
     unittest.main()

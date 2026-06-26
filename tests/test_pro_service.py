@@ -314,6 +314,7 @@ class ProServiceTests(unittest.TestCase):
         )
         assert usage_after is not None
         self.assertEqual(usage_after.used_seconds, initial_used)
+        self.assertFalse(self.service.store.usage_event_exists(f"usage_{job['job_id']}"))
 
         with patch.object(self.service._settings, "transcribe", return_value=fake):
             result = self.service.upload_meeting_audio(
@@ -323,6 +324,7 @@ class ProServiceTests(unittest.TestCase):
             )
         self.assertEqual(result["job"]["status"], "ready")
         self.assertEqual(result["usage"]["used_seconds"], initial_used + 62)
+        self.assertTrue(self.service.store.usage_event_exists(f"usage_{job['job_id']}"))
 
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"

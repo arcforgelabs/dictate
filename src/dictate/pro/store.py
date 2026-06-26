@@ -420,6 +420,8 @@ class ProStore:
                 """,
                 (row.stripe_subscription_id,),
             ).fetchone()
+            # Stripe event_created is second-granularity; two events in the same
+            # second cannot be ordered by timestamp alone (accepted residual).
             if (
                 event_created is not None
                 and existing is not None
@@ -665,6 +667,19 @@ class ProStore:
             except sqlite3.IntegrityError:
                 return False
             return True
+
+    def delete_usage_event(self, event_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM usage_events WHERE event_id = ?", (event_id,))
+            return cur.rowcount > 0
+
+    def usage_event_exists(self, event_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM usage_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            return row is not None
 
     def create_meeting_job(
         self,

@@ -81,6 +81,9 @@ class StripeWebhookHandler:
         else:
             result = {"status": "ignored", "event_type": event_type}
 
+        if _is_retryable_ignored(result):
+            return result
+
         if not self._store.record_billing_event(
             event_id=event_id,
             provider="stripe",
@@ -231,3 +234,8 @@ def _string(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _is_retryable_ignored(result: dict[str, Any]) -> bool:
+    """Subscription events ignored for a missing account may arrive before checkout links the customer."""
+    return result.get("status") == "ignored" and result.get("reason") == "account not found"
