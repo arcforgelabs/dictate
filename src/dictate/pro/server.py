@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from dictate.pro.auth import AuthDeliveryError
 from dictate.pro.service import ProService, ProServiceError, ProSettings
 from dictate.pro.stripe_handler import load_stripe_settings, verify_stripe_signature
 from dictate.version import RELEASE_VERSION
@@ -143,7 +144,11 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             email = str(body.get("email", "")).strip()
             if not email:
                 raise ApiError(400, "email is required")
-            return _Response(200, service.auth.start_sign_in(email))
+            try:
+                payload = service.auth.start_sign_in(email)
+            except AuthDeliveryError as exc:
+                raise ApiError(503, str(exc)) from exc
+            return _Response(200, payload)
 
         if path == "/v1/auth/complete" and method == "POST":
             body = self._read_json()

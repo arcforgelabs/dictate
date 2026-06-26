@@ -9,6 +9,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from dictate.pro.email_delivery import AuthDeliveryError, send_auth_code
 from dictate.pro.store import ProStore, iso, utcnow
 
 
@@ -73,6 +74,8 @@ class ProAuth:
         }
         if self._dev_expose_code:
             payload["dev_code"] = code
+            return payload
+        send_auth_code(to_address=account.email, code=code)
         return payload
 
     def complete_sign_in(
