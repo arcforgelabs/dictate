@@ -73,6 +73,41 @@ class ProStoreTests(unittest.TestCase):
         self.assertTrue(first)
         self.assertFalse(second)
 
+    def test_claim_meeting_job_is_atomic(self) -> None:
+        account = self.store.get_or_create_account("claim@example.com")
+        job = self.store.create_meeting_job(
+            account_id=account.account_id,
+            device_id="dev_1",
+            plan_id=DICTATE_PRO_PLAN.plan_id,
+            mode="batch_meeting",
+            provider="xai",
+            provider_model="test",
+            language=None,
+            requested_diarization=True,
+            billing_period_start=iso(),
+            billing_period_end=iso(),
+        )
+        self.assertTrue(
+            self.store.claim_meeting_job(job.job_id, from_statuses=("queued", "failed"), to="processing")
+        )
+        self.assertFalse(
+            self.store.claim_meeting_job(job.job_id, from_statuses=("queued", "failed"), to="processing")
+        )
+        updated = self.store.get_meeting_job(job.job_id)
+        assert updated is not None
+        self.assertEqual(updated.status, "processing")
+        self.assertIsNotNone(updated.started_at)
+
+    def test_billing_event_exists(self) -> None:
+        self.assertFalse(self.store.billing_event_exists("evt_missing"))
+        self.store.record_billing_event(
+            event_id="evt_exists",
+            provider="stripe",
+            event_type="test.event",
+            payload={"id": "evt_exists"},
+        )
+        self.assertTrue(self.store.billing_event_exists("evt_exists"))
+
 
 if __name__ == "__main__":
     unittest.main()

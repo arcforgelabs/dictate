@@ -48,6 +48,7 @@ class SubscriptionRow:
     current_period_start: str
     current_period_end: str
     cancel_at_period_end: bool
+    last_event_created: int | None = None
 
 
 @dataclass(slots=True)
@@ -234,6 +235,10 @@ class ProStore:
                 );
                 """
             )
+            try:
+                conn.execute("ALTER TABLE subscriptions ADD COLUMN last_event_created INTEGER")
+            except sqlite3.OperationalError:
+                pass
 
     def get_or_create_account(self, email: str) -> AccountRow:
         normalized = email.strip().lower()
@@ -401,8 +406,9 @@ class ProStore:
                 """
                 INSERT INTO subscriptions (
                     account_id, stripe_subscription_id, stripe_customer_id, plan_id, status,
-                    current_period_start, current_period_end, cancel_at_period_end, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    current_period_start, current_period_end, cancel_at_period_end, updated_at,
+                    last_event_created
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stripe_subscription_id) DO UPDATE SET
                     account_id = excluded.account_id,
                     stripe_customer_id = excluded.stripe_customer_id,
@@ -411,7 +417,8 @@ class ProStore:
                     current_period_start = excluded.current_period_start,
                     current_period_end = excluded.current_period_end,
                     cancel_at_period_end = excluded.cancel_at_period_end,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    last_event_created = excluded.last_event_created
                 """,
                 (
                     row.account_id,
@@ -423,8 +430,24 @@ class ProStore:
                     row.current_period_end,
                     1 if row.cancel_at_period_end else 0,
                     iso(),
+                    row.last_event_created,
                 ),
             )
+
+    def get_subscription_by_stripe_id(self, stripe_subscription_id: str) -> SubscriptionRow | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT account_id, stripe_subscription_id, stripe_customer_id, plan_id, status,
+                       current_period_start, current_period_end, cancel_at_period_end, last_event_created
+                FROM subscriptions
+                WHERE stripe_subscription_id = ?
+                """,
+                (stripe_subscription_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return _subscription_row(row)
 
     def get_active_subscription(self, account_id: str) -> SubscriptionRow | None:
         active_statuses = ("active", "trialing", "past_due")
@@ -432,7 +455,7 @@ class ProStore:
             row = conn.execute(
                 """
                 SELECT account_id, stripe_subscription_id, stripe_customer_id, plan_id, status,
-                       current_period_start, current_period_end, cancel_at_period_end
+                       current_period_start, current_period_end, cancel_at_period_end, last_event_created
                 FROM subscriptions
                 WHERE account_id = ?
                   AND status IN ({})
@@ -443,16 +466,7 @@ class ProStore:
             ).fetchone()
             if not row:
                 return None
-            return SubscriptionRow(
-                account_id=row["account_id"],
-                stripe_subscription_id=row["stripe_subscription_id"],
-                stripe_customer_id=row["stripe_customer_id"],
-                plan_id=row["plan_id"],
-                status=row["status"],
-                current_period_start=row["current_period_start"],
-                current_period_end=row["current_period_end"],
-                cancel_at_period_end=bool(row["cancel_at_period_end"]),
-            )
+            return _subscription_row(row)
 
     def ensure_usage_period(
         self,
@@ -680,6 +694,26 @@ class ProStore:
         with self._conn() as conn:
             conn.execute(f"UPDATE meeting_jobs SET {columns} WHERE job_id = ?", values)
 
+    def claim_meeting_job(
+        self,
+        job_id: str,
+        *,
+        from_statuses: tuple[str, ...] = ("queued", "failed"),
+        to: str = "processing",
+    ) -> bool:
+        now = iso()
+        placeholders = ",".join("?" * len(from_statuses))
+        with self._conn() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE meeting_jobs
+                SET status = ?, started_at = ?
+                WHERE job_id = ? AND status IN ({placeholders})
+                """,
+                (to, now, job_id, *from_statuses),
+            )
+            return cursor.rowcount == 1
+
     def save_transcript_segments(self, job_id: str, segments: list[TranscriptSegmentRow]) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM transcript_segments WHERE job_id = ?", (job_id,))
@@ -726,6 +760,14 @@ class ProStore:
                 for row in rows
             ]
 
+    def billing_event_exists(self, event_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM billing_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            return row is not None
+
     def record_billing_event(self, *, event_id: str, provider: str, event_type: str, payload: dict[str, Any]) -> bool:
         with self._conn() as conn:
             try:
@@ -739,6 +781,22 @@ class ProStore:
             except sqlite3.IntegrityError:
                 return False
             return True
+
+
+def _subscription_row(row: sqlite3.Row) -> SubscriptionRow:
+    keys = row.keys()
+    last_event_created = row["last_event_created"] if "last_event_created" in keys else None
+    return SubscriptionRow(
+        account_id=row["account_id"],
+        stripe_subscription_id=row["stripe_subscription_id"],
+        stripe_customer_id=row["stripe_customer_id"],
+        plan_id=row["plan_id"],
+        status=row["status"],
+        current_period_start=row["current_period_start"],
+        current_period_end=row["current_period_end"],
+        cancel_at_period_end=bool(row["cancel_at_period_end"]),
+        last_event_created=last_event_created,
+    )
 
 
 def _meeting_row(row: sqlite3.Row) -> MeetingJobRow:

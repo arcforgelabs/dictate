@@ -17,7 +17,7 @@ from unittest.mock import patch
 import numpy as np
 
 from dictate.pro.relay import RelayResult
-from dictate.pro.server import ProRequestHandler
+from dictate.pro.server import ProRequestHandler, _RateLimiter, _get_rate_limiter
 from dictate.pro.service import ProService, ProSettings
 from dictate.pro.store import TranscriptSegmentRow
 
@@ -134,6 +134,52 @@ class ProServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertIn("hi", transcript["text"])
+
+    def test_stripe_webhook_and_healthz_bypass_rate_limiter(self) -> None:
+        import dictate.pro.server as server_module
+
+        original = server_module._rate_limiter
+        try:
+            server_module._rate_limiter = _RateLimiter(rpm=1)
+            status, _ = _request(self.base_url, "GET", "/healthz")
+            self.assertEqual(status, 200)
+            status, _ = _request(self.base_url, "GET", "/healthz")
+            self.assertEqual(status, 200)
+
+            os.environ["DICTATE_PRO_STRIPE_DEV"] = "1"
+            payload = {
+                "id": "evt_rate",
+                "type": "customer.subscription.created",
+                "created": 1_700_000_000,
+                "data": {
+                    "object": {
+                        "id": "sub_rate",
+                        "customer": "cus_missing",
+                        "status": "active",
+                        "current_period_start": 1_700_000_000,
+                        "current_period_end": 1_700_086_400,
+                        "cancel_at_period_end": False,
+                        "items": {"data": [{"price": {"id": "price_pro"}}]},
+                    }
+                },
+            }
+            status, _ = _request(
+                self.base_url,
+                "POST",
+                "/v1/webhooks/stripe",
+                payload,
+            )
+            self.assertEqual(status, 200)
+            status, _ = _request(
+                self.base_url,
+                "POST",
+                "/v1/webhooks/stripe",
+                {"id": "evt_rate_2", "type": "ping", "created": 1, "data": {"object": {}}},
+            )
+            self.assertEqual(status, 200)
+        finally:
+            server_module._rate_limiter = original
+            os.environ.pop("DICTATE_PRO_STRIPE_DEV", None)
 
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"

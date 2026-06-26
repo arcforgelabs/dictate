@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -21,6 +22,8 @@ from dictate.platform_paths import user_data_dir
 
 DEFAULT_API_URL = "http://127.0.0.1:18765"
 SESSION_PATH = user_data_dir() / "pro-session.json"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -83,6 +86,10 @@ class ProClient:
         if self._save_refresh_token(session.refresh_token):
             payload.pop("refresh_token", None)
         else:
+            logger.warning(
+                "OS secret store unavailable; persisting refresh token in plaintext %s",
+                self.session_path,
+            )
             payload["refresh_token"] = session.refresh_token
         self.session_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         try:

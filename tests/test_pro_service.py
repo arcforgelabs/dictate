@@ -103,6 +103,43 @@ class ProServiceTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status, 402)
 
+    def test_concurrent_upload_claim_rejects_second_attempt(self) -> None:
+        fake = RelayResult(
+            text="Speaker 1: hello",
+            segments=[
+                TranscriptSegmentRow(
+                    seq=0,
+                    speaker_id="0",
+                    speaker_label="Speaker 1",
+                    text="hello",
+                    t_start=0.0,
+                    t_end=1.0,
+                )
+            ],
+            audio_duration_seconds=61.2,
+            billable_seconds=62,
+            provider_request_id="req_test",
+            raw_response={},
+        )
+        job = self.service.create_meeting_job(
+            account_id=self.account_id,
+            device_id=self.device_id,
+            language="en",
+        )
+        self.assertTrue(
+            self.service.store.claim_meeting_job(job["job_id"], from_statuses=("queued", "failed"), to="processing")
+        )
+        wav = self._write_wav(seconds=61)
+        with patch.object(self.service._settings, "transcribe", return_value=fake) as transcribe:
+            with self.assertRaises(ProServiceError) as ctx:
+                self.service.upload_meeting_audio(
+                    account_id=self.account_id,
+                    job_id=job["job_id"],
+                    audio_path=wav,
+                )
+        self.assertEqual(ctx.exception.status, 409)
+        transcribe.assert_not_called()
+
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"
         sample_rate = 16000

@@ -63,7 +63,24 @@ class StripeWebhookHandler:
         self._store = store
         self._settings = settings or load_stripe_settings()
 
-    def handle(self, *, event_id: str, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def handle(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        event_created: int | None = None,
+    ) -> dict[str, Any]:
+        if self._store.billing_event_exists(event_id):
+            return {"status": "duplicate", "event_id": event_id}
+
+        if event_type.startswith("customer.subscription."):
+            result = self._handle_subscription_event(payload, event_created=event_created)
+        elif event_type == "checkout.session.completed":
+            result = self._handle_checkout_completed(payload)
+        else:
+            result = {"status": "ignored", "event_type": event_type}
+
         if not self._store.record_billing_event(
             event_id=event_id,
             provider="stripe",
@@ -71,12 +88,7 @@ class StripeWebhookHandler:
             payload=payload,
         ):
             return {"status": "duplicate", "event_id": event_id}
-
-        if event_type.startswith("customer.subscription."):
-            return self._handle_subscription_event(payload)
-        if event_type == "checkout.session.completed":
-            return self._handle_checkout_completed(payload)
-        return {"status": "ignored", "event_type": event_type}
+        return result
 
     def _handle_checkout_completed(self, payload: dict[str, Any]) -> dict[str, Any]:
         customer_id = _string(payload.get("customer"))
@@ -89,12 +101,32 @@ class StripeWebhookHandler:
             self._store.link_stripe_customer(account_id=account.account_id, stripe_customer_id=customer_id)
         return {"status": "ok", "linked_customer": customer_id, "account_id": account.account_id if account else None}
 
-    def _handle_subscription_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _handle_subscription_event(
+        self,
+        payload: dict[str, Any],
+        *,
+        event_created: int | None = None,
+    ) -> dict[str, Any]:
         subscription_id = _string(payload.get("id"))
         customer_id = _string(payload.get("customer"))
         status = _string(payload.get("status")) or "unknown"
         if not subscription_id or not customer_id:
             return {"status": "ignored", "reason": "missing subscription or customer"}
+
+        existing = self._store.get_subscription_by_stripe_id(subscription_id)
+        if (
+            event_created is not None
+            and existing is not None
+            and existing.last_event_created is not None
+            and event_created < existing.last_event_created
+        ):
+            return {
+                "status": "skipped",
+                "reason": "stale_event",
+                "subscription_id": subscription_id,
+                "stored_event_created": existing.last_event_created,
+                "event_created": event_created,
+            }
 
         account = self._store.get_account_by_stripe_customer(customer_id)
         if account is None:
@@ -107,6 +139,9 @@ class StripeWebhookHandler:
 
         plan_id = self._resolve_plan_id(payload)
         period_start, period_end = _period_bounds(payload)
+        last_event_created = event_created
+        if last_event_created is None and existing is not None:
+            last_event_created = existing.last_event_created
         row = SubscriptionRow(
             account_id=account.account_id,
             stripe_subscription_id=subscription_id,
@@ -116,6 +151,7 @@ class StripeWebhookHandler:
             current_period_start=period_start,
             current_period_end=period_end,
             cancel_at_period_end=bool(payload.get("cancel_at_period_end")),
+            last_event_created=last_event_created,
         )
         self._store.upsert_subscription(row)
         if status in {"active", "trialing", "past_due"}:

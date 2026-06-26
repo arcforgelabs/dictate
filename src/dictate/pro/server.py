@@ -112,11 +112,11 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         return None
 
     def _dispatch(self, method: str) -> None:
-        if not _get_rate_limiter().allow():
-            self._send_json(429, {"error": "rate limit exceeded"})
-            return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        if path not in {"/healthz", "/v1/webhooks/stripe"} and not _get_rate_limiter().allow():
+            self._send_json(429, {"error": "rate limit exceeded"})
+            return
         service: ProService = self.server.service  # type: ignore[attr-defined]
 
         try:
@@ -279,7 +279,14 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         object_payload = data.get("object") if isinstance(data, dict) else None
         if not event_id or not event_type or not isinstance(object_payload, dict):
             raise ApiError(400, "invalid stripe event")
-        result = service.stripe.handle(event_id=event_id, event_type=event_type, payload=object_payload)
+        event_created_raw = event.get("created")
+        event_created = event_created_raw if isinstance(event_created_raw, int) else None
+        result = service.stripe.handle(
+            event_id=event_id,
+            event_type=event_type,
+            payload=object_payload,
+            event_created=event_created,
+        )
         return _Response(200, result)
 
     def _handle_audio_upload(self, service: ProService, account_id: str, job_id: str) -> dict[str, Any]:
