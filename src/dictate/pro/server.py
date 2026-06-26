@@ -7,6 +7,9 @@ import logging
 import mimetypes
 import os
 import re
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +24,40 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18765
+
+
+class _RateLimiter:
+    def __init__(self, rpm: int) -> None:
+        self._rpm = rpm
+        self._lock = threading.Lock()
+        self._timestamps: deque[float] = deque()
+
+    def allow(self) -> bool:
+        if self._rpm <= 0:
+            return True
+        now = time.monotonic()
+        with self._lock:
+            cutoff = now - 60.0
+            while self._timestamps and self._timestamps[0] <= cutoff:
+                self._timestamps.popleft()
+            if len(self._timestamps) >= self._rpm:
+                return False
+            self._timestamps.append(now)
+            return True
+
+
+_rate_limiter: _RateLimiter | None = None
+_rate_limiter_lock = threading.Lock()
+
+
+def _get_rate_limiter() -> _RateLimiter:
+    global _rate_limiter
+    if _rate_limiter is None:
+        with _rate_limiter_lock:
+            if _rate_limiter is None:
+                rpm = int(os.environ.get("DICTATE_PRO_RPM", "120"))
+                _rate_limiter = _RateLimiter(rpm)
+    return _rate_limiter
 
 
 class ApiError(Exception):
@@ -75,6 +112,9 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         return None
 
     def _dispatch(self, method: str) -> None:
+        if not _get_rate_limiter().allow():
+            self._send_json(429, {"error": "rate limit exceeded"})
+            return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         service: ProService = self.server.service  # type: ignore[attr-defined]
@@ -222,6 +262,9 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         settings = load_stripe_settings()
         payload = self._read_body()
         signature = self.headers.get("Stripe-Signature", "")
+        dev_mode = os.environ.get("DICTATE_PRO_STRIPE_DEV", "").strip() == "1"
+        if not settings.webhook_secret and not dev_mode:
+            raise ApiError(503, "stripe webhook secret not configured")
         if settings.webhook_secret and not verify_stripe_signature(payload, signature, settings.webhook_secret):
             raise ApiError(400, "invalid stripe signature")
         try:

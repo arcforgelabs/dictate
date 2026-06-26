@@ -11,6 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dictate.api_keys import (
+    ApiKeyStorageError,
+    clear_pro_refresh_token,
+    read_pro_refresh_token,
+    save_pro_refresh_token,
+)
 from dictate.platform_paths import user_data_dir
 
 DEFAULT_API_URL = "http://127.0.0.1:18765"
@@ -46,35 +52,38 @@ class ProClient:
             return None
         if not isinstance(raw, dict):
             return None
+        refresh_token = self._load_refresh_token(raw)
         required = (
             "account_id",
             "device_id",
             "access_token",
-            "refresh_token",
             "access_expires_at",
             "refresh_expires_at",
         )
-        if not all(raw.get(key) for key in required):
+        if not refresh_token or not all(raw.get(key) for key in required):
             return None
         return ProSession(
             account_id=str(raw["account_id"]),
             device_id=str(raw["device_id"]),
             access_token=str(raw["access_token"]),
-            refresh_token=str(raw["refresh_token"]),
+            refresh_token=refresh_token,
             access_expires_at=str(raw["access_expires_at"]),
             refresh_expires_at=str(raw["refresh_expires_at"]),
         )
 
     def save_session(self, session: ProSession) -> None:
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
+        payload: dict[str, str] = {
             "account_id": session.account_id,
             "device_id": session.device_id,
             "access_token": session.access_token,
-            "refresh_token": session.refresh_token,
             "access_expires_at": session.access_expires_at,
             "refresh_expires_at": session.refresh_expires_at,
         }
+        if self._save_refresh_token(session.refresh_token):
+            payload.pop("refresh_token", None)
+        else:
+            payload["refresh_token"] = session.refresh_token
         self.session_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         try:
             os.chmod(self.session_path, 0o600)
@@ -82,6 +91,7 @@ class ProClient:
             pass
 
     def clear_session(self) -> None:
+        self._clear_refresh_token()
         try:
             self.session_path.unlink(missing_ok=True)
         except OSError:
@@ -185,6 +195,28 @@ class ProClient:
     def get_transcript(self, job_id: str) -> dict[str, Any]:
         session = self._require_session()
         return self._request("GET", f"/v1/meetings/{job_id}/transcript", auth=session.access_token)
+
+    def _save_refresh_token(self, token: str) -> bool:
+        try:
+            save_pro_refresh_token(token)
+        except ApiKeyStorageError:
+            return False
+        except OSError:
+            return False
+        return True
+
+    def _load_refresh_token(self, raw: dict[str, Any]) -> str | None:
+        stored = read_pro_refresh_token()
+        if stored:
+            return stored
+        file_token = raw.get("refresh_token")
+        return str(file_token).strip() if file_token else None
+
+    def _clear_refresh_token(self) -> None:
+        try:
+            clear_pro_refresh_token()
+        except (ApiKeyStorageError, OSError):
+            pass
 
     def _require_session(self) -> ProSession:
         session = self.refresh_if_needed()

@@ -1066,7 +1066,14 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/pro/meetings/") and path.endswith("/audio") and method == "POST":
             job_id = path.removeprefix("/api/pro/meetings/").removesuffix("/audio")
             audio_path = self._read_uploaded_audio_file()
-            return _Response(200, backend.upload_pro_meeting_audio(job_id, audio_path))
+            try:
+                return _Response(200, backend.upload_pro_meeting_audio(job_id, audio_path))
+            finally:
+                try:
+                    audio_path.unlink(missing_ok=True)
+                    audio_path.parent.rmdir()
+                except OSError:
+                    pass
         if path == "/api/events" and method == "GET":
             return _Response(200, sse=self.server.broker.subscribe())  # type: ignore[attr-defined]
         raise ApiError(404, f"no route for {method} {path}")

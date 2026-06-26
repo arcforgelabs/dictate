@@ -10,7 +10,12 @@ from typing import Any, Callable
 
 from dictate.pro.auth import ProAuth
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS, plan_for_id, usage_level
-from dictate.pro.relay import RelayResult, transcribe_meeting_file
+from dictate.pro.relay import (
+    RelayResult,
+    audio_duration_seconds,
+    billable_seconds_for_duration,
+    transcribe_meeting_file,
+)
 from dictate.pro.store import MeetingJobRow, ProStore, SubscriptionRow, iso
 from dictate.pro.stripe_handler import StripeSettings, StripeWebhookHandler
 
@@ -192,6 +197,23 @@ class ProService:
             self.store.update_meeting_job(job_id, status="quota_exceeded", error="quota exhausted")
             raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
 
+        probed_duration = audio_duration_seconds(audio_path)
+        estimated_seconds = billable_seconds_for_duration(probed_duration)
+        if not self.store.reserve_usage_seconds(
+            account_id=account_id,
+            period_start=subscription.current_period_start,
+            seconds=estimated_seconds,
+            hard_stop_seconds=USAGE_THRESHOLDS.hard_stop_seconds,
+        ):
+            self.store.update_meeting_job(
+                job_id,
+                status="quota_exceeded",
+                audio_duration_seconds=probed_duration,
+                error="quota exhausted",
+                completed_at=iso(),
+            )
+            raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
+
         self.store.update_meeting_job(job_id, status="processing", started_at=iso())
         try:
             result = self._settings.transcribe(
@@ -201,6 +223,11 @@ class ProService:
                 diarize=job.requested_diarization,
             )
         except Exception as exc:  # noqa: BLE001
+            self.store.release_usage_seconds(
+                account_id=account_id,
+                period_start=subscription.current_period_start,
+                seconds=estimated_seconds,
+            )
             self.store.update_meeting_job(
                 job_id,
                 status="failed",
@@ -210,20 +237,13 @@ class ProService:
             )
             raise ProServiceError(502, f"transcription failed: {exc}") from exc
 
-        if not self.store.reserve_usage_seconds(
-            account_id=account_id,
-            period_start=subscription.current_period_start,
-            seconds=result.billable_seconds,
-            hard_stop_seconds=USAGE_THRESHOLDS.hard_stop_seconds,
-        ):
-            self.store.update_meeting_job(
-                job_id,
-                status="quota_exceeded",
-                audio_duration_seconds=result.audio_duration_seconds,
-                error="quota exhausted after processing",
-                completed_at=iso(),
+        usage_delta = result.billable_seconds - estimated_seconds
+        if usage_delta != 0:
+            self.store.adjust_usage_seconds(
+                account_id=account_id,
+                period_start=subscription.current_period_start,
+                seconds=usage_delta,
             )
-            raise ProServiceError(402, "Dictate Pro hosted meeting allowance exhausted for this billing period.")
 
         event_id = f"usage_{job_id}"
         self.store.record_usage_event(
@@ -284,6 +304,7 @@ class ProService:
         subscription = self.store.get_active_subscription(account_id)
         if subscription is None:
             raise ProServiceError(403, "Dictate Pro subscription required.")
+        # past_due is intentionally treated as an active grace state while Stripe retries payment.
         if subscription.status not in {"active", "trialing", "past_due"}:
             raise ProServiceError(403, "Dictate Pro subscription is not active.")
         return subscription

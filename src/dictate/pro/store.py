@@ -552,6 +552,54 @@ class ProStore:
             )
             return True
 
+    def release_usage_seconds(
+        self,
+        *,
+        account_id: str,
+        period_start: str,
+        seconds: int,
+    ) -> None:
+        if seconds <= 0:
+            return
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE usage_periods
+                SET used_seconds = MAX(0, used_seconds - ?)
+                WHERE account_id = ? AND period_start = ?
+                """,
+                (seconds, account_id, period_start),
+            )
+
+    def adjust_usage_seconds(
+        self,
+        *,
+        account_id: str,
+        period_start: str,
+        seconds: int,
+    ) -> None:
+        if seconds == 0:
+            return
+        with self._conn() as conn:
+            if seconds > 0:
+                conn.execute(
+                    """
+                    UPDATE usage_periods
+                    SET used_seconds = used_seconds + ?
+                    WHERE account_id = ? AND period_start = ?
+                    """,
+                    (seconds, account_id, period_start),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE usage_periods
+                    SET used_seconds = MAX(0, used_seconds + ?)
+                    WHERE account_id = ? AND period_start = ?
+                    """,
+                    (seconds, account_id, period_start),
+                )
+
     def record_usage_event(
         self,
         *,
