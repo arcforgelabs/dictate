@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ from dictate.hotkey import (
 )
 from dictate.platform_paths import user_config_dir, user_data_dir
 from dictate.stt.factory import BACKEND_REGISTRY, DEFAULT_MODELS, resolve_model_name
+from dictate.pro.client import ProClient, ProClientError
 from dictate.version import RELEASE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -237,6 +239,7 @@ class UiBackend:
     history_store: HistoryStore | None = None
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
+    pro_client: ProClient | None = None
     daemon: Any | None = None
     provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
     # Optional supervisor wired at runtime by connect_supervisor().
@@ -268,6 +271,8 @@ class UiBackend:
             self.history_store = HistoryStore()
         if self.prefs_store is None:
             self.prefs_store = UiPrefsStore()
+        if self.pro_client is None:
+            self.pro_client = ProClient()
 
     # ----- read ----------------------------------------------------------- #
     def get_state(self) -> dict[str, Any]:
@@ -297,7 +302,63 @@ class UiBackend:
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
             "micConnected": True,
             "providerHealth": self._compute_provider_health(cfg),
+            "dictatePro": self._dictate_pro_state(),
         }
+
+    def _dictate_pro_state(self) -> dict[str, Any]:
+        client = self.pro_client
+        if client is None:
+            return {"signedIn": False, "entitlements": None, "usage": None, "account": None}
+        return self._safe(client.get_state, {
+            "signedIn": False,
+            "entitlements": None,
+            "usage": None,
+            "account": None,
+        })
+
+    def start_pro_sign_in(self, email: str) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.start_sign_in(email)
+
+    def complete_pro_sign_in(self, *, challenge_id: str, code: str, device_label: str = "Desktop") -> dict[str, Any]:
+        client = self._require_pro_client()
+        session = client.complete_sign_in(
+            challenge_id=challenge_id,
+            code=code,
+            device_label=device_label,
+        )
+        return {
+            "account_id": session.account_id,
+            "device_id": session.device_id,
+            "signedIn": True,
+            "dictatePro": client.get_state(),
+        }
+
+    def sign_out_pro(self) -> dict[str, Any]:
+        client = self._require_pro_client()
+        client.clear_session()
+        return {"signedIn": False}
+
+    def create_pro_meeting(self, *, language: str | None = None) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.create_meeting(language=language)
+
+    def upload_pro_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.upload_meeting_audio(job_id, audio_path)
+
+    def get_pro_meeting(self, job_id: str) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.get_meeting(job_id)
+
+    def get_pro_meeting_transcript(self, job_id: str) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.get_transcript(job_id)
+
+    def _require_pro_client(self) -> ProClient:
+        if self.pro_client is None:
+            raise ApiError(503, "Dictate Pro client is not configured")
+        return self.pro_client
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:
         combo = cfg.push_to_talk_combo or cfg.push_to_talk_key or DEFAULT_PUSH_TO_TALK_COMBO
@@ -853,6 +914,24 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ApiError(400, f"invalid JSON: {exc}") from exc
 
+    def _read_uploaded_audio_file(self) -> Path:
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0:
+            raise ApiError(400, "audio body is required")
+        raw = self.rfile.read(length)
+        if not raw:
+            raise ApiError(400, "audio body is required")
+        suffix = ".wav"
+        content_type = str(self.headers.get("Content-Type") or "")
+        if "mpeg" in content_type:
+            suffix = ".mp3"
+        elif "ogg" in content_type:
+            suffix = ".ogg"
+        temp_dir = Path(tempfile.mkdtemp(prefix="dictate-pro-upload-"))
+        path = temp_dir / f"audio{suffix}"
+        path.write_bytes(raw)
+        return path
+
     def _send_json(self, status: int, body: Any) -> None:
         data = json.dumps(body).encode("utf-8")
         self.send_response(status)
@@ -903,6 +982,9 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         try:
             response = self._route(method, path)
         except ApiError as exc:
+            self._send_json(exc.status, {"error": exc.message})
+            return
+        except ProClientError as exc:
             self._send_json(exc.status, {"error": exc.message})
             return
         except Exception as exc:  # noqa: BLE001
@@ -957,6 +1039,34 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.get_update_status())
         if path == "/api/update" and method == "POST":
             return _Response(200, backend.start_update())
+        if path == "/api/pro/auth/start" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.start_pro_sign_in(str(body.get("email", "")).strip()))
+        if path == "/api/pro/auth/complete" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(
+                200,
+                backend.complete_pro_sign_in(
+                    challenge_id=str(body.get("challenge_id", "")).strip(),
+                    code=str(body.get("code", "")).strip(),
+                    device_label=str(body.get("deviceLabel") or body.get("device_label") or "Desktop"),
+                ),
+            )
+        if path == "/api/pro/sign-out" and method == "POST":
+            return _Response(200, backend.sign_out_pro())
+        if path == "/api/pro/meetings" and method == "POST":
+            body = self._read_json() or {}
+            language = str(body.get("language") or "").strip() or None
+            return _Response(200, backend.create_pro_meeting(language=language))
+        if path.startswith("/api/pro/meetings/") and method == "GET":
+            job_id = path.removeprefix("/api/pro/meetings/").split("/", 1)[0]
+            if path.endswith("/transcript"):
+                return _Response(200, backend.get_pro_meeting_transcript(job_id))
+            return _Response(200, backend.get_pro_meeting(job_id))
+        if path.startswith("/api/pro/meetings/") and path.endswith("/audio") and method == "POST":
+            job_id = path.removeprefix("/api/pro/meetings/").removesuffix("/audio")
+            audio_path = self._read_uploaded_audio_file()
+            return _Response(200, backend.upload_pro_meeting_audio(job_id, audio_path))
         if path == "/api/events" and method == "GET":
             return _Response(200, sse=self.server.broker.subscribe())  # type: ignore[attr-defined]
         raise ApiError(404, f"no route for {method} {path}")
