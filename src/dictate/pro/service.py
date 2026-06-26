@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import tempfile
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_PERIOD_GRACE_SECONDS = 259_200  # 3 days
 
 from dictate.pro.auth import ProAuth
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS, plan_for_id, usage_level
@@ -256,31 +263,51 @@ class ProService:
             raise ProServiceError(400, f"unreadable audio: {exc}") from exc
 
         usage_delta = result.billable_seconds - estimated_seconds
-        if usage_delta != 0:
-            self.store.adjust_usage_seconds(
-                account_id=account_id,
-                period_start=subscription.current_period_start,
-                seconds=usage_delta,
-            )
+        usage_delta_applied = 0
+        try:
+            if usage_delta != 0:
+                self.store.adjust_usage_seconds(
+                    account_id=account_id,
+                    period_start=subscription.current_period_start,
+                    seconds=usage_delta,
+                )
+                usage_delta_applied = usage_delta
 
-        event_id = f"usage_{job_id}"
-        self.store.record_usage_event(
-            event_id=event_id,
-            account_id=account_id,
-            job_id=job_id,
-            billable_seconds=result.billable_seconds,
-            period_start=subscription.current_period_start,
-        )
-        self.store.save_transcript_segments(job_id, result.segments)
-        self.store.update_meeting_job(
-            job_id,
-            status="ready",
-            audio_duration_seconds=result.audio_duration_seconds,
-            billable_seconds=result.billable_seconds,
-            provider_request_id=result.provider_request_id,
-            completed_at=iso(),
-            error=None,
-        )
+            event_id = f"usage_{job_id}"
+            self.store.record_usage_event(
+                event_id=event_id,
+                account_id=account_id,
+                job_id=job_id,
+                billable_seconds=result.billable_seconds,
+                period_start=subscription.current_period_start,
+            )
+            self.store.save_transcript_segments(job_id, result.segments)
+            self.store.update_meeting_job(
+                job_id,
+                status="ready",
+                audio_duration_seconds=result.audio_duration_seconds,
+                billable_seconds=result.billable_seconds,
+                provider_request_id=result.provider_request_id,
+                completed_at=iso(),
+                error=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            net_charged = reserved_seconds + usage_delta_applied
+            if net_charged:
+                self.store.release_usage_seconds(
+                    account_id=account_id,
+                    period_start=subscription.current_period_start,
+                    seconds=net_charged,
+                )
+            self.store.update_meeting_job(
+                job_id,
+                status="failed",
+                error=f"finalization failed: {exc}",
+                retry_count=job.retry_count + 1,
+                completed_at=iso(),
+            )
+            raise ProServiceError(502, f"transcription finalization failed: {exc}") from exc
+
         updated = self.store.get_meeting_job(job_id)
         return {
             "job": self._meeting_payload(updated),  # type: ignore[arg-type]
@@ -325,7 +352,28 @@ class ProService:
         # past_due is intentionally treated as an active grace state while Stripe retries payment.
         if subscription.status not in {"active", "trialing", "past_due"}:
             raise ProServiceError(403, "Dictate Pro subscription is not active.")
+        if self._subscription_period_expired(subscription):
+            raise ProServiceError(403, "Dictate Pro subscription period has expired.")
         return subscription
+
+    def _subscription_period_expired(self, subscription: SubscriptionRow) -> bool:
+        grace_seconds = int(os.environ.get("DICTATE_PRO_PERIOD_GRACE_SECONDS", str(DEFAULT_PERIOD_GRACE_SECONDS)))
+        period_end = self._parse_period_end(subscription.current_period_end)
+        if period_end is None:
+            return False
+        deadline = period_end + timedelta(seconds=max(0, grace_seconds))
+        return datetime.now(timezone.utc) > deadline
+
+    @staticmethod
+    def _parse_period_end(value: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("unable to parse subscription current_period_end: %r", value)
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
 
     def _owned_job(self, account_id: str, job_id: str) -> MeetingJobRow:
         job = self.store.get_meeting_job(job_id)

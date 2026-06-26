@@ -62,7 +62,7 @@ class StripeWebhookTests(unittest.TestCase):
         self.store.link_stripe_customer(account_id=account.account_id, stripe_customer_id="cus_fail")
 
         class BrokenStore(ProStore):
-            def upsert_subscription(self, row: SubscriptionRow) -> None:
+            def upsert_subscription_if_fresh(self, row: SubscriptionRow, *, event_created: int | None) -> str:
                 raise RuntimeError("simulated mutation failure")
 
         broken = BrokenStore(Path(self._tmp.name) / "broken.sqlite3")
@@ -168,6 +168,29 @@ class StripeWebhookTests(unittest.TestCase):
         assert subscription is not None
         self.assertEqual(subscription.status, "active")
         self.assertEqual(subscription.last_event_created, 2_000)
+
+    def test_unmapped_price_does_not_grant_pro_when_map_configured(self) -> None:
+        account = self.store.get_or_create_account("foreign@example.com")
+        self.store.link_stripe_customer(account_id=account.account_id, stripe_customer_id="cus_foreign")
+        event = {
+            "id": "sub_foreign",
+            "customer": "cus_foreign",
+            "status": "active",
+            "current_period_start": 1_700_000_000,
+            "current_period_end": 1_700_086_400,
+            "cancel_at_period_end": False,
+            "items": {"data": [{"price": {"id": "price_unknown"}}]},
+        }
+        result = self.handler.handle(
+            event_id="evt_foreign",
+            event_type="customer.subscription.created",
+            payload=event,
+            event_created=1_700,
+        )
+        self.assertEqual(result["status"], "ignored")
+        self.assertEqual(result["reason"], "unmapped_price")
+        subscription = self.store.get_active_subscription(account.account_id)
+        self.assertIsNone(subscription)
 
 
 if __name__ == "__main__":

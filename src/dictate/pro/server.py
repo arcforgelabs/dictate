@@ -23,6 +23,7 @@ from dictate.version import RELEASE_VERSION
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
+DEFAULT_UPLOAD_MAX_BYTES = 524_288_000  # 500 MB
 DEFAULT_PORT = 18765
 
 
@@ -294,6 +295,10 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         return _Response(200, result)
 
     def _handle_audio_upload(self, service: ProService, account_id: str, job_id: str) -> dict[str, Any]:
+        max_bytes = int(os.environ.get("DICTATE_PRO_UPLOAD_MAX_BYTES", str(DEFAULT_UPLOAD_MAX_BYTES)))
+        content_length = int(self.headers.get("Content-Length") or "0")
+        if content_length > max_bytes:
+            raise ApiError(413, "audio upload too large")
         content_type = self.headers.get("Content-Type", "")
         if content_type.startswith("multipart/form-data"):
             raise ApiError(400, "use raw audio body uploads for now")

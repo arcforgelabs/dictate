@@ -402,37 +402,66 @@ class ProStore:
 
     def upsert_subscription(self, row: SubscriptionRow) -> None:
         with self._conn() as conn:
-            conn.execute(
+            self._upsert_subscription(conn, row)
+
+    def upsert_subscription_if_fresh(
+        self,
+        row: SubscriptionRow,
+        *,
+        event_created: int | None,
+    ) -> Literal["applied", "skipped"]:
+        """Atomically upsert only when event_created is not stale."""
+        with self._conn() as conn:
+            existing = conn.execute(
                 """
-                INSERT INTO subscriptions (
-                    account_id, stripe_subscription_id, stripe_customer_id, plan_id, status,
-                    current_period_start, current_period_end, cancel_at_period_end, updated_at,
-                    last_event_created
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(stripe_subscription_id) DO UPDATE SET
-                    account_id = excluded.account_id,
-                    stripe_customer_id = excluded.stripe_customer_id,
-                    plan_id = excluded.plan_id,
-                    status = excluded.status,
-                    current_period_start = excluded.current_period_start,
-                    current_period_end = excluded.current_period_end,
-                    cancel_at_period_end = excluded.cancel_at_period_end,
-                    updated_at = excluded.updated_at,
-                    last_event_created = excluded.last_event_created
+                SELECT last_event_created
+                FROM subscriptions
+                WHERE stripe_subscription_id = ?
                 """,
-                (
-                    row.account_id,
-                    row.stripe_subscription_id,
-                    row.stripe_customer_id,
-                    row.plan_id,
-                    row.status,
-                    row.current_period_start,
-                    row.current_period_end,
-                    1 if row.cancel_at_period_end else 0,
-                    iso(),
-                    row.last_event_created,
-                ),
-            )
+                (row.stripe_subscription_id,),
+            ).fetchone()
+            if (
+                event_created is not None
+                and existing is not None
+                and existing["last_event_created"] is not None
+                and event_created < int(existing["last_event_created"])
+            ):
+                return "skipped"
+            self._upsert_subscription(conn, row)
+            return "applied"
+
+    def _upsert_subscription(self, conn: sqlite3.Connection, row: SubscriptionRow) -> None:
+        conn.execute(
+            """
+            INSERT INTO subscriptions (
+                account_id, stripe_subscription_id, stripe_customer_id, plan_id, status,
+                current_period_start, current_period_end, cancel_at_period_end, updated_at,
+                last_event_created
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stripe_subscription_id) DO UPDATE SET
+                account_id = excluded.account_id,
+                stripe_customer_id = excluded.stripe_customer_id,
+                plan_id = excluded.plan_id,
+                status = excluded.status,
+                current_period_start = excluded.current_period_start,
+                current_period_end = excluded.current_period_end,
+                cancel_at_period_end = excluded.cancel_at_period_end,
+                updated_at = excluded.updated_at,
+                last_event_created = excluded.last_event_created
+            """,
+            (
+                row.account_id,
+                row.stripe_subscription_id,
+                row.stripe_customer_id,
+                row.plan_id,
+                row.status,
+                row.current_period_start,
+                row.current_period_end,
+                1 if row.cancel_at_period_end else 0,
+                iso(),
+                row.last_event_created,
+            ),
+        )
 
     def get_subscription_by_stripe_id(self, stripe_subscription_id: str) -> SubscriptionRow | None:
         with self._conn() as conn:

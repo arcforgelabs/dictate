@@ -113,21 +113,6 @@ class StripeWebhookHandler:
         if not subscription_id or not customer_id:
             return {"status": "ignored", "reason": "missing subscription or customer"}
 
-        existing = self._store.get_subscription_by_stripe_id(subscription_id)
-        if (
-            event_created is not None
-            and existing is not None
-            and existing.last_event_created is not None
-            and event_created < existing.last_event_created
-        ):
-            return {
-                "status": "skipped",
-                "reason": "stale_event",
-                "subscription_id": subscription_id,
-                "stored_event_created": existing.last_event_created,
-                "event_created": event_created,
-            }
-
         account = self._store.get_account_by_stripe_customer(customer_id)
         if account is None:
             email = _extract_customer_email(payload)
@@ -137,8 +122,18 @@ class StripeWebhookHandler:
         if account is None:
             return {"status": "ignored", "reason": "account not found"}
 
-        plan_id = self._resolve_plan_id(payload)
+        price_id = self._price_id(payload)
+        plan_id, mapped = self._resolve_plan_id(price_id)
+        if not mapped:
+            return {
+                "status": "ignored",
+                "reason": "unmapped_price",
+                "subscription_id": subscription_id,
+                "price_id": price_id,
+            }
+
         period_start, period_end = _period_bounds(payload)
+        existing = self._store.get_subscription_by_stripe_id(subscription_id)
         last_event_created = event_created
         if last_event_created is None and existing is not None:
             last_event_created = existing.last_event_created
@@ -153,9 +148,18 @@ class StripeWebhookHandler:
             cancel_at_period_end=bool(payload.get("cancel_at_period_end")),
             last_event_created=last_event_created,
         )
-        self._store.upsert_subscription(row)
+        upsert_result = self._store.upsert_subscription_if_fresh(row, event_created=event_created)
+        if upsert_result == "skipped":
+            stored = self._store.get_subscription_by_stripe_id(subscription_id)
+            return {
+                "status": "skipped",
+                "reason": "stale_event",
+                "subscription_id": subscription_id,
+                "stored_event_created": stored.last_event_created if stored else None,
+                "event_created": event_created,
+            }
         if status in {"active", "trialing", "past_due"}:
-            plan = plan_for_stripe_price(self._price_id(payload)) or DICTATE_PRO_PLAN
+            plan = plan_for_stripe_price(price_id) or DICTATE_PRO_PLAN
             self._store.ensure_usage_period(
                 account_id=account.account_id,
                 plan_id=plan.plan_id,
@@ -165,15 +169,21 @@ class StripeWebhookHandler:
             )
         return {"status": "ok", "account_id": account.account_id, "plan_id": plan_id, "subscription_status": status}
 
-    def _resolve_plan_id(self, payload: dict[str, Any]) -> str:
-        price_id = self._price_id(payload)
+    def _price_map_configured(self) -> bool:
+        if self._settings.price_to_plan:
+            return True
+        return bool(STRIPE_PRICE_TO_PLAN)
+
+    def _resolve_plan_id(self, price_id: str | None) -> tuple[str, bool]:
         if price_id:
             mapped = self._settings.price_to_plan.get(price_id) or (
                 plan_for_stripe_price(price_id).plan_id if plan_for_stripe_price(price_id) else None
             )
             if mapped:
-                return mapped
-        return DICTATE_PRO_PLAN.plan_id
+                return mapped, True
+        if self._price_map_configured():
+            return "unmapped_price", False
+        return DICTATE_PRO_PLAN.plan_id, True
 
     def _price_id(self, payload: dict[str, Any]) -> str | None:
         items = payload.get("items")

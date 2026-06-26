@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS
@@ -107,6 +108,53 @@ class ProStoreTests(unittest.TestCase):
             payload={"id": "evt_exists"},
         )
         self.assertTrue(self.store.billing_event_exists("evt_exists"))
+
+    def test_upsert_subscription_if_fresh_skips_stale_event(self) -> None:
+        account = self.store.get_or_create_account("atomic@example.com")
+        period_start = iso()
+        period_end = iso()
+        row = SubscriptionRow(
+            account_id=account.account_id,
+            stripe_subscription_id="sub_atomic",
+            stripe_customer_id="cus_atomic",
+            plan_id="dictate_pro_monthly",
+            status="active",
+            current_period_start=period_start,
+            current_period_end=period_end,
+            cancel_at_period_end=False,
+            last_event_created=2_000,
+        )
+        self.store.upsert_subscription(row)
+        stale = replace(row, status="canceled", last_event_created=2_000)
+        result = self.store.upsert_subscription_if_fresh(stale, event_created=1_000)
+        self.assertEqual(result, "skipped")
+        subscription = self.store.get_subscription_by_stripe_id("sub_atomic")
+        assert subscription is not None
+        self.assertEqual(subscription.status, "active")
+
+    def test_upsert_subscription_if_fresh_applies_when_null_last_event(self) -> None:
+        account = self.store.get_or_create_account("nullstamp@example.com")
+        period_start = iso()
+        period_end = iso()
+        row = SubscriptionRow(
+            account_id=account.account_id,
+            stripe_subscription_id="sub_null",
+            stripe_customer_id="cus_null",
+            plan_id="dictate_pro_monthly",
+            status="active",
+            current_period_start=period_start,
+            current_period_end=period_end,
+            cancel_at_period_end=False,
+            last_event_created=None,
+        )
+        self.store.upsert_subscription(row)
+        updated = replace(row, status="canceled", last_event_created=500)
+        result = self.store.upsert_subscription_if_fresh(updated, event_created=500)
+        self.assertEqual(result, "applied")
+        subscription = self.store.get_subscription_by_stripe_id("sub_null")
+        assert subscription is not None
+        self.assertEqual(subscription.status, "canceled")
+        self.assertEqual(subscription.last_event_created, 500)
 
 
 if __name__ == "__main__":

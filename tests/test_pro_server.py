@@ -198,6 +198,42 @@ class ProServerTests(unittest.TestCase):
             os.environ.pop("DICTATE_PRO_STRIPE_DEV", None)
             os.environ.pop("DICTATE_PRO_WEBHOOK_MAX_BYTES", None)
 
+    def test_audio_upload_rejects_oversized_content_length(self) -> None:
+        status, start = _request(self.base_url, "POST", "/v1/auth/start", {"email": "server@example.com"})
+        self.assertEqual(status, 200)
+        status, complete = _request(
+            self.base_url,
+            "POST",
+            "/v1/auth/complete",
+            {"challenge_id": start["challenge_id"], "code": start["dev_code"]},
+        )
+        self.assertEqual(status, 200)
+        token = complete["access_token"]
+        status, meeting = _request(self.base_url, "POST", "/v1/meetings", {}, token=token)
+        self.assertEqual(status, 200)
+        job_id = meeting["job_id"]
+        os.environ["DICTATE_PRO_UPLOAD_MAX_BYTES"] = "10"
+        try:
+            url = f"{self.base_url}/v1/meetings/{job_id}/audio"
+            request = urllib.request.Request(
+                url,
+                data=b"x" * 20,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "audio/wav",
+                    "Content-Length": "20",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(request, timeout=10)  # noqa: S310
+            self.assertEqual(ctx.exception.code, 413)
+            body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertIn("too large", body["error"])
+        finally:
+            os.environ.pop("DICTATE_PRO_UPLOAD_MAX_BYTES", None)
+
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"
         sample_rate = 16000

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import wave
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,7 +15,7 @@ import numpy as np
 
 from dictate.pro.relay import RelayResult
 from dictate.pro.service import ProService, ProServiceError, ProSettings
-from dictate.pro.store import TranscriptSegmentRow
+from dictate.pro.store import SubscriptionRow, TranscriptSegmentRow, iso, utcnow
 
 
 class ProServiceTests(unittest.TestCase):
@@ -232,6 +233,96 @@ class ProServiceTests(unittest.TestCase):
         assert refreshed is not None
         self.assertEqual(refreshed.status, "failed")
         self.assertGreater(refreshed.retry_count, 0)
+
+    def test_expired_subscription_period_rejected_beyond_grace(self) -> None:
+        subscription = self.service.store.get_active_subscription(self.account_id)
+        assert subscription is not None
+        expired_end = iso(utcnow() - timedelta(days=10))
+        self.service.store.upsert_subscription(
+            replace(subscription, current_period_end=expired_end),
+        )
+        os.environ["DICTATE_PRO_PERIOD_GRACE_SECONDS"] = "259200"
+        try:
+            with self.assertRaises(ProServiceError) as ctx:
+                self.service.get_current_usage(self.account_id)
+            self.assertEqual(ctx.exception.status, 403)
+            self.assertIn("expired", ctx.exception.message)
+        finally:
+            os.environ.pop("DICTATE_PRO_PERIOD_GRACE_SECONDS", None)
+
+    def test_subscription_within_grace_period_still_accepted(self) -> None:
+        subscription = self.service.store.get_active_subscription(self.account_id)
+        assert subscription is not None
+        grace_end = iso(utcnow() - timedelta(days=1))
+        self.service.store.upsert_subscription(
+            replace(subscription, current_period_end=grace_end),
+        )
+        os.environ["DICTATE_PRO_PERIOD_GRACE_SECONDS"] = "259200"
+        try:
+            usage = self.service.get_current_usage(self.account_id)
+            self.assertEqual(usage["included_seconds"], 90_000)
+        finally:
+            os.environ.pop("DICTATE_PRO_PERIOD_GRACE_SECONDS", None)
+
+    def test_finalization_failure_resets_job_and_reconciles_usage(self) -> None:
+        fake = RelayResult(
+            text="Speaker 1: hello",
+            segments=[
+                TranscriptSegmentRow(
+                    seq=0,
+                    speaker_id="0",
+                    speaker_label="Speaker 1",
+                    text="hello",
+                    t_start=0.0,
+                    t_end=1.0,
+                )
+            ],
+            audio_duration_seconds=61.2,
+            billable_seconds=62,
+            provider_request_id="req_test",
+            raw_response={},
+        )
+        job = self.service.create_meeting_job(
+            account_id=self.account_id,
+            device_id=self.device_id,
+            language="en",
+        )
+        subscription = self.service.store.get_active_subscription(self.account_id)
+        assert subscription is not None
+        usage_before = self.service.store.get_usage_period(
+            self.account_id,
+            subscription.current_period_start,
+        )
+        assert usage_before is not None
+        initial_used = usage_before.used_seconds
+        wav = self._write_wav(seconds=61)
+        with patch.object(self.service._settings, "transcribe", return_value=fake):
+            with patch.object(self.service.store, "save_transcript_segments", side_effect=RuntimeError("db down")):
+                with self.assertRaises(ProServiceError) as ctx:
+                    self.service.upload_meeting_audio(
+                        account_id=self.account_id,
+                        job_id=job["job_id"],
+                        audio_path=wav,
+                    )
+        self.assertEqual(ctx.exception.status, 502)
+        refreshed = self.service.store.get_meeting_job(job["job_id"])
+        assert refreshed is not None
+        self.assertEqual(refreshed.status, "failed")
+        usage_after = self.service.store.get_usage_period(
+            self.account_id,
+            subscription.current_period_start,
+        )
+        assert usage_after is not None
+        self.assertEqual(usage_after.used_seconds, initial_used)
+
+        with patch.object(self.service._settings, "transcribe", return_value=fake):
+            result = self.service.upload_meeting_audio(
+                account_id=self.account_id,
+                job_id=job["job_id"],
+                audio_path=wav,
+            )
+        self.assertEqual(result["job"]["status"], "ready")
+        self.assertEqual(result["usage"]["used_seconds"], initial_used + 62)
 
     def _write_wav(self, *, seconds: int) -> Path:
         path = Path(self._tmp.name) / "sample.wav"

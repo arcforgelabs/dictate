@@ -85,12 +85,18 @@ class ProClient:
         }
         if self._save_refresh_token(session.refresh_token):
             payload.pop("refresh_token", None)
-        else:
+        elif _plaintext_tokens_allowed():
             logger.warning(
                 "OS secret store unavailable; persisting refresh token in plaintext %s",
                 self.session_path,
             )
             payload["refresh_token"] = session.refresh_token
+        else:
+            raise ProClientError(
+                503,
+                "OS secret store unavailable and plaintext token fallback is disabled. "
+                "Set DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS=1 for development only.",
+            )
         self.session_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         try:
             os.chmod(self.session_path, 0o600)
@@ -280,3 +286,7 @@ class ProClientError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+def _plaintext_tokens_allowed() -> bool:
+    return os.environ.get("DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS", "").strip() == "1"
