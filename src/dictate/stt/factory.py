@@ -21,7 +21,7 @@ from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_availabl
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
-    "faster-whisper": "small",
+    "faster-whisper": "turbo",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",

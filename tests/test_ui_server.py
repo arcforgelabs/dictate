@@ -177,8 +177,8 @@ class UiBackendStateTests(unittest.TestCase):
             state = _backend(d).get_state()
             self.assertIn("version", state)
             self.assertEqual(state["model"]["backend"], "faster-whisper")
-            self.assertEqual(state["model"]["model"], "small")
-            self.assertEqual(state["model"]["id"], "faster-whisper/small")
+            self.assertEqual(state["model"]["model"], "turbo")
+            self.assertEqual(state["model"]["id"], "faster-whisper/turbo")
             # local models first, hosted providers present
             self.assertEqual(state["models"][0]["backend"], "faster-whisper")
             self.assertTrue(state["models"][0]["local"])

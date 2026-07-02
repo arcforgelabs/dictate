@@ -418,6 +418,11 @@ class Daemon:
                             (mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks))
                             or note_streaming
                         )
+                        # Dictation, when streaming-capable, uses the same silence-aligned
+                        # overlap accumulator as notes (shorter windows) instead of the
+                        # fixed zero-overlap window path, so quality matches a full-utterance
+                        # decode without an end-of-clip re-decode.
+                        dictation_overlap_stream = mode == "dictation" and streaming_enabled
                         stt_id = id(stt)
                         note_provider = ""
                         note_model = ""
@@ -454,6 +459,8 @@ class Daemon:
                                 self._note_streaming_recordings.add(self._active_recording_id)
                         else:
                             self._note_streaming_recordings.discard(self._active_recording_id)
+                            if dictation_overlap_stream:
+                                self._recording_prompt_tails[self._active_recording_id] = ""
                         self._terminal_recordings.discard(self._active_recording_id)
                     if note_start_error is None:
                         try:
@@ -461,6 +468,7 @@ class Daemon:
                                 on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                 recording_id=self._active_recording_id,
                                 note_chunks=note_streaming,
+                                overlap_stream=dictation_overlap_stream,
                                 on_samples=self._track_note_silence if mode == "note" else None,
                             )
                         except TypeError:
@@ -654,6 +662,7 @@ class Daemon:
                     chunk.recording_id,
                     audio,
                     min_duration_s=min_duration_s,
+                    stream_final=True,
                 )
                 if result is None:
                     self._fail_recording_session(
@@ -693,6 +702,7 @@ class Daemon:
             chunk.recording_id,
             audio,
             min_duration_s=min_duration_s,
+            stream_final=chunk.stream_final,
         )
         if result is None:
             self._fail_recording_session(
@@ -715,6 +725,8 @@ class Daemon:
                 piece = result.text.strip()
                 if self._is_note_streaming(chunk.recording_id):
                     piece = self._append_note_stream_piece(chunk, piece)
+                elif mode == "dictation" and self._recording_uses_streaming(chunk.recording_id):
+                    piece = self._append_dictation_stream_piece(chunk, piece)
                 if piece:
                     self._record_transcript_piece(
                         chunk.recording_id,
@@ -1361,6 +1373,24 @@ class Daemon:
             self._recording_prompt_tails[recording_id] = prompt_tail(combined)
         return merged
 
+    def _append_dictation_stream_piece(self, chunk: AudioChunk, piece: str) -> str:
+        """Note-store-free sibling of ``_append_note_stream_piece`` for streamed dictation.
+
+        Same overlap merge + prompt-tail threading as the note path, reusing
+        the same merge helper, but skips note_store persistence (dictation
+        has no note session).
+        """
+        recording_id = chunk.recording_id
+        with self._queue_lock:
+            tail = self._recording_prompt_tails.get(recording_id, "")
+        merged = merge_transcript_piece(tail, piece)
+        if not merged:
+            return ""
+        with self._queue_lock:
+            combined = f"{tail} {merged}".strip() if tail else merged
+            self._recording_prompt_tails[recording_id] = prompt_tail(combined)
+        return merged
+
     def _update_note_chunk_cursor(self, chunk: AudioChunk) -> None:
         if not self._is_note_streaming(chunk.recording_id):
             return
@@ -1378,6 +1408,7 @@ class Daemon:
         audio: np.ndarray,
         *,
         min_duration_s: float | None = None,
+        stream_final: bool = False,
     ) -> TranscriptionResult | None:
         duration = len(audio) / SAMPLE_RATE
         print(
@@ -1398,16 +1429,24 @@ class Daemon:
             mode = self._recording_mode(recording_id)
             supervisor = self.supervisor
 
-            if self._is_note_streaming(recording_id):
+            # Any streaming recording (note or dictation) decodes through the same
+            # prompt-threaded chunk path so quality matches a full-utterance decode.
+            # Dictation's own terminal chunk drops long_form (condition_on_previous_text)
+            # to avoid trailing-silence hallucination; notes keep long_form on the whole
+            # way through (unchanged note behavior) since their finalization is a
+            # separate empty marker, not a real audio chunk.
+            if self._is_note_streaming(recording_id) or self._recording_uses_streaming(recording_id):
                 initial_prompt: str | None = None
                 with self._queue_lock:
                     tail = self._recording_prompt_tails.get(recording_id, "")
                 if tail:
                     initial_prompt = prompt_tail(tail)
+                long_form = not (mode == "dictation" and stream_final)
                 return self.engine.transcribe_stream_chunk(
                     audio,
                     language=self.language,
                     initial_prompt=initial_prompt,
+                    long_form=long_form,
                     min_duration_s=min_duration_s,
                 )
 

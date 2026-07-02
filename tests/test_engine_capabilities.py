@@ -95,8 +95,17 @@ class _FallbackSpeechToText(SpeechToText):
     def model(self):
         return None
 
-    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
-        del audio, language, prompt_context
+    def transcribe(
+        self,
+        audio,
+        language=None,
+        hotwords=None,
+        prompt_context=None,
+        *,
+        initial_prompt=None,
+        long_form=False,
+    ) -> str:
+        del audio, language, prompt_context, initial_prompt, long_form
         self.received_hotwords = hotwords
         if self.fail:
             raise RuntimeError("local model unavailable")

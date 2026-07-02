@@ -15,6 +15,13 @@ from dictate.note_chunker import NoteChunkAccumulator
 DEFAULT_MAX_RECORDING_SECONDS = 120
 DEFAULT_TRANSCRIPTION_WINDOW_SECONDS = 2.0
 
+# Overlap-stream (dictation) chunking: shorter windows than notes so perceived
+# latency stays close to "release key -> last chunk decodes", with enough
+# overlap for prompt-tail threading/merge to dedup the seam.
+DICTATION_MIN_CHUNK_SECONDS = 2.5
+DICTATION_MAX_CHUNK_SECONDS = 3.5
+DICTATION_OVERLAP_SECONDS = 1.0
+
 
 class AudioCaptureError(RuntimeError):
     """Raised when audio recording fails."""
@@ -30,6 +37,12 @@ class AudioChunk:
     recording_id: int = 0
     t_start: float | None = None
     t_end: float | None = None
+    # True only on the last chunk emitted by an accumulator's terminal flush
+    # (note or dictation overlap-streaming). Distinct from ``final`` (queue
+    # routing) so streamed sessions keep flowing through the merge/prompt-tail
+    # path; consumers use this to pick decode params (e.g. long_form) for the
+    # true last piece of real audio without changing queue behavior.
+    stream_final: bool = False
 
 
 class AudioRecorder(Protocol):
@@ -81,6 +94,7 @@ class SoundDeviceRecorder:
         self._stream: Any | None = None
         self._recording = False
         self._note_chunks = False
+        self._overlap_stream = False
         self._note_accumulator: NoteChunkAccumulator | None = None
 
     @property
@@ -97,11 +111,19 @@ class SoundDeviceRecorder:
         recording_id: int | None = None,
         *,
         note_chunks: bool = False,
+        overlap_stream: bool = False,
         note_chunk_seq_offset: int = 0,
         note_time_offset_s: float = 0.0,
         on_samples: Callable[[np.ndarray], None] | None = None,
     ) -> None:
-        """Start recording."""
+        """Start recording.
+
+        ``note_chunks`` and ``overlap_stream`` both drive silence-aligned,
+        overlapping chunk emission via ``NoteChunkAccumulator`` instead of the
+        fixed zero-overlap window path; they use different chunk-size params
+        (notes: longer windows; dictation overlap-stream: shorter windows for
+        lower perceived latency) and are mutually exclusive per session.
+        """
         if self._recording:
             return
 
@@ -115,15 +137,24 @@ class SoundDeviceRecorder:
         self._on_chunk = on_chunk
         self._on_samples = on_samples
         self._note_chunks = bool(note_chunks)
-        self._note_accumulator = (
-            NoteChunkAccumulator(
+        self._overlap_stream = bool(overlap_stream) and not self._note_chunks
+        if self._note_chunks:
+            self._note_accumulator = NoteChunkAccumulator(
                 sample_rate=self.sample_rate,
                 seq_offset=note_chunk_seq_offset,
                 time_offset_s=note_time_offset_s,
             )
-            if self._note_chunks
-            else None
-        )
+        elif self._overlap_stream:
+            self._note_accumulator = NoteChunkAccumulator(
+                sample_rate=self.sample_rate,
+                min_chunk_seconds=DICTATION_MIN_CHUNK_SECONDS,
+                max_chunk_seconds=DICTATION_MAX_CHUNK_SECONDS,
+                overlap_seconds=DICTATION_OVERLAP_SECONDS,
+                seq_offset=note_chunk_seq_offset,
+                time_offset_s=note_time_offset_s,
+            )
+        else:
+            self._note_accumulator = None
 
         try:
             import sounddevice as sd
@@ -168,7 +199,9 @@ class SoundDeviceRecorder:
             self._on_chunk = None
             self._on_samples = None
             if self._note_accumulator is not None:
-                for emitted in self._note_accumulator.flush(final=True):
+                flushed = self._note_accumulator.flush(final=True)
+                last_index = len(flushed) - 1
+                for index, emitted in enumerate(flushed):
                     chunk_events.append(
                         AudioChunk(
                             samples=emitted.samples,
@@ -177,6 +210,7 @@ class SoundDeviceRecorder:
                             recording_id=self._recording_id,
                             t_start=emitted.t_start,
                             t_end=emitted.t_end,
+                            stream_final=index == last_index,
                         )
                     )
                 self._note_accumulator = None
@@ -193,7 +227,7 @@ class SoundDeviceRecorder:
             if self._sample_count == 0:
                 self._sample_count = 0
                 audio = np.array([], dtype=np.float32)
-            elif self._note_chunks:
+            elif self._note_chunks or self._overlap_stream:
                 audio = np.array([], dtype=np.float32)
             elif self._sample_count < self._max_samples:
                 audio = self._buffer[: self._sample_count].copy()
@@ -244,7 +278,7 @@ class SoundDeviceRecorder:
         if samples.size == 0:
             return
         with self._lock:
-            if not self._note_chunks:
+            if not (self._note_chunks or self._overlap_stream):
                 self._write_capture(samples)
             self._append_stream_samples(samples, chunk_events)
             callback = self._on_chunk

@@ -1,0 +1,147 @@
+"""P0: dictation must assemble streamed chunks via overlap+merge, not a raw concat.
+
+Drives the daemon's streaming decode path (the same prompt-tail-threaded merge
+machinery the note streamer uses) with a fake local STT and asserts:
+  - the assembled transcript is the overlap-MERGED result (seam deduped),
+    not a naive " ".join of independently-decoded fragments;
+  - the prompt tail from the first chunk is threaded into the second chunk's
+    ``initial_prompt``;
+  - mid-stream chunks decode with ``long_form=True`` and the terminal chunk
+    (marked via ``AudioChunk.stream_final``) decodes with ``long_form=False``.
+"""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import numpy as np
+
+from dictate.audio import AudioChunk
+from dictate.daemon import Daemon
+from dictate.history import HistoryStore
+from dictate.stt.base import SttCapabilities
+
+
+class _FakeRecorder:
+    """Minimal AudioRecorder double that just records start() kwargs."""
+
+    def __init__(self) -> None:
+        self.is_recording = False
+        self.on_chunk = None
+        self.recording_id = None
+        self.start_kwargs: list[dict[str, object]] = []
+
+    def start(self, on_chunk=None, recording_id=None, **kwargs) -> None:  # noqa: ANN001
+        self.is_recording = True
+        self.on_chunk = on_chunk
+        self.recording_id = recording_id
+        self.start_kwargs.append(dict(kwargs))
+
+    def stop(self) -> np.ndarray:
+        self.is_recording = False
+        return np.array([], dtype=np.float32)
+
+
+class _ScriptedStreamingStt:
+    """Local streaming-capable STT that returns scripted text per call and records kwargs."""
+
+    backend_name = "faster-whisper"
+    model_name = "turbo"
+    capabilities = SttCapabilities(supports_streaming_chunks=True)
+
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(
+        self,
+        audio,
+        language=None,
+        hotwords=None,
+        prompt_context=None,
+        *,
+        initial_prompt=None,
+        long_form=False,
+    ):
+        del audio, language, hotwords, prompt_context
+        index = len(self.calls)
+        self.calls.append({"initial_prompt": initial_prompt, "long_form": long_form})
+        return self.responses[index]
+
+    def release(self) -> None:
+        pass
+
+
+class DictationOverlapStreamAssemblyTests(unittest.TestCase):
+    def test_two_chunk_utterance_merges_overlap_instead_of_raw_concat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ScriptedStreamingStt(
+                [
+                    "the quick brown fox jumps",
+                    "fox jumps over the lazy dog",
+                ]
+            )
+            recorder = _FakeRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon._start_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            self.assertIsNotNone(recorder.on_chunk)
+            # Dictation streaming uses the overlap accumulator, not the fixed window.
+            self.assertTrue(recorder.start_kwargs[-1]["overlap_stream"])
+
+            mid_chunk = AudioChunk(
+                samples=np.ones(16000, dtype=np.float32),
+                final=False,
+                sequence=0,
+                recording_id=recording_id,
+                stream_final=False,
+            )
+            daemon._handle_partial_chunk(mid_chunk)
+
+            final_chunk = AudioChunk(
+                samples=np.ones(16000, dtype=np.float32),
+                final=False,
+                sequence=1,
+                recording_id=recording_id,
+                stream_final=True,
+            )
+            daemon._handle_partial_chunk(final_chunk)
+
+            daemon._handle_final_chunk(
+                AudioChunk(samples=np.array([], dtype=np.float32), final=True, recording_id=recording_id)
+            )
+
+            # Assembled text must be the overlap-merged result: the "fox jumps" seam
+            # is deduped, not doubled the way a raw concat would double it.
+            assembled = output.send.call_args_list[0].args[0]
+            self.assertEqual(assembled, "the quick brown fox jumps over the lazy dog")
+            self.assertNotIn("fox jumps fox jumps", assembled)
+            self.assertEqual(store.load()[0].text, assembled)
+
+            # Prompt-tail threading: second call's initial_prompt carries the first
+            # chunk's tail text.
+            self.assertEqual(len(stt.calls), 2)
+            self.assertIsNone(stt.calls[0]["initial_prompt"])
+            self.assertEqual(stt.calls[1]["initial_prompt"], "the quick brown fox jumps")
+
+            # Mid chunk keeps long_form (condition_on_previous_text) on; only the
+            # chunk marked stream_final decodes with long_form=False.
+            self.assertTrue(stt.calls[0]["long_form"])
+            self.assertFalse(stt.calls[1]["long_form"])
+
+
+if __name__ == "__main__":
+    unittest.main()

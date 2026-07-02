@@ -163,8 +163,14 @@ class DictationEngine:
         *,
         initial_prompt: str | None = None,
         min_duration_s: float | None = None,
+        long_form: bool = True,
     ) -> TranscriptionResult:
-        """Transcribe one streamed note window on the active local backend."""
+        """Transcribe one streamed chunk (note or dictation) on the active local backend.
+
+        ``long_form`` enables ``condition_on_previous_text`` for mid-stream continuity;
+        callers pass ``long_form=False`` for a stream's terminal chunk to avoid
+        trailing-silence hallucination while still threading ``initial_prompt``.
+        """
         if audio.size == 0:
             return TranscriptionResult(status="empty", duration_s=0.0)
 
@@ -179,7 +185,7 @@ class DictationEngine:
                 language,
                 min_duration_s=min_duration_s,
                 initial_prompt=initial_prompt,
-                long_form=True,
+                long_form=long_form,
             )
 
         lexicon_plan = build_lexicon_plan(
@@ -195,7 +201,7 @@ class DictationEngine:
                 hotwords=lexicon_plan.decode_hotwords,
                 prompt_context=lexicon_plan.prompt_context,
                 initial_prompt=initial_prompt,
-                long_form=True,
+                long_form=long_form,
             ).strip()
         except TypeError:
             text = self.stt.transcribe(
