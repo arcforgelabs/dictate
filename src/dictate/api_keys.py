@@ -44,6 +44,41 @@ class ApiKeyStatus:
         return self.status == "Ready"
 
 
+PRO_REFRESH_TOKEN_BACKEND = "dictate-pro-refresh"
+
+
+def save_pro_refresh_token(token: str) -> None:
+    """Persist a Dictate Pro refresh token in the OS secret store."""
+    cleaned = token.strip()
+    if not cleaned:
+        raise ApiKeyStorageError("Refresh token is empty.")
+    if _is_windows():
+        _windows_save_pro_refresh_token(cleaned)
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_save_pro_refresh_token(cleaned)
+        return
+    raise ApiKeyStorageError("No supported OS secret store is available for refresh token storage.")
+
+
+def read_pro_refresh_token() -> str | None:
+    """Read a Dictate Pro refresh token from the OS secret store, if one exists."""
+    if _is_windows():
+        return _windows_read_pro_refresh_token()
+    if shutil.which("secret-tool") is not None:
+        return _secret_tool_read_pro_refresh_token()
+    return None
+
+
+def clear_pro_refresh_token() -> None:
+    """Remove a Dictate Pro refresh token from the OS secret store, if one exists."""
+    if _is_windows():
+        _windows_clear_pro_refresh_token()
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_clear_pro_refresh_token()
+
+
 def save_api_key(backend: str, api_key: str) -> None:
     """Persist an API key in the best available local secret store."""
     _validate_backend(backend)
@@ -293,6 +328,70 @@ def _secret_tool_clear_api_key(backend: str) -> None:
         raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
 
 
+def _secret_tool_save_pro_refresh_token(token: str) -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "store",
+            "--label",
+            "Dictate Pro refresh token",
+            "application",
+            "dictate",
+            "backend",
+            PRO_REFRESH_TOKEN_BACKEND,
+            "kind",
+            "pro-refresh-token",
+        ],
+        action="store",
+        input=token,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+
+
+def _secret_tool_read_pro_refresh_token() -> str | None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "lookup",
+            "application",
+            "dictate",
+            "backend",
+            PRO_REFRESH_TOKEN_BACKEND,
+            "kind",
+            "pro-refresh-token",
+        ],
+        action="lookup",
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def _secret_tool_clear_pro_refresh_token() -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "clear",
+            "application",
+            "dictate",
+            "backend",
+            PRO_REFRESH_TOKEN_BACKEND,
+            "kind",
+            "pro-refresh-token",
+        ],
+        action="clear",
+        timeout=10,
+    )
+    if completed.returncode not in {0, 1}:
+        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
+
+
 def _run_secret_tool(
     args: list[str],
     *,
@@ -371,8 +470,54 @@ def _windows_clear_api_key(backend: str) -> None:
     raise ApiKeyStorageError(_windows_error("delete", code=code))
 
 
+def _windows_save_pro_refresh_token(token: str) -> None:
+    blob = token.encode("utf-16-le")
+    credential = _CREDENTIALW()
+    credential.Type = _CRED_TYPE_GENERIC
+    credential.TargetName = _windows_pro_refresh_target_name()
+    credential.CredentialBlobSize = len(blob)
+    credential.CredentialBlob = ctypes.cast(ctypes.create_string_buffer(blob), wintypes.LPBYTE)
+    credential.Persist = _CRED_PERSIST_LOCAL_MACHINE
+    credential.UserName = "dictate"
+    if not _advapi32().CredWriteW(ctypes.byref(credential), 0):
+        raise ApiKeyStorageError(_windows_error("write"))
+
+
+def _windows_read_pro_refresh_token() -> str | None:
+    credential_ptr = ctypes.POINTER(_CREDENTIALW)()
+    ok = _advapi32().CredReadW(
+        _windows_pro_refresh_target_name(),
+        _CRED_TYPE_GENERIC,
+        0,
+        ctypes.byref(credential_ptr),
+    )
+    if not ok:
+        return None
+    try:
+        credential = credential_ptr.contents
+        if not credential.CredentialBlob or credential.CredentialBlobSize <= 0:
+            return None
+        blob = ctypes.string_at(credential.CredentialBlob, credential.CredentialBlobSize)
+        return blob.decode("utf-16-le").strip() or None
+    finally:
+        _advapi32().CredFree(credential_ptr)
+
+
+def _windows_clear_pro_refresh_token() -> None:
+    if _advapi32().CredDeleteW(_windows_pro_refresh_target_name(), _CRED_TYPE_GENERIC, 0):
+        return
+    code = _windows_last_error()
+    if code == _ERROR_NOT_FOUND:
+        return
+    raise ApiKeyStorageError(_windows_error("delete", code=code))
+
+
 def _windows_target_name(backend: str) -> str:
     return f"Dictate:{backend}:api-key"
+
+
+def _windows_pro_refresh_target_name() -> str:
+    return f"Dictate:{PRO_REFRESH_TOKEN_BACKEND}:pro-refresh-token"
 
 
 def _windows_error(action: str, *, code: int | None = None) -> str:
