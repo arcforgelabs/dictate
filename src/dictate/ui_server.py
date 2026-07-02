@@ -324,7 +324,11 @@ class UiBackend:
     def _models(self, cfg: config_mod.Config) -> list[dict[str, Any]]:
         # Effective local default matches what the daemon runs on THIS machine, so
         # the model list's "default" flag agrees with get_state on a weak box.
-        fw_default = self._effective_model(cfg, "faster-whisper")
+        # A saved stt_model only counts as the faster-whisper default when the saved
+        # backend IS faster-whisper; otherwise (e.g. a hosted cloud selection) resolve
+        # the hardware-aware local tier instead of borrowing the hosted model name.
+        fw_saved = cfg.stt_model if (cfg.stt_backend or "faster-whisper") == "faster-whisper" else None
+        fw_default = fw_saved or resolve_default_local_model(cfg.stt_device or "auto")
         models: list[dict[str, Any]] = []
         for backend in PROVIDER_ORDER:
             if backend not in BACKEND_REGISTRY:

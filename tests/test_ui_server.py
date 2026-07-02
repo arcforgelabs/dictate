@@ -269,6 +269,21 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertIn("small", model_check["sub"])
             self.assertNotIn("turbo", model_check["sub"])
 
+    def test_models_default_flag_ignores_hosted_saved_model(self) -> None:
+        # P3-A: with a hosted backend saved (the normal state after a cloud
+        # selection), the faster-whisper "default" flag must still track the
+        # resolved local tier — not borrow the hosted model name.
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            config_mod.set_stt_selection("xai", "grok-speech-to-text", path=backend.config_path)
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+                state = backend.get_state()
+            fw = [m for m in state["models"] if m["backend"] == "faster-whisper"]
+            defaults = [m["model"] for m in fw if m["default"]]
+            self.assertEqual(defaults, ["small"])
+
     def test_set_model_via_dict(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)

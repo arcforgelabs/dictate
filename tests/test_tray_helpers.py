@@ -85,12 +85,82 @@ class TrayHelperTests(unittest.TestCase):
         )
         item = types.SimpleNamespace(get_active=lambda: True)
 
-        with patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve):
+        with (
+            patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve),
+            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model=None)),
+        ):
             tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
 
         self.assertEqual(resolved_devices, ["cpu"])
         fake_self._start_switch.assert_called_once()
         self.assertEqual(fake_self._start_switch.call_args.kwargs["model"], "small")
+
+    def test_profile_selection_resolves_when_no_explicit_saved_model(self) -> None:
+        # P3-B: active model is a resolver-chosen turbo (no explicit saved model) on
+        # a CUDA box; selecting the CPU profile must re-resolve for CPU (-> small),
+        # NOT keep the stale turbo, which would run turbo on the weak CPU.
+        tray = _import_tray_with_fake_gi()
+
+        resolved_devices: list[str] = []
+
+        def fake_resolve(device: str) -> str:
+            resolved_devices.append(device)
+            return "small"
+
+        fake_self = types.SimpleNamespace(
+            _syncing_profile_menu=False,
+            _prepare_in_progress=False,
+            _switch_in_progress=False,
+            _active_backend="faster-whisper",  # already local...
+            _active_model="turbo",  # ...but this was resolver-chosen, not saved
+            _stt_device="cuda",  # STALE current device
+            _stt_compute_type="int8",
+            _requires_preparation=lambda **_kw: False,
+            _start_switch=MagicMock(),
+            _start_prepare_for_switch=MagicMock(),
+            _set_active_profile_menu_item=MagicMock(),
+            _set_switch_status=MagicMock(),
+        )
+        item = types.SimpleNamespace(get_active=lambda: True)
+
+        with (
+            patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve),
+            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model=None)),
+        ):
+            tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
+
+        self.assertEqual(resolved_devices, ["cpu"])
+        fake_self._start_switch.assert_called_once()
+        self.assertEqual(fake_self._start_switch.call_args.kwargs["model"], "small")
+
+    def test_profile_selection_keeps_explicit_saved_local_model(self) -> None:
+        # P3-B: an EXPLICIT saved local model is preserved across a profile switch.
+        tray = _import_tray_with_fake_gi()
+
+        fake_self = types.SimpleNamespace(
+            _syncing_profile_menu=False,
+            _prepare_in_progress=False,
+            _switch_in_progress=False,
+            _active_backend="faster-whisper",
+            _active_model="medium",  # explicitly saved
+            _stt_device="cuda",
+            _stt_compute_type="int8",
+            _requires_preparation=lambda **_kw: False,
+            _start_switch=MagicMock(),
+            _start_prepare_for_switch=MagicMock(),
+            _set_active_profile_menu_item=MagicMock(),
+            _set_switch_status=MagicMock(),
+        )
+        item = types.SimpleNamespace(get_active=lambda: True)
+
+        with (
+            patch("dictate.tray.resolve_default_local_model", side_effect=AssertionError("should not resolve")),
+            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model="medium")),
+        ):
+            tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
+
+        fake_self._start_switch.assert_called_once()
+        self.assertEqual(fake_self._start_switch.call_args.kwargs["model"], "medium")
 
 
 if __name__ == "__main__":

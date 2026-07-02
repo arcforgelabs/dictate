@@ -24,6 +24,7 @@ from dictate.stt import (
     WHISPERX_MODELS,
     XAI_MODELS,
     create_speech_to_text,
+    resolve_default_local_model,
     resolve_model_name,
 )
 from dictate.startup import (
@@ -97,7 +98,12 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    model_name = resolve_model_name(args.stt_backend, args.model)
+    if args.stt_backend == "faster-whisper" and not args.model:
+        # No explicit --model: check the hardware-aware local default (turbo on
+        # capable hardware, small on a weak CPU), consistent with what the daemon runs.
+        model_name = resolve_default_local_model(args.device)
+    else:
+        model_name = resolve_model_name(args.stt_backend, args.model)
     config = load_config()
     if args.stt_backend == "openai" and config.openai_api_key_command:
         os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)

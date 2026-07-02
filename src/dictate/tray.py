@@ -516,11 +516,13 @@ class TrayIcon:
         if self._switch_in_progress:
             return
         target_backend = "faster-whisper"
-        # Resolve for the NEWLY selected device, not the stale current one, so
-        # picking the CPU profile on a GPU box doesn't pin turbo on the weak CPU.
+        # Keep the active model only when the user EXPLICITLY saved one; otherwise
+        # (including a resolver-chosen turbo on a CUDA box) resolve for the NEWLY
+        # selected device, so picking the CPU profile can't pin turbo on a weak CPU.
+        saved_model = load_config().stt_model
         target_model = (
             self._active_model
-            if self._active_backend == "faster-whisper"
+            if (self._active_backend == "faster-whisper" and saved_model)
             else resolve_default_local_model(device)
         )
         if (
