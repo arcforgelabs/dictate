@@ -224,13 +224,50 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(weak["model"]["id"], "faster-whisper/small")
 
     def test_saved_local_model_overrides_hardware_resolver(self) -> None:
-        # An explicit saved model always wins over the hardware default.
+        # An explicit (CLI-set) saved model always wins over the hardware default
+        # and is NOT clobbered on load (get_state).
+        from dictate import config as config_mod
+
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            backend.patch_config({"model": {"backend": "faster-whisper", "model": "base"}})
+            config_mod.set_stt_selection("faster-whisper", "base", path=backend.config_path)
             with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
                 state = backend.get_state()
             self.assertEqual(state["model"]["model"], "base")
+
+    def test_faster_whisper_selection_persists_resolved_tier_not_client_value(self) -> None:
+        # P2-1: a faster-whisper selection from the GUI (which has no tier picker)
+        # must persist the hardware-resolved tier, never the client's hardcoded id,
+        # so a weak CPU never gets turbo pinned in config.
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+                # Client sends the old hardcoded "faster-whisper/turbo" intent.
+                backend.patch_config({"model": {"backend": "faster-whisper", "model": "turbo"}})
+            cfg = config_mod.load_config(backend.config_path)
+            self.assertEqual(cfg.stt_model, "small")
+
+    def test_models_default_flag_tracks_resolved_local_tier(self) -> None:
+        # P3-1: the models list "default" flag for faster-whisper matches the
+        # effective (resolved) tier, not the aspirational registry default.
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+                state = _backend(d).get_state()
+            fw = [m for m in state["models"] if m["backend"] == "faster-whisper"]
+            defaults = [m["model"] for m in fw if m["default"]]
+            self.assertEqual(defaults, ["small"])
+
+    def test_run_doctor_reports_resolved_local_model(self) -> None:
+        # P3-2: doctor's "Model loads" check reports the resolved tier on a fresh
+        # weak-box config, matching what the daemon runs.
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+                report = _backend(d).run_doctor()
+            model_check = next(c for c in report["checks"] if c["label"] == "Model loads")
+            self.assertIn("small", model_check["sub"])
+            self.assertNotIn("turbo", model_check["sub"])
 
     def test_set_model_via_dict(self) -> None:
         with tempfile.TemporaryDirectory() as d:

@@ -24,7 +24,6 @@ from dictate.stt import (
     WHISPERX_MODELS,
     XAI_MODELS,
     create_speech_to_text,
-    resolve_default_local_model,
     resolve_model_name,
 )
 from dictate.startup import (
@@ -274,11 +273,12 @@ def _seed_config_if_missing() -> None:
     if default_config.is_file():
         shutil.copyfile(default_config, CONFIG_PATH)
         return
-    default_local_model = resolve_default_local_model("auto")
+    # Leave stt_model UNSET so the hardware-aware resolver picks the local model
+    # dynamically at startup (turbo vs small for THIS machine) rather than pinning
+    # a doctor-time decision into config.
     CONFIG_PATH.write_text(
         "push_to_talk_combo: ctrl_r\n"
         "stt_backend: faster-whisper\n"
-        f"stt_model: {default_local_model}\n"
         "stt_device: auto\n"
         "stt_compute_type: int8\n",
         encoding="utf-8",

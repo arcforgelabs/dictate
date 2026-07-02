@@ -4,7 +4,7 @@ import importlib
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def _import_tray_with_fake_gi():
@@ -56,6 +56,41 @@ class TrayHelperTests(unittest.TestCase):
 
         self.assertEqual(status.status, "Ready")
         self.assertEqual(status.source, "api-key-command")
+
+    def test_profile_selection_resolves_local_model_for_new_device(self) -> None:
+        # P2-2: selecting the CPU profile (on a box whose current device is cuda)
+        # must resolve the local model for the NEWLY selected device, not the stale
+        # self._stt_device — otherwise turbo gets pinned on the weak CPU.
+        tray = _import_tray_with_fake_gi()
+
+        resolved_devices: list[str] = []
+
+        def fake_resolve(device: str) -> str:
+            resolved_devices.append(device)
+            return "small"
+
+        fake_self = types.SimpleNamespace(
+            _syncing_profile_menu=False,
+            _prepare_in_progress=False,
+            _switch_in_progress=False,
+            _active_backend="xai",  # not faster-whisper -> resolver branch
+            _active_model="grok-speech-to-text",
+            _stt_device="cuda",  # STALE current device
+            _stt_compute_type="int8",
+            _requires_preparation=lambda **_kw: False,
+            _start_switch=MagicMock(),
+            _start_prepare_for_switch=MagicMock(),
+            _set_active_profile_menu_item=MagicMock(),
+            _set_switch_status=MagicMock(),
+        )
+        item = types.SimpleNamespace(get_active=lambda: True)
+
+        with patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve):
+            tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
+
+        self.assertEqual(resolved_devices, ["cpu"])
+        fake_self._start_switch.assert_called_once()
+        self.assertEqual(fake_self._start_switch.call_args.kwargs["model"], "small")
 
 
 if __name__ == "__main__":

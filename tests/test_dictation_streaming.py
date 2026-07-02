@@ -6,8 +6,8 @@ machinery the note streamer uses) with a fake local STT and asserts:
     not a naive " ".join of independently-decoded fragments;
   - the prompt tail from the first chunk is threaded into the second chunk's
     ``initial_prompt``;
-  - mid-stream chunks decode with ``long_form=True`` and the terminal chunk
-    (marked via ``AudioChunk.stream_final``) decodes with ``long_form=False``.
+  - EVERY dictation chunk decodes with ``long_form=False`` (cross-chunk continuity
+    comes from the threaded ``initial_prompt``, not ``condition_on_previous_text``).
 """
 
 from __future__ import annotations

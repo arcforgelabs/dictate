@@ -516,10 +516,12 @@ class TrayIcon:
         if self._switch_in_progress:
             return
         target_backend = "faster-whisper"
+        # Resolve for the NEWLY selected device, not the stale current one, so
+        # picking the CPU profile on a GPU box doesn't pin turbo on the weak CPU.
         target_model = (
             self._active_model
             if self._active_backend == "faster-whisper"
-            else resolve_default_local_model(self._stt_device)
+            else resolve_default_local_model(device)
         )
         if (
             self._active_backend == target_backend

@@ -26,7 +26,9 @@ function fmtSecs(s) {
 
 /* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
 const ONLINE_MODEL = "xai/grok-speech-to-text";
-const PRIVATE_MODEL = "faster-whisper/turbo";
+// Backend-only: the server picks the hardware-aware local model tier for this
+// machine (there is no model-tier picker in the GUI). Do NOT hardcode a tier here.
+const PRIVATE_MODEL = "faster-whisper";
 
 function PrivacyPill() {
   const s = useStore();
