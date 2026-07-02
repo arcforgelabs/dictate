@@ -2287,6 +2287,46 @@ class DaemonHistoryTests(unittest.TestCase):
         self.assertEqual(seen[0].recording_id, 9)
         self.assertFalse(seen[0].final)
 
+    def test_sounddevice_recorder_overlap_stream_flushes_and_marks_stream_final(self) -> None:
+        from dictate.audio import (
+            DICTATION_MAX_CHUNK_SECONDS,
+            DICTATION_MIN_CHUNK_SECONDS,
+            DICTATION_OVERLAP_SECONDS,
+            SoundDeviceRecorder,
+        )
+
+        seen: list[AudioChunk] = []
+        recorder = SoundDeviceRecorder(
+            sample_rate=16000,
+            max_recording_seconds=10,
+            transcription_window_seconds=2,
+        )
+        recorder.start(on_chunk=seen.append, recording_id=7, overlap_stream=True)
+
+        # The dictation overlap accumulator is built with the DICTATION_* constants,
+        # not the note defaults.
+        acc = recorder._note_accumulator
+        self.assertIsNotNone(acc)
+        self.assertEqual(acc.min_samples, int(16000 * DICTATION_MIN_CHUNK_SECONDS))
+        self.assertEqual(acc.max_samples, int(16000 * DICTATION_MAX_CHUNK_SECONDS))
+        self.assertEqual(acc.overlap_samples, int(16000 * DICTATION_OVERLAP_SECONDS))
+
+        # Feed enough continuous speech to force a mid-stream (hard-cap) chunk plus a
+        # remainder that only flushes on stop().
+        recorder._audio_callback(np.full((80000, 1), 0.5, dtype=np.float32), 80000, None, None)
+        self.assertEqual(len(seen), 1)
+        self.assertFalse(seen[0].stream_final)
+
+        audio = recorder.stop()
+
+        # overlap_stream sessions carry no ring-buffer final audio (chunks own it all).
+        self.assertEqual(audio.shape[0], 0)
+        self.assertEqual(len(seen), 2)
+        self.assertFalse(seen[0].stream_final)
+        self.assertTrue(seen[1].stream_final)
+        self.assertEqual(seen[0].recording_id, 7)
+        self.assertEqual(seen[1].recording_id, 7)
+
     def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon

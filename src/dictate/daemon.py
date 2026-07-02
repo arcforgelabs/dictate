@@ -473,13 +473,24 @@ class Daemon:
                             )
                         except TypeError:
                             try:
+                                # Older recorder that predates ``overlap_stream``: retry
+                                # while RETAINING ``note_chunks`` so note streaming is not
+                                # silently downgraded to a non-chunked capture.
                                 self.recorder.start(
                                     on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                     recording_id=self._active_recording_id,
+                                    note_chunks=note_streaming,
                                     on_samples=self._track_note_silence if mode == "note" else None,
                                 )
                             except TypeError:
-                                self.recorder.start()
+                                try:
+                                    self.recorder.start(
+                                        on_chunk=self._queue_recording_chunk if streaming_enabled else None,
+                                        recording_id=self._active_recording_id,
+                                        on_samples=self._track_note_silence if mode == "note" else None,
+                                    )
+                                except TypeError:
+                                    self.recorder.start()
                 except (AudioCaptureError, TypeError) as exc:
                     if self._active_recording_id is not None:
                         self._clear_recording_state(self._active_recording_id)
@@ -1442,12 +1453,17 @@ class Daemon:
                 if tail:
                     initial_prompt = prompt_tail(tail)
                 long_form = not (mode == "dictation" and stream_final)
+                # Notes keep the lighter master-tuned decode params (unchanged: note
+                # backlog aborts, so a heavier decode risks a hard CPU regression);
+                # dictation uses the default quality profile.
+                decode_profile = "note" if self._is_note_streaming(recording_id) else "quality"
                 return self.engine.transcribe_stream_chunk(
                     audio,
                     language=self.language,
                     initial_prompt=initial_prompt,
                     long_form=long_form,
                     min_duration_s=min_duration_s,
+                    decode_profile=decode_profile,
                 )
 
             # --- Degraded path: force on-device transcription ---

@@ -134,6 +134,7 @@ class DictationEngine:
         min_duration_s: float | None = None,
         initial_prompt: str | None = None,
         long_form: bool = False,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Force on-device CPU transcription (for degraded sessions).
 
@@ -154,6 +155,7 @@ class DictationEngine:
             primary_error=None,
             initial_prompt=initial_prompt,
             long_form=long_form,
+            decode_profile=decode_profile,
         )
 
     def transcribe_stream_chunk(
@@ -164,12 +166,17 @@ class DictationEngine:
         initial_prompt: str | None = None,
         min_duration_s: float | None = None,
         long_form: bool = True,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Transcribe one streamed chunk (note or dictation) on the active local backend.
 
         ``long_form`` enables ``condition_on_previous_text`` for mid-stream continuity;
         callers pass ``long_form=False`` for a stream's terminal chunk to avoid
         trailing-silence hallucination while still threading ``initial_prompt``.
+
+        ``decode_profile`` selects the backend decode params: the default "quality"
+        for dictation, "note" for note streaming (lighter params so long note
+        capture stays cheap on weak CPUs — unchanged from master).
         """
         if audio.size == 0:
             return TranscriptionResult(status="empty", duration_s=0.0)
@@ -186,6 +193,7 @@ class DictationEngine:
                 min_duration_s=min_duration_s,
                 initial_prompt=initial_prompt,
                 long_form=long_form,
+                decode_profile=decode_profile,
             )
 
         lexicon_plan = build_lexicon_plan(
@@ -202,6 +210,7 @@ class DictationEngine:
                 prompt_context=lexicon_plan.prompt_context,
                 initial_prompt=initial_prompt,
                 long_form=long_form,
+                decode_profile=decode_profile,
             ).strip()
         except TypeError:
             text = self.stt.transcribe(
@@ -335,6 +344,7 @@ class DictationEngine:
         primary_error: Exception | None,
         initial_prompt: str | None = None,
         long_form: bool = False,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Fall back to on-device CPU whisper transcription.
 
@@ -375,6 +385,7 @@ class DictationEngine:
                 prompt_context=fallback_plan.prompt_context,
                 initial_prompt=initial_prompt,
                 long_form=long_form,
+                decode_profile=decode_profile,
             ).strip()
         except Exception as fallback_error:  # noqa: BLE001
             if primary_error is not None:

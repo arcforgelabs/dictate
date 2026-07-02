@@ -69,10 +69,17 @@ class _ScriptedStreamingStt:
         *,
         initial_prompt=None,
         long_form=False,
+        decode_profile="quality",
     ):
         del audio, language, hotwords, prompt_context
         index = len(self.calls)
-        self.calls.append({"initial_prompt": initial_prompt, "long_form": long_form})
+        self.calls.append(
+            {
+                "initial_prompt": initial_prompt,
+                "long_form": long_form,
+                "decode_profile": decode_profile,
+            }
+        )
         return self.responses[index]
 
     def release(self) -> None:
@@ -141,6 +148,68 @@ class DictationOverlapStreamAssemblyTests(unittest.TestCase):
             # chunk marked stream_final decodes with long_form=False.
             self.assertTrue(stt.calls[0]["long_form"])
             self.assertFalse(stt.calls[1]["long_form"])
+
+            # Dictation decodes with the QUALITY profile (beam5); notes get "note".
+            self.assertEqual(stt.calls[0]["decode_profile"], "quality")
+            self.assertEqual(stt.calls[1]["decode_profile"], "quality")
+
+
+class _ProfileCapturingStt:
+    """Streaming-capable local STT that records the decode_profile it receives."""
+
+    backend_name = "faster-whisper"
+    model_name = "turbo"
+    capabilities = SttCapabilities(supports_streaming_chunks=True)
+
+    def __init__(self) -> None:
+        self.profiles: list[object] = []
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, *args, decode_profile="quality", **kwargs):  # noqa: ANN001
+        del audio, args, kwargs
+        self.profiles.append(decode_profile)
+        return "text"
+
+    def release(self) -> None:
+        pass
+
+
+class NoteVsDictationDecodeProfileTests(unittest.TestCase):
+    """P2-2: note stream chunks decode with the lighter 'note' profile (beam1);
+    dictation stream chunks decode with the default 'quality' profile (beam5)."""
+
+    def _seed(self, daemon, recording_id: int, mode: str, *, note: bool) -> None:  # noqa: ANN001
+        daemon._recording_stt_ids[recording_id] = id(daemon.engine.stt)
+        daemon._recording_parts[recording_id] = []
+        daemon._recording_modes[recording_id] = mode
+        daemon._streaming_recordings.add(recording_id)
+        daemon._recording_prompt_tails[recording_id] = ""
+        if note:
+            daemon._note_streaming_recordings.add(recording_id)
+
+    def test_decode_profile_per_mode_at_decode_site(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = MagicMock()
+            output.name = "mock"
+            stt = _ProfileCapturingStt()
+            daemon = Daemon(
+                stt,
+                output=output,
+                history_store=HistoryStore(path=Path(tmp) / "h.json"),
+                recorder=_FakeRecorder(),
+            )
+            daemon.engine.min_duration_s = 0
+
+            self._seed(daemon, 1, "dictation", note=False)
+            daemon._transcribe_recording_audio(1, np.ones(16000, dtype=np.float32))
+            self.assertEqual(stt.profiles[-1], "quality")
+
+            self._seed(daemon, 2, "note", note=True)
+            daemon._transcribe_recording_audio(2, np.ones(16000, dtype=np.float32))
+            self.assertEqual(stt.profiles[-1], "note")
 
 
 if __name__ == "__main__":

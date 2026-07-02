@@ -104,8 +104,9 @@ class _FallbackSpeechToText(SpeechToText):
         *,
         initial_prompt=None,
         long_form=False,
+        decode_profile="quality",
     ) -> str:
-        del audio, language, prompt_context, initial_prompt, long_form
+        del audio, language, prompt_context, initial_prompt, long_form, decode_profile
         self.received_hotwords = hotwords
         if self.fail:
             raise RuntimeError("local model unavailable")
