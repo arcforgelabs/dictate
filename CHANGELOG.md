@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-07-02
+
+### Changed
+
+- Local (on-device) dictation now streams through overlapping, silence-aligned,
+  prompt-threaded chunks that are merged into the transcript, instead of joining
+  independent 2-second windows. This removes the word-splitting and duplication
+  ("confetti") that made local dictation unreliable: on-device quality now
+  tracks a full-utterance decode while keeping push-to-talk latency low (the
+  perceived wait is the final chunk, not a re-decode of the whole recording).
+- The default on-device model is now chosen by hardware, from one resolver used
+  everywhere (startup, tray, `dictate doctor`, the UI, and the installers). A
+  CUDA GPU or a capable CPU (~8 GB+ RAM and 8+ cores) defaults to the
+  higher-quality `turbo` model; weaker CPUs default to `small`. No machine is
+  told it runs `turbo` while actually running `small`, and installers no longer
+  force a ~1.5 GB `turbo` download onto a box that will run `small`.
+- On-device decode quality was restored for dictation (beam search + generous
+  VAD padding so word onsets are not clipped at chunk boundaries), while long
+  note recordings keep their lighter, CPU-tuned decode settings unchanged.
+
+### Fixed
+
+- The GUI privacy toggle no longer pins `turbo` into config on a weak machine
+  (which previously bypassed the hardware-aware default permanently).
+- Case- and punctuation-only differences at a streamed chunk seam are now
+  de-duplicated, so overlapping words are not typed twice.
+
+### Added
+
+- Dictate Pro control-plane baseline (account auth, entitlements, Stripe
+  handling, relay/server). Pre-release scaffolding; the purchase path is not yet
+  wired end-to-end (see `docs/GOALS.md`).
+
 ## 2026-06-25
 
 ### Added
