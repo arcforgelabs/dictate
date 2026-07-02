@@ -283,6 +283,56 @@ Media Notes first-slice non-goals:
 3. Do not store imported media in the existing capped recent-history file.
 4. Do not make this a separate video app. It belongs inside Notes.
 
+## Future Target: Local STT Quality Backlog
+
+**Status:** Queued. Follows the local dictation streaming + hardware-aware
+default-model work merged in the `forge/local-stt-streaming` review (dictation
+now decodes overlapping, silence-aligned, prompt-threaded chunks that are merged
+instead of a blind join of 2s context-free windows; one hardware-aware resolver
+picks turbo on capable machines and small on weak CPUs, consistently across
+startup, tray, doctor, UI, and installers).
+
+These are the deliberately-deferred follow-ups from that review, roughly in
+priority order:
+
+1. **Dynamic runtime backpressure / auto-tier-down.** Static hardware gating
+   (RAM + core count) currently decides turbo-vs-small at startup. Add a runtime
+   guard that measures streaming decode real-time-factor and degrades gracefully
+   when the streamer falls behind: drop turbo->small mid-session, and when even
+   small cannot keep real-time (weak 2-4 core / no-AVX2 CPUs, Pi-class hardware),
+   disable local streaming and surface a "recommend a hosted key" notice via the
+   existing `result.notice`/supervisor path rather than silently backing up the
+   partial-audio queue and dropping words.
+2. **Quiet-microphone robustness.** Add peak/RMS input normalization before
+   decode and lower the Silero VAD threshold for quiet capture; revisit the
+   hardcoded `SILENCE_RMS` gate in `note_chunker.py` so soft-spoken speech on
+   built-in laptop mics is not misclassified as silence.
+3. **Language pinning.** Persist a `language` setting in config (and expose it via
+   `dictate config`) and thread it through, so short accented utterances stop
+   flipping language per chunk under auto-detect.
+4. **Hardware guidance docs.** Publish a spec sheet in the README/install docs:
+   recommend an NVIDIA GPU (CTranslate2 is CUDA-only) for best quality/latency;
+   state the realistic CPU-only minimum (small/base tier on 4-core+/8 GB) and
+   that below-minimum machines should use a hosted key.
+5. **Optional English-only local backend (Parakeet).** Evaluate
+   NVIDIA Parakeet-TDT-0.6B via sherpa-onnx / onnx-asr (no NeMo/torch at
+   inference, ~630 MB int8, runs on Pi-class hardware) as an optional local
+   backend for weak machines where multilingual Whisper turbo cannot keep
+   real-time. English-only; keep faster-whisper as the multilingual default.
+6. **Dead-code cleanup.** Remove the unwired `whisper_cpp_backend.py` (plus its
+   test, the `WhisperCppModel` literal, and the stale NeMo `__pycache__`
+   remnant), or wire it up deliberately — it is currently unreachable.
+7. **CLI flag rename (breaking).** The installer prepare-step flag is still named
+   `--no-prepare-turbo` / `-NoPrepareTurbo` although it now prepares the
+   hardware-aware default. Rename to `--no-prepare-model` in a batch with other
+   CLI-contract changes so existing install scripts are not broken piecemeal.
+
+Accepted limitation (documented, not a bug): when an utterance ends exactly on a
+silence boundary, the final decoded chunk keeps `long_form` off-guard behavior
+from the previous chunk; fixing it would require a re-decode that reintroduces
+end-of-clip latency, which the streaming design explicitly avoids. Trailing
+silence is already trimmed, so hallucination risk is negligible.
+
 ## Current Operating Posture
 
 - Microsoft Store is the primary public Windows distribution target.
