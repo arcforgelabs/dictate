@@ -111,7 +111,13 @@ class DoctorStaleLauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             entry = Path(raw) / "dictate.desktop"
             entry.write_text("[Desktop Entry]\nExec=dictate-ui-shell\n")
-            with patch("dictate.doctor.shutil.which", _which_map({"dictate-ui-shell": "/usr/bin/dictate-ui-shell"})):
+            # Resolve to a path that actually exists in any environment (a real
+            # file in the temp dir), since _desktop_exec_target_missing verifies
+            # the resolved binary exists on disk. Hardcoding /usr/bin/... passed
+            # only on machines with the packaged app already installed.
+            resolved = Path(raw) / "dictate-ui-shell"
+            resolved.write_text("")
+            with patch("dictate.doctor.shutil.which", _which_map({"dictate-ui-shell": str(resolved)})):
                 self.assertIsNone(_desktop_exec_target_missing(entry))
 
     def test_fix_item_offered_for_stale_target(self) -> None:
