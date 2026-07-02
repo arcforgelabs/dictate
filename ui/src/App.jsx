@@ -13,7 +13,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.7.2";
+const DEFAULT_VERSION = "2026.7.2-1";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 
 // Format seconds → m:ss or h:mm:ss (mirrors the design's fmt helper).
