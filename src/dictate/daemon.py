@@ -418,6 +418,11 @@ class Daemon:
                             (mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks))
                             or note_streaming
                         )
+                        # Dictation, when streaming-capable, uses the same silence-aligned
+                        # overlap accumulator as notes (shorter windows) instead of the
+                        # fixed zero-overlap window path, so quality matches a full-utterance
+                        # decode without an end-of-clip re-decode.
+                        dictation_overlap_stream = mode == "dictation" and streaming_enabled
                         stt_id = id(stt)
                         note_provider = ""
                         note_model = ""
@@ -454,6 +459,8 @@ class Daemon:
                                 self._note_streaming_recordings.add(self._active_recording_id)
                         else:
                             self._note_streaming_recordings.discard(self._active_recording_id)
+                            if dictation_overlap_stream:
+                                self._recording_prompt_tails[self._active_recording_id] = ""
                         self._terminal_recordings.discard(self._active_recording_id)
                     if note_start_error is None:
                         try:
@@ -461,17 +468,29 @@ class Daemon:
                                 on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                 recording_id=self._active_recording_id,
                                 note_chunks=note_streaming,
+                                overlap_stream=dictation_overlap_stream,
                                 on_samples=self._track_note_silence if mode == "note" else None,
                             )
                         except TypeError:
                             try:
+                                # Older recorder that predates ``overlap_stream``: retry
+                                # while RETAINING ``note_chunks`` so note streaming is not
+                                # silently downgraded to a non-chunked capture.
                                 self.recorder.start(
                                     on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                     recording_id=self._active_recording_id,
+                                    note_chunks=note_streaming,
                                     on_samples=self._track_note_silence if mode == "note" else None,
                                 )
                             except TypeError:
-                                self.recorder.start()
+                                try:
+                                    self.recorder.start(
+                                        on_chunk=self._queue_recording_chunk if streaming_enabled else None,
+                                        recording_id=self._active_recording_id,
+                                        on_samples=self._track_note_silence if mode == "note" else None,
+                                    )
+                                except TypeError:
+                                    self.recorder.start()
                 except (AudioCaptureError, TypeError) as exc:
                     if self._active_recording_id is not None:
                         self._clear_recording_state(self._active_recording_id)
@@ -715,6 +734,8 @@ class Daemon:
                 piece = result.text.strip()
                 if self._is_note_streaming(chunk.recording_id):
                     piece = self._append_note_stream_piece(chunk, piece)
+                elif mode == "dictation" and self._recording_uses_streaming(chunk.recording_id):
+                    piece = self._append_dictation_stream_piece(chunk, piece)
                 if piece:
                     self._record_transcript_piece(
                         chunk.recording_id,
@@ -1361,6 +1382,24 @@ class Daemon:
             self._recording_prompt_tails[recording_id] = prompt_tail(combined)
         return merged
 
+    def _append_dictation_stream_piece(self, chunk: AudioChunk, piece: str) -> str:
+        """Note-store-free sibling of ``_append_note_stream_piece`` for streamed dictation.
+
+        Same overlap merge + prompt-tail threading as the note path, reusing
+        the same merge helper, but skips note_store persistence (dictation
+        has no note session).
+        """
+        recording_id = chunk.recording_id
+        with self._queue_lock:
+            tail = self._recording_prompt_tails.get(recording_id, "")
+        merged = merge_transcript_piece(tail, piece)
+        if not merged:
+            return ""
+        with self._queue_lock:
+            combined = f"{tail} {merged}".strip() if tail else merged
+            self._recording_prompt_tails[recording_id] = prompt_tail(combined)
+        return merged
+
     def _update_note_chunk_cursor(self, chunk: AudioChunk) -> None:
         if not self._is_note_streaming(chunk.recording_id):
             return
@@ -1398,18 +1437,36 @@ class Daemon:
             mode = self._recording_mode(recording_id)
             supervisor = self.supervisor
 
-            if self._is_note_streaming(recording_id):
+            # Any streaming recording (note or dictation) decodes through the same
+            # prompt-threaded chunk path so quality matches a full-utterance decode.
+            # Dictation decodes EVERY chunk with long_form=False: cross-chunk continuity
+            # comes from the threaded initial_prompt (prompt_tail), not from
+            # condition_on_previous_text (which only affects segments within one short
+            # 2.5-3.5s chunk and is the anti-hallucination-safe choice OFF). Notes keep
+            # long_form=True (unchanged behavior).
+            if self._is_note_streaming(recording_id) or self._recording_uses_streaming(recording_id):
                 initial_prompt: str | None = None
                 with self._queue_lock:
                     tail = self._recording_prompt_tails.get(recording_id, "")
                 if tail:
                     initial_prompt = prompt_tail(tail)
+                long_form = mode != "dictation"
+                # Notes keep the lighter master-tuned decode params (unchanged: note
+                # backlog aborts, so a heavier decode risks a hard CPU regression);
+                # dictation uses the default quality profile.
+                decode_profile = "note" if self._is_note_streaming(recording_id) else "quality"
                 return self.engine.transcribe_stream_chunk(
                     audio,
                     language=self.language,
                     initial_prompt=initial_prompt,
+                    long_form=long_form,
                     min_duration_s=min_duration_s,
+                    decode_profile=decode_profile,
                 )
+
+            # On-device decode params: note recordings keep the lighter master
+            # profile even when they fall back to CPU (unchanged note behavior).
+            decode_profile = "note" if mode == "note" else "quality"
 
             # --- Degraded path: force on-device transcription ---
             # When the supervisor is degraded (remote failed earlier), bypass
@@ -1419,6 +1476,7 @@ class Daemon:
                     audio,
                     language=self.language,
                     min_duration_s=min_duration_s,
+                    decode_profile=decode_profile,
                 )
 
             # --- Long recording (note mode): retry remote before degrading ---
@@ -1442,6 +1500,7 @@ class Daemon:
                 language=self.language,
                 min_duration_s=min_duration_s,
                 diarize=diarize,
+                decode_profile=decode_profile,
             )
 
     def _transcribe_long_recording_with_retry(
@@ -1487,12 +1546,13 @@ class Daemon:
         )
         # Use the normal engine.transcribe() which also includes the CPU fallback
         # and sets result.notice — we pass the original exception context via the
-        # engine's existing path.
+        # engine's existing path. This wrapper is note-only, so keep the "note" profile.
         return self.engine.transcribe(
             audio,
             language=self.language,
             min_duration_s=min_duration_s,
             diarize=True,
+            decode_profile="note",
         )
 
     def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:

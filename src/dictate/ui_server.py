@@ -43,7 +43,12 @@ from dictate.hotkey import (
     normalize_push_to_talk_combo,
 )
 from dictate.platform_paths import user_config_dir, user_data_dir
-from dictate.stt.factory import BACKEND_REGISTRY, DEFAULT_MODELS, resolve_model_name
+from dictate.stt.factory import (
+    BACKEND_REGISTRY,
+    DEFAULT_MODELS,
+    resolve_default_local_model,
+    resolve_model_name,
+)
 from dictate.version import RELEASE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -270,13 +275,24 @@ class UiBackend:
             self.prefs_store = UiPrefsStore()
 
     # ----- read ----------------------------------------------------------- #
+    def _effective_model(self, cfg: config_mod.Config, backend: str) -> str:
+        """The model the daemon will actually run for ``backend``.
+
+        For faster-whisper with no saved model, this is the hardware-aware local
+        default (so the UI/doctor/model-list agree with the daemon on a weak box);
+        a saved model always wins.
+        """
+        if backend == "faster-whisper" and not cfg.stt_model:
+            return resolve_default_local_model(cfg.stt_device or "auto")
+        return resolve_model_name(backend, cfg.stt_model)
+
     def get_state(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
         prefs = self.prefs_store.load()
         backend = cfg.stt_backend or "faster-whisper"
         if backend not in BACKEND_REGISTRY:
             backend = "faster-whisper"
-        model = resolve_model_name(backend, cfg.stt_model)
+        model = self._effective_model(cfg, backend)
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
@@ -306,11 +322,19 @@ class UiBackend:
         return {"combo": combo, "display": display, "activation": prefs["activation"]}
 
     def _models(self, cfg: config_mod.Config) -> list[dict[str, Any]]:
+        # Effective local default matches what the daemon runs on THIS machine, so
+        # the model list's "default" flag agrees with get_state on a weak box.
+        # A saved stt_model only counts as the faster-whisper default when the saved
+        # backend IS faster-whisper; otherwise (e.g. a hosted cloud selection) resolve
+        # the hardware-aware local tier instead of borrowing the hosted model name.
+        fw_saved = cfg.stt_model if (cfg.stt_backend or "faster-whisper") == "faster-whisper" else None
+        fw_default = fw_saved or resolve_default_local_model(cfg.stt_device or "auto")
         models: list[dict[str, Any]] = []
         for backend in PROVIDER_ORDER:
             if backend not in BACKEND_REGISTRY:
                 continue
             meta = PROVIDER_META.get(backend, {})
+            default_model = fw_default if backend == "faster-whisper" else DEFAULT_MODELS[backend]
             for model in BACKEND_REGISTRY[backend].model_examples:
                 entry: dict[str, Any] = {
                     "id": f"{backend}/{model}",
@@ -322,7 +346,7 @@ class UiBackend:
                     "local": bool(meta.get("local")),
                     "experimental": bool(meta.get("experimental")),
                     "desc": meta.get("desc", ""),
-                    "default": model == DEFAULT_MODELS[backend],
+                    "default": model == default_model,
                 }
                 if not meta.get("local"):
                     entry["keyName"] = meta.get("keyName", f"{backend} API key")
@@ -434,7 +458,19 @@ class UiBackend:
             backend, _, name = model.partition("/")
         if backend not in BACKEND_REGISTRY:
             raise ApiError(400, f"unknown backend: {backend!r}")
-        resolved = resolve_model_name(backend, name)
+        if backend == "faster-whisper":
+            # The GUI has no local model-tier picker (the privacy pill is a plain
+            # local on/off), so any faster-whisper selection means "use the right
+            # local model for THIS machine". Resolve it hardware-aware rather than
+            # trust the client's hardcoded id, which would otherwise pin turbo in
+            # config forever on a weak CPU (saved model always wins → resolver never
+            # runs → the OOM/swap case the resolver exists to prevent).
+            # This is authoritative because _set_model only fires on an explicit
+            # PATCH /api/config user action, never on page load (load is get_state).
+            cfg = config_mod.load_config(self.config_path)
+            resolved = resolve_default_local_model(cfg.stt_device or "auto")
+        else:
+            resolved = resolve_model_name(backend, name)
         config_mod.set_stt_selection(backend, resolved, path=self.config_path)
 
     def _set_device(self, device: Any) -> None:
@@ -549,7 +585,11 @@ class UiBackend:
     def run_doctor(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
         backend = cfg.stt_backend or "faster-whisper"
-        model = resolve_model_name(backend, cfg.stt_model)
+        if backend not in BACKEND_REGISTRY:
+            backend = "faster-whisper"
+        # Report the model the daemon will actually run (hardware-aware for a fresh
+        # weak-box config), respecting a saved model first.
+        model = self._effective_model(cfg, backend)
         combo = cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO
         checks = [
             {"label": "Microphone access", "sub": "Default device", "ok": True},

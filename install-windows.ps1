@@ -395,7 +395,9 @@ Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs -WorkingDirect
 Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 
 if (-not $NoPrepareTurbo) {
-    Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--model", "turbo", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper turbo model"
+    # Omit --model so prepare-model resolves the hardware-aware local default
+    # (turbo on capable hardware, small on a weak CPU) instead of forcing turbo.
+    Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper model"
 }
 
 if (-not $NoVerify) {

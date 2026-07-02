@@ -3,7 +3,9 @@ push_to_talk_combo: ctrl_r
 stt_backend: faster-whisper
 stt_compute_type: int8
 stt_device: auto
-# Local Whisper uses the single supported local model:
+# Local Whisper picks a hardware-aware default model when stt_model is unset:
+# turbo on CUDA or a capable CPU (~8 GB RAM + >=8 cores), otherwise small.
+# Set stt_model explicitly to override (e.g. tiny/base/small/medium/turbo):
 # stt_model: turbo
 # To avoid local compute, set one hosted backend:
 # stt_backend: openai

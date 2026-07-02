@@ -7,7 +7,13 @@ import sys
 from typing import Sequence
 
 from dictate.model_state import mark_model_failed, mark_model_prepared
-from dictate.stt import STT_BACKENDS, SpeechToText, create_speech_to_text, resolve_model_name
+from dictate.stt import (
+    STT_BACKENDS,
+    SpeechToText,
+    create_speech_to_text,
+    resolve_default_local_model,
+    resolve_model_name,
+)
 
 
 def run_prepare_model(argv: Sequence[str]) -> int:
@@ -37,7 +43,10 @@ def run_prepare_model(argv: Sequence[str]) -> int:
     )
     args = parser.parse_args(list(argv))
 
-    model_name = resolve_model_name(args.stt_backend, args.model)
+    if args.stt_backend == "faster-whisper" and not args.model:
+        model_name = resolve_default_local_model(args.device)
+    else:
+        model_name = resolve_model_name(args.stt_backend, args.model)
     print(
         f"Preparing STT backend '{args.stt_backend}' model '{model_name}' on '{args.device}' ({args.compute_type})...",
         file=sys.stderr,

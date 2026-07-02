@@ -88,14 +88,21 @@ class DictationEngine:
         *,
         min_duration_s: float | None = None,
         diarize: bool = False,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
-        """Transcribe audio; fall back to on-device CPU on remote failure."""
+        """Transcribe audio; fall back to on-device CPU on remote failure.
+
+        ``decode_profile`` selects the on-device decode params; callers pass "note"
+        for note-mode recordings so a CPU fallback keeps the lighter master-tuned
+        params instead of the heavier dictation "quality" defaults.
+        """
         return self._do_transcribe(
             audio,
             language,
             min_duration_s=min_duration_s,
             diarize=diarize,
             allow_cpu_fallback=True,
+            decode_profile=decode_profile,
         )
 
     def transcribe_remote_only(
@@ -134,6 +141,7 @@ class DictationEngine:
         min_duration_s: float | None = None,
         initial_prompt: str | None = None,
         long_form: bool = False,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Force on-device CPU transcription (for degraded sessions).
 
@@ -154,6 +162,7 @@ class DictationEngine:
             primary_error=None,
             initial_prompt=initial_prompt,
             long_form=long_form,
+            decode_profile=decode_profile,
         )
 
     def transcribe_stream_chunk(
@@ -163,8 +172,19 @@ class DictationEngine:
         *,
         initial_prompt: str | None = None,
         min_duration_s: float | None = None,
+        long_form: bool = True,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
-        """Transcribe one streamed note window on the active local backend."""
+        """Transcribe one streamed chunk (note or dictation) on the active local backend.
+
+        ``long_form`` enables ``condition_on_previous_text`` for mid-stream continuity;
+        callers pass ``long_form=False`` for a stream's terminal chunk to avoid
+        trailing-silence hallucination while still threading ``initial_prompt``.
+
+        ``decode_profile`` selects the backend decode params: the default "quality"
+        for dictation, "note" for note streaming (lighter params so long note
+        capture stays cheap on weak CPUs — unchanged from master).
+        """
         if audio.size == 0:
             return TranscriptionResult(status="empty", duration_s=0.0)
 
@@ -179,7 +199,8 @@ class DictationEngine:
                 language,
                 min_duration_s=min_duration_s,
                 initial_prompt=initial_prompt,
-                long_form=True,
+                long_form=long_form,
+                decode_profile=decode_profile,
             )
 
         lexicon_plan = build_lexicon_plan(
@@ -189,21 +210,36 @@ class DictationEngine:
             replacements=self.lexicon_replacements,
         )
         try:
-            text = self.stt.transcribe(
-                audio,
-                language=language,
-                hotwords=lexicon_plan.decode_hotwords,
-                prompt_context=lexicon_plan.prompt_context,
-                initial_prompt=initial_prompt,
-                long_form=True,
-            ).strip()
-        except TypeError:
-            text = self.stt.transcribe(
-                audio,
-                language=language,
-                hotwords=lexicon_plan.decode_hotwords,
-                prompt_context=lexicon_plan.prompt_context,
-            ).strip()
+            try:
+                text = self.stt.transcribe(
+                    audio,
+                    language=language,
+                    hotwords=lexicon_plan.decode_hotwords,
+                    prompt_context=lexicon_plan.prompt_context,
+                    initial_prompt=initial_prompt,
+                    long_form=long_form,
+                    decode_profile=decode_profile,
+                ).strip()
+            except TypeError:
+                # Degrade one kwarg at a time: first drop only decode_profile so a
+                # backend that still honors initial_prompt/long_form keeps cross-chunk
+                # threading; only if THAT also TypeErrors do we drop everything.
+                try:
+                    text = self.stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=lexicon_plan.decode_hotwords,
+                        prompt_context=lexicon_plan.prompt_context,
+                        initial_prompt=initial_prompt,
+                        long_form=long_form,
+                    ).strip()
+                except TypeError:
+                    text = self.stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=lexicon_plan.decode_hotwords,
+                        prompt_context=lexicon_plan.prompt_context,
+                    ).strip()
         except Exception as exc:  # noqa: BLE001
             return TranscriptionResult(
                 status="error",
@@ -236,6 +272,7 @@ class DictationEngine:
         diarize: bool,
         allow_cpu_fallback: bool,
         report_health_on_fail: bool = True,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Core transcription logic shared by public transcribe variants."""
         if audio.size == 0:
@@ -261,12 +298,24 @@ class DictationEngine:
                     hotwords=lexicon_plan.decode_hotwords,
                 ).strip()
             else:
-                text = self.stt.transcribe(
-                    audio,
-                    language=language,
-                    hotwords=lexicon_plan.decode_hotwords,
-                    prompt_context=lexicon_plan.prompt_context,
-                ).strip()
+                try:
+                    text = self.stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=lexicon_plan.decode_hotwords,
+                        prompt_context=lexicon_plan.prompt_context,
+                        decode_profile=decode_profile,
+                    ).strip()
+                except TypeError:
+                    # Backend predates decode_profile: retry without it, keeping the
+                    # other kwargs. A genuine transcription failure is not a TypeError
+                    # and still propagates to the CPU-fallback path below.
+                    text = self.stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=lexicon_plan.decode_hotwords,
+                        prompt_context=lexicon_plan.prompt_context,
+                    ).strip()
         except Exception as exc:  # noqa: BLE001
             if _online and report_health_on_fail:
                 self._report_health(False, _classify_health_error(exc))
@@ -284,6 +333,7 @@ class DictationEngine:
                 audio,
                 language=language,
                 primary_error=exc,
+                decode_profile=decode_profile,
             )
 
         if _online:
@@ -329,6 +379,7 @@ class DictationEngine:
         primary_error: Exception | None,
         initial_prompt: str | None = None,
         long_form: bool = False,
+        decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Fall back to on-device CPU whisper transcription.
 
@@ -362,14 +413,35 @@ class DictationEngine:
             replacements=self.lexicon_replacements,
         )
         try:
-            text = fallback_stt.transcribe(
-                audio,
-                language=language,
-                hotwords=fallback_plan.decode_hotwords,
-                prompt_context=fallback_plan.prompt_context,
-                initial_prompt=initial_prompt,
-                long_form=long_form,
-            ).strip()
+            try:
+                text = fallback_stt.transcribe(
+                    audio,
+                    language=language,
+                    hotwords=fallback_plan.decode_hotwords,
+                    prompt_context=fallback_plan.prompt_context,
+                    initial_prompt=initial_prompt,
+                    long_form=long_form,
+                    decode_profile=decode_profile,
+                ).strip()
+            except TypeError:
+                # Degrade one kwarg at a time: drop decode_profile first (keep
+                # initial_prompt/long_form), then fall back to the bare call.
+                try:
+                    text = fallback_stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=fallback_plan.decode_hotwords,
+                        prompt_context=fallback_plan.prompt_context,
+                        initial_prompt=initial_prompt,
+                        long_form=long_form,
+                    ).strip()
+                except TypeError:
+                    text = fallback_stt.transcribe(
+                        audio,
+                        language=language,
+                        hotwords=fallback_plan.decode_hotwords,
+                        prompt_context=fallback_plan.prompt_context,
+                    ).strip()
         except Exception as fallback_error:  # noqa: BLE001
             if primary_error is not None:
                 error = _fallback_error_message(

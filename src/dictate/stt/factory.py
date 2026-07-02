@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -21,7 +22,7 @@ from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_availabl
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
-    "faster-whisper": "small",
+    "faster-whisper": "turbo",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
@@ -126,6 +127,110 @@ class BackendReadiness:
 
 def resolve_model_name(backend: SttBackend, model: str | None = None) -> str:
     return model or BACKEND_REGISTRY[backend].default_model
+
+
+# faster-whisper turbo (int8) needs ~1.5 GB resident; 8 GB total RAM is the
+# documented minimum, so gate turbo on ~7.5 GB + a reasonably wide CPU. Weaker
+# boxes fall back to "small" so a fresh CPU config never OOMs/swaps.
+_TURBO_MIN_RAM_BYTES = int(7.5 * 1024**3)
+_TURBO_MIN_CPU_COUNT = 8
+
+
+def _cuda_available_for_faster_whisper() -> bool:
+    """True when CTranslate2 reports at least one usable CUDA device."""
+    try:
+        import ctranslate2
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        return int(ctranslate2.get_cuda_device_count()) > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _total_system_ram_bytes() -> int | None:
+    """Best-effort cross-platform total physical RAM in bytes (no third-party deps).
+
+    Returns ``None`` when detection is not possible, so callers can fall back to a
+    conservative heuristic rather than guessing high and OOM-ing a weak machine.
+    """
+    # Linux and macOS expose physical pages via sysconf.
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+        if page_size > 0 and phys_pages > 0:
+            return int(page_size) * int(phys_pages)
+    except (ValueError, OSError, AttributeError):
+        pass
+    # Linux fallback: parse /proc/meminfo MemTotal (kB).
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    # Windows: GlobalMemoryStatusEx via ctypes.
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            class _MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = _MemoryStatusEx()
+            stat.dwLength = ctypes.sizeof(_MemoryStatusEx)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullTotalPhys)
+        except Exception:  # noqa: BLE001
+            pass
+    # macOS fallback (if sysconf was unavailable): sysctl hw.memsize.
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"])  # noqa: S603,S607
+            return int(out.strip())
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def resolve_default_local_model(device: ComputeDevice = "auto") -> str:
+    """Single hardware-aware default for the local (faster-whisper) model.
+
+    This is the one place that decides turbo-vs-small so startup, tray reset,
+    doctor, and the UI all agree. It is SEPARATE from ``resolve_model_name`` (the
+    aspirational registry default) — an explicit saved config model still wins at
+    the call sites, which pass ``model`` to ``resolve_model_name`` instead.
+    """
+    override = os.environ.get("DICTATE_FORCE_LOCAL_MODEL")
+    if override:
+        return override
+    if device == "cuda":
+        return "turbo"
+    if device == "auto" and _cuda_available_for_faster_whisper():
+        return "turbo"
+    # device == "cpu", or "auto" with no CUDA: gate turbo on machine capability.
+    cpu_count = os.cpu_count() or 0
+    ram_bytes = _total_system_ram_bytes()
+    if ram_bytes is None:
+        # RAM unknown: fall back to a cpu-count-only heuristic; if that is also
+        # unknown, stay conservative.
+        return "turbo" if cpu_count >= _TURBO_MIN_CPU_COUNT else "small"
+    if ram_bytes >= _TURBO_MIN_RAM_BYTES and cpu_count >= _TURBO_MIN_CPU_COUNT:
+        return "turbo"
+    return "small"
 
 
 def create_speech_to_text(

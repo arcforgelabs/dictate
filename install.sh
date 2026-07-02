@@ -37,7 +37,7 @@ Default: --user.
 
 --user installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate and
 ~/.local/bin/dictate-ui-server, seeds the default config on first install,
-creates app launcher/autostart entries, prepares the faster-whisper turbo model,
+creates app launcher/autostart entries, prepares the hardware-aware faster-whisper model,
 and installs the desktop "Quiet Console" UI shell when a build toolchain is
 present (unless disabled). All steps degrade gracefully when prerequisites are
 missing.
@@ -348,14 +348,15 @@ run_logged_check() {
 
 if [ "$PREPARE_TURBO" -eq 1 ]; then
   PREPARE_LOG="/tmp/dictate-install-prepare.log"
+  # Omit --model so prepare-model resolves the hardware-aware local default
+  # (turbo on capable hardware, small on a weak CPU) instead of forcing turbo.
   run_logged_check \
-    "dictate prepare-model --stt-backend faster-whisper --model turbo --device auto --compute-type int8" \
+    "dictate prepare-model --stt-backend faster-whisper --device auto --compute-type int8" \
     "$PREPARE_LOG" \
     1800 \
     "$DICTATE_BIN" \
     prepare-model \
     --stt-backend faster-whisper \
-    --model turbo \
     --device auto \
     --compute-type int8
 fi
@@ -365,14 +366,13 @@ if [ "$VERIFY" -eq 1 ]; then
   run_logged_check "dictate --help" "$VERIFY_LOG" 20 "$DICTATE_BIN" --help
   run_logged_check "dictate benchmark --help" "$VERIFY_LOG" 20 "$DICTATE_BIN" benchmark --help
   run_logged_check \
-    "dictate doctor --quick --stt-backend faster-whisper --model turbo" \
+    "dictate doctor --quick --stt-backend faster-whisper" \
     "$VERIFY_LOG" \
     20 \
     "$DICTATE_BIN" \
     doctor \
     --quick \
-    --stt-backend faster-whisper \
-    --model turbo
+    --stt-backend faster-whisper
 fi
 
 if [ "$STARTUP" -eq 1 ]; then

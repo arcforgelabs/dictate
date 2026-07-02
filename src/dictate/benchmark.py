@@ -12,7 +12,12 @@ from typing import Sequence
 
 import numpy as np
 
-from dictate.stt import STT_BACKENDS, create_speech_to_text, resolve_model_name
+from dictate.stt import (
+    STT_BACKENDS,
+    create_speech_to_text,
+    resolve_default_local_model,
+    resolve_model_name,
+)
 
 
 @dataclass(slots=True)
@@ -84,7 +89,10 @@ def _run_from_args(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest).expanduser().resolve()
     audio_root = Path(args.audio_root).expanduser().resolve()
 
-    model_name = resolve_model_name(args.stt_backend, args.model)
+    if args.stt_backend == "faster-whisper" and not args.model:
+        model_name = resolve_default_local_model(args.device)
+    else:
+        model_name = resolve_model_name(args.stt_backend, args.model)
     stt = create_speech_to_text(
         backend=args.stt_backend,
         model=model_name,
