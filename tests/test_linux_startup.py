@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,14 @@ from unittest.mock import patch
 from dictate import startup
 from dictate.doctor import _check_runtime_paths, _desktop_exec_target_missing, _fix_items
 from dictate.preflight import PreflightReport
+
+
+def setUpModule() -> None:
+    # These exercise Linux desktop-entry / launcher / autostart behavior
+    # (.desktop files, ~/.local/bin targets). The functions under test
+    # short-circuit on Windows, so the assertions are Linux-only.
+    if not sys.platform.startswith("linux"):
+        raise unittest.SkipTest("Linux desktop startup behavior")
 
 
 def _which_map(mapping: dict[str, str | None]):

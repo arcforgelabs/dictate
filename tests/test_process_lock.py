@@ -83,6 +83,10 @@ class StopRunningDaemonTests(unittest.TestCase):
                 stopped, _ = stop_running_daemon()
             self.assertTrue(stopped)
 
+    @unittest.skipIf(
+        sys.platform.startswith("win"),
+        "double-fork daemon liveness test is POSIX-only (uses os.fork/os.setsid)",
+    )
     def test_live_process_is_stopped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             lockdir = Path(tmp) / "dictate-daemon.lockdir"
