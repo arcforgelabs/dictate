@@ -13,6 +13,7 @@ import numpy as np
 from dictate import __main__ as main_module
 from dictate.config import Config
 from dictate.stt import SttCapabilities
+from dictate.stt import factory as stt_factory
 
 
 class FakeOnceStt:
@@ -68,7 +69,9 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=False):
+        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
+             patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):
                 backend, model = main_module._resolve_startup_stt(
                     args=args,
@@ -83,7 +86,7 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=True):
+        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
             with contextlib.redirect_stderr(io.StringIO()):
                 backend, model = main_module._resolve_startup_stt(
                     args=args,
@@ -98,7 +101,10 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=False):
+        # No CUDA + a weak CPU box (little RAM) must resolve to the smaller model.
+        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
+             patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):
                 backend, model = main_module._resolve_startup_stt(
                     args=args,
@@ -113,7 +119,7 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=True):
+        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
             with contextlib.redirect_stderr(io.StringIO()):
                 backend, model = main_module._resolve_startup_stt(
                     args=args,
@@ -128,7 +134,9 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with patch.object(main_module, "_cuda_available_for_faster_whisper", return_value=False):
+        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
+             patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):
                 backend, model = main_module._resolve_startup_stt(
                     args=args,

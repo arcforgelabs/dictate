@@ -144,9 +144,10 @@ class DictationOverlapStreamAssemblyTests(unittest.TestCase):
             self.assertIsNone(stt.calls[0]["initial_prompt"])
             self.assertEqual(stt.calls[1]["initial_prompt"], "the quick brown fox jumps")
 
-            # Mid chunk keeps long_form (condition_on_previous_text) on; only the
-            # chunk marked stream_final decodes with long_form=False.
-            self.assertTrue(stt.calls[0]["long_form"])
+            # Every dictation chunk decodes with long_form=False: cross-chunk
+            # continuity comes from the threaded initial_prompt, not
+            # condition_on_previous_text (anti-hallucination-safe OFF).
+            self.assertFalse(stt.calls[0]["long_form"])
             self.assertFalse(stt.calls[1]["long_form"])
 
             # Dictation decodes with the QUALITY profile (beam5); notes get "note".
@@ -155,22 +156,22 @@ class DictationOverlapStreamAssemblyTests(unittest.TestCase):
 
 
 class _ProfileCapturingStt:
-    """Streaming-capable local STT that records the decode_profile it receives."""
+    """Streaming-capable local STT that records decode_profile + long_form it receives."""
 
     backend_name = "faster-whisper"
     model_name = "turbo"
     capabilities = SttCapabilities(supports_streaming_chunks=True)
 
     def __init__(self) -> None:
-        self.profiles: list[object] = []
+        self.calls: list[dict[str, object]] = []
 
     @property
     def model(self):
         return None
 
-    def transcribe(self, audio, *args, decode_profile="quality", **kwargs):  # noqa: ANN001
+    def transcribe(self, audio, *args, decode_profile="quality", long_form=False, **kwargs):  # noqa: ANN001
         del audio, args, kwargs
-        self.profiles.append(decode_profile)
+        self.calls.append({"decode_profile": decode_profile, "long_form": long_form})
         return "text"
 
     def release(self) -> None:
@@ -178,8 +179,9 @@ class _ProfileCapturingStt:
 
 
 class NoteVsDictationDecodeProfileTests(unittest.TestCase):
-    """P2-2: note stream chunks decode with the lighter 'note' profile (beam1);
-    dictation stream chunks decode with the default 'quality' profile (beam5)."""
+    """P2-2/P3-1: note stream chunks decode with the lighter 'note' profile (beam1)
+    and long_form=True (unchanged); dictation stream chunks use the 'quality'
+    profile (beam5) and long_form=False for every chunk."""
 
     def _seed(self, daemon, recording_id: int, mode: str, *, note: bool) -> None:  # noqa: ANN001
         daemon._recording_stt_ids[recording_id] = id(daemon.engine.stt)
@@ -205,11 +207,13 @@ class NoteVsDictationDecodeProfileTests(unittest.TestCase):
 
             self._seed(daemon, 1, "dictation", note=False)
             daemon._transcribe_recording_audio(1, np.ones(16000, dtype=np.float32))
-            self.assertEqual(stt.profiles[-1], "quality")
+            self.assertEqual(stt.calls[-1]["decode_profile"], "quality")
+            self.assertFalse(stt.calls[-1]["long_form"])
 
             self._seed(daemon, 2, "note", note=True)
             daemon._transcribe_recording_audio(2, np.ones(16000, dtype=np.float32))
-            self.assertEqual(stt.profiles[-1], "note")
+            self.assertEqual(stt.calls[-1]["decode_profile"], "note")
+            self.assertTrue(stt.calls[-1]["long_form"])
 
 
 if __name__ == "__main__":

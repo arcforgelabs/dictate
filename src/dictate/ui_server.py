@@ -43,7 +43,12 @@ from dictate.hotkey import (
     normalize_push_to_talk_combo,
 )
 from dictate.platform_paths import user_config_dir, user_data_dir
-from dictate.stt.factory import BACKEND_REGISTRY, DEFAULT_MODELS, resolve_model_name
+from dictate.stt.factory import (
+    BACKEND_REGISTRY,
+    DEFAULT_MODELS,
+    resolve_default_local_model,
+    resolve_model_name,
+)
 from dictate.version import RELEASE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -276,7 +281,12 @@ class UiBackend:
         backend = cfg.stt_backend or "faster-whisper"
         if backend not in BACKEND_REGISTRY:
             backend = "faster-whisper"
-        model = resolve_model_name(backend, cfg.stt_model)
+        # Show the hardware-aware local default (what the daemon will actually run)
+        # when no model is saved; a saved model always wins.
+        if backend == "faster-whisper" and not cfg.stt_model:
+            model = resolve_default_local_model(cfg.stt_device or "auto")
+        else:
+            model = resolve_model_name(backend, cfg.stt_model)
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},

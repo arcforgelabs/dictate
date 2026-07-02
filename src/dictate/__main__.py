@@ -66,6 +66,7 @@ from dictate.stt import (
     SttBackend,
     XAI_MODELS,
     create_speech_to_text,
+    resolve_default_local_model,
     resolve_model_name,
 )
 from dictate.version import RELEASE_VERSION
@@ -382,8 +383,9 @@ def _resolve_startup_stt(
 ) -> tuple[SttBackend, str]:
     backend_flag = _flag_in_args(cli_args, "--stt-backend")
     model_flag = _flag_in_args(cli_args, "--model")
+    device = _startup_device(args=args, cli_args=cli_args, config=config)
     if not backend_flag and not model_flag and config.stt_backend in STT_BACKENDS:
-        model_name = _resolve_saved_model_name(config.stt_backend, config.stt_model)
+        model_name = _resolve_saved_model_name(config.stt_backend, config.stt_model, device)
         print(
             f"Using saved STT selection: backend='{config.stt_backend}' model='{model_name}'",
             file=sys.stderr,
@@ -398,7 +400,7 @@ def _resolve_startup_stt(
     if model_flag:
         model_name = resolve_model_name(backend, args.model)
     else:
-        model_name = _resolve_saved_model_name(backend, args.model)
+        model_name = _resolve_saved_model_name(backend, args.model, device)
     if not backend_flag and not model_flag and args.model is None:
         print(
             f"Using automatic STT selection: backend='{backend}' model='{model_name}'",
@@ -416,27 +418,37 @@ def _apply_configured_secret_commands(*, config: Config, stt_backend: SttBackend
         os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
 
-def _resolve_saved_model_name(backend: SttBackend, configured_model: str | None) -> str:
+def _resolve_saved_model_name(
+    backend: SttBackend,
+    configured_model: str | None,
+    device: ComputeDevice = "auto",
+) -> str:
     if configured_model:
         return resolve_model_name(backend, configured_model)
-    return _default_model_for_backend(backend)
+    return _default_model_for_backend(backend, device)
 
 
-def _default_model_for_backend(backend: SttBackend) -> str:
+def _default_model_for_backend(backend: SttBackend, device: ComputeDevice = "auto") -> str:
     if backend == "faster-whisper":
-        return "turbo" if _cuda_available_for_faster_whisper() else "small"
+        return resolve_default_local_model(device)
     return resolve_model_name(backend, None)
 
 
-def _cuda_available_for_faster_whisper() -> bool:
-    try:
-        import ctranslate2
-    except Exception:  # noqa: BLE001
-        return False
-    try:
-        return int(ctranslate2.get_cuda_device_count()) > 0
-    except Exception:  # noqa: BLE001
-        return False
+def _startup_device(
+    *,
+    args,  # noqa: ANN001
+    cli_args: Sequence[str],
+    config: Config,
+) -> ComputeDevice:
+    """Resolve the effective compute device (no printing) for default-model gating.
+
+    Mirrors the device-selection half of ``_resolve_startup_runtime`` so the local
+    default model can be chosen with the same device the daemon will actually use.
+    """
+    device_flag = _flag_in_args(cli_args, "--device")
+    if not device_flag and config.stt_device in {"cpu", "cuda", "auto"}:
+        return config.stt_device  # type: ignore[return-value]
+    return args.device
 
 
 def _resolve_startup_runtime(

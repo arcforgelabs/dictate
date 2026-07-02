@@ -174,7 +174,12 @@ class EventBrokerTests(unittest.TestCase):
 class UiBackendStateTests(unittest.TestCase):
     def test_default_state_shape(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            state = _backend(d).get_state()
+            # Pin the hardware-aware default so the shape assertion is deterministic.
+            with patch(
+                "dictate.ui_server.resolve_default_local_model",
+                return_value="turbo",
+            ):
+                state = _backend(d).get_state()
             self.assertIn("version", state)
             self.assertEqual(state["model"]["backend"], "faster-whisper")
             self.assertEqual(state["model"]["model"], "turbo")
@@ -202,6 +207,30 @@ class UiBackendStateTests(unittest.TestCase):
             state = backend.get_state()
             self.assertEqual(state["model"]["backend"], "gemini")
             self.assertEqual(state["model"]["model"], "gemini-3-flash-preview")
+
+    def test_default_local_model_matches_hardware_resolver(self) -> None:
+        # Fresh config (no saved stt_model): the displayed local default must match
+        # what the daemon would actually run, per the hardware-aware resolver.
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
+                capable = _backend(d).get_state()
+            self.assertEqual(capable["model"]["model"], "turbo")
+            self.assertEqual(capable["model"]["id"], "faster-whisper/turbo")
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+                weak = _backend(d).get_state()
+            self.assertEqual(weak["model"]["model"], "small")
+            self.assertEqual(weak["model"]["id"], "faster-whisper/small")
+
+    def test_saved_local_model_overrides_hardware_resolver(self) -> None:
+        # An explicit saved model always wins over the hardware default.
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            backend.patch_config({"model": {"backend": "faster-whisper", "model": "base"}})
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
+                state = backend.get_state()
+            self.assertEqual(state["model"]["model"], "base")
 
     def test_set_model_via_dict(self) -> None:
         with tempfile.TemporaryDirectory() as d:

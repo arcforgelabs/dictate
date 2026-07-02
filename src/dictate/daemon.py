@@ -673,7 +673,6 @@ class Daemon:
                     chunk.recording_id,
                     audio,
                     min_duration_s=min_duration_s,
-                    stream_final=True,
                 )
                 if result is None:
                     self._fail_recording_session(
@@ -713,7 +712,6 @@ class Daemon:
             chunk.recording_id,
             audio,
             min_duration_s=min_duration_s,
-            stream_final=chunk.stream_final,
         )
         if result is None:
             self._fail_recording_session(
@@ -1419,7 +1417,6 @@ class Daemon:
         audio: np.ndarray,
         *,
         min_duration_s: float | None = None,
-        stream_final: bool = False,
     ) -> TranscriptionResult | None:
         duration = len(audio) / SAMPLE_RATE
         print(
@@ -1442,17 +1439,18 @@ class Daemon:
 
             # Any streaming recording (note or dictation) decodes through the same
             # prompt-threaded chunk path so quality matches a full-utterance decode.
-            # Dictation's own terminal chunk drops long_form (condition_on_previous_text)
-            # to avoid trailing-silence hallucination; notes keep long_form on the whole
-            # way through (unchanged note behavior) since their finalization is a
-            # separate empty marker, not a real audio chunk.
+            # Dictation decodes EVERY chunk with long_form=False: cross-chunk continuity
+            # comes from the threaded initial_prompt (prompt_tail), not from
+            # condition_on_previous_text (which only affects segments within one short
+            # 2.5-3.5s chunk and is the anti-hallucination-safe choice OFF). Notes keep
+            # long_form=True (unchanged behavior).
             if self._is_note_streaming(recording_id) or self._recording_uses_streaming(recording_id):
                 initial_prompt: str | None = None
                 with self._queue_lock:
                     tail = self._recording_prompt_tails.get(recording_id, "")
                 if tail:
                     initial_prompt = prompt_tail(tail)
-                long_form = not (mode == "dictation" and stream_final)
+                long_form = mode != "dictation"
                 # Notes keep the lighter master-tuned decode params (unchanged: note
                 # backlog aborts, so a heavier decode risks a hard CPU regression);
                 # dictation uses the default quality profile.
@@ -1466,6 +1464,10 @@ class Daemon:
                     decode_profile=decode_profile,
                 )
 
+            # On-device decode params: note recordings keep the lighter master
+            # profile even when they fall back to CPU (unchanged note behavior).
+            decode_profile = "note" if mode == "note" else "quality"
+
             # --- Degraded path: force on-device transcription ---
             # When the supervisor is degraded (remote failed earlier), bypass
             # the remote backend entirely and go straight to the CPU fallback.
@@ -1474,6 +1476,7 @@ class Daemon:
                     audio,
                     language=self.language,
                     min_duration_s=min_duration_s,
+                    decode_profile=decode_profile,
                 )
 
             # --- Long recording (note mode): retry remote before degrading ---
@@ -1497,6 +1500,7 @@ class Daemon:
                 language=self.language,
                 min_duration_s=min_duration_s,
                 diarize=diarize,
+                decode_profile=decode_profile,
             )
 
     def _transcribe_long_recording_with_retry(
@@ -1542,12 +1546,13 @@ class Daemon:
         )
         # Use the normal engine.transcribe() which also includes the CPU fallback
         # and sets result.notice — we pass the original exception context via the
-        # engine's existing path.
+        # engine's existing path. This wrapper is note-only, so keep the "note" profile.
         return self.engine.transcribe(
             audio,
             language=self.language,
             min_duration_s=min_duration_s,
             diarize=True,
+            decode_profile="note",
         )
 
     def _last_recording_audio_status(self, recording_id: int) -> TranscriptionResult | None:

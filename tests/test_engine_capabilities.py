@@ -213,5 +213,111 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertIn("CPU fallback failed: local model unavailable", result.error or "")
 
 
+class _FakeWhisperSegment:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _KwargCapturingWhisperModel:
+    """Fake faster-whisper WhisperModel that records transcribe kwargs."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def transcribe(self, audio, **kwargs):  # noqa: ANN001
+        del audio
+        self.calls.append(kwargs)
+        return [_FakeWhisperSegment("fallback words")], None
+
+
+class _PromptOnlyStreamingStt(SpeechToText):
+    """Streaming backend that accepts initial_prompt/long_form but NOT decode_profile."""
+
+    backend_name = "faster-whisper"
+    capabilities = SttCapabilities(supports_hotwords=True, supports_streaming_chunks=True)
+    model_name = "base"
+
+    def __init__(self) -> None:
+        self.received_initial_prompt: str | None = None
+        self.received_long_form: object = None
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(
+        self,
+        audio,
+        language=None,
+        hotwords=None,
+        prompt_context=None,
+        *,
+        initial_prompt=None,
+        long_form=False,
+    ) -> str:
+        del audio, language, hotwords, prompt_context
+        self.received_initial_prompt = initial_prompt
+        self.received_long_form = long_form
+        return "streamed"
+
+
+class DecodeProfileThreadingTests(unittest.TestCase):
+    def test_note_mode_one_shot_fallback_decodes_with_note_beam_size(self) -> None:
+        # Item 2: a note-mode one-shot recording that fails hosted and falls back
+        # to CPU must decode with the "note" profile (beam_size=1).
+        from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
+
+        fallback = FasterWhisperSpeechToText(model_name="base", device="cpu", compute_type="int8")
+        fake_model = _KwargCapturingWhisperModel()
+        fallback._model = fake_model  # type: ignore[attr-defined]
+
+        engine = DictationEngine(stt=_FailingApiSpeechToText())
+        audio = np.ones(8000, dtype=np.float32)
+
+        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
+            result = engine.transcribe(audio, language="en", diarize=True, decode_profile="note")
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(len(fake_model.calls), 1)
+        self.assertEqual(fake_model.calls[0]["beam_size"], 1)
+        self.assertEqual(fake_model.calls[0]["vad_parameters"]["speech_pad_ms"], 50)
+
+    def test_dictation_one_shot_uses_quality_beam_size(self) -> None:
+        from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
+
+        fallback = FasterWhisperSpeechToText(model_name="base", device="cpu", compute_type="int8")
+        fake_model = _KwargCapturingWhisperModel()
+        fallback._model = fake_model  # type: ignore[attr-defined]
+
+        engine = DictationEngine(stt=_FailingApiSpeechToText())
+        audio = np.ones(8000, dtype=np.float32)
+
+        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
+            engine.transcribe(audio, language="en")  # default decode_profile="quality"
+
+        self.assertEqual(fake_model.calls[0]["beam_size"], 5)
+
+    def test_stream_chunk_degrades_decode_profile_but_keeps_initial_prompt(self) -> None:
+        # Item 4: a backend that accepts initial_prompt/long_form but not
+        # decode_profile still receives initial_prompt (only decode_profile dropped).
+        stt = _PromptOnlyStreamingStt()
+        engine = DictationEngine(stt=stt)
+        engine.min_duration_s = 0
+        audio = np.ones(8000, dtype=np.float32)
+
+        result = engine.transcribe_stream_chunk(
+            audio,
+            language="en",
+            initial_prompt="prior tail",
+            long_form=False,
+            decode_profile="quality",
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.text, "streamed")
+        self.assertEqual(stt.received_initial_prompt, "prior tail")
+        self.assertFalse(stt.received_long_form)
+
+
 if __name__ == "__main__":
     unittest.main()

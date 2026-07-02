@@ -41,7 +41,7 @@ from dictate.api_keys import (
     api_key_status,
     clear_api_key,
 )
-from dictate.stt import BACKEND_REGISTRY, create_speech_to_text
+from dictate.stt import BACKEND_REGISTRY, create_speech_to_text, resolve_default_local_model
 
 ICON_ACTIVE = "microphone-sensitivity-high-symbolic"
 ICON_PAUSED = "microphone-disabled-symbolic"
@@ -410,7 +410,7 @@ class TrayIcon:
                         )
                         self._start_switch(
                             backend="faster-whisper",
-                            model="turbo",
+                            model=resolve_default_local_model(self._stt_device),
                             device=_device_for_backend("faster-whisper", self._stt_device),
                             compute_type=_compute_type_for_backend(
                                 "faster-whisper",
@@ -516,7 +516,11 @@ class TrayIcon:
         if self._switch_in_progress:
             return
         target_backend = "faster-whisper"
-        target_model = self._active_model if self._active_backend == "faster-whisper" else "turbo"
+        target_model = (
+            self._active_model
+            if self._active_backend == "faster-whisper"
+            else resolve_default_local_model(self._stt_device)
+        )
         if (
             self._active_backend == target_backend
             and (device, compute_type) == (self._stt_device, self._stt_compute_type)
