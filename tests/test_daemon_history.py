@@ -2288,6 +2288,12 @@ class DaemonHistoryTests(unittest.TestCase):
         self.assertFalse(seen[0].final)
 
     def test_sounddevice_recorder_overlap_stream_flushes_and_marks_stream_final(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        # Test the raw chunking/flush behavior without the AGC/noise-suppression
+        # preprocessor (which buffers 10 ms and would shift exact sample counts).
+        self.enterContext(patch.dict(os.environ, {"DICTATE_DENOISE": "0"}))
         from dictate.audio import (
             DICTATION_MAX_CHUNK_SECONDS,
             DICTATION_MIN_CHUNK_SECONDS,

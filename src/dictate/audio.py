@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from dictate.audio_preprocess import AudioPreprocessor, create_preprocessor
 from dictate.note_chunker import NoteChunkAccumulator
 
 DEFAULT_MAX_RECORDING_SECONDS = 120
@@ -96,6 +97,7 @@ class SoundDeviceRecorder:
         self._note_chunks = False
         self._overlap_stream = False
         self._note_accumulator: NoteChunkAccumulator | None = None
+        self._preprocessor: AudioPreprocessor | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -155,6 +157,8 @@ class SoundDeviceRecorder:
             )
         else:
             self._note_accumulator = None
+        # AGC + noise suppression on the live stream (None if disabled/unavailable).
+        self._preprocessor = create_preprocessor(self.sample_rate)
 
         try:
             import sounddevice as sd
@@ -198,6 +202,15 @@ class SoundDeviceRecorder:
             callback = self._on_chunk
             self._on_chunk = None
             self._on_samples = None
+            if self._preprocessor is not None:
+                # Drain the ~10 ms the preprocessor was still buffering so the tail
+                # of the utterance is not lost, then feed it through the same path.
+                tail = self._preprocessor.flush()
+                self._preprocessor = None
+                if tail.size:
+                    if not (self._note_chunks or self._overlap_stream):
+                        self._write_capture(tail)
+                    self._append_stream_samples(tail, chunk_events)
             if self._note_accumulator is not None:
                 flushed = self._note_accumulator.flush(final=True)
                 last_index = len(flushed) - 1
@@ -277,6 +290,12 @@ class SoundDeviceRecorder:
         samples = np.asarray(indata, dtype=np.float32).reshape(-1)
         if samples.size == 0:
             return
+        if self._preprocessor is not None:
+            # AGC + noise suppression before anything downstream sees the audio.
+            # Emits only whole 10 ms frames; the ~10 ms remainder is flushed on stop.
+            samples = self._preprocessor.process(samples)
+            if samples.size == 0:
+                return
         with self._lock:
             if not (self._note_chunks or self._overlap_stream):
                 self._write_capture(samples)

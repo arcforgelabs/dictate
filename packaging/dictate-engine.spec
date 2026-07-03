@@ -28,6 +28,18 @@ for pkg in ("ctranslate2", "faster_whisper", "av", "onnxruntime", "tokenizers", 
     binaries += b
     hiddenimports += h
 
+# Optional Linux-only AGC + noise suppression (webrtc-noise-gain). It is imported
+# lazily and degrades gracefully, so only bundle it when it is actually installed.
+try:
+    import webrtc_noise_gain  # noqa: F401
+
+    d, b, h = collect_all("webrtc_noise_gain")
+    datas += d
+    binaries += b
+    hiddenimports += h
+except Exception:
+    pass
+
 # Our own package + its lazily-imported backends/dialogs.
 hiddenimports += collect_submodules("dictate")
 hiddenimports += [
