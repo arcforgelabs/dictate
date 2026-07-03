@@ -293,7 +293,31 @@ picks turbo on capable machines and small on weak CPUs, consistently across
 startup, tray, doctor, UI, and installers).
 
 These are the deliberately-deferred follow-ups from that review, roughly in
-priority order:
+priority order.
+
+**TOP PRIORITY — Input audio level management (AGC / normalization / clipping
+guard).** Real-world finding: on a machine whose microphone works fine in
+Telegram, Zoom, and normal voice calls, Dictate produced hallucinated/garbled
+transcripts because it captures the **raw** `sounddevice` stream with no gain
+management. On a hot mic the raw capture **clips** (peak > 0 dBFS) and Whisper
+emits coherent nonsense ("thanks for watching", "Kayla and I are happy to fund
+it"); at low gain the RMS is too quiet and it hallucinates from the language
+prior. Voice apps avoid this with WebRTC-style **automatic gain control + noise
+suppression**; Dictate has none. Lowering the OS mic gain is only a fragile
+manual workaround. Implement, in the capture/pre-decode path:
+   - Peak/RMS **input normalization** toward a target (e.g. ~ −20 dBFS RMS) with
+     headroom, applied before the model sees the audio.
+   - **Clipping / too-hot detection** with a clear user warning (and, ideally,
+     soft limiting) — a clipping mic currently fails silently, which is exactly
+     the "unusable" symptom.
+   - Lower / adaptive **Silero VAD threshold** for quiet capture, and revisit the
+     hardcoded `SILENCE_RMS` gate in `note_chunker.py` so soft speech is not
+     dropped as silence.
+   - Consider optional lightweight **noise suppression / AGC** so Dictate "just
+     works" on the same mics every other voice app handles.
+   This is the second half of making local dictation genuinely usable — the
+   streaming fix removed the boundary "confetti"; this removes the
+   garbage-in/garbage-out from unmanaged input levels.
 
 1. **Dynamic runtime backpressure / auto-tier-down.** Static hardware gating
    (RAM + core count) currently decides turbo-vs-small at startup. Add a runtime
