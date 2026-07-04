@@ -122,10 +122,12 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
     (Join-Path $Root "packaging\dist"), `
     (Join-Path $Root "packaging\build")
 
-Push-Location (Join-Path $Root "packaging")
+Push-Location $Root
 try {
-    & $VenvPython -m PyInstaller dictate-engine.spec --noconfirm `
-        --distpath dist --workpath build --log-level WARN
+    & $VenvPython -m PyInstaller (Join-Path $Root "packaging\dictate-engine.spec") --noconfirm `
+        --distpath (Join-Path $Root "packaging\dist") `
+        --workpath (Join-Path $Root "packaging\build") `
+        --log-level WARN
 } finally {
     Pop-Location
 }

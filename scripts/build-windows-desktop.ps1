@@ -13,6 +13,7 @@
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\build-windows-desktop.ps1
 #   $env:DICTATE_BUNDLES = "msi"; .\scripts\build-windows-desktop.ps1
+#   $env:DICTATE_BUNDLES = "no-bundle"; .\scripts\build-windows-desktop.ps1
 
 [CmdletBinding()]
 param(
@@ -29,6 +30,7 @@ Set-Location $Root
 if ([string]::IsNullOrWhiteSpace($Bundles)) {
     $Bundles = "msi,nsis"
 }
+$NoBundle = $Bundles -in @("none", "no-bundle", "unbundled")
 
 function Require-Command {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -67,10 +69,12 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
     (Join-Path $Root "packaging\dist"), `
     (Join-Path $Root "packaging\build")
 
-Push-Location (Join-Path $Root "packaging")
+Push-Location $Root
 try {
-    & $VenvPython -m PyInstaller dictate-engine.spec --noconfirm `
-        --distpath dist --workpath build --log-level WARN
+    & $VenvPython -m PyInstaller (Join-Path $Root "packaging\dictate-engine.spec") --noconfirm `
+        --distpath (Join-Path $Root "packaging\dist") `
+        --workpath (Join-Path $Root "packaging\build") `
+        --log-level WARN
 } finally {
     Pop-Location
 }
@@ -93,22 +97,36 @@ Write-Host "ensuring the Tauri CLI is available"
 npm --prefix ui-shell install
 npm --prefix ui-shell exec -- tauri --version | Out-Null
 
-Write-Host "building Windows packages ($Bundles)"
+if ($NoBundle) {
+    Write-Host "building Windows desktop executable (no installer bundle)"
+} else {
+    Write-Host "building Windows packages ($Bundles)"
+}
 Push-Location (Join-Path $Root "ui-shell")
 try {
-    npm run tauri -- build --bundles $Bundles
+    if ($NoBundle) {
+        npm run tauri -- build --no-bundle
+    } else {
+        npm run tauri -- build --bundles $Bundles
+    }
 } finally {
     Pop-Location
 }
 
 Write-Host ""
 Write-Host "artifacts:"
-$BundleRoot = Join-Path $Root "ui-shell\src-tauri\target\release\bundle"
-$Artifacts = Get-ChildItem $BundleRoot -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Extension -in ".msi", ".exe" }
+if ($NoBundle) {
+    $Artifacts = @(
+        Get-Item (Join-Path $Root "ui-shell\src-tauri\target\release\dictate-ui-shell.exe") -ErrorAction SilentlyContinue
+    )
+} else {
+    $BundleRoot = Join-Path $Root "ui-shell\src-tauri\target\release\bundle"
+    $Artifacts = Get-ChildItem $BundleRoot -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in ".msi", ".exe" }
+}
 
 if (-not $Artifacts) {
-    throw "No Windows desktop artifacts were produced under $BundleRoot"
+    throw "No Windows desktop artifacts were produced."
 }
 
 $Artifacts | ForEach-Object { $_.FullName }

@@ -68,6 +68,26 @@ NVIDIA CUDA evidence on Samuel's workstation:
 4. A Parakeet v2 CUDA smoke transcription on one second of silence returns an
    empty transcript, as expected.
 
+Windows VM evidence on `win11-dev`:
+
+1. `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax` passes.
+2. `scripts/windows-vm-smoke.sh --vm win11-dev --mode install` passes,
+   including install, Python compile, 50 focused Windows platform tests,
+   `dictate --version`, and cleanup.
+3. `scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle` passes,
+   including install, update, quick doctor, and uninstall.
+4. `scripts/windows-vm-smoke.sh --vm win11-dev --mode build --keep-guest-workdir`
+   passes for the no-bundle Windows desktop build. Verified guest artifacts:
+   `C:\Users\Public\dictate-vm-smoke\source\ui-shell\src-tauri\target\release\dictate-ui-shell.exe`
+   and
+   `C:\Users\Public\dictate-vm-smoke\source\ui-shell\src-tauri\target\release\engine\dictate-engine.exe`.
+
+Windows installer bundling is not yet promoted. In the current `win11-dev` VM,
+Tauri/WiX MSI bundling fails because `candle.exe` exits with `-2146232576`
+(CLR/.NET runtime load failure), and NSIS bundling also fails inside Tauri. The
+verified Windows human-test artifact is currently the no-bundle executable plus
+engine sidecar, not an installer.
+
 Current AMD readiness behavior:
 
 1. `dictate doctor --stt-backend parakeet --device amd --quick` requires an

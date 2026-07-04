@@ -62,7 +62,7 @@ hiddenimports += [
 block_cipher = None
 
 a = Analysis(
-    ["engine_entry.py"],
+    [os.path.join(SPECPATH, "engine_entry.py")],
     pathex=[],
     binaries=binaries,
     datas=datas,

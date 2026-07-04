@@ -14,7 +14,7 @@ Usage: scripts/windows-vm-smoke.sh [options]
 
 Options:
   --vm <name>          libvirt/QEMU VM name. Default: $VM_NAME
-  --mode <mode>        syntax, install, or lifecycle. Default: syntax
+  --mode <mode>        syntax, install, lifecycle, or build. Default: syntax
   --timeout <seconds>  Guest command timeout. Default: 900
   --keep-guest-workdir Leave %TEMP%\\dictate-vm-smoke in the guest for inspection
   -h, --help           Show this help
@@ -23,6 +23,7 @@ Modes:
   syntax     Parse Dictate .ps1 scripts inside Windows PowerShell.
   install    syntax + install-windows.ps1 smoke install, compile, focused tests.
   lifecycle  install + update-windows.ps1 and uninstall-windows.ps1 smoke checks.
+  build      syntax + build the Windows desktop executable and verify artifacts.
 
 Requires libvirt virsh access and QEMU Guest Agent running in the Windows VM.
 The source zip is copied into the guest through QEMU Guest Agent file APIs, so
@@ -79,8 +80,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$MODE" in
-  syntax|install|lifecycle) ;;
-  *) die "--mode must be syntax, install, or lifecycle" ;;
+  syntax|install|lifecycle|build) ;;
+  *) die "--mode must be syntax, install, lifecycle, or build" ;;
 esac
 
 need_cmd virsh
@@ -105,12 +106,14 @@ zip_path = Path(sys.argv[2]).resolve()
 excluded_dirs = {
     ".git",
     ".venv",
+    "node_modules",
     ".pytest_cache",
     ".ruff_cache",
     ".mypy_cache",
     "__pycache__",
     "build",
     "dist",
+    "target",
 }
 excluded_suffixes = {".pyc", ".pyo"}
 
@@ -289,7 +292,8 @@ function Invoke-Checked {
 
 \$mode = $(ps_single_quote "$MODE")
 \$guestZip = $(ps_single_quote "$GUEST_ZIP")
-\$root = Join-Path \$env:TEMP 'dictate-vm-smoke'
+\$publicRoot = if (\$env:PUBLIC) { \$env:PUBLIC } else { 'C:\\Users\\Public' }
+\$root = Join-Path \$publicRoot 'dictate-vm-smoke'
 \$source = Join-Path \$root 'source'
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \$root
@@ -344,6 +348,24 @@ if (\$mode -eq 'lifecycle') {
     }
     Invoke-Checked 'Uninstall Dictate Windows smoke' {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\uninstall-windows.ps1 -Quiet
+    }
+}
+
+if (\$mode -eq 'build') {
+    Invoke-Checked 'Build Windows desktop bundle' {
+        \$env:DICTATE_BUNDLES = 'no-bundle'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build-windows-desktop.ps1
+    }
+    \$releaseRoot = Join-Path \$source 'ui-shell\\src-tauri\\target\\release'
+    \$artifacts = @()
+    \$artifacts += Get-Item (Join-Path \$releaseRoot 'dictate-ui-shell.exe') -ErrorAction SilentlyContinue
+    \$artifacts += Get-Item (Join-Path \$releaseRoot 'engine\\dictate-engine.exe') -ErrorAction SilentlyContinue
+    \$artifacts = \$artifacts | Where-Object { \$_ }
+    if (\$artifacts.Count -lt 2) {
+        throw "No Windows desktop artifacts were produced under \$releaseRoot"
+    }
+    foreach (\$artifact in \$artifacts) {
+        Write-Output "artifact \$([System.IO.Path]::GetFullPath(\$artifact.FullName))"
     }
 }
 
