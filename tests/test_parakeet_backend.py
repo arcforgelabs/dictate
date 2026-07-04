@@ -8,7 +8,10 @@ transcribe wrapper against a fake onnx-asr model.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+import sys
+import types
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -50,21 +53,32 @@ class ParakeetRegistrationTests(unittest.TestCase):
         self.assertEqual(stt.compute_type, "int8")
         self.assertIsNone(stt._model)  # lazy — not loaded on construction
 
-    def test_factory_rejects_unwired_v3_model(self) -> None:
-        with self.assertRaisesRegex(ValueError, "not wired"):
-            create_speech_to_text(
-                backend="parakeet",
-                model="parakeet-tdt-0.6b-v3",
-                device="cpu",
-                compute_type="int8",
-            )
+    def test_factory_builds_v3_without_loading_model(self) -> None:
+        stt = create_speech_to_text(
+            backend="parakeet",
+            model="parakeet-tdt-0.6b-v3",
+            device="cpu",
+            compute_type="int8",
+        )
+        self.assertEqual(stt.model_name, "parakeet-tdt-0.6b-v3")
+        self.assertIsNone(stt._model)
 
-    def test_factory_rejects_unwired_gpu_device(self) -> None:
+    def test_factory_builds_cuda_lane_without_loading_model(self) -> None:
+        stt = create_speech_to_text(
+            backend="parakeet",
+            model="parakeet-tdt-0.6b-v2",
+            device="cuda",
+            compute_type="int8",
+        )
+        self.assertEqual(stt.device, "cuda")
+        self.assertIsNone(stt._model)
+
+    def test_factory_rejects_unknown_model(self) -> None:
         with self.assertRaisesRegex(ValueError, "not wired"):
             create_speech_to_text(
                 backend="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                device="cuda",
+                model="parakeet-tdt-unknown",
+                device="cpu",
                 compute_type="int8",
             )
 
@@ -112,6 +126,27 @@ class ParakeetTranscribeTests(unittest.TestCase):
         stt.release()
         self.assertIsNone(stt._model)
 
+    def test_model_load_passes_selected_provider(self) -> None:
+        fake_onnx_asr = types.SimpleNamespace(load_model=Mock(return_value=_FakeOnnxModel("ok")))
+        stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2", device="cuda")
+
+        with (
+            patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
+            patch("dictate.stt.parakeet_backend._ensure_model", return_value=Path("/tmp/model")),
+            patch(
+                "dictate.stt.parakeet_backend._providers_for_device",
+                return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            ),
+        ):
+            self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
+
+        fake_onnx_asr.load_model.assert_called_once_with(
+            "nemo-parakeet-tdt-0.6b-v2",
+            "/tmp/model",
+            quantization="int8",
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+
 
 class ParakeetReadinessTests(unittest.TestCase):
     def test_readiness_reports_missing_dependency(self) -> None:
@@ -128,7 +163,7 @@ class ParakeetReadinessTests(unittest.TestCase):
             report = check_backend_readiness(backend="parakeet", model=None, device="cpu")
         self.assertEqual(report.errors, [])
 
-    def test_readiness_marks_v3_as_planned_not_wired(self) -> None:
+    def test_readiness_accepts_v3_when_available(self) -> None:
         from dictate.stt import check_backend_readiness
 
         with patch("dictate.stt.factory.parakeet_available", return_value=True):
@@ -137,20 +172,20 @@ class ParakeetReadinessTests(unittest.TestCase):
                 model="parakeet-tdt-0.6b-v3",
                 device="cpu",
             )
-        self.assertTrue(
-            any("planned lane but is not wired yet" in error for error in report.errors)
-        )
+        self.assertEqual(report.errors, [])
 
-    def test_readiness_marks_cuda_as_planned_not_wired(self) -> None:
+    def test_readiness_requires_cuda_onnx_provider_for_cuda(self) -> None:
         from dictate.stt import check_backend_readiness
 
+        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
         with patch("dictate.stt.factory.parakeet_available", return_value=True):
-            report = check_backend_readiness(
-                backend="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                device="cuda",
-            )
-        self.assertTrue(any("device 'cuda'" in error for error in report.errors))
+            with patch.dict(sys.modules, {"onnxruntime": fake_ort}):
+                report = check_backend_readiness(
+                    backend="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    device="cuda",
+                )
+        self.assertTrue(any("CUDAExecutionProvider" in error for error in report.errors))
 
 
 if __name__ == "__main__":

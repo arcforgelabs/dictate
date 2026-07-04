@@ -20,7 +20,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gpu = ["torch>=2.4.0"]
+gpu = [
+    "torch>=2.4.0",
+    "onnxruntime-gpu>=1.23,<1.24; platform_machine == 'x86_64' and (sys_platform == 'linux' or sys_platform == 'win32')",
+]
 whisperx = ["whisperx>=3.8.6"]
 x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]

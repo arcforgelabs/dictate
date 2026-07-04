@@ -145,7 +145,7 @@ class SttRegistryTests(unittest.TestCase):
             any("no AMD-capable execution provider" in error for error in report.errors)
         )
 
-    def test_parakeet_amd_readiness_reports_migraphx_provider_and_unwired_runtime(self) -> None:
+    def test_parakeet_amd_readiness_accepts_migraphx_provider(self) -> None:
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: [
                 "MIGraphXExecutionProvider",
@@ -161,7 +161,7 @@ class SttRegistryTests(unittest.TestCase):
                 model="parakeet-tdt-0.6b-v2",
                 device="amd",
             )
-        self.assertTrue(any("device 'amd'" in error for error in report.errors))
+        self.assertFalse(report.errors)
         self.assertTrue(any("MIGraphXExecutionProvider" in note for note in report.notes))
 
     def test_openai_readiness_requires_api_key(self) -> None:

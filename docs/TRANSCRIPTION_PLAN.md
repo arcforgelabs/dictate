@@ -49,13 +49,24 @@ the product direction.
 
 As of 2026-07-05, Dictate accepts `amd` as an explicit compute-device lane in
 the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
-Runtime exposes an AMD-capable execution provider. This is readiness plumbing,
-not completed AMD inference: Parakeet AMD still needs provider-aware model
-loading, representative AMD hardware benchmarks, and Windows AMD validation.
-Parakeet v3 is registered as a planned model lane, but doctor/preflight and the
-backend reject it until a real v3 runtime is implemented. Parakeet CUDA and AMD
-device requests are also rejected rather than silently running the current CPU
-ONNX path.
+Runtime exposes an AMD-capable execution provider. Parakeet v2 and v3 are wired
+through the ONNX/onnx-asr loader, and explicit CUDA/AMD Parakeet requests pass
+provider lists into ONNX Runtime instead of silently running the CPU path.
+
+This is still not a promoted GPU lane: representative NVIDIA/AMD hardware
+benchmarks, Windows AMD validation, packaging of the required ONNX Runtime GPU
+wheels/providers, and failure-mode testing remain before changing product
+defaults.
+
+NVIDIA CUDA evidence on Samuel's workstation:
+
+1. `onnxruntime-gpu==1.23.2` exposes `CUDAExecutionProvider` after
+   `onnxruntime.preload_dlls()` loads the CUDA/cuDNN libraries from the venv.
+2. `dictate doctor --stt-backend parakeet --device cuda --quick` is healthy.
+3. `dictate prepare-model --stt-backend parakeet --model parakeet-tdt-0.6b-v2
+   --device cuda --compute-type int8` loads successfully.
+4. A Parakeet v2 CUDA smoke transcription on one second of silence returns an
+   empty transcript, as expected.
 
 Current AMD readiness behavior:
 
@@ -67,6 +78,8 @@ Current AMD readiness behavior:
    coverage for that temporary backend.
 4. Startup preflight blocks an explicit AMD request if the runtime cannot
    actually satisfy it, avoiding a silent CPU fallback.
+5. `parakeet-tdt-0.6b-v3` is available as the planned multilingual Parakeet
+   lane, but it still needs benchmark and packaging validation before promotion.
 
 ## AMD GPU Path
 

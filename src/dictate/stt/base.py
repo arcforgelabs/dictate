@@ -28,6 +28,11 @@ ComputeDevice = Literal["cpu", "cuda", "amd", "auto"]
 COMPUTE_DEVICES: tuple[ComputeDevice, ...] = ("cpu", "cuda", "amd", "auto")
 ComputeType = Literal["int8", "float16", "float32"]
 COMPUTE_TYPES: tuple[ComputeType, ...] = ("int8", "float16", "float32")
+ONNX_AMD_PROVIDERS: tuple[str, ...] = (
+    "MIGraphXExecutionProvider",
+    "ROCMExecutionProvider",
+    "DmlExecutionProvider",
+)
 SttBackend = Literal["faster-whisper", "parakeet", "whisperx", "openai", "xai", "gemini"]
 
 

@@ -9,6 +9,7 @@ from typing import Callable
 
 from dictate.api_keys import API_BACKEND_LABELS, api_key_status
 from dictate.stt.base import (
+    ONNX_AMD_PROVIDERS,
     ComputeDevice,
     ComputeType,
     SpeechToText,
@@ -40,7 +41,6 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "large-v3-turbo",
 )
 PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
-WIRED_PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2",)
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
@@ -49,13 +49,6 @@ OPENAI_MODELS: tuple[str, ...] = (
 )
 XAI_MODELS: tuple[str, ...] = ("grok-speech-to-text",)
 GEMINI_MODELS: tuple[str, ...] = ("gemini-3-flash-preview",)
-AMD_ONNX_PROVIDERS: tuple[str, ...] = (
-    "MIGraphXExecutionProvider",
-    "ROCMExecutionProvider",
-    "DmlExecutionProvider",
-)
-
-
 @dataclass(frozen=True, slots=True)
 class BackendSpec:
     backend: SttBackend
@@ -320,10 +313,10 @@ def check_backend_readiness(
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
     if backend == "parakeet":
-        if model_name not in WIRED_PARAKEET_MODELS:
+        if model_name not in PARAKEET_MODELS:
             report.errors.append(
-                f"Parakeet model '{model_name}' is a planned lane but is not wired yet. "
-                f"Wired today: {', '.join(WIRED_PARAKEET_MODELS)}."
+                f"Parakeet model '{model_name}' is not one of the wired models: "
+                f"{', '.join(PARAKEET_MODELS)}."
             )
         if parakeet_available():
             report.notes.append("Parakeet (onnx-asr) importable.")
@@ -332,11 +325,8 @@ def check_backend_readiness(
                 'Parakeet backend selected but onnx-asr is not importable. '
                 'Install with: uv pip install "onnx-asr[cpu,hub]"'
             )
-        if device in {"cuda", "amd"}:
-            report.errors.append(
-                f"Parakeet device '{device}' is a planned lane but is not wired yet. "
-                "Use cpu/auto until provider-specific Parakeet loading is implemented."
-            )
+        if device in {"cuda", "auto"}:
+            _check_cuda_with_onnxruntime(report, requested_device=device)
         if device in {"amd", "auto"}:
             _check_amd_with_onnxruntime(report, requested_device=device)
 
@@ -498,7 +488,7 @@ def _check_amd_with_onnxruntime(
             report.errors.append(f"Could not inspect ONNX Runtime execution providers: {exc}")
         return
 
-    matched = tuple(provider for provider in AMD_ONNX_PROVIDERS if provider in providers)
+    matched = tuple(provider for provider in ONNX_AMD_PROVIDERS if provider in providers)
     if matched:
         report.notes.append(f"ONNX Runtime AMD-capable provider detected: {matched[0]}")
         return
@@ -506,10 +496,55 @@ def _check_amd_with_onnxruntime(
     if requested_device == "amd":
         report.errors.append(
             "AMD GPU device requested but ONNX Runtime has no AMD-capable execution "
-            f"provider. Expected one of: {', '.join(AMD_ONNX_PROVIDERS)}."
+            f"provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}."
         )
     elif providers:
         report.notes.append(
             "ONNX Runtime providers detected, but no AMD-capable provider is enabled: "
+            + ", ".join(providers)
+        )
+
+
+def _check_cuda_with_onnxruntime(
+    report: BackendReadiness,
+    *,
+    requested_device: ComputeDevice,
+) -> None:
+    try:
+        import onnxruntime as ort
+    except Exception:  # noqa: BLE001
+        if requested_device == "cuda":
+            report.errors.append(
+                "CUDA device requested for Parakeet but onnxruntime is not importable."
+            )
+        return
+
+    preload = getattr(ort, "preload_dlls", None)
+    if callable(preload):
+        try:
+            preload()
+        except Exception as exc:  # noqa: BLE001
+            if requested_device == "cuda":
+                report.errors.append(f"Could not preload ONNX Runtime CUDA libraries: {exc}")
+            return
+
+    try:
+        providers = tuple(str(provider) for provider in ort.get_available_providers())
+    except Exception as exc:  # noqa: BLE001
+        if requested_device == "cuda":
+            report.errors.append(f"Could not inspect ONNX Runtime execution providers: {exc}")
+        return
+
+    if "CUDAExecutionProvider" in providers:
+        report.notes.append("ONNX Runtime CUDA provider detected: CUDAExecutionProvider")
+        return
+
+    if requested_device == "cuda":
+        report.errors.append(
+            "CUDA device requested for Parakeet but ONNX Runtime has no CUDAExecutionProvider."
+        )
+    elif providers:
+        report.notes.append(
+            "ONNX Runtime providers detected, but CUDAExecutionProvider is not enabled: "
             + ", ".join(providers)
         )

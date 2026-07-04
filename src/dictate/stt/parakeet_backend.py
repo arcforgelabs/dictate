@@ -21,20 +21,41 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from dictate.platform_paths import user_data_dir
-from dictate.stt.base import ComputeDevice, ComputeType, SpeechToText, SttCapabilities
+from dictate.stt.base import (
+    ONNX_AMD_PROVIDERS,
+    ComputeDevice,
+    ComputeType,
+    SpeechToText,
+    SttCapabilities,
+)
 
 logger = logging.getLogger(__name__)
 
-# onnx-asr's registry name and the HF repo that hosts the ONNX export.
-_ONNX_ASR_NAME = "nemo-parakeet-tdt-0.6b-v2"
-_SUPPORTED_MODEL = "parakeet-tdt-0.6b-v2"
-_HF_REPO = "istupakov/parakeet-tdt-0.6b-v2-onnx"
-_MODEL_DIRNAME = "parakeet-tdt-0.6b-v2-onnx"
+@dataclass(frozen=True, slots=True)
+class _ParakeetModelSpec:
+    onnx_asr_name: str
+    hf_repo: str
+    model_dirname: str
+
+
+_MODEL_SPECS: dict[str, _ParakeetModelSpec] = {
+    "parakeet-tdt-0.6b-v2": _ParakeetModelSpec(
+        onnx_asr_name="nemo-parakeet-tdt-0.6b-v2",
+        hf_repo="istupakov/parakeet-tdt-0.6b-v2-onnx",
+        model_dirname="parakeet-tdt-0.6b-v2-onnx",
+    ),
+    "parakeet-tdt-0.6b-v3": _ParakeetModelSpec(
+        onnx_asr_name="nemo-parakeet-tdt-0.6b-v3",
+        hf_repo="istupakov/parakeet-tdt-0.6b-v3-onnx",
+        model_dirname="parakeet-tdt-0.6b-v3-onnx",
+    ),
+}
 
 
 def parakeet_available() -> bool:
@@ -47,8 +68,8 @@ def parakeet_available() -> bool:
         return False
 
 
-def _model_dir() -> Path:
-    return user_data_dir() / "models" / _MODEL_DIRNAME
+def _model_dir(spec: _ParakeetModelSpec) -> Path:
+    return user_data_dir() / "models" / spec.model_dirname
 
 
 # The exact ONNX files onnx-asr needs, per quantization. Downloaded individually
@@ -71,7 +92,7 @@ _FP32_FILES = (
 )
 
 
-def _ensure_model(quantization: str) -> Path:
+def _ensure_model(model_name: str, quantization: str) -> Path:
     """Return a flat directory holding the Parakeet ONNX files, downloading once.
 
     Fetches each required file directly into a flat directory (real files, no
@@ -80,7 +101,8 @@ def _ensure_model(quantization: str) -> Path:
     """
     from huggingface_hub import hf_hub_download
 
-    target = _model_dir()
+    spec = _MODEL_SPECS[model_name]
+    target = _model_dir(spec)
     target.mkdir(parents=True, exist_ok=True)
     files = _INT8_FILES if quantization == "int8" else _FP32_FILES
     for name in files:
@@ -88,12 +110,54 @@ def _ensure_model(quantization: str) -> Path:
         if dest.exists() and dest.stat().st_size > 0:
             continue
         hf_hub_download(
-            _HF_REPO,
+            spec.hf_repo,
             filename=name,
             local_dir=str(target),
             local_dir_use_symlinks=False,
         )
     return target
+
+
+def _available_onnx_providers() -> tuple[str, ...]:
+    import onnxruntime as ort
+
+    return tuple(str(provider) for provider in ort.get_available_providers())
+
+
+def _preload_cuda_dlls() -> None:
+    import onnxruntime as ort
+
+    preload = getattr(ort, "preload_dlls", None)
+    if callable(preload):
+        preload()
+
+
+def _providers_for_device(device: ComputeDevice) -> list[str] | None:
+    if device == "auto":
+        return None
+    if device == "cpu":
+        return ["CPUExecutionProvider"]
+
+    if device == "cuda":
+        _preload_cuda_dlls()
+    available = _available_onnx_providers()
+    if device == "cuda":
+        if "CUDAExecutionProvider" not in available:
+            raise RuntimeError(
+                "Parakeet CUDA requested but ONNX Runtime does not expose CUDAExecutionProvider."
+            )
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+    if device == "amd":
+        provider = next((name for name in ONNX_AMD_PROVIDERS if name in available), None)
+        if provider is None:
+            raise RuntimeError(
+                "Parakeet AMD requested but ONNX Runtime does not expose an AMD-capable "
+                f"execution provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}."
+            )
+        return [provider, "CPUExecutionProvider"]
+
+    raise RuntimeError(f"Unsupported Parakeet device '{device}'.")
 
 
 class ParakeetSpeechToText(SpeechToText):
@@ -117,15 +181,10 @@ class ParakeetSpeechToText(SpeechToText):
         device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ):
-        if model_name != _SUPPORTED_MODEL:
+        if model_name not in _MODEL_SPECS:
             raise ValueError(
                 f"Parakeet model '{model_name}' is not wired in this runtime yet. "
-                f"Supported today: {_SUPPORTED_MODEL}."
-            )
-        if device in {"cuda", "amd"}:
-            raise ValueError(
-                f"Parakeet device '{device}' is not wired in this runtime yet. "
-                "Use cpu/auto until the provider-specific Parakeet lanes are implemented."
+                f"Supported today: {', '.join(_MODEL_SPECS)}."
             )
         self.model_name = model_name
         self.device = device
@@ -138,10 +197,21 @@ class ParakeetSpeechToText(SpeechToText):
         if self._model is None:
             import onnx_asr
 
-            model_dir = _ensure_model(self.compute_type)
-            logger.info("Loading Parakeet (%s) from %s", self.compute_type, model_dir)
+            spec = _MODEL_SPECS[self.model_name]
+            model_dir = _ensure_model(self.model_name, self.compute_type)
+            providers = _providers_for_device(self.device)
+            logger.info(
+                "Loading Parakeet %s (%s) from %s on %s",
+                self.model_name,
+                self.compute_type,
+                model_dir,
+                self.device,
+            )
             self._model = onnx_asr.load_model(
-                _ONNX_ASR_NAME, str(model_dir), quantization=self.compute_type
+                spec.onnx_asr_name,
+                str(model_dir),
+                quantization=self.compute_type,
+                providers=providers,
             )
             logger.info("Parakeet model loaded")
         return self._model

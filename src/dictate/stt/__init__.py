@@ -9,6 +9,7 @@ from dictate.stt.base import (
     SpeechToText,
     SttBackend,
     SttCapabilities,
+    ONNX_AMD_PROVIDERS,
     WhisperCppModel,
 )
 from dictate.stt.factory import (
@@ -41,6 +42,7 @@ __all__ = [
     "FASTER_WHISPER_MODELS",
     "GEMINI_MODELS",
     "OPENAI_MODELS",
+    "ONNX_AMD_PROVIDERS",
     "PARAKEET_MODELS",
     "STT_BACKENDS",
     "WHISPERX_MODELS",
