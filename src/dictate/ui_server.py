@@ -79,6 +79,12 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "local": True,
         "desc": "Runs on this machine — no key, nothing leaves your device.",
     },
+    "parakeet": {
+        "provider": "Local",
+        "brand": None,
+        "local": True,
+        "desc": "Runs on this machine — fast, accurate English, nothing leaves your device.",
+    },
     "whisperx": {
         "provider": "Local",
         "brand": None,
@@ -112,7 +118,7 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
     },
 }
 # Order shown in the Model view (local first, matching the design).
-PROVIDER_ORDER = ("faster-whisper", "whisperx", "openai", "xai", "gemini")
+PROVIDER_ORDER = ("parakeet", "faster-whisper", "whisperx", "openai", "xai", "gemini")
 
 
 class ApiError(Exception):

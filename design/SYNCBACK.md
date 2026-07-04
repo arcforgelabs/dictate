@@ -25,6 +25,12 @@ Row format (keep it to a few lines):
 
 ## Open
 
+- [ ] 2026-07-03 — Local engine toggle (Private mode only): "English" ⇄ "Multilingual" segmented control beside the privacy pill
+      code: ui/src/App.jsx (LocalEngineToggle, added to HomeBar left next to PrivacyPill), ui/src/store.jsx (MODELS + modelById), ui/src/styles.css (.engine-seg/.engine-opt) → cloud: 2477ec21-a493-41a0-b400-2a65c5bc3bf6 / comp-capture-home.html (needs mapping)
+      by: forge build lane (Opus) · branch/commit: master (uncommitted)
+      why: on-device now has two engines — English (Parakeet, fast+accurate) default vs Multilingual (Whisper); user asked for a simple speed/quality-style switch, reframed to English/Multilingual since Parakeet wins both on CPU
+      notes: NO brand names surfaced (design rule); only visible in Private mode; minimal segmented pill matching .privpill/.updpill aesthetic; writes stt_backend=parakeet / faster-whisper via existing config PATCH
+
 - [ ] 2026-06-24 — Capture home idle copy: "Ready to dictate" (was "Ready to capture")
       code: ui/src/App.jsx (CaptureHome) → cloud: 2477ec21-a493-41a0-b400-2a65c5bc3bf6 / comp-capture-home.html
       by: Cursor build lane · branch/commit: master @ 8411a3d (uncommitted)

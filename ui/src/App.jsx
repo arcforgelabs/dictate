@@ -26,9 +26,47 @@ function fmtSecs(s) {
 
 /* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
 const ONLINE_MODEL = "xai/grok-speech-to-text";
-// Backend-only: the server picks the hardware-aware local model tier for this
-// machine (there is no model-tier picker in the GUI). Do NOT hardcode a tier here.
-const PRIVATE_MODEL = "faster-whisper";
+// Local engines. English (Parakeet) is the private default — fast + accurate on
+// this machine. Multilingual (Whisper) is backend-only so the server picks the
+// hardware-aware tier. No brand names surface in the UI.
+const PRIVATE_MODEL = "parakeet/parakeet-tdt-0.6b-v2";
+const PRIVATE_MODEL_MULTI = "faster-whisper";
+
+/* Local language toggle — only shown in Private mode. English uses the on-device
+   Parakeet engine (fast, accurate); Multilingual uses Whisper for other languages.
+   Neither name is surfaced; the choice is framed by capability, not brand. */
+function LocalEngineToggle() {
+  const s = useStore();
+  const online = s.providerMode === "online";
+  const privateOn = !online || s.providerDegraded;
+  if (!privateOn) return null;
+  const backend = String(s.model || "").split("/")[0];
+  const isEnglish = backend !== "faster-whisper" && backend !== "whisperx";
+  const pick = (english) => {
+    if (english === isEnglish) return;
+    s.setModel(english ? PRIVATE_MODEL : PRIVATE_MODEL_MULTI);
+  };
+  return (
+    <div className="engine-seg" role="group" aria-label="Local language">
+      <button
+        type="button"
+        className={"engine-opt" + (isEnglish ? " on" : "")}
+        aria-pressed={isEnglish}
+        onClick={() => pick(true)}
+      >
+        English
+      </button>
+      <button
+        type="button"
+        className={"engine-opt" + (!isEnglish ? " on" : "")}
+        aria-pressed={!isEnglish}
+        onClick={() => pick(false)}
+      >
+        Multilingual
+      </button>
+    </div>
+  );
+}
 
 function PrivacyPill() {
   const s = useStore();
@@ -128,7 +166,7 @@ function CaptureHome() {
     <div className="note-home">
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
-      <HomeBar left={<PrivacyPill />} right={<UpdatePill />} />
+      <HomeBar left={<><PrivacyPill /><LocalEngineToggle /></>} right={<UpdatePill />} />
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">

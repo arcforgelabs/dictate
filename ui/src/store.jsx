@@ -7,6 +7,8 @@ export const useStore = () => useContext(StoreCtx);
 // Canonical model catalog (display metadata). Ids match the Python backend
 // (`<backend>/<model>`), so live state can map onto these directly.
 export const MODELS = [
+  { id: "parakeet/parakeet-tdt-0.6b-v2", name: "English", provider: "Local", brand: null, local: true, backend: "parakeet",
+    desc: "Runs on this machine — fast, accurate English, nothing leaves your device." },
   { id: "faster-whisper/turbo", name: "faster-whisper · turbo", provider: "Local", brand: null, local: true, backend: "faster-whisper",
     desc: "Runs on this machine — no key, nothing leaves your device." },
   { id: "whisperx/large-v3", name: "whisperx · large-v3", provider: "Local", brand: null, local: true, backend: "whisperx",
@@ -18,7 +20,17 @@ export const MODELS = [
   { id: "gemini/gemini-3-flash-preview", name: "gemini-3-flash-preview", provider: "Google", brand: "gemini", backend: "gemini",
     desc: "Gemini multimodal, hosted.", keyName: "Gemini API key", keyPrefix: "AIza" },
 ];
-export const modelById = (id) => MODELS.find((m) => m.id === id) || MODELS[0];
+export const modelById = (id) => {
+  if (!id) return MODELS[0];
+  // Exact id match, else a backend-only id (e.g. "faster-whisper") maps to that
+  // backend's first catalog entry, else fall back to the first model.
+  const backend = String(id).split("/")[0];
+  return (
+    MODELS.find((m) => m.id === id) ||
+    MODELS.find((m) => m.backend === backend) ||
+    MODELS[0]
+  );
+};
 
 export const DEMO_PHRASES = [
   "Can you push the release branch and tag it before the standup at ten.",
