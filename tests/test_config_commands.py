@@ -101,6 +101,27 @@ class ConfigSetModelTests(unittest.TestCase):
         self.assertEqual(code, 0)
         mock_sel.assert_called_once_with("faster-whisper", "turbo")
 
+    def test_set_meeting_model_defaults_to_parakeet_pyannote_backend(self) -> None:
+        with patch("dictate.__main__.set_meeting_stt_selection") as mock_sel:
+            code, out, _ = _run_config(["set-meeting-model", "parakeet-tdt-0.6b-v2"])
+        self.assertEqual(code, 0)
+        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v2")
+        self.assertIn("meeting_model=parakeet-tdt-0.6b-v2", out)
+
+    def test_set_meeting_model_accepts_backend_prefix(self) -> None:
+        with patch("dictate.__main__.set_meeting_stt_selection") as mock_sel:
+            code, out, _ = _run_config(
+                ["set-meeting-model", "parakeet-pyannote/parakeet-tdt-0.6b-v3"]
+            )
+        self.assertEqual(code, 0)
+        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v3")
+        self.assertIn("parakeet-pyannote", out)
+
+    def test_set_meeting_model_rejects_unknown_backend(self) -> None:
+        code, _, err = _run_config(["set-meeting-model", "unknown/model"])
+        self.assertEqual(code, 1)
+        self.assertIn("unknown meeting backend", err)
+
 
 class ConfigShowTests(unittest.TestCase):
     """show subcommand."""
@@ -114,6 +135,8 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("private", out)
         self.assertIn("faster-whisper", out)
+        self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
+        self.assertIn("update_channel: stable", out)
         self.assertIn("not-set", out)
 
     def test_show_online_provider_with_key(self) -> None:
@@ -133,6 +156,17 @@ class ConfigShowTests(unittest.TestCase):
         lines = out.splitlines()
         xai_line = next((l for l in lines if "key.xai" in l), "")
         self.assertIn("set", xai_line)
+
+    def test_set_update_channel_unstable(self) -> None:
+        with patch("dictate.__main__.set_update_channel", return_value="unstable") as mock_set:
+            code, out, _ = _run_config(["set-update-channel", "unstable"])
+        self.assertEqual(code, 0)
+        mock_set.assert_called_once_with("unstable")
+        self.assertIn("update_channel=unstable", out)
+
+    def test_set_update_channel_invalid_rejected(self) -> None:
+        with self.assertRaises(SystemExit):
+            _run_config(["set-update-channel", "nightly"])
 
     def test_show_no_subcommand_returns_2(self) -> None:
         code, _, _ = _run_config([])

@@ -22,6 +22,7 @@ SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
 INSTALL_GPU="${DICTATE_INSTALL_GPU:-0}"
+INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"
 INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -33,13 +34,13 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--user|--system] [--gpu] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
+Usage: $0 [--user|--system] [--gpu] [--meeting] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
 Default: --user.
 
 --user installs dictate into ~/.local/share/dictate, links ~/.local/bin/dictate and
 ~/.local/bin/dictate-ui-server, seeds the default config on first install,
-creates app launcher/autostart entries, prepares the hardware-aware faster-whisper model,
+creates app launcher/autostart entries, prepares the Parakeet local model,
 and installs the desktop "Quiet Console" UI shell when a build toolchain is
 present (unless disabled). All steps degrade gracefully when prerequisites are
 missing.
@@ -49,6 +50,10 @@ sudo. It is intentionally explicit because it requires administrator approval.
 
 --gpu installs Dictate's GPU optional dependencies for local CUDA/ONNX Runtime
 testing on capable machines.
+
+--meeting installs Dictate's pyannote/torch optional dependencies for the
+parakeet-pyannote Meeting lane. DiariZen and Sortformer still require their
+runtime-specific setup before selecting those experimental lanes.
 EOF
 }
 
@@ -126,6 +131,12 @@ while [ "$#" -gt 0 ]; do
     --no-gpu)
       INSTALL_GPU=0
       ;;
+    --meeting)
+      INSTALL_MEETING=1
+      ;;
+    --no-meeting)
+      INSTALL_MEETING=0
+      ;;
     --user)
       INSTALL_SCOPE="user"
       ;;
@@ -170,6 +181,9 @@ elif [ "$SESSION_BACKEND" = "unknown" ]; then
 fi
 if [ "$INSTALL_GPU" -eq 1 ]; then
   EXTRAS+=("gpu")
+fi
+if [ "$INSTALL_MEETING" -eq 1 ]; then
+  EXTRAS+=("meeting")
 fi
 PIP_TARGET="$SCRIPT_DIR"
 if [ "${#EXTRAS[@]}" -gt 0 ]; then
@@ -399,15 +413,15 @@ run_logged_check() {
 
 if [ "$PREPARE_TURBO" -eq 1 ]; then
   PREPARE_LOG="/tmp/dictate-install-prepare.log"
-  # Omit --model so prepare-model resolves the hardware-aware local default
-  # (turbo on capable hardware, small on a weak CPU) instead of forcing turbo.
+  # Keep the legacy flag name for installer compatibility, but prepare the
+  # fresh local default: Parakeet v2.
   run_logged_check \
-    "dictate prepare-model --stt-backend faster-whisper --device auto --compute-type int8" \
+    "dictate prepare-model --stt-backend parakeet --device auto --compute-type int8" \
     "$PREPARE_LOG" \
     1800 \
     "$DICTATE_BIN" \
     prepare-model \
-    --stt-backend faster-whisper \
+    --stt-backend parakeet \
     --device auto \
     --compute-type int8
 fi
@@ -417,13 +431,12 @@ if [ "$VERIFY" -eq 1 ]; then
   run_logged_check "dictate --help" "$VERIFY_LOG" 20 "$DICTATE_BIN" --help
   run_logged_check "dictate benchmark --help" "$VERIFY_LOG" 20 "$DICTATE_BIN" benchmark --help
   run_logged_check \
-    "dictate doctor --quick --stt-backend faster-whisper" \
+    "dictate doctor --quick" \
     "$VERIFY_LOG" \
     20 \
     "$DICTATE_BIN" \
     doctor \
-    --quick \
-    --stt-backend faster-whisper
+    --quick
 fi
 
 if [ "$STARTUP" -eq 1 ]; then

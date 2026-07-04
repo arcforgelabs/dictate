@@ -26,11 +26,14 @@ class Config:
     push_to_talk_key: str | None = None
     stt_backend: str | None = None
     stt_model: str | None = None
+    meeting_stt_backend: str | None = None
+    meeting_stt_model: str | None = None
     stt_device: str | None = None
     stt_compute_type: str | None = None
     openai_api_key_command: str | None = None
     xai_api_key_command: str | None = None
     gemini_api_key_command: str | None = None
+    update_channel: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
@@ -87,15 +90,22 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     stt_backend = data.get("stt_backend")
     stt_model = data.get("stt_model")
+    meeting_stt_backend = data.get("meeting_stt_backend")
+    meeting_stt_model = data.get("meeting_stt_model")
     stt_device = data.get("stt_device")
     stt_compute_type = data.get("stt_compute_type")
     openai_api_key_command = data.get("openai_api_key_command")
     xai_api_key_command = data.get("xai_api_key_command")
     gemini_api_key_command = data.get("gemini_api_key_command")
+    update_channel = data.get("update_channel")
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
         stt_model = None
+    if not isinstance(meeting_stt_backend, str):
+        meeting_stt_backend = None
+    if not isinstance(meeting_stt_model, str):
+        meeting_stt_model = None
     if not isinstance(stt_device, str):
         stt_device = None
     if not isinstance(stt_compute_type, str):
@@ -106,6 +116,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         xai_api_key_command = None
     if not isinstance(gemini_api_key_command, str):
         gemini_api_key_command = None
+    if not isinstance(update_channel, str):
+        update_channel = None
 
     return Config(
         hotwords=hotwords,
@@ -115,11 +127,14 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         push_to_talk_key=push_to_talk_key,
         stt_backend=stt_backend,
         stt_model=stt_model,
+        meeting_stt_backend=meeting_stt_backend,
+        meeting_stt_model=meeting_stt_model,
         stt_device=stt_device,
         stt_compute_type=stt_compute_type,
         openai_api_key_command=openai_api_key_command,
         xai_api_key_command=xai_api_key_command,
         gemini_api_key_command=gemini_api_key_command,
+        update_channel=update_channel,
     )
 
 
@@ -187,6 +202,14 @@ def set_stt_selection(backend: str, model: str, path: Path = CONFIG_PATH) -> Non
     _save_raw(data, path)
 
 
+def set_meeting_stt_selection(backend: str, model: str, path: Path = CONFIG_PATH) -> None:
+    """Persist selected Meeting STT backend/model without changing dictation."""
+    data = _load_raw(path)
+    data["meeting_stt_backend"] = backend
+    data["meeting_stt_model"] = model
+    _save_raw(data, path)
+
+
 def set_stt_backend(backend: str, path: Path = CONFIG_PATH) -> None:
     """Persist STT backend without changing the saved model."""
     data = _load_raw(path)
@@ -207,6 +230,19 @@ def set_stt_runtime_profile(device: str, compute_type: str, path: Path = CONFIG_
     data["stt_device"] = device
     data["stt_compute_type"] = compute_type
     _save_raw(data, path)
+
+
+def set_update_channel(channel: str, path: Path = CONFIG_PATH) -> str:
+    """Persist the app update channel. Returns the normalized channel."""
+    normalized = channel.strip().lower()
+    if normalized == "latest":
+        normalized = "stable"
+    if normalized not in {"stable", "unstable"}:
+        raise ValueError("update channel must be stable or unstable")
+    data = _load_raw(path)
+    data["update_channel"] = normalized
+    _save_raw(data, path)
+    return normalized
 
 
 def set_api_key_command(backend: str, command: str | None, path: Path = CONFIG_PATH) -> None:

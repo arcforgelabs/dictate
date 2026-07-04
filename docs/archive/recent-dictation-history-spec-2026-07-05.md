@@ -3,7 +3,8 @@
 Status: historical implementation spec. The recovery mechanism now surfaces in
 the desktop UI as local dictation history / Notes rather than as the primary
 product direction. Keep this file for implementation context; use
-[GOALS.md](GOALS.md) for current transcript-first goals.
+[TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md) for the current transcript-first
+recording and meeting plan.
 
 ## Why this exists
 
@@ -174,7 +175,7 @@ Use this prompt verbatim for the next coding agent:
 Implement the "Recent Dictation History Recovery" feature in this repository.
 
 Read first:
-- docs/recent-dictation-history-spec.md
+- docs/archive/recent-dictation-history-spec-2026-07-05.md
 - src/dictate/daemon.py
 - src/dictate/tray.py
 - src/dictate/hotwords_dialog.py

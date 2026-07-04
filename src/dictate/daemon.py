@@ -31,7 +31,7 @@ from dictate.hotkey_backend import (
 from dictate.lexicon import LexiconMode
 from dictate.outputs import TextOutput
 from dictate.provider_supervisor import ProviderSupervisor
-from dictate.stt import SpeechToText
+from dictate.stt import SpeechToText, TranscriptSegment
 
 # Retry policy for long recordings (note mode) when remote transcription fails.
 # We retry the full chunk up to N times with exponential backoff before degrading.
@@ -44,7 +44,7 @@ FINAL_AUDIO_QUEUE_SIZE = 4
 FINAL_WINDOW_QUEUE_SIZE = 128
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
-RecordingMode = Literal["dictation", "note"]
+RecordingMode = Literal["dictation", "note", "meeting"]
 
 
 class Daemon:
@@ -69,6 +69,7 @@ class Daemon:
         note_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
         supervisor: ProviderSupervisor | None = None,
+        meeting_stt: SpeechToText | None = None,
     ):
         self.active = True
         self.language = language
@@ -90,6 +91,15 @@ class Daemon:
             lexicon_mode=lexicon_mode,
             lexicon_replacements=lexicon_replacements,
         )
+        self.meeting_engine: DictationEngine | None = None
+        if meeting_stt is not None:
+            self.meeting_engine = DictationEngine(
+                stt=meeting_stt,
+                sample_rate=SAMPLE_RATE,
+                hotwords=hotwords,
+                lexicon_mode=lexicon_mode,
+                lexicon_replacements=lexicon_replacements,
+            )
         # Wire the supervisor as the engine's health_sink so remote
         # success/failure is reported automatically on every transcription.
         if supervisor is not None:
@@ -142,6 +152,8 @@ class Daemon:
         """Update hotwords without restarting daemon."""
         with self._engine_lock:
             self.engine.set_hotwords(hotwords)
+            if self.meeting_engine is not None:
+                self.meeting_engine.set_hotwords(hotwords)
 
     def clear_active_api_key(self, backend: str) -> None:
         """Remove a hosted backend key from the currently loaded STT object."""
@@ -149,6 +161,10 @@ class Daemon:
             stt = self.engine.stt
             if stt.backend_name == backend and hasattr(stt, "api_key"):
                 setattr(stt, "api_key", "")
+            if self.meeting_engine is not None:
+                meeting_stt = self.meeting_engine.stt
+                if meeting_stt.backend_name == backend and hasattr(meeting_stt, "api_key"):
+                    setattr(meeting_stt, "api_key", "")
 
     def set_push_to_talk_combo(self, combo: str) -> None:
         """Update push-to-talk combo without restarting daemon."""
@@ -167,6 +183,10 @@ class Daemon:
             if self._note_recording_paused:
                 return self.resume_note_recording()
         return self._start_recording(mode="note")
+
+    def start_meeting_recording(self) -> bool:
+        """Start a meeting recording that requires speaker attribution."""
+        return self._start_recording(mode="meeting")
 
     def pause_note_recording(self, *, pause_reason: str = "manual") -> bool:
         """Pause an active note recording without finalizing the session."""
@@ -262,6 +282,15 @@ class Daemon:
         self._finalize_recording()
         return True
 
+    def stop_meeting_recording(self) -> bool:
+        """Stop an active meeting recording and queue it for transcription."""
+        with self._recording_lock:
+            recording_id = self._active_recording_id
+            if recording_id is None or self._recording_mode(recording_id) != "meeting":
+                return False
+        self._finalize_recording()
+        return True
+
     def _finish_paused_note_recording(self, recording_id: int) -> None:
         with self._recording_lock:
             if self._active_recording_id != recording_id or not self._note_recording_paused:
@@ -316,12 +345,24 @@ class Daemon:
 
     @property
     def note_recording_active(self) -> bool:
+        return self.long_recording_active
+
+    @property
+    def long_recording_active(self) -> bool:
         recording_id = self._active_recording_id
         return bool(
             recording_id is not None
-            and self._recording_mode(recording_id) == "note"
+            and self._recording_mode(recording_id) in {"note", "meeting"}
             and not self._is_recording_failed(recording_id)
         )
+
+    @property
+    def long_recording_mode(self) -> RecordingMode | None:
+        recording_id = self._active_recording_id
+        if recording_id is None or self._is_recording_failed(recording_id):
+            return None
+        mode = self._recording_mode(recording_id)
+        return mode if mode in {"note", "meeting"} else None
 
     @property
     def note_recording_paused(self) -> bool:
@@ -350,10 +391,50 @@ class Daemon:
             except Exception as exc:  # noqa: BLE001
                 print(f"Failed to release previous STT resources: {exc}", file=sys.stderr)
 
+    def set_meeting_speech_to_text(
+        self,
+        stt: SpeechToText,
+        *,
+        hotwords: str | None = None,
+    ) -> None:
+        """Set the dedicated Meeting backend without changing normal dictation."""
+        previous_stt: SpeechToText | None = None
+        with self._engine_lock:
+            if self.meeting_engine is None:
+                self.meeting_engine = DictationEngine(
+                    stt=stt,
+                    sample_rate=SAMPLE_RATE,
+                    hotwords=hotwords if hotwords is not None else self.engine.hotwords,
+                    lexicon_mode=self.engine.lexicon_mode,
+                    lexicon_replacements=self.engine.lexicon_replacements,
+                )
+            else:
+                previous_stt = self.meeting_engine.stt
+                self.meeting_engine.stt = stt
+                if hotwords is not None:
+                    self.meeting_engine.set_hotwords(hotwords)
+            try:
+                self.meeting_engine.release_api_fallback()
+            except Exception as exc:  # noqa: BLE001
+                print(f"Failed to release meeting fallback STT resources: {exc}", file=sys.stderr)
+        if previous_stt is not None and previous_stt is not stt:
+            try:
+                previous_stt.release()
+            except Exception as exc:  # noqa: BLE001
+                print(f"Failed to release previous meeting STT resources: {exc}", file=sys.stderr)
+
     def current_backend_model(self) -> tuple[str, str]:
         """Return active backend/model selection."""
         with self._engine_lock:
             return (self.engine.stt.backend_name, self.engine.stt.model_name)
+
+    def current_meeting_backend_model(self) -> tuple[str, str] | None:
+        """Return dedicated Meeting backend/model selection if configured."""
+        with self._engine_lock:
+            if self.meeting_engine is None:
+                return None
+            stt = self.meeting_engine.stt
+            return (stt.backend_name, getattr(stt, "model_name", "") or "")
 
     def runtime_stt_options(self) -> tuple[str, str]:
         """Return current STT device/compute options for new model instantiation."""
@@ -383,6 +464,11 @@ class Daemon:
                 self.engine.release()
             except Exception:  # noqa: BLE001
                 pass
+            if self.meeting_engine is not None:
+                try:
+                    self.meeting_engine.release()
+                except Exception:  # noqa: BLE001
+                    pass
 
         if self.supervisor is not None:
             try:
@@ -409,7 +495,8 @@ class Daemon:
                     self._active_recording_id = self._recording_generation
                     recording_id = self._active_recording_id
                     with self._engine_lock:
-                        stt = self.engine.stt
+                        engine = self._engine_for_mode_locked(mode)
+                        stt = engine.stt
                         note_streaming = mode == "note" and (
                             (self.supervisor is not None and self.supervisor.is_degraded())
                             or stt.backend_name == "faster-whisper"
@@ -424,14 +511,11 @@ class Daemon:
                         # decode without an end-of-clip re-decode.
                         dictation_overlap_stream = mode == "dictation" and streaming_enabled
                         stt_id = id(stt)
-                        note_provider = ""
-                        note_model = ""
-                        if note_streaming:
-                            note_provider = stt.backend_name
-                            note_model = getattr(stt, "model_name", "") or ""
-                            if self.supervisor is not None and self.supervisor.is_degraded():
-                                note_provider = "faster-whisper"
-                                note_model = note_model or "base"
+                        note_provider = stt.backend_name
+                        note_model = getattr(stt, "model_name", "") or ""
+                        if self.supervisor is not None and self.supervisor.is_degraded():
+                            note_provider = "faster-whisper"
+                            note_model = note_model or "base"
                     with self._queue_lock:
                         self._recording_parts[self._active_recording_id] = []
                         self._recording_chunk_counts[self._active_recording_id] = 0
@@ -442,21 +526,29 @@ class Daemon:
                             self._streaming_recordings.add(self._active_recording_id)
                         else:
                             self._streaming_recordings.discard(self._active_recording_id)
-                        if note_streaming:
+                        if mode in {"note", "meeting"}:
                             try:
                                 note_id = self.note_store.create_note(
                                     provider=note_provider,
                                     model=note_model,
                                     recording_id=self._active_recording_id,
+                                    speaker_labels=mode == "meeting",
+                                    mode=mode,
                                 )
                             except Exception as exc:  # noqa: BLE001
                                 note_start_error = exc
                                 failed_recording_id = self._active_recording_id
                             else:
                                 self._recording_note_ids[self._active_recording_id] = note_id
-                                self._recording_prompt_tails[self._active_recording_id] = ""
-                                self._recording_note_chunk_cursors[self._active_recording_id] = (0, 0.0)
-                                self._note_streaming_recordings.add(self._active_recording_id)
+                                if note_streaming:
+                                    self._recording_prompt_tails[self._active_recording_id] = ""
+                                    self._recording_note_chunk_cursors[self._active_recording_id] = (
+                                        0,
+                                        0.0,
+                                    )
+                                    self._note_streaming_recordings.add(self._active_recording_id)
+                                else:
+                                    self._note_streaming_recordings.discard(self._active_recording_id)
                         else:
                             self._note_streaming_recordings.discard(self._active_recording_id)
                             if dictation_overlap_stream:
@@ -506,11 +598,16 @@ class Daemon:
                     self._surface_note_terminal(recording_id, "failed")
                     return False
 
-                label = "Note recording" if mode == "note" else "Recording"
+                if mode == "meeting":
+                    label = "Meeting recording"
+                elif mode == "note":
+                    label = "Note recording"
+                else:
+                    label = "Recording"
                 print(f"\r  \033[91m● {label}...\033[0m", end="", file=sys.stderr, flush=True)
                 self._notify_recording(True)
-                if mode == "note":
-                    self._notify_note_recording(True, paused=False)
+                if mode in {"note", "meeting"}:
+                    self._notify_note_recording(True, paused=False, mode=mode)
                 # Opportunistic recovery probe: if degraded, check whether the remote
                 # recovered while we were idle — cheap way to avoid waiting for the
                 # next scheduled probe to fire.
@@ -538,8 +635,8 @@ class Daemon:
                 else:
                     print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 self._notify_recording(False)
-                if mode == "note":
-                    self._notify_note_recording(False, paused=False)
+                if mode in {"note", "meeting"}:
+                    self._notify_note_recording(False, paused=False, mode=mode)
                 return
             if failed or self._is_recording_failed(recording_id):
                 with self._recording_lock:
@@ -548,8 +645,8 @@ class Daemon:
                     self._note_recording_paused = False
                     self._clear_recording_state(recording_id)
                 self._notify_recording(False)
-                if mode == "note":
-                    self._notify_note_recording(False, paused=False)
+                if mode in {"note", "meeting"}:
+                    self._notify_note_recording(False, paused=False, mode=mode)
                 return
 
             if self._should_queue_stop_audio(recording_id, audio):
@@ -560,8 +657,8 @@ class Daemon:
                         transcript_reason="truncated-audio",
                     )
                     self._notify_recording(False)
-                    if mode == "note":
-                        self._notify_note_recording(False, paused=False)
+                    if mode in {"note", "meeting"}:
+                        self._notify_note_recording(False, paused=False, mode=mode)
                     return
                 self._queue_final_chunk(AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id))
             elif self._should_queue_final_marker(recording_id):
@@ -572,8 +669,8 @@ class Daemon:
                 self._active_recording_id = None
                 self._note_recording_paused = False
             self._notify_recording(False)
-            if mode == "note":
-                self._notify_note_recording(False, paused=False)
+            if mode in {"note", "meeting"}:
+                self._notify_note_recording(False, paused=False, mode=mode)
 
     def _on_hotkey_press(self) -> None:
         try:
@@ -858,16 +955,22 @@ class Daemon:
         *,
         paused: bool = False,
         pause_reason: str | None = None,
+        mode: RecordingMode | None = None,
     ) -> None:
         if self.note_recording_callback is None:
             return
+        if mode is None:
+            mode = self.long_recording_mode or "note"
         try:
-            self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason)
+            self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason, mode=mode)
         except TypeError:
             try:
-                self.note_recording_callback(recording, paused=paused)
+                self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason)
             except TypeError:
-                self.note_recording_callback(recording)
+                try:
+                    self.note_recording_callback(recording, paused=paused)
+                except TypeError:
+                    self.note_recording_callback(recording)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Note recording callback failed: {exc}", file=sys.stderr)
 
@@ -1022,6 +1125,7 @@ class Daemon:
         text: str,
         raw_text: str,
         recording_id: int,
+        segments: list[dict[str, object]] | None = None,
     ) -> None:
         payload: dict[str, object] = {
             "text": text,
@@ -1029,6 +1133,8 @@ class Daemon:
             "recording_id": recording_id,
             "status": "ok",
         }
+        if segments is not None:
+            payload["segments"] = segments
         if self.note_callback is not None:
             try:
                 self.note_callback(payload)
@@ -1040,7 +1146,7 @@ class Daemon:
             sequence=None,
             recording_id=recording_id,
             stale=False,
-            mode="note",
+            mode=self._recording_mode(recording_id),
         )
 
     def _surface_note_terminal(self, recording_id: int, status: str) -> None:
@@ -1073,11 +1179,55 @@ class Daemon:
             return
         if recording_id != 0 and not self._recording_session_known(recording_id):
             return
+        if not self._persist_transcript_segments(recording_id, result):
+            return
         with self._queue_lock:
             if recording_id == 0:
                 self._recording_parts.setdefault(recording_id, []).append(result.text.strip())
             elif recording_id in self._recording_parts:
                 self._recording_parts[recording_id].append(result.text.strip())
+
+    def _persist_transcript_segments(self, recording_id: int, result: TranscriptionResult) -> bool:
+        if recording_id == 0 or self._is_note_streaming(recording_id):
+            return True
+        if self._recording_mode(recording_id) not in {"note", "meeting"}:
+            return True
+        with self._queue_lock:
+            note_id = self._recording_note_ids.get(recording_id)
+            seq = self._recording_chunk_counts.get(recording_id, 0)
+        if not note_id:
+            return True
+        provider, model = self._stt_labels(recording_id)
+        segments = result.segments or [
+            TranscriptSegment(
+                text=result.text,
+                t_start=0.0,
+                t_end=result.duration_s,
+            )
+        ]
+        try:
+            for offset, segment in enumerate(segments):
+                text = segment.text.strip()
+                if not text:
+                    continue
+                self.note_store.append_segment(
+                    note_id,
+                    NoteSegment(
+                        seq=seq + offset,
+                        t_start=segment.t_start if segment.t_start is not None else 0.0,
+                        t_end=segment.t_end if segment.t_end is not None else result.duration_s,
+                        provider=provider,
+                        model=model,
+                        text=text,
+                        speaker_id=segment.speaker_id,
+                        speaker_label=segment.speaker_label,
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Could not persist transcript segments for %s", note_id)
+            self._fail_recording_session(recording_id, f"Note storage failed: {exc}")
+            return False
+        return True
 
     def _remember_recording_audio_status(self, recording_id: int, result: TranscriptionResult) -> None:
         if result.status not in {"too_short", "no_speech"}:
@@ -1108,7 +1258,7 @@ class Daemon:
             final_result = final_result or self._last_recording_audio_status(recording_id)
             self._clear_recording_state(recording_id)
             self._surface_empty_final_status(final_result)
-            if mode == "note":
+            if mode in {"note", "meeting"}:
                 if note_id:
                     try:
                         self.note_store.mark_failed(note_id, error="empty")
@@ -1120,7 +1270,7 @@ class Daemon:
 
         mode = self._recording_mode(recording_id)
         self._mark_recording_completed(recording_id)
-        if mode == "note":
+        if mode in {"note", "meeting"}:
             self._finalize_note_session(recording_id, assembled_text)
             self._clear_recording_state(recording_id)
             return
@@ -1149,6 +1299,7 @@ class Daemon:
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
         note_id: str | None = None
+        segments_payload: list[dict[str, object]] = []
         with self._queue_lock:
             note_id = self._recording_note_ids.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
@@ -1157,6 +1308,9 @@ class Daemon:
             stored = self.note_store.assembled_text(note_id)
             if stored.strip():
                 raw_text = stored
+            segments_payload = [
+                _note_segment_payload(segment) for segment in self.note_store.load_segments(note_id)
+            ]
             try:
                 self.note_store.mark_ready(note_id)
             except Exception as exc:  # noqa: BLE001
@@ -1180,7 +1334,12 @@ class Daemon:
             print(f"\r  Note history save failed: {exc}", file=sys.stderr)
         else:
             self._notify_history_changed()
-        self._surface_note(text=note_text, raw_text=raw_text, recording_id=recording_id)
+        self._surface_note(
+            text=note_text,
+            raw_text=raw_text,
+            recording_id=recording_id,
+            segments=segments_payload,
+        )
         print(f"\r  Saved note: {note_text}", file=sys.stderr)
 
     def _fail_recording_session(
@@ -1200,7 +1359,7 @@ class Daemon:
         with self._recording_lock:
             active_capture = self._active_recording_id == recording_id
             recorder_running = self.recorder.is_recording
-            if active_capture and mode == "note":
+            if active_capture and mode in {"note", "meeting"}:
                 self._note_recording_paused = False
                 self._note_pause_reason = None
         with self._queue_lock:
@@ -1228,14 +1387,16 @@ class Daemon:
             stale=True,
             reason=transcript_reason,
         )
-        should_stop_capture = active_capture and (mode == "note" or transcript_reason in {"capture-error", "truncated-audio"})
+        should_stop_capture = active_capture and (
+            mode in {"note", "meeting"} or transcript_reason in {"capture-error", "truncated-audio"}
+        )
         if should_stop_capture:
             self._notify_recording(False)
-        if mode == "note":
+        if mode in {"note", "meeting"}:
             # Publish a terminal note signal so the webview can leave "Transcribing…".
             self._surface_note_terminal(recording_id, "failed")
-        if should_stop_capture and mode == "note":
-            self._notify_note_recording(False, paused=False)
+        if should_stop_capture and mode in {"note", "meeting"}:
+            self._notify_note_recording(False, paused=False, mode=mode)
         if should_stop_capture and recorder_running:
             threading.Thread(
                 target=self._cleanup_failed_recording_session,
@@ -1340,9 +1501,10 @@ class Daemon:
             max(max(segment.t_end for segment in segments), queued_time),
         )
 
-    def _stt_labels(self) -> tuple[str, str]:
+    def _stt_labels(self, recording_id: int | None = None) -> tuple[str, str]:
         with self._engine_lock:
-            stt = self.engine.stt
+            mode = self._recording_mode(recording_id) if recording_id is not None else "dictation"
+            stt = self._engine_for_mode_locked(mode).stt
             provider = stt.backend_name
             model = getattr(stt, "model_name", "") or ""
         if self.supervisor is not None and self.supervisor.is_degraded():
@@ -1359,7 +1521,7 @@ class Daemon:
         if not merged:
             return ""
         if note_id:
-            provider, model = self._stt_labels()
+            provider, model = self._stt_labels(recording_id)
             try:
                 self.note_store.append_segment(
                     note_id,
@@ -1431,10 +1593,10 @@ class Daemon:
                 terminal = recording_id in self._terminal_recordings
             if recording_id != 0 and (terminal or expected_stt_id is None):
                 return None
-            if expected_stt_id is not None and id(self.engine.stt) != expected_stt_id:
-                return None
-
             mode = self._recording_mode(recording_id)
+            engine = self._engine_for_mode_locked(mode)
+            if expected_stt_id is not None and id(engine.stt) != expected_stt_id:
+                return None
             supervisor = self.supervisor
 
             # Any streaming recording (note or dictation) decodes through the same
@@ -1455,7 +1617,7 @@ class Daemon:
                 # backlog aborts, so a heavier decode risks a hard CPU regression);
                 # dictation uses the default quality profile.
                 decode_profile = "note" if self._is_note_streaming(recording_id) else "quality"
-                return self.engine.transcribe_stream_chunk(
+                return engine.transcribe_stream_chunk(
                     audio,
                     language=self.language,
                     initial_prompt=initial_prompt,
@@ -1466,7 +1628,7 @@ class Daemon:
 
             # On-device decode params: note recordings keep the lighter master
             # profile even when they fall back to CPU (unchanged note behavior).
-            decode_profile = "note" if mode == "note" else "quality"
+            decode_profile = "note" if mode in {"note", "meeting"} else "quality"
 
             # --- Degraded path: force on-device transcription ---
             # When the supervisor is degraded (remote failed earlier), bypass
@@ -1492,14 +1654,16 @@ class Daemon:
 
             # --- Default path (no supervisor, or streaming chunks in dictation) ---
             # One remote attempt; on failure the engine falls back to CPU and
-            # sets result.notice.  For note recordings without a supervisor,
-            # diarize=True so the backend diarization path is used.
-            diarize = mode == "note"
-            return self.engine.transcribe(
+            # sets result.notice. Meeting is the only mode that asks for speaker
+            # attribution; note recordings use the same plain ASR contract as
+            # push-to-talk dictation.
+            diarize = mode == "meeting"
+            return engine.transcribe(
                 audio,
                 language=self.language,
                 min_duration_s=min_duration_s,
                 diarize=diarize,
+                require_speaker_attribution=mode == "meeting",
                 decode_profile=decode_profile,
             )
 
@@ -1528,7 +1692,7 @@ class Daemon:
                     audio,
                     language=self.language,
                     min_duration_s=min_duration_s,
-                    diarize=True,  # note recordings use diarization
+                    diarize=False,
                 )
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
@@ -1551,7 +1715,7 @@ class Daemon:
             audio,
             language=self.language,
             min_duration_s=min_duration_s,
-            diarize=True,
+            diarize=False,
             decode_profile="note",
         )
 
@@ -1602,6 +1766,11 @@ class Daemon:
                 and recording_id not in self._recording_final_chunks
             )
 
+    def _engine_for_mode_locked(self, mode: RecordingMode) -> DictationEngine:
+        if mode == "meeting" and self.meeting_engine is not None:
+            return self.meeting_engine
+        return self.engine
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -1622,3 +1791,19 @@ def _make_supervisor_health_sink(
         else:
             supervisor.report_failure(reason or "unreachable")
     return _sink
+
+
+def _note_segment_payload(segment: NoteSegment) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "seq": segment.seq,
+        "t_start": segment.t_start,
+        "t_end": segment.t_end,
+        "provider": segment.provider,
+        "model": segment.model,
+        "text": segment.text,
+    }
+    if segment.speaker_id:
+        payload["speaker_id"] = segment.speaker_id
+    if segment.speaker_label:
+        payload["speaker_label"] = segment.speaker_label
+    return payload

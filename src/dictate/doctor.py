@@ -21,6 +21,10 @@ from dictate.stt import (
     COMPUTE_DEVICES,
     GEMINI_MODELS,
     OPENAI_MODELS,
+    PARAKEET_DIARIZEN_MODELS,
+    PARAKEET_MODELS,
+    PARAKEET_PYANNOTE_MODELS,
+    PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
     WHISPERX_MODELS,
     XAI_MODELS,
@@ -40,15 +44,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stt-backend",
         choices=STT_BACKENDS,
-        default="faster-whisper",
-        help="STT backend to diagnose",
+        default="parakeet",
+        help="STT backend to diagnose (default: parakeet)",
     )
     parser.add_argument(
         "--model",
         default=None,
         help=(
             "Model name override for diagnosis. "
-            "local example: turbo. "
+            f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
+            "faster-whisper examples: turbo, small. "
+            f"parakeet-pyannote examples: {', '.join(PARAKEET_PYANNOTE_MODELS)}. "
+            f"parakeet-diarizen examples: {', '.join(PARAKEET_DIARIZEN_MODELS)}. "
+            f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}. "
             f"whisperx examples: {', '.join(WHISPERX_MODELS)}. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
             f"xai examples: {', '.join(XAI_MODELS)}. "

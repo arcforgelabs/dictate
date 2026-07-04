@@ -11,9 +11,13 @@ It runs two ways:
 
 - **Standalone (browser / dev / tests)** — a self-contained mock with the canned
   dictation demo, so the whole UI is explorable and testable with no backend.
+  Mock recording is enabled only in Vite dev/test mode or with
+  `VITE_DICTATE_ENABLE_MOCK=1`.
 - **Live (inside the Tauri shell)** — the shell injects
   `window.__DICTATE__ = { baseUrl, token, platform }` and the UI reflects and
-  drives the real Python engine over the `ui_server` HTTP API.
+  drives the real Python engine over the `ui_server` HTTP API. A packaged shell
+  with no live engine must show an engine-connection error; it must not return
+  canned demo transcripts.
 
 ## Develop — the fast UI loop
 
@@ -60,8 +64,9 @@ Fonts (Hanken Grotesk + JetBrains Mono variable TTFs) are bundled in
 | window min/max/close | Tauri window API (`withGlobalTauri`) |
 
 Every request carries `Authorization: Bearer <token>`; the server is loopback
-only. With no bridge injected, `ipc.isLive()` is `false` and all mutations stay
-local (mock mode) — which is exactly what the test suite exercises.
+only. With no bridge injected, `ipc.isLive()` is `false`. Local mock mutations
+are allowed only when `ipc.isMockMode()` is true; `ipc.isShell()` disables mock
+recording even if the engine bridge is temporarily unavailable.
 
 ## Layout
 

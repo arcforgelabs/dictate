@@ -124,11 +124,19 @@ def _create_loaded_stt(
         compute_type=compute_type,  # type: ignore[arg-type]
     )
     try:
-        _ = stt.model
+        _prepare_backend_resources(stt)
     except Exception:  # noqa: BLE001
         _release_stt(stt)
         raise
     return stt
+
+
+def _prepare_backend_resources(stt: SpeechToText) -> None:
+    prepare_resources = getattr(stt, "prepare_model_resources", None)
+    if callable(prepare_resources):
+        prepare_resources()
+        return
+    _ = stt.model
 
 
 def _release_stt(stt: SpeechToText | None) -> None:

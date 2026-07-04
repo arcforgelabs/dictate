@@ -39,6 +39,8 @@ class NoteSegment:
     provider: str
     model: str
     text: str
+    speaker_id: str | None = None
+    speaker_label: str | None = None
 
 
 class NoteStore:
@@ -54,12 +56,13 @@ class NoteStore:
         model: str,
         recording_id: int | None = None,
         speaker_labels: bool = False,
+        mode: str = "note",
     ) -> str:
         note_id = f"note_{uuid.uuid4().hex}"
         started_at = datetime.now(timezone.utc).isoformat()
         record = NoteRecord(
             note_id=note_id,
-            mode="note",
+            mode=mode,
             provider=provider,
             model=model,
             started_at=started_at,
@@ -106,6 +109,19 @@ class NoteStore:
             error=raw.get("error"),
         )
 
+    def list_notes(self, *, limit: int = 50) -> list[NoteRecord]:
+        if not self._root.is_dir():
+            return []
+        notes: list[NoteRecord] = []
+        for note_dir in self._root.iterdir():
+            if not note_dir.is_dir():
+                continue
+            note = self.load_note(note_dir.name)
+            if note is not None:
+                notes.append(note)
+        notes.sort(key=_note_sort_key, reverse=True)
+        return notes[: max(0, limit)]
+
     def load_segments(self, note_id: str) -> list[NoteSegment]:
         path = self._note_dir(note_id) / "segments.jsonl"
         if not path.is_file():
@@ -131,13 +147,19 @@ class NoteStore:
                     provider=str(raw.get("provider", "")),
                     model=str(raw.get("model", "")),
                     text=text,
+                    speaker_id=_optional_str(raw.get("speaker_id")),
+                    speaker_label=_optional_str(raw.get("speaker_label")),
                 )
             )
         segments.sort(key=lambda item: item.seq)
         return segments
 
     def assembled_text(self, note_id: str) -> str:
-        parts = [segment.text.strip() for segment in self.load_segments(note_id)]
+        segments = self.load_segments(note_id)
+        if any(segment.speaker_label or segment.speaker_id for segment in segments):
+            parts = _speaker_grouped_parts(segments)
+        else:
+            parts = [segment.text.strip() for segment in segments]
         return " ".join(part for part in parts if part)
 
     def mark_processing(self, note_id: str) -> None:
@@ -206,3 +228,43 @@ class NoteStore:
 
     def _note_dir(self, note_id: str) -> Path:
         return self._root / note_id
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _note_sort_key(note: NoteRecord) -> str:
+    return note.ended_at or note.started_at or ""
+
+
+def _segment_display_text(segment: NoteSegment) -> str:
+    text = segment.text.strip()
+    if not text:
+        return ""
+    label = segment.speaker_label or segment.speaker_id
+    return f"{label}: {text}" if label else text
+
+
+def _speaker_grouped_parts(segments: list[NoteSegment]) -> list[str]:
+    grouped: list[str] = []
+    current_label: str | None = None
+    current_parts: list[str] = []
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+        label = segment.speaker_label or segment.speaker_id
+        if label != current_label and current_parts:
+            grouped.append(_speaker_line(current_label, current_parts))
+            current_parts = []
+        current_label = label
+        current_parts.append(text)
+    if current_parts:
+        grouped.append(_speaker_line(current_label, current_parts))
+    return grouped
+
+
+def _speaker_line(label: str | None, parts: list[str]) -> str:
+    text = " ".join(part.strip() for part in parts if part.strip()).strip()
+    return f"{label}: {text}" if label else text

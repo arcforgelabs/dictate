@@ -16,6 +16,7 @@ from dictate.lexicon import (
     normalize_lexicon_mode,
 )
 from dictate.stt import SpeechToText
+from dictate.stt.base import TranscriptSegment
 
 ResultStatus = Literal["ok", "empty", "too_short", "no_speech", "error"]
 
@@ -25,6 +26,7 @@ class TranscriptionResult:
     status: ResultStatus
     duration_s: float
     text: str = ""
+    segments: list[TranscriptSegment] | None = None
     error: str | None = None
     notice: str | None = None
 
@@ -88,6 +90,7 @@ class DictationEngine:
         *,
         min_duration_s: float | None = None,
         diarize: bool = False,
+        require_speaker_attribution: bool = False,
         decode_profile: str = "quality",
     ) -> TranscriptionResult:
         """Transcribe audio; fall back to on-device CPU on remote failure.
@@ -101,6 +104,7 @@ class DictationEngine:
             language,
             min_duration_s=min_duration_s,
             diarize=diarize,
+            require_speaker_attribution=require_speaker_attribution,
             allow_cpu_fallback=True,
             decode_profile=decode_profile,
         )
@@ -112,6 +116,7 @@ class DictationEngine:
         *,
         min_duration_s: float | None = None,
         diarize: bool = False,
+        require_speaker_attribution: bool = False,
     ) -> TranscriptionResult:
         """Transcribe using the primary backend only; raise on remote failure.
 
@@ -129,6 +134,7 @@ class DictationEngine:
             language,
             min_duration_s=min_duration_s,
             diarize=diarize,
+            require_speaker_attribution=require_speaker_attribution,
             allow_cpu_fallback=False,
             report_health_on_fail=False,
         )
@@ -270,6 +276,7 @@ class DictationEngine:
         *,
         min_duration_s: float | None,
         diarize: bool,
+        require_speaker_attribution: bool,
         allow_cpu_fallback: bool,
         report_health_on_fail: bool = True,
         decode_profile: str = "quality",
@@ -290,35 +297,84 @@ class DictationEngine:
             replacements=self.lexicon_replacements,
         )
         _online = self.stt.backend_name in {"xai", "openai", "gemini"}
+        supports_speaker_attribution = bool(
+            getattr(self.stt.capabilities, "supports_speaker_attribution", False)
+        )
+        if diarize and require_speaker_attribution and not supports_speaker_attribution:
+            return TranscriptionResult(
+                status="error",
+                duration_s=duration,
+                error=(
+                    f"{self.stt.backend_name} does not support required speaker "
+                    "attribution for meeting transcription"
+                ),
+            )
         try:
-            if diarize and hasattr(self.stt, "transcribe_diarized"):
-                text = self.stt.transcribe_diarized(
+            segments: list[TranscriptSegment] | None = None
+            segment_transcriber = _defined_method(self.stt, "transcribe_diarized_segments")
+            diarized_transcriber = _defined_method(self.stt, "transcribe_diarized")
+            if diarize and segment_transcriber is not None:
+                segments = segment_transcriber(
+                    audio,
+                    language=language,
+                    hotwords=lexicon_plan.decode_hotwords,
+                )
+                text = _segments_to_text(segments).strip()
+            elif diarize and diarized_transcriber is not None:
+                text = diarized_transcriber(
                     audio,
                     language=language,
                     hotwords=lexicon_plan.decode_hotwords,
                 ).strip()
             else:
-                try:
-                    text = self.stt.transcribe(
-                        audio,
-                        language=language,
-                        hotwords=lexicon_plan.decode_hotwords,
-                        prompt_context=lexicon_plan.prompt_context,
-                        decode_profile=decode_profile,
-                    ).strip()
-                except TypeError:
-                    # Backend predates decode_profile: retry without it, keeping the
-                    # other kwargs. A genuine transcription failure is not a TypeError
-                    # and still propagates to the CPU-fallback path below.
-                    text = self.stt.transcribe(
-                        audio,
-                        language=language,
-                        hotwords=lexicon_plan.decode_hotwords,
-                        prompt_context=lexicon_plan.prompt_context,
-                    ).strip()
+                plain_segment_transcriber = _defined_method(self.stt, "transcribe_segments")
+                if plain_segment_transcriber is not None:
+                    try:
+                        segments = plain_segment_transcriber(
+                            audio,
+                            language=language,
+                            hotwords=lexicon_plan.decode_hotwords,
+                            prompt_context=lexicon_plan.prompt_context,
+                            decode_profile=decode_profile,
+                        )
+                    except TypeError:
+                        segments = plain_segment_transcriber(
+                            audio,
+                            language=language,
+                            hotwords=lexicon_plan.decode_hotwords,
+                            prompt_context=lexicon_plan.prompt_context,
+                        )
+                    text = _segments_to_text(segments).strip()
+                else:
+                    try:
+                        text = self.stt.transcribe(
+                            audio,
+                            language=language,
+                            hotwords=lexicon_plan.decode_hotwords,
+                            prompt_context=lexicon_plan.prompt_context,
+                            decode_profile=decode_profile,
+                        ).strip()
+                    except TypeError:
+                        # Backend predates decode_profile: retry without it, keeping the
+                        # other kwargs. A genuine transcription failure is not a TypeError
+                        # and still propagates to the CPU-fallback path below.
+                        text = self.stt.transcribe(
+                            audio,
+                            language=language,
+                            hotwords=lexicon_plan.decode_hotwords,
+                            prompt_context=lexicon_plan.prompt_context,
+                        ).strip()
         except Exception as exc:  # noqa: BLE001
             if _online and report_health_on_fail:
                 self._report_health(False, _classify_health_error(exc))
+            if require_speaker_attribution:
+                if allow_cpu_fallback:
+                    return TranscriptionResult(
+                        status="error",
+                        duration_s=duration,
+                        error=str(exc),
+                    )
+                raise
             if not _api_fallback_allowed(self.stt):
                 # Non-API (on-device) backend: return error directly; no fallback.
                 return TranscriptionResult(
@@ -345,6 +401,21 @@ class DictationEngine:
                 hotwords=lexicon_plan.post_hotwords,
                 replacements=lexicon_plan.post_replacements,
             ).strip()
+            if segments:
+                segments = [
+                    TranscriptSegment(
+                        text=apply_post_corrections(
+                            segment.text,
+                            hotwords=lexicon_plan.post_hotwords,
+                            replacements=lexicon_plan.post_replacements,
+                        ).strip(),
+                        t_start=segment.t_start,
+                        t_end=segment.t_end,
+                        speaker_id=segment.speaker_id,
+                        speaker_label=segment.speaker_label,
+                    )
+                    for segment in segments
+                ]
 
         if not text:
             return TranscriptionResult(status="no_speech", duration_s=duration)
@@ -353,6 +424,7 @@ class DictationEngine:
             status="ok",
             duration_s=duration,
             text=text,
+            segments=segments,
         )
 
     def release(self) -> None:
@@ -580,6 +652,44 @@ def _backend_label(stt: SpeechToText) -> str:
     if stt.backend_name == "gemini":
         return "Gemini"
     return stt.backend_name
+
+
+def _segments_to_text(segments: list[TranscriptSegment]) -> str:
+    lines: list[str] = []
+    current_speaker: str | None = None
+    current_parts: list[str] = []
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+        speaker = segment.speaker_label or segment.speaker_id
+        if speaker:
+            if current_parts and current_speaker != speaker:
+                lines.append(_format_segment_line(current_speaker, current_parts))
+                current_parts = []
+            current_speaker = speaker
+            current_parts.append(text)
+        else:
+            if current_parts:
+                lines.append(_format_segment_line(current_speaker, current_parts))
+                current_parts = []
+                current_speaker = None
+            lines.append(text)
+    if current_parts:
+        lines.append(_format_segment_line(current_speaker, current_parts))
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _format_segment_line(speaker: str | None, parts: list[str]) -> str:
+    text = " ".join(part.strip() for part in parts if part.strip()).strip()
+    return f"{speaker}: {text}" if speaker else text
+
+
+def _defined_method(obj: object, name: str):
+    if name not in dir(obj):
+        return None
+    method = getattr(obj, name, None)
+    return method if callable(method) else None
 
 
 def _short_error(exc: Exception, limit: int = 240) -> str:

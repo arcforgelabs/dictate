@@ -12,8 +12,10 @@ from dictate.config import (
     remove_lexicon_replacements,
     set_api_key_command,
     set_push_to_talk_combo,
+    set_meeting_stt_selection,
     set_stt_runtime_profile,
     set_stt_selection,
+    set_update_channel,
 )
 
 
@@ -43,6 +45,23 @@ class ConfigSelectionTests(unittest.TestCase):
             self.assertEqual(config.stt_model, "gemini-3-flash-preview")
             self.assertEqual(config.stt_device, "cuda")
             self.assertEqual(config.stt_compute_type, "float16")
+
+    def test_set_meeting_stt_preferences_preserve_primary_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            set_stt_selection("parakeet", "parakeet-tdt-0.6b-v2", path=config_path)
+
+            set_meeting_stt_selection(
+                "parakeet-pyannote",
+                "parakeet-tdt-0.6b-v3",
+                path=config_path,
+            )
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.stt_backend, "parakeet")
+            self.assertEqual(config.stt_model, "parakeet-tdt-0.6b-v2")
+            self.assertEqual(config.meeting_stt_backend, "parakeet-pyannote")
+            self.assertEqual(config.meeting_stt_model, "parakeet-tdt-0.6b-v3")
 
     def test_load_config_reads_push_to_talk_combo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -101,6 +120,25 @@ class ConfigSelectionTests(unittest.TestCase):
             config = load_config(path=config_path)
             self.assertEqual(config.push_to_talk_combo, "ctrl+space")
             self.assertIsNone(config.push_to_talk_key)
+
+    def test_set_update_channel_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+
+            saved = set_update_channel("unstable", path=config_path)
+
+            config = load_config(path=config_path)
+            self.assertEqual(saved, "unstable")
+            self.assertEqual(config.update_channel, "unstable")
+
+    def test_set_update_channel_accepts_latest_alias_for_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+
+            saved = set_update_channel("latest", path=config_path)
+
+            self.assertEqual(saved, "stable")
+            self.assertEqual(load_config(path=config_path).update_channel, "stable")
 
     def test_lexicon_replacements_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

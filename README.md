@@ -8,7 +8,9 @@ speak, and it transcribes into whatever app you are already using.
 Current status: early desktop app. Linux installs, Windows 11 source installs,
 tray controls, startup integration, local dictation history, update, and
 uninstall paths are implemented. Microsoft Store packaging and submission
-automation are maintained separately from GitHub releases; see `docs/GOALS.md`.
+automation are maintained separately from GitHub releases; see
+`docs/msstore-automation.md`. The current transcription/model deployment plan is
+`docs/TRANSCRIPTION_PLAN.md`.
 
 ## Install
 
@@ -22,6 +24,12 @@ Windows developer/source install from the hosted bootstrap:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
+```
+
+Unstable developer/source bootstrap for pre-stable feature testing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
 ```
 
 Open **Dictate** from the Start Menu after install.
@@ -84,6 +92,20 @@ powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/uninstall.ps1 | iex"
 ```
 
+To test updates before they are promoted to stable:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/update.ps1 | iex"
+```
+
+Users on the app's npm-backed update path can opt into or out of unstable
+updates from the CLI:
+
+```bash
+dictate config set-update-channel unstable
+dictate config set-update-channel stable
+```
+
 Windows from source:
 
 ```powershell
@@ -121,10 +143,29 @@ also want to remove config, logs, history, and downloaded model data.
 
 ## Models
 
-The default path uses local faster-whisper transcription. The desktop UI keeps
-model/provider choices out of the primary workflow. Advanced users and tests can
-still configure explicit local or hosted providers through CLI options and
-`dictate config`.
+The default local English path is Parakeet where the runtime is available. The
+desktop UI keeps engine names out of the primary workflow; advanced users and
+tests can still configure explicit local or hosted providers through CLI options
+and `dictate config`.
+
+GPU lanes are explicit:
+
+- NVIDIA CUDA: install with the `gpu` extra and verify with
+  `dictate doctor --stt-backend parakeet --device cuda --quick`.
+- Windows AMD GPU: install with the `amd` extra for ONNX Runtime DirectML and
+  verify with `dictate doctor --stt-backend parakeet --device amd --quick`.
+- Linux AMD GPU: install a ROCm/MIGraphX-capable ONNX Runtime build, then verify
+  with `dictate doctor --stt-backend parakeet --device amd --quick`.
+- Meeting uses a dedicated speaker-attribution lane. Inspect it with
+  `dictate config show`; set it with
+  `dictate config set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2`.
+  Source installs can add pyannote support with `./install.sh --meeting` or
+  `.\install-windows.ps1 -Meeting`, then verify with
+  `dictate doctor --stt-backend parakeet-pyannote --device cuda --quick`.
+  Experimental preflight targets also exist for
+  `parakeet-diarizen/parakeet-tdt-0.6b-v2` and
+  `parakeet-sortformer/parakeet-tdt-0.6b-v2`; these still require their
+  runtime-specific DiariZen or NeMo setup before selection.
 
 ## Commands
 
@@ -218,14 +259,14 @@ for source/dev installs.
 ## Docs
 
 - [Windows 11 support](docs/windows-11.md)
-- [Recent History spec](docs/recent-dictation-history-spec.md)
+- [Transcription deployment plan](docs/TRANSCRIPTION_PLAN.md)
 - [Release/versioning](docs/release-versioning.md)
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Microsoft Store automation](docs/msstore-automation.md)
 - [Microsoft Store listing draft](docs/msstore-listing.md)
 - [Deployment security](docs/deployment-security.md)
-- [Goals](docs/GOALS.md)
 - [Development streams](docs/development-streams.md)
+- [Archived docs index](docs/archive/README.md)
 - [Security policy](SECURITY.md)
 
 ## License

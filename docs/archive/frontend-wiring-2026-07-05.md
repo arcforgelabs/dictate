@@ -44,11 +44,12 @@ plus Tauri commands in `ui-shell/src-tauri/src/lib.rs` for window/OS actions.
    exercise needs a newer published release: verify the polkit prompt, the atomic
    file swap, and that the new shell + engine come up together.
 
-4. **Meeting mode speaker attribution.** The UI should expose a plain
-   `Meeting` action, not a primary "diarization" control. Live meeting mode must
-   require an internal speaker-attribution path. Plain recordings and
-   push-to-talk dictation use the same non-speaker-attributed ASR path. The
-   canonical model and runtime plan is `docs/TRANSCRIPTION_PLAN.md`.
+4. **Local Meeting model lanes.** The capture home exposes a plain `Meeting`
+   action and routes it to strict backend meeting endpoints. Live meeting mode
+   now fails closed unless the selected backend supports speaker-attributed
+   output. The remaining gap is implementing and benchmarking the local
+   DiariZen, Sortformer, and pyannote speaker-attribution lanes from
+   `docs/TRANSCRIPTION_PLAN.md`.
 
 5. **WhisperX backend.** UI metadata exists for `whisperx`, but
    `docs/TRANSCRIPTION_PLAN.md` says not to make WhisperX the main meeting
@@ -59,8 +60,9 @@ plus Tauri commands in `ui-shell/src-tauri/src/lib.rs` for window/OS actions.
    archived provider cost notes) but there is **no frontend surface yet**.
    **Production P0:** public **Upgrade to Pro** on
    https://arcforge.au/download/dictate is live but still links to `/login` until
-   Stripe product + account entitlements are wired (see `docs/GOALS.md` and
-   `arc-forge-website/STATUS.md`).
+   Stripe product + account entitlements are wired (see
+   `docs/archive/goals-2026-07-05.md` for the historical goal note and
+   `arc-forge-website/STATUS.md` for website state).
    To wire in this repo: entitlement/subscription state in `GET /api/state`, a Pro
    affordance in the UI, checkout/portal deep links from the app, MS Store IAP
    (Windows) where applicable, and service-side entitlement checks before hosted

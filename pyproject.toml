@@ -22,9 +22,19 @@ dependencies = [
 [project.optional-dependencies]
 gpu = [
     "torch>=2.4.0",
-    "onnxruntime-gpu>=1.23,<1.24; platform_machine == 'x86_64' and (sys_platform == 'linux' or sys_platform == 'win32')",
+    "onnxruntime-gpu>=1.23,<1.24; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and (sys_platform == 'linux' or sys_platform == 'win32')",
+]
+amd = [
+    "onnxruntime-directml>=1.19,<1.24; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and sys_platform == 'win32'",
 ]
 whisperx = ["whisperx>=3.8.6"]
+meeting = ["pyannote.audio>=4.0.0", "torch>=2.4.0"]
+sortformer = [
+    "nemo-toolkit[asr]>=2.6,<2.7",
+    # NeMo 2.6's ASR imports require the pre-0.22 tokenizer API.
+    "tokenizers>=0.21,<0.22",
+    "transformers>=4.53,<4.54",
+]
 x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]
 windows = ["pynput>=1.7.0", "pyperclip>=1.9.0"]

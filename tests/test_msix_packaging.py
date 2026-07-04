@@ -69,7 +69,14 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn('Join-Path $Dist "AppxManifest.xml"', script)
         self.assertIn("dictate-ui-shell.exe", script)
         self.assertIn("dictate-engine.exe", script)
-        self.assertIn("winapp tool makeappx pack", script)
+        self.assertIn('Kind = "winapp"', script)
+        self.assertIn("tool makeappx @Arguments", script)
+        self.assertIn('"pack", "/d", $Dist, "/p", $Output, "/o"', script)
+        self.assertIn("Windows SDK MakeAppx", script)
+        self.assertIn("Invoke-MakeAppx", script)
+        self.assertIn("Assert-MsixPackage", script)
+        self.assertIn("unpack", script)
+        self.assertIn("ArcForgeLabs.ArcForgeDictate", script)
         self.assertRegex(script, re.compile(r"build --no-bundle"))
 
     def test_windows_msi_uses_installer_safe_version(self) -> None:

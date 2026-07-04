@@ -72,6 +72,83 @@ function hilite(text, q) {
   return <>{text.slice(0, i)}<mark className="hl">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
+function fmtSecs(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
+}
+
+function normalizeSegments(segments) {
+  if (!Array.isArray(segments)) return [];
+  return segments
+    .map((segment, index) => {
+      const text = typeof segment?.text === "string" ? segment.text.trim() : "";
+      if (!text) return null;
+      const tStart = Number.isFinite(Number(segment.tStart))
+        ? Number(segment.tStart)
+        : Number.isFinite(Number(segment.t_start))
+          ? Number(segment.t_start)
+          : null;
+      const tEnd = Number.isFinite(Number(segment.tEnd))
+        ? Number(segment.tEnd)
+        : Number.isFinite(Number(segment.t_end))
+          ? Number(segment.t_end)
+          : null;
+      return {
+        seq: Number.isFinite(Number(segment.seq)) ? Number(segment.seq) : index,
+        tStart,
+        tEnd,
+        text,
+        speakerId: segment.speakerId || segment.speaker_id || null,
+        speakerLabel: segment.speakerLabel || segment.speaker_label || null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.seq - b.seq);
+}
+
+function notePlainText(note) {
+  const segments = normalizeSegments(note?.segments);
+  if (!segments.length) return typeof note?.text === "string" ? note.text : "";
+  return segments
+    .map((segment) => {
+      const label = segment.speakerLabel || segment.speakerId;
+      return label ? `${label}: ${segment.text}` : segment.text;
+    })
+    .join("\n");
+}
+
+function noteSearchText(note) {
+  const pieces = [typeof note?.text === "string" ? note.text : ""];
+  for (const segment of normalizeSegments(note?.segments)) {
+    pieces.push(segment.text);
+    if (segment.speakerLabel) pieces.push(segment.speakerLabel);
+    if (segment.speakerId) pieces.push(segment.speakerId);
+    if (Number.isFinite(segment.tStart)) pieces.push(fmtSecs(segment.tStart));
+    if (Number.isFinite(segment.tEnd)) pieces.push(fmtSecs(segment.tEnd));
+  }
+  return pieces.join(" ").toLowerCase();
+}
+
+function noteMarkdown(note, titleDate) {
+  const segments = normalizeSegments(note?.segments);
+  if (!segments.length) return `# Note - ${titleDate}\n\n${notePlainText(note)}\n`;
+  const lines = [`# Note - ${titleDate}`, ""];
+  for (const segment of segments) {
+    const label = segment.speakerLabel || segment.speakerId || "Transcript";
+    const hasStart = Number.isFinite(segment.tStart);
+    const hasEnd = Number.isFinite(segment.tEnd);
+    const time = hasStart && hasEnd
+      ? ` [${fmtSecs(segment.tStart)}-${fmtSecs(segment.tEnd)}]`
+      : hasStart
+        ? ` [${fmtSecs(segment.tStart)}]`
+        : "";
+    lines.push(`**${label}${time}:** ${segment.text}`);
+  }
+  return `${lines.join("\n\n")}\n`;
+}
+
 function HistoryView() {
   const s = useStore();
   const [q, setQ] = useState("");
@@ -87,7 +164,7 @@ function HistoryView() {
   const filtered = useMemo(() => {
     if (!q) return all;
     const sq = q.toLowerCase();
-    return all.filter((n) => n.text.toLowerCase().includes(sq));
+    return all.filter((n) => noteSearchText(n).includes(sq));
   }, [q, all]);
 
   // Open a history note in the ExpandedNote read view.
@@ -100,7 +177,7 @@ function HistoryView() {
 
   const copyNote = (note) => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(note.text)
+      navigator.clipboard.writeText(notePlainText(note))
         .then(() => s.toast("Copied to clipboard"))
         .catch(() => s.toast("Could not copy", { bad: true }));
     }
@@ -109,7 +186,7 @@ function HistoryView() {
   const exportNote = async (note) => {
     const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
     const name = `dictate-note-${ts}.md`;
-    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const md = noteMarkdown(note, ts);
     try {
       const saved = await ipc.saveTextFile(name, md);
       if (saved) s.toast("Saved as Markdown");
@@ -163,7 +240,7 @@ function HistoryView() {
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openNote(note); } }}
             >
               <div className="nr-body">
-                <div className="nr-text">{hilite(note.text, q)}</div>
+                <div className="nr-text">{hilite(notePlainText(note), q)}</div>
                 <div className="nr-meta t-mono">
                   <span>{formatHistoryTime(note.createdAt)}</span>
                 </div>

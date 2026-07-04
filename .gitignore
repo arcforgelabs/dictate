@@ -8,5 +8,10 @@ build/
 
 .worktrees/
 
+benchmark-fixtures/
+benchmark-curated/
+benchmark-results/
+evidence-bundles/
+
 .claude-design/
 .claude-design-ds/

@@ -41,8 +41,9 @@ Keep shared STT, audio, config, history, and CLI behavior on `master` unless the
 
 Windows installation is intentionally implemented as a packaging edge around the shared app. The PowerShell installer should stay thin: create the environment, install `.[windows]`, seed config, write launchers, create shortcuts, and run diagnostics. Shared behavior should stay in `src/dictate`.
 
-The public Windows release target is tracked in [GOALS.md](GOALS.md). Store API
-automation wiring is tracked in [msstore-automation.md](msstore-automation.md).
+The public Windows release target and Store API automation wiring are tracked in
+[msstore-automation.md](msstore-automation.md). The current transcription/model
+deployment target is tracked in [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md).
 
 ## GitHub Project Organization
 

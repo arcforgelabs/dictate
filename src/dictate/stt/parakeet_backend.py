@@ -33,6 +33,7 @@ from dictate.stt.base import (
     ComputeType,
     SpeechToText,
     SttCapabilities,
+    TranscriptSegment,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ _FP32_FILES = (
 )
 
 
-def _ensure_model(model_name: str, quantization: str) -> Path:
+def _ensure_model(model_name: str, quantization: str | None) -> Path:
     """Return a flat directory holding the Parakeet ONNX files, downloading once.
 
     Fetches each required file directly into a flat directory (real files, no
@@ -160,6 +161,15 @@ def _providers_for_device(device: ComputeDevice) -> list[str] | None:
     raise RuntimeError(f"Unsupported Parakeet device '{device}'.")
 
 
+def _quantization_for_compute_type(compute_type: ComputeType) -> str | None:
+    # onnx-asr accepts None for the plain fp32 files and "int8" for the int8
+    # files. Passing "float16" makes it look for encoder-model?float16.onnx,
+    # which the Parakeet ONNX repos do not publish.
+    if compute_type == "float32":
+        return None
+    return "int8"
+
+
 class ParakeetSpeechToText(SpeechToText):
     """English CPU transcription via NVIDIA Parakeet-TDT (onnx-asr)."""
 
@@ -168,7 +178,7 @@ class ParakeetSpeechToText(SpeechToText):
         supports_hotwords=False,
         supports_prompt_bias=False,
         supports_language_hint=False,
-        supports_word_timestamps=False,
+        supports_word_timestamps=True,
         # Parakeet has no prompt input to carry context across chunks, so chunked
         # streaming mangles word boundaries. It's fast enough (~13x realtime) to
         # decode the whole utterance in one pass instead — higher quality, low tail.
@@ -188,8 +198,8 @@ class ParakeetSpeechToText(SpeechToText):
             )
         self.model_name = model_name
         self.device = device
-        # Parakeet ONNX ships fp32 and int8; anything other than int8 loads fp32.
-        self.compute_type = "int8" if compute_type == "int8" else "fp32"
+        self.compute_type = compute_type
+        self.quantization = _quantization_for_compute_type(compute_type)
         self._model: Any | None = None
 
     @property
@@ -198,19 +208,19 @@ class ParakeetSpeechToText(SpeechToText):
             import onnx_asr
 
             spec = _MODEL_SPECS[self.model_name]
-            model_dir = _ensure_model(self.model_name, self.compute_type)
+            model_dir = _ensure_model(self.model_name, self.quantization)
             providers = _providers_for_device(self.device)
             logger.info(
                 "Loading Parakeet %s (%s) from %s on %s",
                 self.model_name,
-                self.compute_type,
+                self.quantization or "fp32",
                 model_dir,
                 self.device,
             )
             self._model = onnx_asr.load_model(
                 spec.onnx_asr_name,
                 str(model_dir),
-                quantization=self.compute_type,
+                quantization=self.quantization,
                 providers=providers,
             )
             logger.info("Parakeet model loaded")
@@ -234,5 +244,79 @@ class ParakeetSpeechToText(SpeechToText):
         text = self.model.recognize(np.asarray(audio, dtype=np.float32))
         return (text or "").strip()
 
+    def transcribe_segments(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        hotwords: str | None = None,
+        prompt_context: str | None = None,
+        *,
+        initial_prompt: str | None = None,
+        long_form: bool = False,
+    ) -> list[TranscriptSegment]:
+        del language, hotwords, prompt_context, initial_prompt, long_form
+        if audio.size == 0:
+            return []
+        result = _recognize_timestamped(self.model, np.asarray(audio, dtype=np.float32))
+        text = _timestamped_text(result)
+        if not text:
+            return []
+        t_start, t_end = _timestamp_bounds(result, len(audio) / 16000.0)
+        return [TranscriptSegment(text=text, t_start=t_start, t_end=t_end)]
+
     def release(self) -> None:
         self._model = None
+
+
+def _recognize_timestamped(model: Any, audio: np.ndarray) -> Any:
+    with_timestamps = getattr(model, "with_timestamps", None)
+    if callable(with_timestamps):
+        timestamped_model = with_timestamps()
+        recognize = getattr(timestamped_model, "recognize", None)
+        if callable(recognize):
+            return recognize(audio)
+    return model.recognize(audio)
+
+
+def _timestamped_text(result: Any) -> str:
+    if isinstance(result, str):
+        return result.strip()
+    text = getattr(result, "text", None)
+    if isinstance(text, str):
+        return text.strip()
+    if isinstance(result, dict):
+        value = result.get("text")
+        if isinstance(value, str):
+            return value.strip()
+    return str(result or "").strip()
+
+
+def _timestamp_bounds(result: Any, duration_s: float) -> tuple[float | None, float | None]:
+    start = _optional_float(getattr(result, "start", None))
+    end = _optional_float(getattr(result, "end", None))
+    if isinstance(result, dict):
+        start = _optional_float(result.get("start", result.get("t_start"))) if start is None else start
+        end = _optional_float(result.get("end", result.get("t_end"))) if end is None else end
+    timestamps = getattr(result, "timestamps", None)
+    if timestamps is None and isinstance(result, dict):
+        timestamps = result.get("timestamps")
+    if start is None and isinstance(timestamps, list) and timestamps:
+        start = _optional_float(timestamps[0])
+    if end is None and isinstance(timestamps, list) and timestamps:
+        end = _optional_float(timestamps[-1])
+    if start is None:
+        start = 0.0
+    if end is None:
+        end = duration_s
+    return start, max(end, start)
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

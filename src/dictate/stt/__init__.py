@@ -9,6 +9,7 @@ from dictate.stt.base import (
     SpeechToText,
     SttBackend,
     SttCapabilities,
+    TranscriptSegment,
     ONNX_AMD_PROVIDERS,
     WhisperCppModel,
 )
@@ -18,6 +19,9 @@ from dictate.stt.factory import (
     FASTER_WHISPER_MODELS,
     GEMINI_MODELS,
     OPENAI_MODELS,
+    PARAKEET_DIARIZEN_MODELS,
+    PARAKEET_PYANNOTE_MODELS,
+    PARAKEET_SORTFORMER_MODELS,
     PARAKEET_MODELS,
     STT_BACKENDS,
     WHISPERX_MODELS,
@@ -33,6 +37,11 @@ from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.gemini_backend import GeminiSpeechToText
 from dictate.stt.openai_backend import OpenAISpeechToText
 from dictate.stt.parakeet_backend import ParakeetSpeechToText
+from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText
+from dictate.stt.parakeet_speaker_backend import (
+    ParakeetDiariZenSpeechToText,
+    ParakeetSortformerSpeechToText,
+)
 from dictate.stt.whisperx_backend import WhisperXSpeechToText
 from dictate.stt.xai_backend import XAISpeechToText
 
@@ -43,6 +52,9 @@ __all__ = [
     "GEMINI_MODELS",
     "OPENAI_MODELS",
     "ONNX_AMD_PROVIDERS",
+    "PARAKEET_DIARIZEN_MODELS",
+    "PARAKEET_PYANNOTE_MODELS",
+    "PARAKEET_SORTFORMER_MODELS",
     "PARAKEET_MODELS",
     "STT_BACKENDS",
     "WHISPERX_MODELS",
@@ -57,9 +69,13 @@ __all__ = [
     "GeminiSpeechToText",
     "OpenAISpeechToText",
     "ParakeetSpeechToText",
+    "ParakeetPyannoteSpeechToText",
+    "ParakeetDiariZenSpeechToText",
+    "ParakeetSortformerSpeechToText",
     "SpeechToText",
     "SttBackend",
     "SttCapabilities",
+    "TranscriptSegment",
     "WhisperCppModel",
     "WhisperXSpeechToText",
     "XAISpeechToText",

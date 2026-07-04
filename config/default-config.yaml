@@ -3,11 +3,15 @@ push_to_talk_combo: ctrl_r
 stt_compute_type: int8
 stt_device: auto
 # Leave stt_backend/stt_model unset for the hardware-aware local default:
-# English Parakeet on CPU when available; current CUDA builds use faster-whisper
-# until the Parakeet CUDA lane is implemented and benchmarked.
+# English Parakeet v2 on CPU, CUDA, and AMD when the Parakeet runtime is
+# available. Accelerator readiness is checked by doctor/preflight.
 # Set stt_backend/stt_model explicitly to override:
 # stt_backend: parakeet
 # stt_model: parakeet-tdt-0.6b-v2
+# Meeting mode uses a separate speaker-attribution lane. Leave these unset for
+# the default local Parakeet+pyannote Meeting backend, or set them explicitly.
+# meeting_stt_backend: parakeet-pyannote
+# meeting_stt_model: parakeet-tdt-0.6b-v2
 # stt_backend: faster-whisper
 # stt_model: turbo
 # stt_model: large-v3

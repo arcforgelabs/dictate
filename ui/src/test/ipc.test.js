@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { ipc, isLive } from "../ipc.js";
+import { ipc, isLive, isMockMode } from "../ipc.js";
 
 afterEach(() => {
   delete window.__DICTATE__;
@@ -13,6 +13,18 @@ describe("ipc bridge", () => {
   it("reports not-live without an injected bridge", () => {
     expect(isLive()).toBe(false);
     expect(ipc.isLive()).toBe(false);
+  });
+
+  it("allows mock mode in browser tests without an injected shell", () => {
+    expect(isMockMode()).toBe(true);
+    expect(ipc.isMockMode()).toBe(true);
+  });
+
+  it("disables mock mode when only Tauri is present", () => {
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    expect(ipc.isLive()).toBe(false);
+    expect(ipc.isShell()).toBe(true);
+    expect(ipc.isMockMode()).toBe(false);
   });
 
   it("defaults to a Linux (gnome) platform in the browser", () => {
@@ -162,6 +174,32 @@ describe("ipc bridge", () => {
         method: "POST",
         headers: { Authorization: "Bearer t" },
       }),
+    );
+  });
+
+  it("starts and stops meetings through authenticated backend routes", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ recording: true, mode: "meeting" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ recording: false, mode: "meeting" }),
+      });
+
+    await expect(ipc.startMeetingRecording()).resolves.toEqual({ recording: true, mode: "meeting" });
+    await expect(ipc.stopMeetingRecording()).resolves.toEqual({ recording: false, mode: "meeting" });
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:1/api/meetings/start",
+      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:1/api/meetings/stop",
+      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
     );
   });
 });

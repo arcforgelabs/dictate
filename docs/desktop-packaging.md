@@ -22,6 +22,15 @@ loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.j
 Models are **not** bundled - they download on first use, exactly as in a `pip`
 install.
 
+GPU provider packages are packaging inputs, not UI choices. The default bundled
+engine can run CPU Parakeet. NVIDIA builds that should exercise CUDA install the
+`gpu` extra. Windows AMD validation builds install the `amd` extra, which brings
+in ONNX Runtime DirectML and is verified by
+`dictate doctor --stt-backend parakeet --device amd --quick`. Linux AMD
+validation remains ROCm/MIGraphX-provider based and must use a runner or test
+machine with an ONNX Runtime build that exposes `MIGraphXExecutionProvider` or
+`ROCMExecutionProvider`.
+
 ## Build / release flow
 
 ```
@@ -70,7 +79,7 @@ scripts/build-windows-desktop.ps1
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
 - These artifacts are for internal validation and signed direct-download fallback.
   The target public Windows channel is Microsoft Store distribution, tracked in
-  [GOALS.md](GOALS.md).
+  [msstore-automation.md](msstore-automation.md).
 - The Tauri shell looks for `dictate-engine.exe` on Windows and for
   `dictate-engine` elsewhere. It also reads the UI handshake from
   `%LOCALAPPDATA%\dictate`, matching `src/dictate/platform_paths.py`.
@@ -99,12 +108,17 @@ scripts/build-windows-msix-store.ps1
   ├─ tauri build --no-bundle
   ├─ stage dictate-ui-shell.exe + engine\dictate-engine.exe
   ├─ render packaging\msix\Package.appxmanifest.in
-  └─ winapp tool makeappx pack
+  ├─ winapp tool makeappx pack, or Windows SDK makeappx.exe
+  └─ unpack and validate manifest identity + shell/engine payloads
 ```
 
 - **Manual (`.github/workflows/windows-msix-store-bundle.yml`,
   `workflow_dispatch`)** builds `packaging/msix/out/*.msix` for Partner Center
   package validation. Trigger: `gh workflow run windows-msix-store-bundle.yml`.
+- `scripts/build-windows-msix-store.ps1` prefers Microsoft's `winapp` CLI, but
+  can fall back to Windows SDK `makeappx.exe` when `winapp` is not installed.
+  After packing, it unpacks the MSIX and validates the Partner Center identity,
+  package version, shell executable, and engine sidecar payload.
 - **Manual (`.github/workflows/msstore-publish-msix.yml`, `workflow_dispatch`)**
   uses Microsoft Store Developer CLI for current-state checks, draft package
   upload, or explicit publish/commit. Use `mode=status` for read-only checks,
@@ -114,6 +128,32 @@ scripts/build-windows-msix-store.ps1
   release is tagged and verified, create the Store draft with `mode=draft`,
   review it in Partner Center, then use `mode=publish` when it is ready for
   Microsoft certification.
+- Local VM evidence: `scripts/windows-vm-smoke.sh --vm win11-dev --mode msix
+  --timeout 2400 --keep-guest-workdir` passed on 2026-07-05 after the current
+  Parakeet-first installer/default, Meeting readiness, benchmark, Windows AMD
+  DirectML, AMD evidence-import, and segment-aware UI changes. It produced
+  `C:\Users\Public\dictate-vm-smoke\source\packaging\msix\out\ArcForgeDictate_2026.7.4.0_x64.msix`,
+  smoke-tested the frozen engine binary, and validated the unpacked manifest,
+  shell executable, and engine sidecar.
+- Current install smoke evidence: `scripts/windows-vm-smoke.sh --vm win11-dev
+  --mode install --timeout 1800 --keep-guest-workdir` passed on 2026-07-05
+  after resetting the guest Dictate app-data directory, seeding a fresh config,
+  compiling Python sources, running 314 focused Windows tests with 16 skips,
+  verifying
+  `dictate 2026.7.4`, and confirming default `dictate doctor --quick
+  --type-backend pynput` reports Parakeet v2.
+- Current lifecycle smoke evidence: `scripts/windows-vm-smoke.sh --vm
+  win11-dev --mode lifecycle --timeout 2400 --keep-guest-workdir` passed on
+  2026-07-05 after the same fresh-config install path, update, default Parakeet
+  doctor check, and uninstall.
+- Windows AMD DirectML smoke evidence: `scripts/windows-vm-smoke.sh --vm
+  win11-dev --mode amd --timeout 1800 --keep-guest-workdir` passed on
+  2026-07-05 after the Parakeet-first installer/default and fresh-config smoke
+  changes. It resets guest Dictate app data, seeds a fresh config, runs 196
+  focused Windows tests with 15 skips, installs the `amd` extra, verifies
+  `DmlExecutionProvider`, and runs `dictate doctor --stt-backend parakeet
+  --device amd --quick --type-backend pynput` in the guest. This checks
+  DirectML packaging/readiness, not Radeon performance.
 - The manifest identity is pinned to Partner Center:
   `ArcForgeLabs.ArcForgeDictate` and
   `CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C`.

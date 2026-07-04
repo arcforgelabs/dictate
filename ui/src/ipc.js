@@ -2,13 +2,17 @@
 //
 // In production the Tauri shell injects `window.__DICTATE__ = { baseUrl, token }`
 // (read from the Python ui_server handshake file) and exposes window controls on
-// `window.__TAURI__`. When neither is present — a plain browser, dev, or a test
-// runner — we fall back to a self-contained mock so the UI is fully runnable
-// standalone.
+// `window.__TAURI__`. Mock mode is allowed only for dev/test/browser previews or
+// an explicit VITE_DICTATE_ENABLE_MOCK=1 opt-in. Packaged shells must fail
+// visibly instead of returning canned transcripts.
 
 // The raw injected object (carries `platform` even when the server is down).
 function injected() {
   return (typeof window !== "undefined" && window.__DICTATE__) || null;
+}
+
+function tauri() {
+  return (typeof window !== "undefined" && window.__TAURI__) || null;
 }
 
 // A usable bridge only exists once the shell has a server URL + token.
@@ -18,7 +22,7 @@ function bridge() {
 }
 
 async function refreshBridge() {
-  const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+  const t = tauri();
   const invoke = t && t.core && t.core.invoke;
   if (!invoke) return null;
   let next;
@@ -37,7 +41,13 @@ export function isLive() {
 }
 
 export function isShell() {
-  return !!injected();
+  return !!(injected() || tauri());
+}
+
+export function isMockMode() {
+  if (isLive() || isShell()) return false;
+  const env = import.meta.env || {};
+  return !!(env.DEV || env.MODE === "test" || env.VITE_DICTATE_ENABLE_MOCK === "1");
 }
 
 async function call(method, path, body, retry = true) {
@@ -75,6 +85,7 @@ async function call(method, path, body, retry = true) {
 export const ipc = {
   isLive,
   isShell,
+  isMockMode,
 
   // Platform: "gnome" | "kde" | "win11" | "win10" | "mac" | "linux".
   // Read from the injected object directly so the chrome is correct even when
@@ -105,6 +116,12 @@ export const ipc = {
   },
   async stopNoteRecording() {
     return call("POST", "/api/notes/stop");
+  },
+  async startMeetingRecording() {
+    return call("POST", "/api/meetings/start");
+  },
+  async stopMeetingRecording() {
+    return call("POST", "/api/meetings/stop");
   },
   async pauseNoteRecording() {
     return call("POST", "/api/notes/pause");
@@ -207,7 +224,7 @@ export const ipc = {
 
   // Save text through the OS-native file picker (Tauri) or a browser download fallback.
   async saveTextFile(defaultName, content) {
-    const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+    const t = tauri();
     const invoke = t && t.core && t.core.invoke;
     if (invoke) {
       return invoke("save_text_file", { defaultName, content });
@@ -230,7 +247,7 @@ export const ipc = {
 
   // Relaunch the app after an in-app update installed a new package.
   async restartApp() {
-    const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+    const t = tauri();
     const invoke = t && t.core && t.core.invoke;
     if (!invoke) return false;
     try {
@@ -243,7 +260,7 @@ export const ipc = {
 
   // Window controls — wired to the Tauri current window when available.
   async windowControl(action) {
-    const t = typeof window !== "undefined" ? window.__TAURI__ : null;
+    const t = tauri();
     if (!t) return false;
     try {
       const win = t.window.getCurrentWindow ? t.window.getCurrentWindow() : t.window.getCurrent();

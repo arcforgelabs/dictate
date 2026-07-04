@@ -29,11 +29,21 @@ Developer/source bootstrap from PowerShell:
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
 
+Pre-stable developer/source bootstrap from the npm `unstable` channel:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
+```
+
 The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. It is a developer/bootstrap path, not the public Windows install target. If Node.js is already installed, this is equivalent:
 
 ```powershell
 npx @arcforgelabs/dictate install
 ```
+
+Use `npx @arcforgelabs/dictate@unstable install` or the `@unstable` CDN URL
+only for pre-stable feature testing. Stable public promotion still goes through
+CalVer release tags and the guarded Store/MSIX path.
 
 From PowerShell in a repo root:
 
@@ -47,7 +57,7 @@ Windows setup wizard from a repo root:
 powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
 ```
 
-That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default `faster-whisper/turbo` model, runs `dictate doctor --quick`, registers Dictate in Installed Apps, adds a Start Menu shortcut named `Dictate`, and enables launch on startup by default.
+That command creates `.venv` with Python 3.11 or 3.12, installs Dictate with the Windows dependencies, installs the Microsoft Visual C++ runtime if it is missing, seeds `%APPDATA%\dictate\config.yaml`, writes launcher scripts, prepares the default Parakeet local model, runs `dictate doctor --quick`, registers Dictate in Installed Apps, adds a Start Menu shortcut named `Dictate`, and enables launch on startup by default.
 
 Skip model preparation or verification when needed:
 
@@ -69,7 +79,7 @@ scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode install
 scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode lifecycle
 ```
 
-The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` also runs a no-model/no-shortcut install, focused tests, version check, and uninstall cleanup. `lifecycle` adds update and uninstall smoke checks.
+The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` resets Dictate app data in the guest, runs a no-shortcut install, compiles Python sources, runs focused tests, checks the version, verifies the fresh Parakeet default with `dictate doctor --quick`, and uninstalls. `lifecycle` adds update and post-update doctor/uninstall smoke checks.
 
 GitHub-hosted Windows user smoke test:
 

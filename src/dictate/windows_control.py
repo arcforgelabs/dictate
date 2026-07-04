@@ -31,6 +31,7 @@ from dictate.update_status import (
     TERMS_URL,
     UpdateStatus,
     check_update_status,
+    npm_dist_tag,
 )
 from dictate.version import RELEASE_VERSION
 
@@ -38,11 +39,15 @@ HOSTED_WINDOWS_UPDATE_COMMAND = (
     "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1 | iex"
 )
 BACKEND_CHOICES = tuple(BACKEND_REGISTRY.keys())
-DEFAULT_BACKEND = "faster-whisper"
+DEFAULT_BACKEND = "parakeet"
 MODEL_CHOICES = {
     backend: spec.model_examples for backend, spec in BACKEND_REGISTRY.items()
 }
 DEFAULT_MODELS = {
+    "parakeet": "parakeet-tdt-0.6b-v2",
+    "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
+    "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
+    "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
     "faster-whisper": "small",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
@@ -319,7 +324,7 @@ class ControlPanel:
     def _sync_status_line(self) -> None:
         backend = self.backend_var.get()
         model = self.model_var.get()
-        if backend == "faster-whisper":
+        if backend in {"faster-whisper", "parakeet", "parakeet-pyannote"}:
             selected = f"Selected: Local / {model} ({self.local_runtime_var.get()})"
         else:
             selected = f"Selected: {backend} / {model}"
@@ -579,8 +584,15 @@ def _windows_update_command() -> list[str]:
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        HOSTED_WINDOWS_UPDATE_COMMAND,
+        _hosted_windows_update_command(),
     ]
+
+
+def _hosted_windows_update_command() -> str:
+    channel = npm_dist_tag()
+    if channel == "latest":
+        return HOSTED_WINDOWS_UPDATE_COMMAND
+    return f"iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@{channel}/update.ps1 | iex"
 
 
 def _candidate_source_roots() -> list[Path]:

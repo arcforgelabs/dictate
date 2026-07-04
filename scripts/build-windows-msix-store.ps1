@@ -35,6 +35,31 @@ function Require-Command {
     }
 }
 
+function Find-MakeAppxCommand {
+    $WinApp = Get-Command "winapp" -ErrorAction SilentlyContinue
+    if ($WinApp) {
+        return @{ Kind = "winapp"; Path = $WinApp.Source }
+    }
+
+    $MakeAppx = Get-Command "makeappx.exe" -ErrorAction SilentlyContinue
+    if ($MakeAppx) {
+        return @{ Kind = "makeappx"; Path = $MakeAppx.Source }
+    }
+
+    $SdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+    if (Test-Path $SdkRoot) {
+        $SdkMakeAppx = Get-ChildItem $SdkRoot -Recurse -Filter "makeappx.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\makeappx\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($SdkMakeAppx) {
+            return @{ Kind = "makeappx"; Path = $SdkMakeAppx.FullName }
+        }
+    }
+
+    throw "Missing MSIX packaging tool. Install winapp CLI or the Windows SDK MakeAppx tool."
+}
+
 function Convert-ToMsixVersion {
     param([Parameter(Mandatory = $true)][string]$Version)
     $parts = @($Version.Split(".") | ForEach-Object { [int]$_ })
@@ -84,14 +109,66 @@ function Resize-Png {
     }
 }
 
+function Invoke-MakeAppx {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Command,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    if ($Command.Kind -eq "winapp") {
+        & $Command.Path tool makeappx @Arguments
+    } else {
+        & $Command.Path @Arguments
+    }
+}
+
+function Assert-MsixPackage {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Command,
+        [Parameter(Mandatory = $true)][string]$PackagePath,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion
+    )
+
+    $InspectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("dictate-msix-inspect-" + [guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType Directory -Force -Path $InspectDir | Out-Null
+        Invoke-MakeAppx -Command $Command -Arguments @("unpack", "/p", $PackagePath, "/d", $InspectDir, "/o")
+        $ManifestPath = Join-Path $InspectDir "AppxManifest.xml"
+        if (-not (Test-Path $ManifestPath)) {
+            throw "MSIX validation failed: missing AppxManifest.xml"
+        }
+        [xml]$Manifest = Get-Content $ManifestPath -Raw
+        $Identity = $Manifest.Package.Identity
+        if ($Identity.Name -ne "ArcForgeLabs.ArcForgeDictate") {
+            throw "MSIX validation failed: unexpected identity '$($Identity.Name)'"
+        }
+        if ($Identity.Publisher -ne "CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C") {
+            throw "MSIX validation failed: unexpected publisher '$($Identity.Publisher)'"
+        }
+        if ($Identity.Version -ne $ExpectedVersion) {
+            throw "MSIX validation failed: expected version '$ExpectedVersion', got '$($Identity.Version)'"
+        }
+        foreach ($Payload in @("dictate-ui-shell.exe", "engine\dictate-engine.exe")) {
+            $PayloadPath = Join-Path $InspectDir $Payload
+            if (-not (Test-Path $PayloadPath)) {
+                throw "MSIX validation failed: missing payload '$Payload'"
+            }
+        }
+    } finally {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $InspectDir
+    }
+}
+
 Write-Host "preflight"
-if (-not $IsWindows) {
+$IsWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
+$RunningOnWindows = if ($IsWindowsVariable) { [bool]$IsWindowsVariable.Value } else { $env:OS -eq "Windows_NT" }
+if (-not $RunningOnWindows) {
     throw "MSIX packaging must run on Windows."
 }
 Require-Command $Python
 Require-Command "npm"
 Require-Command "cargo"
-Require-Command "winapp"
+$MakeAppxCommand = Find-MakeAppxCommand
 
 $TauriConfigPath = Join-Path $Root "ui-shell\src-tauri\tauri.conf.json"
 $TauriConfig = Get-Content $TauriConfigPath -Raw | ConvertFrom-Json
@@ -188,11 +265,14 @@ Write-Host "packing MSIX"
 if (Test-Path $Output) {
     Remove-Item -Force $Output
 }
-winapp tool makeappx pack /d $Dist /p $Output /o
+Invoke-MakeAppx -Command $MakeAppxCommand -Arguments @("pack", "/d", $Dist, "/p", $Output, "/o")
 
 if (-not (Test-Path $Output)) {
     throw "MSIX package was not produced: $Output"
 }
+
+Write-Host "validating MSIX package contents"
+Assert-MsixPackage -Command $MakeAppxCommand -PackagePath $Output -ExpectedVersion $MsixVersion
 
 Write-Host ""
 Write-Host "artifact:"

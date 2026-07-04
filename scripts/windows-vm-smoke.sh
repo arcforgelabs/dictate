@@ -14,7 +14,7 @@ Usage: scripts/windows-vm-smoke.sh [options]
 
 Options:
   --vm <name>          libvirt/QEMU VM name. Default: $VM_NAME
-  --mode <mode>        syntax, install, lifecycle, or build. Default: syntax
+  --mode <mode>        syntax, install, lifecycle, build, msix, or amd. Default: syntax
   --timeout <seconds>  Guest command timeout. Default: 900
   --keep-guest-workdir Leave %TEMP%\\dictate-vm-smoke in the guest for inspection
   -h, --help           Show this help
@@ -24,6 +24,8 @@ Modes:
   install    syntax + install-windows.ps1 smoke install, compile, focused tests.
   lifecycle  install + update-windows.ps1 and uninstall-windows.ps1 smoke checks.
   build      syntax + build the Windows desktop executable and verify artifacts.
+  msix       syntax + build the Store MSIX package and verify the .msix artifact.
+  amd        install + install the Windows AMD DirectML extra and run AMD doctor.
 
 Requires libvirt virsh access and QEMU Guest Agent running in the Windows VM.
 The source zip is copied into the guest through QEMU Guest Agent file APIs, so
@@ -80,8 +82,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$MODE" in
-  syntax|install|lifecycle|build) ;;
-  *) die "--mode must be syntax, install, lifecycle, or build" ;;
+  syntax|install|lifecycle|build|msix|amd) ;;
+  *) die "--mode must be syntax, install, lifecycle, build, msix, or amd" ;;
 esac
 
 need_cmd virsh
@@ -297,6 +299,10 @@ function Invoke-Checked {
 \$source = Join-Path \$root 'source'
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \$root
+\$dictateAppData = if (\$env:APPDATA) { Join-Path \$env:APPDATA 'dictate' } else { Join-Path \$HOME 'AppData\\Roaming\\dictate' }
+\$dictateLocalData = if (\$env:LOCALAPPDATA) { Join-Path \$env:LOCALAPPDATA 'dictate' } else { Join-Path \$HOME 'AppData\\Local\\dictate' }
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \$dictateAppData
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \$dictateLocalData
 New-Item -ItemType Directory -Force -Path \$source | Out-Null
 
 Write-Output "==> Expanding Dictate source from \$guestZip"
@@ -312,6 +318,9 @@ Write-Output "==> PowerShell syntax parse"
     'update-windows.ps1',
     'uninstall.ps1',
     'uninstall-windows.ps1',
+    'scripts/collect-transcription-evidence.ps1',
+    'scripts/run-human-test-readiness.ps1',
+    'scripts/run-amd-promotion-benchmarks.ps1',
     'scripts/windows-user-smoke.ps1'
 )
 foreach (\$script in \$scripts) {
@@ -319,18 +328,35 @@ foreach (\$script in \$scripts) {
     Write-Output "parsed \$script"
 }
 
-if (\$mode -in @('install', 'lifecycle')) {
+if (\$mode -in @('install', 'lifecycle', 'amd')) {
     Invoke-Checked 'Install Dictate Windows smoke' {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\install-windows.ps1 -NoPrepareTurbo -NoVerify -NoShortcut -NoStartup
     }
     Invoke-Checked 'Compile Python sources' {
         & .\\.venv\\Scripts\\python.exe -m compileall -q src tests scripts
     }
-    Invoke-Checked 'Run focused Windows platform tests' {
-        & .\\.venv\\Scripts\\python.exe -m unittest tests.test_update_status tests.test_windows_platform
+    Invoke-Checked 'Run focused Windows platform and loopback API tests' {
+        & .\\.venv\\Scripts\\python.exe -m unittest tests.test_update_status tests.test_windows_platform tests.test_ui_server tests.test_model_prepare tests.test_default_local_model tests.test_main_stt_selection tests.test_stt_registry tests.test_benchmark tests.test_main_benchmark_dispatch tests.test_benchmark_fixtures tests.test_transcription_plan_audit tests.test_config_commands tests.test_config_selection tests.test_daemon_history
     }
     Invoke-Checked 'Show Dictate version' {
         & .\\.venv\\Scripts\\dictate.exe --version
+    }
+    Invoke-Checked 'Doctor quick for fresh Parakeet default' {
+        & .\\.venv\\Scripts\\dictate.exe doctor --quick --type-backend pynput
+    }
+    if (\$mode -eq 'amd') {
+        Invoke-Checked 'Install Windows AMD DirectML extra' {
+            & .\\.venv\\Scripts\\python.exe -m pip install -e ".[amd]"
+        }
+        Invoke-Checked 'Inspect ONNX Runtime DirectML provider' {
+            & .\\.venv\\Scripts\\python.exe -c "import onnxruntime as ort; providers=ort.get_available_providers(); print('providers=' + ','.join(providers)); raise SystemExit(0 if 'DmlExecutionProvider' in providers else 2)"
+        }
+        Invoke-Checked 'Doctor quick for Parakeet AMD DirectML lane' {
+            & .\\.venv\\Scripts\\dictate.exe doctor --stt-backend parakeet --device amd --quick --type-backend pynput
+        }
+        Invoke-Checked 'Uninstall Dictate Windows AMD smoke cleanup' {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\uninstall-windows.ps1 -Quiet
+        }
     }
     if (\$mode -eq 'install') {
         Invoke-Checked 'Uninstall Dictate Windows smoke cleanup' {
@@ -363,6 +389,20 @@ if (\$mode -eq 'build') {
     \$artifacts = \$artifacts | Where-Object { \$_ }
     if (\$artifacts.Count -lt 2) {
         throw "No Windows desktop artifacts were produced under \$releaseRoot"
+    }
+    foreach (\$artifact in \$artifacts) {
+        Write-Output "artifact \$([System.IO.Path]::GetFullPath(\$artifact.FullName))"
+    }
+}
+
+if (\$mode -eq 'msix') {
+    Invoke-Checked 'Build Windows Store MSIX package' {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build-windows-msix-store.ps1
+    }
+    \$msixRoot = Join-Path \$source 'packaging\\msix\\out'
+    \$artifacts = Get-ChildItem -Path \$msixRoot -Filter '*.msix' -File -ErrorAction SilentlyContinue
+    if (-not \$artifacts -or \$artifacts.Count -lt 1) {
+        throw "No Windows MSIX artifacts were produced under \$msixRoot"
     }
     foreach (\$artifact in \$artifacts) {
         Write-Output "artifact \$([System.IO.Path]::GetFullPath(\$artifact.FullName))"

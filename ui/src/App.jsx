@@ -15,6 +15,15 @@ import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.7.4";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
+const DEMO_HISTORY = () => {
+  const now = Date.now();
+  // Newest-first: matches the real backend ordering and pushHistory behaviour.
+  return [
+    { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
+    { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
+    { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
+  ];
+};
 
 // Format seconds → m:ss or h:mm:ss (mirrors the design's fmt helper).
 function fmtSecs(s) {
@@ -22,6 +31,68 @@ function fmtSecs(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
   const p = (n) => String(n).padStart(2, "0");
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
+}
+
+function normalizeSegments(segments) {
+  if (!Array.isArray(segments)) return [];
+  return segments
+    .map((segment, index) => {
+      const text = typeof segment?.text === "string" ? segment.text.trim() : "";
+      if (!text) return null;
+      const tStart = Number.isFinite(Number(segment.tStart))
+        ? Number(segment.tStart)
+        : Number.isFinite(Number(segment.t_start))
+          ? Number(segment.t_start)
+          : null;
+      const tEnd = Number.isFinite(Number(segment.tEnd))
+        ? Number(segment.tEnd)
+        : Number.isFinite(Number(segment.t_end))
+          ? Number(segment.t_end)
+          : null;
+      return {
+        seq: Number.isFinite(Number(segment.seq)) ? Number(segment.seq) : index,
+        tStart,
+        tEnd,
+        text,
+        speakerId: segment.speakerId || segment.speaker_id || null,
+        speakerLabel: segment.speakerLabel || segment.speaker_label || null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.seq - b.seq);
+}
+
+function noteText(note) {
+  return typeof note?.text === "string" ? note.text : "";
+}
+
+function notePlainText(note) {
+  const segments = normalizeSegments(note?.segments);
+  if (!segments.length) return noteText(note);
+  return segments
+    .map((segment) => {
+      const label = segment.speakerLabel || segment.speakerId;
+      return label ? `${label}: ${segment.text}` : segment.text;
+    })
+    .join("\n");
+}
+
+function noteMarkdown(note, titleDate) {
+  const segments = normalizeSegments(note?.segments);
+  if (!segments.length) return `# Note - ${titleDate}\n\n${noteText(note)}\n`;
+  const lines = [`# Note - ${titleDate}`, ""];
+  for (const segment of segments) {
+    const label = segment.speakerLabel || segment.speakerId || "Transcript";
+    const hasStart = Number.isFinite(segment.tStart);
+    const hasEnd = Number.isFinite(segment.tEnd);
+    const time = hasStart && hasEnd
+      ? ` [${fmtSecs(segment.tStart)}-${fmtSecs(segment.tEnd)}]`
+      : hasStart
+        ? ` [${fmtSecs(segment.tStart)}]`
+        : "";
+    lines.push(`**${label}${time}:** ${segment.text}`);
+  }
+  return `${lines.join("\n\n")}\n`;
 }
 
 /* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
@@ -162,6 +233,7 @@ function GsKeyboard() {
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
+  const meeting = s.captureMode === "meeting";
   return (
     <div className="note-home">
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
@@ -183,14 +255,15 @@ function CaptureHome() {
                   paused={s.notePaused}
                   reduced={s.reduced}
                   onStart={s.startNoteRecording}
-                  onPause={s.pauseNoteRecording}
+                  onPause={meeting ? s.finishNoteRecording : s.pauseNoteRecording}
                   onResume={s.resumeNoteRecording}
+                  activeLabel={meeting ? "Finish meeting" : "Pause recording"}
                 />
               </div>
               <div className="note-feedback">
             {s.noteRecording && !s.notePaused ? (
               <>
-                <div className="note-status live">Recording</div>
+                <div className="note-status live">{meeting ? "Meeting" : "Recording"}</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
                 {s.transcript?.text ? (
                   <div className="note-preview" aria-live="polite">
@@ -207,7 +280,7 @@ function CaptureHome() {
                 </div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
                 <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
-                  Finish note
+                  {meeting ? "Finish meeting" : "Finish note"}
                 </button>
               </>
             ) : (
@@ -215,6 +288,10 @@ function CaptureHome() {
                 <div className="note-status">Ready to dictate</div>
                 <div className="note-status-sub t-mono">Press the mic and speak.</div>
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
+                <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
+                  <Icon name="notebook" size={14} />
+                  <span>Meeting</span>
+                </button>
                 {/* Getting started: teach the key when there are no notes yet */}
                 {(!s.history || s.history.length === 0) && <GsKeyboard />}
                 {/* Live push-to-talk transcript — hide once history has the same note (CopyLastNote). */}
@@ -282,11 +359,15 @@ function CopyLastNote() {
 
 /* ── Transcribing… (indeterminate, shown between stop and note event) ── */
 function NoteProcessing() {
+  const s = useStore();
+  const meeting = s.captureMode === "meeting";
   return (
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
-        <div className="note-status-sub t-mono">Turning your words into a note.</div>
+        <div className="note-status-sub t-mono">
+          {meeting ? "Separating speakers and preparing the transcript." : "Turning your words into a note."}
+        </div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
       </div>
     </div>
@@ -303,7 +384,7 @@ function ExpandedNote() {
 
   const handleCopy = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(note.text)
+      navigator.clipboard.writeText(notePlainText(note))
         .then(() => s.toast("Copied to clipboard"))
         .catch(() => s.toast("Could not copy", { bad: true }));
     }
@@ -313,7 +394,7 @@ function ExpandedNote() {
   const handleExport = async () => {
     const ts = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : "note";
     const name = `dictate-note-${ts}.md`;
-    const md = `# Note — ${ts}\n\n${note.text}\n`;
+    const md = noteMarkdown(note, ts);
     try {
       const saved = await ipc.saveTextFile(name, md);
       if (saved) s.toast("Saved as Markdown");
@@ -331,10 +412,32 @@ function ExpandedNote() {
         <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
         <NotebookToggle />
       </div>
-      {/* Search + Times omitted: real data is plain text, no timestamps or speaker lines */}
-      {/* TODO(backend): Add search once the engine exposes segment-level data */}
       <div className="note-exp-body scroll">
-        <p className="note-exp-text">{note.text}</p>
+        {normalizeSegments(note.segments).length > 0 ? (
+          <div className="note-segments">
+            {normalizeSegments(note.segments).map((segment) => {
+              const label = segment.speakerLabel || segment.speakerId;
+              const hasStart = Number.isFinite(segment.tStart);
+              const hasEnd = Number.isFinite(segment.tEnd);
+              return (
+                <div className="note-segment" key={segment.seq}>
+                  <div className="note-segment-meta">
+                    {label && <span className="note-segment-speaker">{label}</span>}
+                    {(hasStart || hasEnd) && (
+                      <span className="note-segment-time">
+                        {hasStart ? fmtSecs(segment.tStart) : "--"}
+                        {hasEnd ? `-${fmtSecs(segment.tEnd)}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <p className="note-segment-text">{segment.text}</p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="note-exp-text">{noteText(note)}</p>
+        )}
       </div>
     </div>
   );
@@ -354,15 +457,7 @@ export default function App() {
   const [device2, setDevice2State] = useState("auto");
   const [compute] = useState("int8");
   const [hotwords, setHotwords] = useState([]);
-  const [history, setHistory] = useState(() => {
-    const now = Date.now();
-    // Newest-first: matches the real backend ordering and pushHistory behaviour.
-    return [
-      { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
-      { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
-      { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
-    ];
-  });
+  const [history, setHistory] = useState(() => (ipc.isMockMode() ? DEMO_HISTORY() : []));
   // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
   const [theme, setThemeState] = useState(() => {
     if (typeof window === "undefined" || !window.matchMedia) return "light";
@@ -377,6 +472,7 @@ export default function App() {
   const [noteRecording, setNoteRecording] = useState(false);
   const [notePaused, setNotePaused] = useState(false);
   const [notePauseReason, setNotePauseReason] = useState(null);
+  const [captureMode, setCaptureMode] = useState("note");
   const [noteText, setNoteText] = useState("");
   const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
@@ -453,6 +549,7 @@ export default function App() {
   const terminalTranscriptIdOrderRef = useRef([]);
   // noteViewRef: stale-closure-safe read of noteView inside the SSE handler.
   const noteViewRef = useRef(null); noteViewRef.current = noteView;
+  const captureModeRef = useRef("note"); captureModeRef.current = captureMode;
   // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
   const watchdogRef = useRef(null);
   // Flash ring: stable refs so triggerFlash can be useCallback([]) and safe in SSE handler.
@@ -486,10 +583,12 @@ export default function App() {
       }
       else if (ev.type === "note-recording") {
         if (ev.paused) {
+          if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteRecording(true);
           setNotePaused(true);
           setNotePauseReason(ev.pauseReason || null);
         } else if (ev.active) {
+          if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteRecording(true);
           setNotePaused(false);
           setNotePauseReason(null);
@@ -502,6 +601,7 @@ export default function App() {
           setNotePaused(false);
           setNotePauseReason(null);
           // Recording finished — show Transcribing… and arm the safety-net watchdog.
+          if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteView("processing");
           armWatchdog();
         }
@@ -513,11 +613,16 @@ export default function App() {
         clearWatchdog();
         if (status === "ok" && typeof ev.text === "string" && ev.text) {
           setNoteText(ev.text);
-          const note = { id: ev.id || "n" + Date.now(), text: ev.text, createdAt: ev.createdAt || new Date().toISOString() };
+          const note = {
+            id: ev.id || "n" + Date.now(),
+            text: ev.text,
+            createdAt: ev.createdAt || new Date().toISOString(),
+            segments: normalizeSegments(ev.segments),
+          };
           setCurrentNote(note);
           setExpandedFrom("capture");
           setNoteView("expanded");
-          toast("Conversation note saved");
+          toast(captureModeRef.current === "meeting" ? "Meeting saved" : "Conversation note saved");
         } else if (status === "empty") {
           setNoteView(null);
           toast("No speech detected", { bad: true });
@@ -622,6 +727,7 @@ export default function App() {
     }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.notes && typeof st.notes.paused === "boolean") setNotePaused(st.notes.paused);
+    if (st.notes && (st.notes.mode === "meeting" || st.notes.mode === "note")) setCaptureMode(st.notes.mode);
     if (st.notes && typeof st.notes.pauseReason === "string") setNotePauseReason(st.notes.pauseReason);
     else if (st.notes && !st.notes.paused) setNotePauseReason(null);
     if (st.prefs) {
@@ -646,7 +752,12 @@ export default function App() {
   }, []);
 
   const mapHistory = (st) =>
-    (st.history || []).map((h) => ({ id: h.id, text: h.text, createdAt: h.createdAt }));
+    (st.history || []).map((h) => ({
+      id: h.id,
+      text: h.text,
+      createdAt: h.createdAt,
+      segments: normalizeSegments(h.segments),
+    }));
 
   // ---- toasts ----
   const dismiss = (id) => setToasts((ts) => ts.filter((t) => t.id !== id));
@@ -764,6 +875,7 @@ export default function App() {
     if (!r) return;
     if (typeof r.recording === "boolean") setNoteRecording(r.recording);
     if (typeof r.paused === "boolean") setNotePaused(r.paused);
+    if (r.mode === "meeting" || r.mode === "note") setCaptureMode(r.mode);
     if (typeof r.pauseReason === "string") setNotePauseReason(r.pauseReason);
     else if (r.paused === false) setNotePauseReason(null);
   };
@@ -771,13 +883,14 @@ export default function App() {
   const startNoteRecording = () => {
     if (noteRecording) return;
     if (!ipc.isLive()) {
-      if (ipc.isShell()) {
+      if (!ipc.isMockMode()) {
         toast("Dictate engine is not connected", { bad: true });
         return;
       }
       clearWatchdog();
       setNotePaused(false);
       setNotePauseReason(null);
+      setCaptureMode("note");
       setNoteRecording(true);
       setNoteView(null);
       setCurrentNote(null);
@@ -789,9 +902,36 @@ export default function App() {
       .catch((e) => toast(e.message || "Could not start note recording", { bad: true }));
   };
 
+  const startMeetingRecording = () => {
+    if (noteRecording) return;
+    if (!ipc.isLive()) {
+      if (!ipc.isMockMode()) {
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
+      clearWatchdog();
+      setNotePaused(false);
+      setNotePauseReason(null);
+      setCaptureMode("meeting");
+      setNoteRecording(true);
+      setNoteView(null);
+      setCurrentNote(null);
+      toast("Meeting started");
+      return;
+    }
+    setCaptureMode("meeting");
+    ipc.startMeetingRecording()
+      .then(applyNoteState)
+      .catch((e) => toast(e.message || "Could not start meeting", { bad: true }));
+  };
+
   const pauseNoteRecording = () => {
     if (!noteRecording || notePaused) return;
     if (!ipc.isLive()) {
+      if (!ipc.isMockMode()) {
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
       setNotePaused(true);
       return;
     }
@@ -803,6 +943,10 @@ export default function App() {
   const resumeNoteRecording = () => {
     if (!noteRecording || !notePaused) return;
     if (!ipc.isLive()) {
+      if (!ipc.isMockMode()) {
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
       setNotePaused(false);
       return;
     }
@@ -814,7 +958,7 @@ export default function App() {
   const finishNoteRecording = () => {
     if (!noteRecording) return;
     if (!ipc.isLive()) {
-      if (ipc.isShell()) {
+      if (!ipc.isMockMode()) {
         setNotePaused(false);
         setNoteRecording(false);
         toast("Dictate engine is not connected", { bad: true });
@@ -824,22 +968,36 @@ export default function App() {
       setNoteRecording(false);
       setNoteView("processing");
       armWatchdog();
-      const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+      const demo = captureMode === "meeting"
+        ? "Speaker 1: Let's capture the launch blockers.\nSpeaker 2: I will test the Windows build and report back tomorrow."
+        : "Let's capture this as a project note. Add the follow-up action for tomorrow.";
+      const demoSegments = captureMode === "meeting"
+        ? [
+            { seq: 0, tStart: 0, tEnd: 2.4, text: "Let's capture the launch blockers.", speakerLabel: "Speaker 1" },
+            { seq: 1, tStart: 2.4, tEnd: 5.8, text: "I will test the Windows build and report back tomorrow.", speakerLabel: "Speaker 2" },
+          ]
+        : [];
       setTimeout(() => {
         clearWatchdog();
-        const note = { id: "n" + Date.now(), text: demo, createdAt: new Date().toISOString() };
+        const note = {
+          id: "n" + Date.now(),
+          text: demo,
+          createdAt: new Date().toISOString(),
+          segments: demoSegments,
+        };
         setNoteText(demo);
         setCurrentNote(note);
         pushHistory(demo);
         setExpandedFrom("capture");
         setNoteView("expanded");
-        toast("Conversation note saved");
+        toast(captureMode === "meeting" ? "Meeting saved" : "Conversation note saved");
       }, 800);
       return;
     }
-    ipc.stopNoteRecording()
+    const stop = captureMode === "meeting" ? ipc.stopMeetingRecording : ipc.stopNoteRecording;
+    stop()
       .then(applyNoteState)
-      .catch((e) => toast(e.message || "Could not finish note recording", { bad: true }));
+      .catch((e) => toast(e.message || "Could not finish recording", { bad: true }));
   };
 
   const toggleNoteRecording = () => {
@@ -1039,8 +1197,8 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, notePaused, notePauseReason, noteText,
-    startNoteRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
+    recording, noteRecording, notePaused, notePauseReason, captureMode, noteText,
+    startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,

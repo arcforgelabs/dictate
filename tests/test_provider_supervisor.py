@@ -547,7 +547,7 @@ class LongRecordingRetryTests(unittest.TestCase):
             call_count[0] += 1
             raise RuntimeError("connection failed")
 
-        # Note recordings use diarize=True → engine calls transcribe_diarized
+        # Note recordings use the same plain ASR path as push-to-talk.
         stt.transcribe.side_effect = _always_fail
         stt.transcribe_diarized.side_effect = _always_fail
 
@@ -597,7 +597,7 @@ class LongRecordingRetryTests(unittest.TestCase):
                 raise RuntimeError("transient error")
             return "hello from retry"
 
-        # Note recordings use transcribe_diarized when available
+        # Note recordings use the same plain ASR path as push-to-talk.
         stt.transcribe_diarized.side_effect = _fail_then_succeed
         stt.transcribe.side_effect = _fail_then_succeed
 
@@ -627,6 +627,8 @@ class LongRecordingRetryTests(unittest.TestCase):
         # Result should be ok
         self.assertEqual(result.status, "ok")
         self.assertIn("hello", str(result.text))
+        self.assertEqual(stt.transcribe.call_count, 2)
+        stt.transcribe_diarized.assert_not_called()
 
     def test_degraded_session_uses_local_transcription(self) -> None:
         """If supervisor is already degraded, recording goes straight to local."""

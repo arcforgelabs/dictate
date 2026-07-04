@@ -43,10 +43,13 @@ from dictate.hotkey import (
     format_hotkey_combo,
     normalize_push_to_talk_combo,
 )
+from dictate.note_store import NoteSegment, NoteStore
 from dictate.platform_paths import user_config_dir, user_data_dir
 from dictate.stt.factory import (
     BACKEND_REGISTRY,
     DEFAULT_MODELS,
+    check_backend_readiness,
+    create_speech_to_text,
     resolve_default_local_backend,
     resolve_default_local_model,
     resolve_model_name,
@@ -86,6 +89,27 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "local": True,
         "desc": "Runs on this machine — fast, accurate English, nothing leaves your device.",
     },
+    "parakeet-pyannote": {
+        "provider": "Local",
+        "brand": None,
+        "local": True,
+        "experimental": True,
+        "desc": "Local Meeting backend with Parakeet and speaker labels.",
+    },
+    "parakeet-diarizen": {
+        "provider": "Local",
+        "brand": None,
+        "local": True,
+        "experimental": True,
+        "desc": "Local Meeting backend with Parakeet and DiariZen speaker labels.",
+    },
+    "parakeet-sortformer": {
+        "provider": "Local",
+        "brand": None,
+        "local": True,
+        "experimental": True,
+        "desc": "Local Meeting backend with Parakeet and NVIDIA Sortformer speakers.",
+    },
     "whisperx": {
         "provider": "Local",
         "brand": None,
@@ -119,7 +143,17 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
     },
 }
 # Order shown in the Model view (local first, matching the design).
-PROVIDER_ORDER = ("parakeet", "faster-whisper", "whisperx", "openai", "xai", "gemini")
+PROVIDER_ORDER = (
+    "parakeet",
+    "parakeet-pyannote",
+    "parakeet-diarizen",
+    "parakeet-sortformer",
+    "faster-whisper",
+    "whisperx",
+    "openai",
+    "xai",
+    "gemini",
+)
 
 
 class ApiError(Exception):
@@ -141,6 +175,18 @@ def _optional_positive_float(value: Any) -> float | None:
     if parsed <= 0:
         raise ApiError(400, "audioDurationSeconds must be a positive number")
     return parsed
+
+
+def _dedupe_text(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _meeting_blocking_warning(warnings: list[str]) -> str | None:
+    for warning in warnings:
+        normalized = warning.casefold()
+        if "pyannote/speaker-diarization-community-1 is gated" in normalized:
+            return warning
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +307,7 @@ class UiBackend:
 
     config_path: Path = field(default_factory=lambda: config_mod.CONFIG_PATH)
     history_store: HistoryStore | None = None
+    note_store: NoteStore | None = None
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
     pro_client: ProClient | None = None
@@ -293,6 +340,8 @@ class UiBackend:
     def __post_init__(self) -> None:
         if self.history_store is None:
             self.history_store = HistoryStore()
+        if self.note_store is None:
+            self.note_store = NoteStore()
         if self.prefs_store is None:
             self.prefs_store = UiPrefsStore()
         if self.pro_client is None:
@@ -318,9 +367,15 @@ class UiBackend:
         if backend not in BACKEND_REGISTRY:
             backend = "faster-whisper"
         model = self._effective_model(cfg, backend)
+        meeting_backend, meeting_model = self._meeting_selection(cfg)
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
+            "meetingModel": {
+                "id": f"{meeting_backend}/{meeting_model}",
+                "backend": meeting_backend,
+                "model": meeting_model,
+            },
             "models": self._models(cfg),
             "shortcut": self._shortcut(cfg, prefs),
             "hotwords": list(cfg.hotwords),
@@ -485,9 +540,25 @@ class UiBackend:
         return self.api_key_status(backend, log_failures=False)
 
     def get_history(self) -> list[dict[str, Any]]:
-        entries = self.history_store.load()
+        seen_text: set[str] = set()
         out: list[dict[str, Any]] = []
+        if self.note_store is not None:
+            for note in self.note_store.list_notes(limit=50):
+                payload = self.note_payload(self.note_store, note.note_id)
+                if payload is None:
+                    continue
+                text = str(payload.get("text") or "").strip()
+                if not text:
+                    continue
+                payload["time"] = self._history_label(str(payload.get("createdAt") or ""))
+                out.append(payload)
+                seen_text.add(_dedupe_text(text))
+
+        entries = self.history_store.load()
         for entry in entries:
+            text_key = _dedupe_text(entry.text)
+            if text_key in seen_text:
+                continue
             out.append(
                 {
                     "id": entry.id,
@@ -496,6 +567,7 @@ class UiBackend:
                     "createdAt": entry.created_at,
                 }
             )
+            seen_text.add(text_key)
         return out
 
     def _history_label(self, created_at: str) -> str:
@@ -627,9 +699,20 @@ class UiBackend:
         started = bool(daemon.start_note_recording())
         return self._notes_payload()
 
+    def start_meeting_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        self._ensure_meeting_backend_ready()
+        daemon.start_meeting_recording()
+        return self._notes_payload()
+
     def stop_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         daemon.stop_note_recording()
+        return self._notes_payload()
+
+    def stop_meeting_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        daemon.stop_meeting_recording()
         return self._notes_payload()
 
     def pause_note_recording(self) -> dict[str, Any]:
@@ -646,6 +729,56 @@ class UiBackend:
         daemon = self._require_daemon()
         daemon.toggle_note_recording()
         return self._notes_payload()
+
+    def _ensure_meeting_backend_ready(self) -> None:
+        cfg = config_mod.load_config(self.config_path)
+        backend, model = self._meeting_selection(cfg)
+        readiness = check_backend_readiness(
+            backend=backend,
+            model=model,
+            device=cfg.stt_device or "auto",
+        )
+        capabilities = BACKEND_REGISTRY[backend].capabilities
+        if not capabilities.supports_speaker_attribution:
+            raise ApiError(
+                409,
+                "Meeting needs a speaker-ready local model. Select the Meeting model and prepare it first.",
+            )
+        if readiness.errors:
+            raise ApiError(409, f"Meeting model is not ready: {readiness.errors[0]}")
+        blocking_warning = _meeting_blocking_warning(readiness.warnings)
+        if blocking_warning is not None:
+            raise ApiError(409, f"Meeting model is not ready: {blocking_warning}")
+        self._install_meeting_backend_if_needed(cfg, backend=backend, model=model)
+
+    def _meeting_selection(self, cfg: config_mod.Config) -> tuple[str, str]:
+        backend = cfg.meeting_stt_backend or "parakeet-pyannote"
+        if backend not in BACKEND_REGISTRY:
+            backend = "parakeet-pyannote"
+        model = resolve_model_name(backend, cfg.meeting_stt_model)
+        return backend, model
+
+    def _install_meeting_backend_if_needed(
+        self,
+        cfg: config_mod.Config,
+        *,
+        backend: str,
+        model: str,
+    ) -> None:
+        daemon = self._require_daemon()
+        set_meeting = getattr(daemon, "set_meeting_speech_to_text", None)
+        if not callable(set_meeting):
+            return
+        current_meeting = getattr(daemon, "current_meeting_backend_model", None)
+        if callable(current_meeting) and current_meeting() == (backend, model):
+            return
+        stt = create_speech_to_text(
+            backend=backend,
+            model=model,
+            device=cfg.stt_device or "auto",
+            compute_type=cfg.stt_compute_type or "int8",
+        )
+        set_meeting(stt, hotwords=cfg.hotwords_for_backend(backend))
 
     def save_provider_key(self, backend: str, api_key: str) -> dict[str, Any]:
         if backend not in api_keys_mod.API_BACKENDS:
@@ -749,7 +882,7 @@ class UiBackend:
             return default
 
     def _note_recording_active(self) -> bool:
-        return bool(self.daemon is not None and getattr(self.daemon, "note_recording_active", False))
+        return bool(self.daemon is not None and getattr(self.daemon, "long_recording_active", False))
 
     def _note_recording_paused(self) -> bool:
         return bool(self.daemon is not None and getattr(self.daemon, "note_recording_paused", False))
@@ -760,11 +893,51 @@ class UiBackend:
             "recording": self._note_recording_active(),
             "paused": paused,
         }
+        if self.daemon is not None:
+            mode = getattr(self.daemon, "long_recording_mode", None)
+            if mode in {"note", "meeting"}:
+                payload["mode"] = mode
         if paused and self.daemon is not None:
             reason = getattr(self.daemon, "note_pause_reason", None)
             if isinstance(reason, str) and reason:
                 payload["pauseReason"] = reason
         return payload
+
+    @staticmethod
+    def note_segment_payload(segment: NoteSegment) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "seq": segment.seq,
+            "tStart": segment.t_start,
+            "tEnd": segment.t_end,
+            "text": segment.text,
+            "provider": segment.provider,
+            "model": segment.model,
+        }
+        if segment.speaker_id:
+            payload["speakerId"] = segment.speaker_id
+        if segment.speaker_label:
+            payload["speakerLabel"] = segment.speaker_label
+        return payload
+
+    @classmethod
+    def note_payload(cls, note_store: NoteStore, note_id: str) -> dict[str, Any] | None:
+        note = note_store.load_note(note_id)
+        if note is None:
+            return None
+        segments = note_store.load_segments(note_id)
+        return {
+            "id": note.note_id,
+            "mode": note.mode,
+            "status": note.status,
+            "text": note_store.assembled_text(note.note_id),
+            "createdAt": note.started_at,
+            "endedAt": note.ended_at,
+            "durationSeconds": note.duration_s,
+            "provider": note.provider,
+            "model": note.model,
+            "speakerLabels": note.speaker_labels,
+            "segments": [cls.note_segment_payload(segment) for segment in segments],
+        }
 
     # ----- provider health ------------------------------------------------ #
     def _compute_provider_health(self, cfg: config_mod.Config) -> dict[str, Any]:
@@ -781,13 +954,13 @@ class UiBackend:
         - ``since``      str|null   — ISO-8601 UTC timestamp of degradation start
 
         Logic:
-        * ``private`` (faster-whisper) → always healthy; no key needed.
+        * Local/private backends → always healthy; no key needed.
         * Supervisor present → read full state from supervisor.
         * Online + no key → unhealthy, status ``no-key``.
         * Online + key present → reflect the tracked runtime outcome.
         """
         backend = cfg.stt_backend or "faster-whisper"
-        is_private = backend == "faster-whisper"
+        is_private = bool(PROVIDER_META.get(backend, {}).get("local", False))
         mode = "private" if is_private else "online"
 
         # --- supervisor path (richer state) ---
@@ -800,7 +973,8 @@ class UiBackend:
             since = sup_state.get("since")
             healthy = not degraded
             status = reason if degraded else "ok"
-            # Still surface no-key as unhealthy even when supervisor is healthy
+            # Still surface no-key as unhealthy for hosted backends even when
+            # supervisor is healthy. Local Parakeet/Whisper lanes need no key.
             if not is_private and healthy:
                 has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(preferred), False)
                 if not has_key:
@@ -1088,6 +1262,10 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.start_note_recording())
         if path == "/api/notes/stop" and method == "POST":
             return _Response(200, backend.stop_note_recording())
+        if path == "/api/meetings/start" and method == "POST":
+            return _Response(200, backend.start_meeting_recording())
+        if path == "/api/meetings/stop" and method == "POST":
+            return _Response(200, backend.stop_meeting_recording())
         if path == "/api/notes/pause" and method == "POST":
             return _Response(200, backend.pause_note_recording())
         if path == "/api/notes/resume" and method == "POST":

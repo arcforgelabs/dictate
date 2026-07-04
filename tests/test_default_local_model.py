@@ -87,8 +87,18 @@ class ResolveDefaultLocalBackendTests(unittest.TestCase):
             self.assertEqual(backend, "faster-whisper")
             self.assertEqual(model, "turbo")
 
-    def test_cuda_defaults_to_whisper_turbo(self) -> None:
-        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
+    def test_cuda_prefers_parakeet_when_available(self) -> None:
+        with patch.object(stt_factory, "parakeet_available", return_value=True), \
+             patch.object(stt_factory, "_cuda_available_for_faster_whisper") as cuda_probe:
+            self.assertEqual(
+                stt_factory.resolve_default_local_backend("cuda"),
+                ("parakeet", "parakeet-tdt-0.6b-v2"),
+            )
+            cuda_probe.assert_not_called()
+
+    def test_cuda_falls_back_to_whisper_turbo_without_parakeet(self) -> None:
+        with patch.object(stt_factory, "parakeet_available", return_value=False), \
+             patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
             self.assertEqual(stt_factory.resolve_default_local_backend("cuda"), ("faster-whisper", "turbo"))
 
     def test_amd_prefers_parakeet_when_available(self) -> None:

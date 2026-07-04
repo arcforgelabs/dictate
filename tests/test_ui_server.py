@@ -11,10 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dictate.api_keys import ApiKeyStatus
+from dictate import config as config_mod
 from dictate.history import HistoryStore
+from dictate.note_store import NoteSegment, NoteStore
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
+    ApiError,
     DEFAULT_PREFS,
     EventBroker,
     UiBackend,
@@ -30,6 +33,7 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
     kwargs = dict(
         config_path=base / "config.yaml",
         history_store=HistoryStore(base / "history.json"),
+        note_store=NoteStore(base / "notes"),
         prefs_store=UiPrefsStore(base / "ui-prefs.json"),
         save_api_key=lambda backend, key: None,
         clear_api_key=lambda backend: None,
@@ -77,13 +81,35 @@ class _FakeNoteDaemon:
     def __init__(self) -> None:
         self.note_recording_active = False
         self.note_recording_paused = False
+        self.long_recording_mode = None
         self.calls: list[str] = []
+        self.meeting_backend_model: tuple[str, str] | None = None
+
+    @property
+    def long_recording_active(self) -> bool:
+        return self.note_recording_active
 
     def start_note_recording(self) -> bool:
         self.calls.append("start")
         self.note_recording_active = True
         self.note_recording_paused = False
+        self.long_recording_mode = "note"
         return True
+
+    def start_meeting_recording(self) -> bool:
+        self.calls.append("start-meeting")
+        self.note_recording_active = True
+        self.note_recording_paused = False
+        self.long_recording_mode = "meeting"
+        return True
+
+    def current_meeting_backend_model(self) -> tuple[str, str] | None:
+        return self.meeting_backend_model
+
+    def set_meeting_speech_to_text(self, stt, *, hotwords=None) -> None:  # noqa: ANN001, ANN201
+        del hotwords
+        self.calls.append("set-meeting")
+        self.meeting_backend_model = (stt.backend_name, stt.model_name)
 
     def pause_note_recording(self) -> bool:
         self.calls.append("pause")
@@ -101,6 +127,12 @@ class _FakeNoteDaemon:
 
     def stop_note_recording(self) -> bool:
         self.calls.append("stop")
+        self.note_recording_active = False
+        self.note_recording_paused = False
+        return True
+
+    def stop_meeting_recording(self) -> bool:
+        self.calls.append("stop-meeting")
         self.note_recording_active = False
         self.note_recording_paused = False
         return True
@@ -200,17 +232,14 @@ class UiBackendStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             # Pin the hardware-aware default so the shape assertion is deterministic.
             with patch(
-                "dictate.ui_server.resolve_default_local_model",
-                return_value="turbo",
-            ), patch(
                 "dictate.ui_server.resolve_default_local_backend",
-                return_value=("faster-whisper", "turbo"),
+                return_value=("parakeet", "parakeet-tdt-0.6b-v2"),
             ):
                 state = _backend(d).get_state()
             self.assertIn("version", state)
-            self.assertEqual(state["model"]["backend"], "faster-whisper")
-            self.assertEqual(state["model"]["model"], "turbo")
-            self.assertEqual(state["model"]["id"], "faster-whisper/turbo")
+            self.assertEqual(state["model"]["backend"], "parakeet")
+            self.assertEqual(state["model"]["model"], "parakeet-tdt-0.6b-v2")
+            self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
             # local models first (parakeet English default leads), hosted present
             self.assertEqual(state["models"][0]["backend"], "parakeet")
             self.assertTrue(state["models"][0]["local"])
@@ -223,7 +252,18 @@ class UiBackendStateTests(unittest.TestCase):
             )
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(
-                backends, {"parakeet", "faster-whisper", "whisperx", "openai", "xai", "gemini"}
+                backends,
+                {
+                    "parakeet",
+                    "parakeet-pyannote",
+                    "parakeet-diarizen",
+                    "parakeet-sortformer",
+                    "faster-whisper",
+                    "whisperx",
+                    "openai",
+                    "xai",
+                    "gemini",
+                },
             )
             # default shortcut + activation
             self.assertEqual(state["shortcut"]["combo"], "ctrl_r")
@@ -231,6 +271,22 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["shortcut"]["activation"], "hold")
             self.assertEqual(state["prefs"], DEFAULT_PREFS)
             self.assertEqual(state["providers"]["openai"]["status"], "None")
+            self.assertEqual(state["providerHealth"]["mode"], "private")
+            self.assertEqual(state["providerHealth"]["status"], "ok")
+            self.assertTrue(state["providerHealth"]["healthy"])
+
+    def test_parakeet_provider_health_is_private_without_api_key(self) -> None:
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            config_mod.set_stt_selection("parakeet", "parakeet-tdt-0.6b-v2", path=backend.config_path)
+
+            state = backend.get_state()
+
+        self.assertEqual(state["providerHealth"]["mode"], "private")
+        self.assertEqual(state["providerHealth"]["status"], "ok")
+        self.assertTrue(state["providerHealth"]["healthy"])
 
     def test_state_reflects_configured_model(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -240,15 +296,18 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["model"]["backend"], "gemini")
             self.assertEqual(state["model"]["model"], "gemini-3-flash-preview")
 
-    def test_default_local_model_matches_hardware_resolver(self) -> None:
+    def test_default_local_model_matches_backend_resolver(self) -> None:
         # Fresh config (no saved stt_model): the displayed local default must match
-        # what the daemon would actually run, per the hardware-aware resolver.
+        # what the daemon would actually run, per the backend resolver.
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"), \
-                 patch("dictate.ui_server.resolve_default_local_backend", return_value=("faster-whisper", "turbo")):
+            with patch(
+                "dictate.ui_server.resolve_default_local_backend",
+                return_value=("parakeet", "parakeet-tdt-0.6b-v2"),
+            ):
                 capable = _backend(d).get_state()
-            self.assertEqual(capable["model"]["model"], "turbo")
-            self.assertEqual(capable["model"]["id"], "faster-whisper/turbo")
+            self.assertEqual(capable["model"]["backend"], "parakeet")
+            self.assertEqual(capable["model"]["model"], "parakeet-tdt-0.6b-v2")
+            self.assertEqual(capable["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
 
         with tempfile.TemporaryDirectory() as d:
             with patch("dictate.ui_server.resolve_default_local_model", return_value="small"), \
@@ -424,6 +483,7 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             started = backend.start_note_recording()
             self.assertTrue(started["recording"])
             self.assertFalse(started["paused"])
+            self.assertEqual(started["mode"], "note")
             paused = backend.pause_note_recording()
             self.assertTrue(paused["recording"])
             self.assertTrue(paused["paused"])
@@ -433,6 +493,151 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertFalse(backend.stop_note_recording()["recording"])
             self.assertTrue(backend.toggle_note_recording()["recording"])
             self.assertEqual(daemon.calls, ["start", "pause", "resume", "stop", "toggle"])
+
+    def test_meeting_controls_call_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            config_mod.set_stt_selection(
+                "parakeet-pyannote",
+                "parakeet-tdt-0.6b-v2",
+                path=backend.config_path,
+            )
+            with patch("dictate.ui_server.check_backend_readiness") as check_backend_readiness:
+                check_backend_readiness.return_value.errors = []
+                check_backend_readiness.return_value.warnings = []
+                started = backend.start_meeting_recording()
+            self.assertTrue(started["recording"])
+            self.assertEqual(started["mode"], "meeting")
+            stopped = backend.stop_meeting_recording()
+            self.assertFalse(stopped["recording"])
+            self.assertEqual(daemon.calls, ["set-meeting", "start-meeting", "stop-meeting"])
+            self.assertEqual(daemon.meeting_backend_model, ("parakeet-pyannote", "parakeet-tdt-0.6b-v2"))
+
+    def test_meeting_start_uses_default_meeting_backend_when_dictation_backend_is_plain_asr(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            config_mod.set_stt_selection("parakeet", "parakeet-tdt-0.6b-v2", path=backend.config_path)
+
+            with patch("dictate.ui_server.check_backend_readiness") as check_backend_readiness:
+                check_backend_readiness.return_value.errors = []
+                check_backend_readiness.return_value.warnings = []
+                payload = backend.start_meeting_recording()
+
+            self.assertTrue(payload["recording"])
+            check_backend_readiness.assert_called_once_with(
+                backend="parakeet-pyannote",
+                model="parakeet-tdt-0.6b-v2",
+                device="auto",
+            )
+            self.assertEqual(daemon.calls, ["set-meeting", "start-meeting"])
+
+    def test_meeting_start_blocks_when_pyannote_model_access_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            config_mod.set_stt_selection(
+                "parakeet-pyannote",
+                "parakeet-tdt-0.6b-v2",
+                path=backend.config_path,
+            )
+            with patch("dictate.ui_server.check_backend_readiness") as check_backend_readiness:
+                check_backend_readiness.return_value.errors = []
+                check_backend_readiness.return_value.warnings = [
+                    "pyannote/speaker-diarization-community-1 is gated."
+                ]
+                with self.assertRaisesRegex(ApiError, "Meeting model is not ready"):
+                    backend.start_meeting_recording()
+
+            self.assertEqual(daemon.calls, [])
+
+    def test_meeting_start_allows_non_blocking_backend_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            config_mod.set_stt_selection(
+                "parakeet-pyannote",
+                "parakeet-tdt-0.6b-v2",
+                path=backend.config_path,
+            )
+            with patch("dictate.ui_server.check_backend_readiness") as check_backend_readiness:
+                check_backend_readiness.return_value.errors = []
+                check_backend_readiness.return_value.warnings = [
+                    "pyannote runs through PyTorch. On AMD, this requires a ROCm-enabled PyTorch build."
+                ]
+                payload = backend.start_meeting_recording()
+
+            self.assertTrue(payload["recording"])
+            self.assertEqual(daemon.calls, ["set-meeting", "start-meeting"])
+
+    def test_note_payload_includes_speaker_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            store = NoteStore(Path(d) / "notes")
+            note_id = store.create_note(
+                provider="parakeet-pyannote",
+                model="parakeet-tdt-0.6b-v2",
+                speaker_labels=True,
+                mode="meeting",
+            )
+            store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.25,
+                    provider="parakeet-pyannote",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="hello",
+                    speaker_id="SPEAKER_A",
+                    speaker_label="Speaker 1",
+                ),
+            )
+            store.mark_ready(note_id, duration_s=1.25)
+
+            payload = UiBackend.note_payload(store, note_id)
+
+            assert payload is not None
+            self.assertEqual(payload["mode"], "meeting")
+            self.assertTrue(payload["speakerLabels"])
+            self.assertEqual(payload["text"], "Speaker 1: hello")
+            self.assertEqual(payload["segments"][0]["speakerLabel"], "Speaker 1")
+            self.assertEqual(payload["segments"][0]["tStart"], 0.0)
+            self.assertEqual(payload["segments"][0]["tEnd"], 1.25)
+
+    def test_get_history_rehydrates_persisted_note_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            note_store = NoteStore(Path(d) / "notes")
+            history_store = HistoryStore(Path(d) / "history.json")
+            note_id = note_store.create_note(
+                provider="parakeet-pyannote",
+                model="parakeet-tdt-0.6b-v2",
+                speaker_labels=True,
+                mode="meeting",
+            )
+            note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=2.0,
+                    provider="parakeet-pyannote",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="hello",
+                    speaker_label="Speaker 1",
+                ),
+            )
+            note_store.mark_ready(note_id, duration_s=2.0)
+            history_store.append("Speaker 1: hello")
+            backend = _backend(d, history_store=history_store, note_store=note_store)
+
+            history = backend.get_history()
+
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["id"], note_id)
+            self.assertEqual(history[0]["mode"], "meeting")
+            self.assertEqual(history[0]["segments"][0]["speakerLabel"], "Speaker 1")
+            self.assertEqual(history[0]["segments"][0]["tStart"], 0.0)
 
     def test_note_pause_and_resume_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as d:

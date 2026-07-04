@@ -572,6 +572,12 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-finish-btn:hover{background:var(--surface-3);}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
+.meeting-action{margin-top:4px;height:30px;padding:0 12px;border-radius:var(--r-pill);
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--surface-2);
+  border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;
+  transition:var(--t-fast);white-space:nowrap;}
+.meeting-action:hover{background:var(--surface-3);border-color:var(--border-2);color:var(--fg);}
+.meeting-action:focus-visible{outline:2px solid var(--live);outline-offset:3px;}
 /* Config-gap: quiet amber pill on home when online mode but no API key configured */
 .config-hint{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-pill);
   background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber-text);font-size:11.5px;font-weight:600;}
@@ -691,6 +697,16 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-exp-body{flex:1;min-height:0;overflow-y:auto;padding:32px var(--prose-inset) 56px;}
 .note-exp-text{max-width:var(--prose-width);margin:0;font-size:15px;line-height:1.75;color:var(--fg);
   white-space:pre-wrap;word-break:break-word;text-wrap:pretty;}
+.note-segments{max-width:var(--prose-width);display:flex;flex-direction:column;gap:18px;}
+.note-segment{display:grid;grid-template-columns:minmax(116px,150px) minmax(0,1fr);gap:18px;align-items:start;}
+.note-segment-meta{min-width:0;display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.35;color:var(--muted);}
+.note-segment-speaker{font-weight:700;color:var(--fg);overflow-wrap:anywhere;}
+.note-segment-time{font-variant-numeric:tabular-nums;color:var(--muted2);}
+.note-segment-text{min-width:0;margin:0;font-size:15px;line-height:1.75;color:var(--fg);overflow-wrap:anywhere;}
+@media (max-width:640px){
+  .note-segment{grid-template-columns:1fr;gap:6px;}
+  .note-segment-meta{flex-direction:row;align-items:baseline;gap:10px;}
+}
 
 /* ===========================================================================
    COPY-LAST ROW — quiet recovery chip below the cradle on the home screen.

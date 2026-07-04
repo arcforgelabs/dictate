@@ -9,6 +9,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
+from dictate.config import Config
 from dictate.update_status import (
     RELEASES_URL,
     check_update_status,
@@ -155,6 +156,7 @@ class UpdateStatusTests(unittest.TestCase):
             plat,
             roots,
             user,
+            patch("dictate.update_status.load_config", return_value=Config()),
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/npx"),
             patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen),
         ):
@@ -166,6 +168,76 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@latest", "update", "--user"]],
+        )
+
+    def test_linux_user_update_can_target_unstable_npm_channel(self) -> None:
+        calls = []
+
+        def fake_popen(command):  # noqa: ANN001
+            calls.append(command)
+            return object()
+
+        plat, roots, user = self._linux_user()
+        with (
+            plat,
+            roots,
+            user,
+            patch.dict("dictate.update_status.os.environ", {"DICTATE_UPDATE_CHANNEL": "unstable"}, clear=False),
+            patch("dictate.update_status.load_config", return_value=Config()),
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/npx"),
+            patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen),
+        ):
+            flow = start_update_flow()
+
+        self.assertTrue(flow.started)
+        self.assertEqual(
+            calls,
+            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@unstable", "update", "--user"]],
+        )
+
+    def test_invalid_update_channel_falls_back_to_latest(self) -> None:
+        plat, roots, user = self._linux_user()
+        with (
+            plat,
+            roots,
+            user,
+            patch.dict("dictate.update_status.os.environ", {"DICTATE_UPDATE_CHANNEL": "../../bad"}, clear=False),
+            patch("dictate.update_status.load_config", return_value=Config()),
+            patch(
+                "dictate.update_status.urllib.request.urlopen",
+                side_effect=urllib.error.URLError("offline"),
+            ),
+        ):
+            status = check_update_status(timeout=0.01)
+
+        self.assertEqual(status.commands, {"update": "npx -y @arcforgelabs/dictate@latest update --user"})
+
+    def test_saved_unstable_update_channel_wins_for_linux_user_update(self) -> None:
+        calls = []
+
+        def fake_popen(command):  # noqa: ANN001
+            calls.append(command)
+            return object()
+
+        plat, roots, user = self._linux_user()
+        with (
+            plat,
+            roots,
+            user,
+            patch.dict("dictate.update_status.os.environ", {"DICTATE_UPDATE_CHANNEL": "stable"}, clear=False),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable"),
+            ),
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/npx"),
+            patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen),
+        ):
+            flow = start_update_flow()
+
+        self.assertTrue(flow.started)
+        self.assertEqual(
+            calls,
+            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@unstable", "update", "--user"]],
         )
 
     def test_linux_user_update_requires_npx(self) -> None:

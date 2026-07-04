@@ -91,6 +91,68 @@ The current developer/bootstrap install path is:
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
 ```
 
+## Npm Channels
+
+Use npm dist-tags as update channels for the hosted developer/source bootstrap:
+
+| npm dist-tag | Meaning | Publisher |
+| --- | --- | --- |
+| `latest` | Stable developer bootstrap that points at a reviewed CalVer GitHub release tag. | `.github/workflows/release.yml` |
+| `unstable` | Test bootstrap for a selected branch/SHA before it is considered stable. | `.github/workflows/npm-unstable.yml` |
+
+The stable release workflow publishes `@arcforgelabs/dictate@latest` only from a
+validated `v20*` release tag reachable from the default branch. Do not publish
+feature work to `latest`.
+
+The unstable workflow is manually dispatched. It creates a unique prerelease npm
+version such as `2026.7.4-unstable.123.1`, patches the hosted `install.ps1` and
+`update.ps1` scripts in the npm package so they download the exact selected
+commit archive, and publishes that shim under the requested dist-tag
+(`unstable` by default). It does not move GitHub releases, Microsoft Store
+drafts, or the stable npm `latest` tag. The app version reported by
+`dictate --version` still comes from the selected source commit, so branch builds
+without a version bump can report the base CalVer while being delivered through
+the unstable channel.
+
+With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
+matrix, the Windows user install/update/uninstall smoke, UI build/server smoke,
+desktop shell compile/Rust tests, and npm package dry-run. Store upload/publish
+and signed Windows artifact release remain separate guarded workflows.
+
+To publish an unstable bootstrap:
+
+```bash
+gh workflow run npm-unstable.yml \
+  -f source_ref=feature/my-branch \
+  -f npm_tag=unstable \
+  -f run_tests=true
+```
+
+To install or update from the unstable bootstrap:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/update.ps1 | iex"
+```
+
+For Linux user installs that update through the in-app/npm path, set:
+
+```bash
+dictate config set-update-channel unstable
+dictate config set-update-channel stable
+```
+
+`stable` is the user-facing name for npm's `latest` dist-tag. `unstable` maps to
+the `unstable` dist-tag. `DICTATE_UPDATE_CHANNEL=unstable` remains available for
+temporary process-level overrides, but the CLI setting is the supported user
+opt-in mechanism.
+
+Promotion rule: once a feature set is locked, tested, and accepted, merge it to
+the release branch/default branch, create the normal CalVer tag, run
+`.github/workflows/release.yml`, then advance official channels such as
+Microsoft Store through their own guarded workflows. Never promote by retagging
+an unstable npm package as stable.
+
 Do not present this as the normal public Windows install path. The Windows
 release target is Microsoft Store distribution, with signed direct-download
 artifacts only as a secondary fallback.

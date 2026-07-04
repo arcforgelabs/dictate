@@ -14,6 +14,7 @@ import sys
 import urllib.error
 import urllib.request
 
+from dictate.config import load_config
 from dictate.version import RELEASE_VERSION
 
 LATEST_RELEASE_URL = "https://api.github.com/repos/arcforgelabs/dictate/releases/latest"
@@ -189,7 +190,7 @@ def start_update_flow() -> UpdateFlow:
 
 DEB_ASSET_SUFFIX = "_amd64.deb"
 _DOWNLOAD_TIMEOUT = 600.0
-NPM_PACKAGE = "@arcforgelabs/dictate@latest"
+NPM_PACKAGE_NAME = "@arcforgelabs/dictate"
 
 
 def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
@@ -197,7 +198,7 @@ def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
     npx = shutil.which("npx")
     if not npx:
         return _missing_deps_flow(context, ["npx"])
-    command = [npx, "-y", NPM_PACKAGE, "update", "--user"]
+    command = [npx, "-y", _npm_package_spec(), "update", "--user"]
     subprocess.Popen(command)  # noqa: S603
     return UpdateFlow(
         mode="command",
@@ -398,7 +399,7 @@ def _commands_for_context(context: dict[str, object]) -> dict[str, str]:
     if install_kind == "linux-source" and isinstance(source_root, Path):
         return {"update": f"bash {source_root / 'update.sh'}"}
     if install_kind == "linux-user":
-        return {"update": f"npx -y {NPM_PACKAGE} update --user"}
+        return {"update": f"npx -y {_npm_package_spec()} update --user"}
     if install_kind == "linux-package":
         return {"update": "download latest .deb and install with pkexec/apt"}
     if install_kind == "windows-source" and isinstance(source_root, Path):
@@ -422,6 +423,42 @@ def _manual_update_message(context: dict[str, object]) -> str:
     if install_kind == "mac-package":
         return "Open the latest macOS package from GitHub releases."
     return "Open the latest release for this platform."
+
+
+def _npm_update_channel() -> str:
+    try:
+        configured = load_config().update_channel
+    except Exception:  # noqa: BLE001
+        configured = None
+    channel = _normalize_update_channel(configured)
+    if channel:
+        return channel
+    channel = os.environ.get("DICTATE_UPDATE_CHANNEL", "stable").strip() or "stable"
+    channel = "stable" if channel == "latest" else channel
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,63}", channel):
+        return "stable"
+    return channel
+
+
+def _npm_package_spec() -> str:
+    return f"{NPM_PACKAGE_NAME}@{npm_dist_tag()}"
+
+
+def npm_dist_tag() -> str:
+    """Return the npm dist-tag for the configured app update channel."""
+    channel = _npm_update_channel()
+    return "latest" if channel == "stable" else channel
+
+
+def _normalize_update_channel(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    channel = value.strip().lower()
+    if channel == "latest":
+        return "stable"
+    if channel in {"stable", "unstable"}:
+        return channel
+    return None
 
 
 def _windows_update_command(source_root: Path) -> list[str]:

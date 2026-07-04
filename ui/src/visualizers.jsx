@@ -34,7 +34,16 @@ function spawnRing(wrap, born, mag0) {
   requestAnimationFrame(step);
 }
 
-export function BreathCradle({ active, paused, session, reduced, onStart, onPause, onResume }) {
+export function BreathCradle({
+  active,
+  paused,
+  session,
+  reduced,
+  onStart,
+  onPause,
+  onResume,
+  activeLabel = "Pause recording",
+}) {
   const wrapRef = useRef(null), btnRef = useRef(null), haloRef = useRef(null);
   const S = useRef({ amp: 0, armed: true, last: 0, raf: 0 });
   const [near, setNear] = useState(false);
@@ -108,7 +117,7 @@ export function BreathCradle({ active, paused, session, reduced, onStart, onPaus
     ? "Start recording"
     : paused
       ? "Resume recording"
-      : "Pause recording";
+      : activeLabel;
 
   const icon = showStopHint
     ? <Icon name="square" size={34} />

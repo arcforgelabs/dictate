@@ -16,7 +16,7 @@ import numpy as np
 
 from dictate.audio import AudioCaptureError, AudioChunk
 from dictate.history import HistoryStore
-from dictate.stt.base import SttCapabilities
+from dictate.stt.base import SttCapabilities, TranscriptSegment
 
 # Stub out heavy dependencies so tests work without faster-whisper / numpy / pynput.
 _stub_modules = {
@@ -65,6 +65,8 @@ class _FakeApiStt(_FakeStt):
 
 
 class _DiarizingApiStt(_FakeApiStt):
+    capabilities = SttCapabilities(supports_speaker_attribution=True)
+
     def __init__(self) -> None:
         super().__init__()
         self.diarized_calls: list[int] = []
@@ -73,6 +75,35 @@ class _DiarizingApiStt(_FakeApiStt):
         del args, kwargs
         self.diarized_calls.append(len(audio))
         return "Speaker 1: hosted final"
+
+
+class _SegmentDiarizingStt(_FakeStt):
+    backend_name = "parakeet-pyannote"
+    model_name = "parakeet-tdt-0.6b-v2"
+    capabilities = SttCapabilities(supports_speaker_attribution=True)
+
+    def __init__(self) -> None:
+        self.segment_calls: list[int] = []
+
+    def transcribe_diarized_segments(self, audio, *args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        self.segment_calls.append(len(audio))
+        return [
+            TranscriptSegment(
+                text="hello",
+                t_start=0.0,
+                t_end=0.4,
+                speaker_id="SPEAKER_A",
+                speaker_label="Speaker 1",
+            ),
+            TranscriptSegment(
+                text="reply",
+                t_start=0.5,
+                t_end=1.0,
+                speaker_id="SPEAKER_B",
+                speaker_label="Speaker 2",
+            ),
+        ]
 
 
 class _ChunkingStt(_FakeStt):
@@ -1246,7 +1277,7 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(notes[-1]["text"], "")
             self.assertTrue(any("Note recording failed" in (status or "") for status in statuses))
 
-    def test_note_recording_uses_backend_diarization_when_available(self) -> None:
+    def test_note_recording_uses_plain_asr_when_backend_diarization_is_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
 
@@ -1262,10 +1293,155 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertTrue(daemon.stop_note_recording())
             daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
 
+            self.assertEqual(stt.calls, [16])
+            self.assertEqual(stt.diarized_calls, [])
+            self.assertEqual(store.load()[0].text, "hosted final")
+            output.send.assert_not_called()
+
+    def test_meeting_recording_requires_backend_speaker_attribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _FakeApiStt()
+            recorder = _FakeRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_meeting_recording())
+            self.assertTrue(daemon.stop_meeting_recording())
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(stt.calls, [])
+            self.assertEqual(store.load(), [])
+
+    def test_meeting_recording_uses_backend_speaker_attribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _DiarizingApiStt()
+            recorder = _FakeRecorder()
+            daemon = Daemon(stt, output=output, history_store=store, recorder=recorder)
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_meeting_recording())
+            self.assertTrue(daemon.stop_meeting_recording())
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
             self.assertEqual(stt.calls, [])
             self.assertEqual(stt.diarized_calls, [16])
             self.assertEqual(store.load()[0].text, "Speaker 1: hosted final")
             output.send.assert_not_called()
+
+    def test_meeting_recording_can_use_dedicated_speaker_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            primary_stt = _FakeApiStt()
+            meeting_stt = _DiarizingApiStt()
+            recorder = _FakeRecorder()
+            daemon = Daemon(
+                primary_stt,
+                output=output,
+                history_store=store,
+                recorder=recorder,
+                meeting_stt=meeting_stt,
+            )
+            daemon.engine.min_duration_s = 0
+            assert daemon.meeting_engine is not None
+            daemon.meeting_engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_meeting_recording())
+            self.assertTrue(daemon.stop_meeting_recording())
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(primary_stt.calls, [])
+            self.assertEqual(meeting_stt.diarized_calls, [16])
+            self.assertEqual(store.load()[0].text, "Speaker 1: hosted final")
+
+            self.assertTrue(daemon.start_note_recording())
+            self.assertTrue(daemon.stop_note_recording())
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(primary_stt.calls, [16])
+            self.assertEqual(meeting_stt.diarized_calls, [16])
+
+    def test_meeting_recording_persists_structured_speaker_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+            from dictate.note_store import NoteStore
+
+            hist = HistoryStore(path=Path(tmp) / "h.json")
+            notes = NoteStore(root=Path(tmp) / "notes")
+            output = MagicMock()
+            output.name = "mock"
+            stt = _SegmentDiarizingStt()
+            recorder = _FakeRecorder()
+            note_events: list[dict[str, object]] = []
+            daemon = Daemon(
+                stt,
+                output=output,
+                history_store=hist,
+                note_store=notes,
+                recorder=recorder,
+                note_callback=note_events.append,
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_meeting_recording())
+            recording_id = daemon._active_recording_id
+            assert recording_id is not None
+            note_id = daemon._recording_note_ids[recording_id]
+            self.assertTrue(daemon.stop_meeting_recording())
+            daemon._handle_final_chunk(daemon._audio_queue.get_nowait())
+
+            self.assertEqual(stt.segment_calls, [16])
+            note = notes.load_note(note_id)
+            assert note is not None
+            self.assertEqual(note.mode, "meeting")
+            self.assertTrue(note.speaker_labels)
+            self.assertEqual(note.status, "ready")
+            segments = notes.load_segments(note_id)
+            self.assertEqual(len(segments), 2)
+            self.assertEqual(segments[0].speaker_label, "Speaker 1")
+            self.assertEqual(segments[0].t_start, 0.0)
+            self.assertEqual(segments[1].speaker_id, "SPEAKER_B")
+            self.assertEqual(hist.load()[0].text, "Speaker 1: hello Speaker 2: reply")
+            self.assertEqual(note_events[-1]["segments"][0]["speaker_label"], "Speaker 1")
+            output.send.assert_not_called()
+
+    def test_meeting_recording_callback_includes_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from dictate.daemon import Daemon
+
+            events: list[dict[str, object]] = []
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            output = MagicMock()
+            output.name = "mock"
+            daemon = Daemon(
+                _DiarizingApiStt(),
+                output=output,
+                history_store=store,
+                recorder=_FakeRecorder(),
+                note_recording_callback=lambda recording, **kwargs: events.append(
+                    {"recording": recording, **kwargs}
+                ),
+            )
+            daemon.engine.min_duration_s = 0
+
+            self.assertTrue(daemon.start_meeting_recording())
+            self.assertTrue(daemon.stop_meeting_recording())
+
+            self.assertEqual(events[0]["mode"], "meeting")
+            self.assertEqual(events[-1]["mode"], "meeting")
 
     def test_push_to_talk_does_not_use_backend_diarization(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -36,6 +36,7 @@ lanes:
 | Environment | Purpose | Secrets / variables |
 | --- | --- | --- |
 | `release` | GitHub release assets and npm publish | `NPM_TOKEN` |
+| `npm-publish` | Manual unstable npm dist-tag publish | `NPM_TOKEN` |
 | `windows-signing` | Authenticode signing and signed Windows release upload | `WINDOWS_SIGNING_PFX_B64`, `WINDOWS_SIGNING_PFX_PASSWORD`, signing timestamp variables |
 | `microsoft-store-status` | Read-only Store credential smoke/status checks | Store tenant/client/seller/product values and Store client secret |
 | `microsoft-store-draft` | Build and upload Store package to an uncommitted draft | Store tenant/client/seller/product values and Store client secret |
@@ -68,6 +69,9 @@ Current repository settings:
 7. Microsoft Store `draft` mode uploads a package without committing the
    submission. Microsoft Store `publish` mode submits the current draft for
    certification and must be explicitly approved.
+8. Manual unstable npm publishes may move only non-stable dist-tags such as
+   `unstable`. Stable promotion must go through the normal release workflow,
+   not by moving `latest` to an unstable package.
 
 ## Secrets
 

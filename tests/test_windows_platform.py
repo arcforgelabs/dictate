@@ -164,7 +164,11 @@ class WindowsPlatformTests(unittest.TestCase):
             and node.targets[0].id in {"DEFAULT_BACKEND", "DEFAULT_MODELS"}
         }
 
-        self.assertEqual(assignments["DEFAULT_BACKEND"], "faster-whisper")
+        self.assertEqual(assignments["DEFAULT_BACKEND"], "parakeet")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet"], "parakeet-tdt-0.6b-v2")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-pyannote"], "parakeet-tdt-0.6b-v2")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-diarizen"], "parakeet-tdt-0.6b-v2")
+        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-sortformer"], "parakeet-tdt-0.6b-v2")
         self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "small")
 
     def test_windows_controls_apply_configured_key_command(self) -> None:
@@ -195,6 +199,10 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn("[switch]$NoStartup", script)
+        self.assertIn("[switch]$Meeting", script)
+        self.assertIn('$installExtras = @("windows")', script)
+        self.assertIn('$installExtras += "meeting"', script)
+        self.assertIn('$installTarget = "${PSScriptRoot}[$($installExtras -join', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
         self.assertIn('"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*', script)
@@ -229,6 +237,9 @@ class WindowsPlatformTests(unittest.TestCase):
         script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
 
         self.assertIn("--no-startup", script)
+        self.assertIn("--meeting", script)
+        self.assertIn('INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"', script)
+        self.assertIn('EXTRAS+=("meeting")', script)
         self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
         self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
@@ -450,6 +461,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("self.root.after(500, self.root.destroy)", source)
         self.assertIn("install-windows-wizard.ps1", source)
         self.assertIn("HOSTED_WINDOWS_UPDATE_COMMAND", source)
+        self.assertIn("npm_dist_tag", source)
         self.assertIn("update.ps1 | iex", source)
         self.assertIn('(root / ".git").exists()', source)
         self.assertIn('"Update"', source)
@@ -588,6 +600,26 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
         self.assertIn('"access": "public"', package_json)
         self.assertIn('"provenance": true', package_json)
+
+    def test_unstable_npm_publish_workflow_uses_separate_dist_tag(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "npm-unstable.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("npm_tag", workflow)
+        self.assertIn('default: "unstable"', workflow)
+        self.assertIn("UNSTABLE_VERSION", workflow)
+        self.assertIn("Windows user install smoke", workflow)
+        self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("desktop-shell", workflow)
+        self.assertIn("needs.tests.result == 'success'", workflow)
+        self.assertIn("npm publish --access public --tag", workflow)
+        self.assertIn("npm dist-tag add", workflow)
+        self.assertIn("archive/${GITHUB_SHA}.zip", workflow)
+        self.assertIn("install.ps1", workflow)
+        self.assertIn("update.ps1", workflow)
+        self.assertNotIn("--tag latest", workflow)
 
 
 if __name__ == "__main__":

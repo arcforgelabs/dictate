@@ -5,6 +5,7 @@ import App from "../App.jsx";
 afterEach(() => {
   cleanup();
   delete window.__DICTATE__;
+  delete window.__TAURI__;
   delete window.EventSource;
   vi.restoreAllMocks();
 });
@@ -103,6 +104,34 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText(/project note/i)).toBeInTheDocument();
   });
 
+  it("records a mock meeting with speaker-labelled output", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText("Meeting"));
+    expect(screen.getByText("Meeting")).toBeInTheDocument();
+    expect(screen.getByLabelText("Finish meeting")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Finish meeting"));
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+    expect(screen.getByText("Separating speakers and preparing the transcript.")).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getByText("Speaker 1")).toBeInTheDocument();
+    expect(screen.getByText("Speaker 2")).toBeInTheDocument();
+    expect(screen.getByText("0:00-0:02")).toBeInTheDocument();
+    expect(screen.getByText(/launch blockers/i)).toBeInTheDocument();
+  });
+
+  it("does not return canned transcripts in a shell without an engine bridge", () => {
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    render(<App />);
+    expect(screen.queryByText(/meeting summary/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Start recording"));
+
+    expect(screen.getByText("Dictate engine is not connected")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Pause recording")).not.toBeInTheDocument();
+    expect(screen.queryByText(/project note/i)).not.toBeInTheDocument();
+  });
+
   it("close from expanded note (after capture) returns to capture home", async () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
@@ -115,17 +144,33 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("exports expanded note as markdown through the native save bridge", async () => {
     const invoke = vi.fn().mockResolvedValue(true);
-    window.__TAURI__ = { core: { invoke } };
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
     finishCapture();
     await waitFor(() => expect(screen.getByTitle("Export as Markdown")).toBeInTheDocument(), { timeout: 2000 });
+    window.__TAURI__ = { core: { invoke } };
     fireEvent.click(screen.getByTitle("Export as Markdown"));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
       defaultName: expect.stringMatching(/^dictate-note-\d{4}-\d{2}-\d{2}\.md$/),
-      content: expect.stringContaining("# Note —"),
+      content: expect.stringContaining("# Note -"),
     })));
     expect(screen.getByText("Saved as Markdown")).toBeInTheDocument();
+  });
+
+  it("exports segmented meeting notes with speaker labels and timestamps", async () => {
+    const invoke = vi.fn().mockResolvedValue(true);
+    render(<App />);
+    fireEvent.click(screen.getByText("Meeting"));
+    fireEvent.click(screen.getByLabelText("Finish meeting"));
+
+    await waitFor(() => expect(screen.getByTitle("Export as Markdown")).toBeInTheDocument(), { timeout: 2000 });
+    window.__TAURI__ = { core: { invoke } };
+    fireEvent.click(screen.getByTitle("Export as Markdown"));
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
+      content: expect.stringContaining("**Speaker 1 [0:00-0:02]:** Let's capture the launch blockers."),
+    })));
+    expect(invoke.mock.calls[0][1].content).toContain("**Speaker 2 [0:02-0:05]:** I will test the Windows build and report back tomorrow.");
   });
 
   it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
@@ -513,6 +558,69 @@ describe("Notes list (history view)", () => {
     fireEvent.click(screen.getByLabelText("Close note"));
     expect(screen.getByPlaceholderText("Search dictations")).toBeInTheDocument();
     expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("rehydrates persisted meeting segments from live state", async () => {
+    const sources = [];
+    const invoke = vi.fn().mockResolvedValue(true);
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [{
+          id: "note_meeting",
+          text: "Meeting transcript saved",
+          createdAt: "2026-07-05T00:00:00+00:00",
+          mode: "meeting",
+          speakerLabels: true,
+          segments: [
+            {
+              seq: 0,
+              t_start: 0.48,
+              t_end: 3.36,
+              text: "The birch canoe slid on the smooth planks.",
+              speaker_id: "speaker_0",
+              speaker_label: "Speaker 1",
+            },
+            {
+              seq: 1,
+              t_start: 3.36,
+              t_end: 7.68,
+              text: "Paint the sockets in the wall dull green.",
+              speaker_id: "speaker_1",
+              speaker_label: "Speaker 2",
+            },
+          ],
+        }],
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    navTo("Notes");
+    const input = screen.getByPlaceholderText("Search dictations");
+    fireEvent.change(input, { target: { value: "paint the sockets" } });
+    expect(screen.getByText(/The birch canoe slid/i)).toBeInTheDocument();
+    expect(screen.getByText(/Paint the sockets/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Export as Markdown"));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
+      content: expect.stringContaining("**Speaker 1 [0:00-0:03]:** The birch canoe slid on the smooth planks."),
+    })));
+    expect(invoke.mock.calls[0][1].content).toContain(
+      "**Speaker 2 [0:03-0:07]:** Paint the sockets in the wall dull green.",
+    );
+    fireEvent.click(screen.getByText(/Paint the sockets/i));
+
+    expect(screen.getByText("Speaker 1")).toBeInTheDocument();
+    expect(screen.getByText("Speaker 2")).toBeInTheDocument();
+    expect(screen.getByText("0:00-0:03")).toBeInTheDocument();
+    expect(screen.getByText("0:03-0:07")).toBeInTheDocument();
+    expect(screen.getByText("The birch canoe slid on the smooth planks.")).toBeInTheDocument();
   });
 });
 

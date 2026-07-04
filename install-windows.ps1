@@ -3,6 +3,7 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
+    [switch]$Meeting,
     [switch]$RecreateVenv
 )
 
@@ -383,7 +384,12 @@ if (-not (Test-Path $venvPython)) {
 }
 
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
-Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", "${PSScriptRoot}[windows]") -Description "Installing Dictate Windows package"
+$installExtras = @("windows")
+if ($Meeting) {
+    $installExtras += "meeting"
+}
+$installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
+Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
 
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
@@ -395,9 +401,10 @@ Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs -WorkingDirect
 Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PSScriptRoot "assets\dictate.ico")
 
 if (-not $NoPrepareTurbo) {
-    # Omit --model so prepare-model resolves the hardware-aware local default
-    # (turbo on capable hardware, small on a weak CPU) instead of forcing turbo.
-    Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "faster-whisper", "--device", "auto", "--compute-type", "int8") -Description "Preparing faster-whisper model"
+    # Keep the legacy switch name for installer compatibility, but prepare the
+    # fresh local default: Parakeet v2. Explicit faster-whisper users can still
+    # prepare that backend manually.
+    Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "parakeet", "--device", "auto", "--compute-type", "int8") -Description "Preparing Parakeet model"
 }
 
 if (-not $NoVerify) {

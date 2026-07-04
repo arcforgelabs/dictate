@@ -20,12 +20,32 @@ from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.gemini_backend import GeminiSpeechToText, gemini_api_key_available
 from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
 from dictate.stt.parakeet_backend import ParakeetSpeechToText, parakeet_available
+from dictate.stt.parakeet_pyannote_backend import (
+    PYANNOTE_COMMUNITY_MODEL,
+    ParakeetPyannoteSpeechToText,
+    pyannote_available,
+    pyannote_model_source,
+    pyannote_token,
+)
+from dictate.stt.parakeet_speaker_backend import (
+    DIARIZEN_MODEL,
+    SORTFORMER_MODEL,
+    ParakeetDiariZenSpeechToText,
+    ParakeetSortformerSpeechToText,
+    diarizen_available,
+    diarizen_model_source,
+    sortformer_available,
+    sortformer_model_source,
+)
 from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "turbo",
     "parakeet": "parakeet-tdt-0.6b-v2",
+    "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
+    "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
+    "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
@@ -41,6 +61,9 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "large-v3-turbo",
 )
 PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
+PARAKEET_PYANNOTE_MODELS: tuple[str, ...] = PARAKEET_MODELS
+PARAKEET_DIARIZEN_MODELS: tuple[str, ...] = PARAKEET_MODELS
+PARAKEET_SORTFORMER_MODELS: tuple[str, ...] = PARAKEET_MODELS
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
@@ -79,6 +102,42 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="NVIDIA Parakeet-TDT English ASR via ONNX (fast, accurate on CPU).",
         capabilities=ParakeetSpeechToText.capabilities,
         builder=lambda model, device, compute_type: ParakeetSpeechToText(
+            model_name=model,
+            device=device,
+            compute_type=compute_type,
+        ),
+    ),
+    "parakeet-pyannote": BackendSpec(
+        backend="parakeet-pyannote",
+        default_model=DEFAULT_MODELS["parakeet-pyannote"],
+        model_examples=PARAKEET_PYANNOTE_MODELS,
+        description="Local Meeting backend: Parakeet ASR with pyannote Community-1 speakers.",
+        capabilities=ParakeetPyannoteSpeechToText.capabilities,
+        builder=lambda model, device, compute_type: ParakeetPyannoteSpeechToText(
+            model_name=model,
+            device=device,
+            compute_type=compute_type,
+        ),
+    ),
+    "parakeet-diarizen": BackendSpec(
+        backend="parakeet-diarizen",
+        default_model=DEFAULT_MODELS["parakeet-diarizen"],
+        model_examples=PARAKEET_DIARIZEN_MODELS,
+        description="Local Meeting backend: Parakeet ASR with DiariZen speaker attribution.",
+        capabilities=ParakeetDiariZenSpeechToText.capabilities,
+        builder=lambda model, device, compute_type: ParakeetDiariZenSpeechToText(
+            model_name=model,
+            device=device,
+            compute_type=compute_type,
+        ),
+    ),
+    "parakeet-sortformer": BackendSpec(
+        backend="parakeet-sortformer",
+        default_model=DEFAULT_MODELS["parakeet-sortformer"],
+        model_examples=PARAKEET_SORTFORMER_MODELS,
+        description="Local Meeting backend: Parakeet ASR with NVIDIA Sortformer speaker attribution.",
+        capabilities=ParakeetSortformerSpeechToText.capabilities,
+        builder=lambda model, device, compute_type: ParakeetSortformerSpeechToText(
             model_name=model,
             device=device,
             compute_type=compute_type,
@@ -254,25 +313,19 @@ def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBa
     """The default (backend, model) for a fresh local config on this machine.
 
     English-first: on CPU we default to Parakeet, which is both faster and more
-    accurate than Whisper for English. CUDA still defaults to faster-whisper
-    because the integrated Parakeet backend is currently the ONNX CPU path; the
-    Parakeet CUDA and AMD GPU lanes must be implemented and benchmarked before
-    they become install defaults. The UI's English/Multilingual toggle switches
-    between Parakeet and Whisper; a saved config selection always wins over this
-    default.
+    accurate than Whisper for English. CUDA and AMD also default to Parakeet
+    when the runtime is importable; readiness/doctor then verifies that the
+    requested accelerator provider actually exists instead of silently accepting
+    CPU fallback. A saved config selection always wins over this default.
     """
     override = os.environ.get("DICTATE_FORCE_LOCAL_BACKEND")
     if override in {"parakeet", "faster-whisper"}:
         backend: SttBackend = override  # type: ignore[assignment]
         return backend, DEFAULT_MODELS[backend]
-    if device == "amd" and parakeet_available():
-        return "parakeet", DEFAULT_MODELS["parakeet"]
-    on_cuda = device == "cuda" or (device == "auto" and _cuda_available_for_faster_whisper())
-    if on_cuda:
-        return "faster-whisper", "turbo"
-    # CPU: Parakeet (English) when its runtime is available, else Whisper fallback.
     if parakeet_available():
         return "parakeet", DEFAULT_MODELS["parakeet"]
+    if device == "cuda" or (device == "auto" and _cuda_available_for_faster_whisper()):
+        return "faster-whisper", "turbo"
     return "faster-whisper", resolve_default_local_model(device)
 
 
@@ -327,8 +380,17 @@ def check_backend_readiness(
             )
         if device in {"cuda", "auto"}:
             _check_cuda_with_onnxruntime(report, requested_device=device)
-        if device in {"amd", "auto"}:
+        if device == "amd":
             _check_amd_with_onnxruntime(report, requested_device=device)
+
+    if backend == "parakeet-pyannote":
+        _check_parakeet_pyannote(report, model_name=model_name, device=device)
+
+    if backend == "parakeet-diarizen":
+        _check_parakeet_diarizen(report, model_name=model_name, device=device)
+
+    if backend == "parakeet-sortformer":
+        _check_parakeet_sortformer(report, model_name=model_name, device=device)
 
     if backend == "whisperx":
         _check_whisperx(report, model_name=model_name, device=device)
@@ -386,6 +448,133 @@ def _check_whisperx(
             "WhisperX diarization requires a Hugging Face token for pyannote models."
         )
     _check_cuda_with_torch(report, requested_device=device)
+
+
+def _check_parakeet_pyannote(
+    report: BackendReadiness,
+    *,
+    model_name: str,
+    device: ComputeDevice,
+) -> None:
+    if model_name not in PARAKEET_PYANNOTE_MODELS:
+        report.errors.append(
+            f"Parakeet+pyannote model '{model_name}' is not one of the wired ASR models: "
+            f"{', '.join(PARAKEET_PYANNOTE_MODELS)}."
+        )
+    if parakeet_available():
+        report.notes.append("Parakeet (onnx-asr) importable.")
+    else:
+        report.errors.append(
+            'Parakeet backend selected but onnx-asr is not importable. '
+            'Install with: uv pip install "onnx-asr[cpu,hub]"'
+        )
+    if pyannote_available():
+        report.notes.append("pyannote.audio importable.")
+    else:
+        report.errors.append(
+            'pyannote.audio is not importable. Install with: uv pip install -e ".[meeting]"'
+        )
+    model_source = pyannote_model_source()
+    if os.path.exists(os.path.expanduser(model_source)):
+        report.notes.append(f"pyannote model path: {model_source}")
+    elif not pyannote_token():
+        report.errors.append(
+            f"{PYANNOTE_COMMUNITY_MODEL} is gated. Accept the Hugging Face model terms, "
+            "then set DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN. For offline "
+            "use, set DICTATE_PYANNOTE_MODEL_PATH to a local model checkout."
+        )
+    if device in {"cuda", "auto", "amd"}:
+        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
+        if device == "amd":
+            report.warnings.append(
+                "pyannote runs through PyTorch. On AMD, this requires a ROCm-enabled "
+                "PyTorch build that reports availability through torch.cuda."
+            )
+    if device in {"cuda", "auto"}:
+        _check_cuda_with_onnxruntime(report, requested_device=device)
+    if device == "amd":
+        _check_amd_with_onnxruntime(report, requested_device=device)
+
+
+def _check_parakeet_diarizen(
+    report: BackendReadiness,
+    *,
+    model_name: str,
+    device: ComputeDevice,
+) -> None:
+    _check_parakeet_speaker_foundation(report, model_name=model_name, device=device, models=PARAKEET_DIARIZEN_MODELS)
+    if diarizen_available():
+        report.notes.append("DiariZen runtime importable.")
+    else:
+        report.errors.append(
+            "DiariZen Meeting backend selected but the diarizen runtime is not importable. "
+            "Install DiariZen or set DICTATE_DIARIZEN_MODEL_PATH to a supported local checkout."
+        )
+    source = diarizen_model_source()
+    if os.path.exists(os.path.expanduser(source)):
+        report.notes.append(f"DiariZen model path: {source}")
+    else:
+        report.notes.append(f"DiariZen model: {source or DIARIZEN_MODEL}")
+    if device in {"cuda", "auto", "amd"}:
+        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
+        if device == "amd":
+            report.warnings.append(
+                "DiariZen runs through PyTorch. On AMD, this requires a ROCm-enabled "
+                "PyTorch build that reports availability through torch.cuda."
+            )
+
+
+def _check_parakeet_sortformer(
+    report: BackendReadiness,
+    *,
+    model_name: str,
+    device: ComputeDevice,
+) -> None:
+    _check_parakeet_speaker_foundation(report, model_name=model_name, device=device, models=PARAKEET_SORTFORMER_MODELS)
+    if sortformer_available():
+        report.notes.append("NVIDIA NeMo ASR runtime importable.")
+    else:
+        report.errors.append(
+            "NVIDIA Sortformer Meeting backend selected but NeMo ASR is not importable. "
+            'Install the NeMo ASR runtime before selecting parakeet-sortformer.'
+        )
+    source = sortformer_model_source()
+    if os.path.exists(os.path.expanduser(source)):
+        report.notes.append(f"Sortformer model path: {source}")
+    else:
+        report.notes.append(f"Sortformer model: {source or SORTFORMER_MODEL}")
+    if device in {"cuda", "auto", "amd"}:
+        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
+        if device == "amd":
+            report.warnings.append(
+                "Sortformer runs through PyTorch. On AMD, this requires a ROCm-enabled "
+                "PyTorch build that reports availability through torch.cuda."
+            )
+
+
+def _check_parakeet_speaker_foundation(
+    report: BackendReadiness,
+    *,
+    model_name: str,
+    device: ComputeDevice,
+    models: tuple[str, ...],
+) -> None:
+    if model_name not in models:
+        report.errors.append(
+            f"Parakeet speaker-attribution ASR model '{model_name}' is not one of the wired models: "
+            f"{', '.join(models)}."
+        )
+    if parakeet_available():
+        report.notes.append("Parakeet (onnx-asr) importable.")
+    else:
+        report.errors.append(
+            'Parakeet backend selected but onnx-asr is not importable. '
+            'Install with: uv pip install "onnx-asr[cpu,hub]"'
+        )
+    if device in {"cuda", "auto"}:
+        _check_cuda_with_onnxruntime(report, requested_device=device)
+    if device == "amd":
+        _check_amd_with_onnxruntime(report, requested_device=device)
 
 
 def _check_xai(report: BackendReadiness, *, model_name: str) -> None:
@@ -496,7 +685,10 @@ def _check_amd_with_onnxruntime(
     if requested_device == "amd":
         report.errors.append(
             "AMD GPU device requested but ONNX Runtime has no AMD-capable execution "
-            f"provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}."
+            f"provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}. "
+            "On Windows, install Dictate with the 'amd' extra for DirectML. On Linux, "
+            "install a ROCm/MIGraphX-capable ONNX Runtime build before selecting "
+            "--device amd."
         )
     elif providers:
         report.notes.append(

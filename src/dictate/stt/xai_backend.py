@@ -29,6 +29,7 @@ class XAISpeechToText(SpeechToText):
         supports_prompt_bias=False,
         supports_language_hint=True,
         supports_word_timestamps=True,
+        supports_speaker_attribution=True,
     )
 
     def __init__(

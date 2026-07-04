@@ -39,8 +39,10 @@ from dictate.config import (
     parse_hotwords_text,
     remove_hotwords,
     remove_lexicon_replacements,
+    set_meeting_stt_selection,
     set_stt_backend,
     set_stt_selection,
+    set_update_channel,
 )
 from dictate.doctor import run_doctor
 from dictate.engine import DictationEngine
@@ -62,6 +64,7 @@ from dictate.stt import (
     ComputeType,
     GEMINI_MODELS,
     OPENAI_MODELS,
+    PARAKEET_MODELS,
     STT_BACKENDS,
     WHISPERX_MODELS,
     SpeechToText,
@@ -110,14 +113,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--stt-backend",
         choices=STT_BACKENDS,
         default="faster-whisper",
-        help="Speech-to-text backend (default: faster-whisper)",
+        help="Speech-to-text backend (fresh local default: parakeet when available)",
     )
     parser.add_argument(
         "--model",
         default=None,
         help=(
             "Model name. "
-            "local example: turbo. "
+            f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
+            "faster-whisper examples: turbo, small. "
             f"whisperx examples: {', '.join(WHISPERX_MODELS)}. "
             f"openai examples: {', '.join(OPENAI_MODELS)}. "
             f"xai examples: {', '.join(XAI_MODELS)}. "
@@ -400,7 +404,8 @@ def _resolve_startup_stt(
             file=sys.stderr,
         )
     # No saved/flagged selection: pick the hardware-aware default local backend
-    # (Parakeet English on CPU, Whisper turbo on GPU) rather than the argparse default.
+    # (Parakeet English across CPU/CUDA/AMD when available) rather than the
+    # argparse compatibility default.
     if not backend_flag and not model_flag:
         backend, model_name = resolve_default_local_backend(device)
         print(
@@ -842,6 +847,19 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     sm = sub.add_parser("set-model", help="Set the model for the current backend")
     sm.add_argument("model_id", help="Model name (e.g. grok-speech-to-text)")
 
+    # set-meeting-model [backend/]model
+    smm = sub.add_parser(
+        "set-meeting-model",
+        help="Set the dedicated Meeting backend/model without changing dictation",
+    )
+    smm.add_argument(
+        "model_id",
+        help=(
+            "Meeting model id, e.g. parakeet-pyannote/parakeet-tdt-0.6b-v2 "
+            "or parakeet-diarizen/parakeet-tdt-0.6b-v2"
+        ),
+    )
+
     # set-shortcut <combo>
     ss = sub.add_parser("set-shortcut", help="Set the push-to-talk shortcut (e.g. ctrl+d)")
     ss.add_argument("combo", help="Key combo, e.g. 'ctrl+d' or 'ctrl+space'")
@@ -864,6 +882,10 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     sbe = sub.add_parser("set-behavior", help="Toggle tray-only / listening overlay / sound cue")
     sbe.add_argument("name", choices=["tray", "overlay", "sound"])
     sbe.add_argument("mode", choices=["on", "off"])
+
+    # set-update-channel stable|unstable
+    suc = sub.add_parser("set-update-channel", help="Opt into stable or unstable app updates")
+    suc.add_argument("channel", choices=["stable", "unstable"])
 
     # show
     sub.add_parser("show", help="Print current config and key status")
@@ -900,6 +922,20 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         backend = cfg.stt_backend or "faster-whisper"
         set_stt_selection(backend, args.model_id)
         print(f"ok: model={args.model_id} (backend={backend})")
+        return 0
+
+    # ---- set-meeting-model -------------------------------------------------
+    if args.cmd == "set-meeting-model":
+        backend = "parakeet-pyannote"
+        model = args.model_id
+        if "/" in model:
+            backend, _, model = model.partition("/")
+        if backend not in STT_BACKENDS:
+            print(f"error: unknown meeting backend: {backend}", file=sys.stderr)
+            return 1
+        model = resolve_model_name(backend, model)
+        set_meeting_stt_selection(backend, model)
+        print(f"ok: meeting_model={model} (meeting_stt_backend={backend})")
         return 0
 
     # ---- set-shortcut ------------------------------------------------------
@@ -971,15 +1007,26 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"ok: {args.name}={args.mode}")
         return 0
 
+    # ---- set-update-channel ------------------------------------------------
+    if args.cmd == "set-update-channel":
+        channel = set_update_channel(args.channel)
+        print(f"ok: update_channel={channel}")
+        return 0
+
     # ---- show --------------------------------------------------------------
     if args.cmd == "show":
         cfg = load_config()
         backend = cfg.stt_backend or "faster-whisper"
-        mode = "private" if backend == "faster-whisper" else "online"
+        mode = "online" if backend in {"openai", "xai", "gemini"} else "private"
         model = cfg.stt_model or "(default)"
+        meeting_backend = cfg.meeting_stt_backend or "parakeet-pyannote"
+        if meeting_backend not in STT_BACKENDS:
+            meeting_backend = "parakeet-pyannote"
+        meeting_model = resolve_model_name(meeting_backend, cfg.meeting_stt_model)
         prefs = _config_load_ui_prefs()
         print(f"provider: {mode} (stt_backend={backend})")
         print(f"model: {model}")
+        print(f"meeting_model: {meeting_backend}/{meeting_model}")
         print(f"shortcut: {cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO}")
         hw = cfg.hotwords
         print(f"hotwords: {len(hw)}" + (f" ({', '.join(hw)})" if hw else ""))
@@ -987,6 +1034,8 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"tray-only: {'on' if prefs.get('trayOnly') else 'off'}")
         print(f"overlay: {'on' if prefs.get('overlay') else 'off'}")
         print(f"sound: {'on' if prefs.get('sound') else 'off'}")
+        update_channel = cfg.update_channel if cfg.update_channel in {"stable", "unstable"} else "stable"
+        print(f"update_channel: {update_channel}")
         try:
             from dictate import startup as startup_mod
 

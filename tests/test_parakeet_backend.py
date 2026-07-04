@@ -93,6 +93,19 @@ class _FakeOnnxModel:
         return self._text
 
 
+class _FakeTimestampedModel(_FakeOnnxModel):
+    def with_timestamps(self):
+        return self
+
+    def recognize(self, audio):  # noqa: ANN001
+        self.received = audio
+        return types.SimpleNamespace(
+            text=self._text,
+            timestamps=[0.25, 1.5],
+            tokens=["Hello", "world"],
+        )
+
+
 class ParakeetTranscribeTests(unittest.TestCase):
     def _stt_with_fake(self, text: str) -> ParakeetSpeechToText:
         stt = ParakeetSpeechToText()
@@ -121,6 +134,17 @@ class ParakeetTranscribeTests(unittest.TestCase):
         )
         self.assertEqual(out, "ok")
 
+    def test_transcribe_segments_uses_timestamp_adapter(self) -> None:
+        stt = ParakeetSpeechToText()
+        stt._model = _FakeTimestampedModel("Hello world")
+
+        segments = stt.transcribe_segments(np.ones(32000, dtype=np.float32), language="en")
+
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "Hello world")
+        self.assertEqual(segments[0].t_start, 0.25)
+        self.assertEqual(segments[0].t_end, 1.5)
+
     def test_release_clears_model(self) -> None:
         stt = self._stt_with_fake("ok")
         stt.release()
@@ -146,6 +170,25 @@ class ParakeetTranscribeTests(unittest.TestCase):
             quantization="int8",
             providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
         )
+
+    def test_float16_compute_uses_supported_int8_quantization(self) -> None:
+        stt = ParakeetSpeechToText(
+            model_name="parakeet-tdt-0.6b-v2",
+            device="cuda",
+            compute_type="float16",
+        )
+
+        self.assertEqual(stt.compute_type, "float16")
+        self.assertEqual(stt.quantization, "int8")
+
+    def test_float32_compute_uses_unquantized_files(self) -> None:
+        stt = ParakeetSpeechToText(
+            model_name="parakeet-tdt-0.6b-v2",
+            device="cuda",
+            compute_type="float32",
+        )
+
+        self.assertEqual(stt.quantization, None)
 
 
 class ParakeetReadinessTests(unittest.TestCase):

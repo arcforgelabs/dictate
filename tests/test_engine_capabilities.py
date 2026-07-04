@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 
 from dictate.engine import DictationEngine
-from dictate.stt import SpeechToText, SttCapabilities
+from dictate.stt import SpeechToText, SttCapabilities, TranscriptSegment
 
 
 class _DummyNoHotwordsSpeechToText(SpeechToText):
@@ -65,6 +65,80 @@ class _DummyPromptSpeechToText(SpeechToText):
         self.received_hotwords = hotwords
         self.received_prompt_context = prompt_context
         return "ok"
+
+
+class _DummySpeakerAttributionSpeechToText(SpeechToText):
+    backend_name = "dummy-speakers"
+    capabilities = SttCapabilities(supports_speaker_attribution=True)
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+        del audio, language, hotwords, prompt_context
+        self.calls.append("plain")
+        return "plain"
+
+    def transcribe_diarized(self, audio, language=None, hotwords=None) -> str:
+        del audio, language, hotwords
+        self.calls.append("diarized")
+        return "Speaker 1: meeting"
+
+
+class _DummySegmentSpeakerAttributionSpeechToText(SpeechToText):
+    backend_name = "dummy-segment-speakers"
+    capabilities = SttCapabilities(supports_speaker_attribution=True)
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+        del audio, language, hotwords, prompt_context
+        return "plain"
+
+    def transcribe_diarized_segments(self, audio, language=None, hotwords=None):
+        del audio, language, hotwords
+        return [
+            TranscriptSegment(
+                text="hello",
+                t_start=0.0,
+                t_end=0.5,
+                speaker_id="SPEAKER_A",
+                speaker_label="Speaker 1",
+            ),
+            TranscriptSegment(
+                text="reply",
+                t_start=0.6,
+                t_end=1.0,
+                speaker_id="SPEAKER_B",
+                speaker_label="Speaker 2",
+            ),
+        ]
+
+
+class _DummyPlainSegmentSpeechToText(SpeechToText):
+    backend_name = "dummy-plain-segments"
+    capabilities = SttCapabilities(supports_word_timestamps=True)
+
+    @property
+    def model(self):
+        return None
+
+    def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+        del audio, language, hotwords, prompt_context
+        return "plain fallback"
+
+    def transcribe_segments(self, audio, language=None, hotwords=None, prompt_context=None):
+        del audio, language, hotwords, prompt_context
+        return [
+            TranscriptSegment(text="hello", t_start=0.0, t_end=0.4),
+            TranscriptSegment(text="world", t_start=0.4, t_end=0.8),
+        ]
 
 
 class _FailingApiSpeechToText(SpeechToText):
@@ -135,6 +209,56 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(stt.received_hotwords, "AcmeWidget ProjectNova")
         self.assertIsNone(stt.received_prompt_context)
+
+    def test_required_speaker_attribution_fails_closed_without_capability(self) -> None:
+        stt = _DummyNoHotwordsSpeechToText()
+        engine = DictationEngine(stt=stt)
+        audio = np.ones(8000, dtype=np.float32)
+
+        result = engine.transcribe(audio, language="en", diarize=True, require_speaker_attribution=True)
+
+        self.assertEqual(result.status, "error")
+        self.assertIn("speaker attribution", result.error or "")
+
+    def test_required_speaker_attribution_uses_diarized_backend(self) -> None:
+        stt = _DummySpeakerAttributionSpeechToText()
+        engine = DictationEngine(stt=stt)
+        audio = np.ones(8000, dtype=np.float32)
+
+        result = engine.transcribe(audio, language="en", diarize=True, require_speaker_attribution=True)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.text, "Speaker 1: meeting")
+        self.assertEqual(stt.calls, ["diarized"])
+
+    def test_required_speaker_attribution_preserves_structured_segments(self) -> None:
+        stt = _DummySegmentSpeakerAttributionSpeechToText()
+        engine = DictationEngine(stt=stt)
+        audio = np.ones(16000, dtype=np.float32)
+
+        result = engine.transcribe(audio, language="en", diarize=True, require_speaker_attribution=True)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.text, "Speaker 1: hello\nSpeaker 2: reply")
+        self.assertIsNotNone(result.segments)
+        assert result.segments is not None
+        self.assertEqual(result.segments[0].speaker_label, "Speaker 1")
+        self.assertEqual(result.segments[0].t_start, 0.0)
+        self.assertEqual(result.segments[1].speaker_id, "SPEAKER_B")
+
+    def test_plain_transcription_preserves_structured_segments(self) -> None:
+        stt = _DummyPlainSegmentSpeechToText()
+        engine = DictationEngine(stt=stt)
+        audio = np.ones(16000, dtype=np.float32)
+
+        result = engine.transcribe(audio, language="en")
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.text, "hello\nworld")
+        self.assertIsNotNone(result.segments)
+        assert result.segments is not None
+        self.assertEqual(result.segments[0].t_start, 0.0)
+        self.assertEqual(result.segments[1].t_end, 0.8)
 
     def test_prompt_mode_passes_context_on_prompt_capable_backend(self) -> None:
         stt = _DummyPromptSpeechToText()
