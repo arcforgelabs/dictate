@@ -42,6 +42,10 @@ class TrayHelperTests(unittest.TestCase):
         tray = _import_tray_with_fake_gi()
 
         with (
+            patch.dict(
+                "os.environ",
+                {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": "", "DICTATE_XAI_API_KEY_COMMAND": ""},
+            ),
             patch(
                 "dictate.tray.api_key_status",
                 return_value=tray.ApiKeyStatus(
@@ -86,8 +90,8 @@ class TrayHelperTests(unittest.TestCase):
         item = types.SimpleNamespace(get_active=lambda: True)
 
         with (
-            patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve),
-            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model=None)),
+            patch.object(tray, "resolve_default_local_model", side_effect=fake_resolve),
+            patch.object(tray, "load_config", return_value=types.SimpleNamespace(stt_model=None)),
         ):
             tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
 
@@ -124,8 +128,8 @@ class TrayHelperTests(unittest.TestCase):
         item = types.SimpleNamespace(get_active=lambda: True)
 
         with (
-            patch("dictate.tray.resolve_default_local_model", side_effect=fake_resolve),
-            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model=None)),
+            patch.object(tray, "resolve_default_local_model", side_effect=fake_resolve),
+            patch.object(tray, "load_config", return_value=types.SimpleNamespace(stt_model=None)),
         ):
             tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
 
@@ -154,8 +158,12 @@ class TrayHelperTests(unittest.TestCase):
         item = types.SimpleNamespace(get_active=lambda: True)
 
         with (
-            patch("dictate.tray.resolve_default_local_model", side_effect=AssertionError("should not resolve")),
-            patch("dictate.tray.load_config", return_value=types.SimpleNamespace(stt_model="medium")),
+            patch.object(
+                tray,
+                "resolve_default_local_model",
+                side_effect=AssertionError("should not resolve"),
+            ),
+            patch.object(tray, "load_config", return_value=types.SimpleNamespace(stt_model="medium")),
         ):
             tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
 

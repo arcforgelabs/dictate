@@ -579,8 +579,12 @@ class HttpIntegrationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 401)
 
     def test_authorized_state(self) -> None:
-        with self._get("/api/state") as resp:
-            body = json.loads(resp.read())
+        with patch(
+            "dictate.ui_server.resolve_default_local_backend",
+            return_value=("parakeet", "parakeet-tdt-0.6b-v2"),
+        ):
+            with self._get("/api/state") as resp:
+                body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertEqual(body["model"]["backend"], "parakeet")
 
