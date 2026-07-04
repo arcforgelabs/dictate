@@ -11,6 +11,7 @@ DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 ICON_DIR="$INSTALL_DIR/share/icons"
 ICON_PATH="$ICON_DIR/dictate-simple.png"
+APP_ICON_SOURCE="$SCRIPT_DIR/ui-shell/src-tauri/icons/icon.png"
 DESKTOP_PATH="$DESKTOP_DIR/dictate.desktop"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dictate"
 CONFIG_PATH="$CONFIG_DIR/config.yaml"
@@ -214,7 +215,11 @@ ln -sf "$INSTALL_DIR/venv/bin/dictate-ui-server" "$BIN_DIR/dictate-ui-server"
 echo "Installing icon ..."
 mkdir -p "$ICON_DIR"
 rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"
-install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
+if [ -f "$APP_ICON_SOURCE" ]; then
+  install -m 644 "$APP_ICON_SOURCE" "$ICON_PATH"
+else
+  install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"
+fi
 
 echo "Installing desktop entry ..."
 mkdir -p "$DESKTOP_DIR"
@@ -283,6 +288,16 @@ install_desktop_ui() {
   npm --prefix "$shell_src" ci >/dev/null 2>&1 \
     || npm --prefix "$shell_src" install >/dev/null 2>&1 \
     || { echo "UI shell tooling install failed; skipping the optional shell."; print_ui_hint; return 0; }
+  # Tauri validates configured bundle resources even for --no-bundle builds.
+  # Stage a per-user engine wrapper before the build so the resource glob exists,
+  # then install the same wrapper next to the shell binary below.
+  local bundled_engine_dir="$shell_src/src-tauri/engine"
+  mkdir -p "$bundled_engine_dir"
+  cat > "$bundled_engine_dir/dictate-engine" <<WRAP
+#!/bin/sh
+exec "$INSTALL_DIR/venv/bin/dictate" "\$@"
+WRAP
+  chmod 755 "$bundled_engine_dir/dictate-engine"
   # Build through the Tauri CLI, NOT a raw `cargo build`. The CLI enables the
   # `custom-protocol` feature that embeds the frontend and serves it over the
   # app protocol. A plain cargo build omits that feature, so the shell falls
@@ -306,11 +321,7 @@ install_desktop_ui() {
   # never needs sudo/pkexec.
   local engine_dir="$BIN_DIR/engine"
   mkdir -p "$engine_dir"
-  cat > "$engine_dir/dictate-engine" <<WRAP
-#!/bin/sh
-exec "$INSTALL_DIR/venv/bin/dictate" "\$@"
-WRAP
-  chmod 755 "$engine_dir/dictate-engine"
+  install -m 755 "$bundled_engine_dir/dictate-engine" "$engine_dir/dictate-engine"
   echo "Installed per-user engine launcher: $engine_dir/dictate-engine"
 }
 
