@@ -10,7 +10,7 @@ import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
-import { BreathCradle } from "./visualizers.jsx";
+import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.7.4";
@@ -192,11 +192,13 @@ function CaptureHome() {
               <>
                 <div className="note-status live">Recording</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
-                <div className="note-preview" aria-live="polite">
-                  {s.transcript?.text
-                    ? <><span>{s.transcript.text}</span><span className="note-caret" /></>
-                    : <span className="note-preview-wait">Listening for speech…</span>}
-                </div>
+                {s.transcript?.text ? (
+                  <div className="note-preview" aria-live="polite">
+                    <span>{s.transcript.text}</span><span className="note-caret" />
+                  </div>
+                ) : (
+                  <WaveTimeline active reduced={s.reduced} />
+                )}
               </>
             ) : s.noteRecording && s.notePaused ? (
               <>
@@ -351,7 +353,7 @@ export default function App() {
   const [device] = useState("Default device");
   const [device2, setDevice2State] = useState("auto");
   const [compute] = useState("int8");
-  const [hotwords, setHotwords] = useState(["AcmeWidget", "OpenClaw", "Stalwart"]);
+  const [hotwords, setHotwords] = useState([]);
   const [history, setHistory] = useState(() => {
     const now = Date.now();
     // Newest-first: matches the real backend ordering and pushHistory behaviour.

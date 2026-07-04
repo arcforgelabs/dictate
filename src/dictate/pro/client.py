@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from dictate.api_keys import (
 )
 from dictate.platform_paths import user_data_dir
 
-DEFAULT_API_URL = "http://127.0.0.1:18765"
+DEFAULT_API_URL = "https://console.arcforge.au"
 SESSION_PATH = user_data_dir() / "pro-session.json"
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class ProClient:
     ) -> None:
         self.base_url = (base_url or os.environ.get("DICTATE_PRO_API_URL") or DEFAULT_API_URL).rstrip("/")
         self.session_path = session_path
+        self._pending_email: str = ""
 
     def load_session(self) -> ProSession | None:
         if not self.session_path.is_file():
@@ -114,6 +116,11 @@ class ProClient:
         return self.load_session() is not None
 
     def start_sign_in(self, email: str) -> dict[str, Any]:
+        email = email.strip().lower()
+        self._pending_email = email
+        if self._uses_arcforge_gateway():
+            response = self._request("POST", "/api/account/auth/login-code", {"email": email})
+            return {**response, "challenge_id": email, "email": email}
         return self._request("POST", "/v1/auth/start", {"email": email})
 
     def complete_sign_in(self, *, challenge_id: str, code: str, device_label: str = "Desktop") -> ProSession:
@@ -125,15 +132,20 @@ class ProClient:
         }
         if session_data:
             payload["device_id"] = session_data.device_id
-        response = self._request("POST", "/v1/auth/complete", payload)
-        session = ProSession(
-            account_id=str(response["account_id"]),
-            device_id=str(response["device_id"]),
-            access_token=str(response["access_token"]),
-            refresh_token=str(response["refresh_token"]),
-            access_expires_at=str(response["access_expires_at"]),
-            refresh_expires_at=str(response["refresh_expires_at"]),
-        )
+        if self._uses_arcforge_gateway():
+            email = (self._pending_email or challenge_id).strip().lower()
+            response = self._request("POST", "/api/account/auth/verify-code", {"email": email, "code": code})
+            session = self._session_from_arcforge_auth_response(response)
+        else:
+            response = self._request("POST", "/v1/auth/complete", payload)
+            session = ProSession(
+                account_id=str(response["account_id"]),
+                device_id=str(response["device_id"]),
+                access_token=str(response["access_token"]),
+                refresh_token=str(response["refresh_token"]),
+                access_expires_at=str(response["access_expires_at"]),
+                refresh_expires_at=str(response["refresh_expires_at"]),
+            )
         self.save_session(session)
         return session
 
@@ -144,20 +156,26 @@ class ProClient:
         expires_at = datetime.fromisoformat(session.access_expires_at)
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) < expires_at - __import__("datetime").timedelta(minutes=1):
+        if datetime.now(timezone.utc) < expires_at - timedelta(minutes=1):
             return session
         response = self._request(
             "POST",
-            "/v1/auth/refresh",
-            {"refresh_token": session.refresh_token},
+            "/api/account/auth/token" if self._uses_arcforge_gateway() else "/v1/auth/refresh",
+            {"grant_type": "refresh_token", "refresh_token": session.refresh_token}
+            if self._uses_arcforge_gateway()
+            else {"refresh_token": session.refresh_token},
         )
-        refreshed = ProSession(
-            account_id=str(response["account_id"]),
-            device_id=str(response["device_id"]),
-            access_token=str(response["access_token"]),
-            refresh_token=str(response["refresh_token"]),
-            access_expires_at=str(response["access_expires_at"]),
-            refresh_expires_at=str(response["refresh_expires_at"]),
+        refreshed = (
+            self._session_from_arcforge_auth_response(response, fallback=session)
+            if self._uses_arcforge_gateway()
+            else ProSession(
+                account_id=str(response["account_id"]),
+                device_id=str(response["device_id"]),
+                access_token=str(response["access_token"]),
+                refresh_token=str(response["refresh_token"]),
+                access_expires_at=str(response["access_expires_at"]),
+                refresh_expires_at=str(response["refresh_expires_at"]),
+            )
         )
         self.save_session(refreshed)
         return refreshed
@@ -165,24 +183,49 @@ class ProClient:
     def get_state(self) -> dict[str, Any]:
         session = self.refresh_if_needed()
         if session is None:
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None}
+            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
         try:
-            account = self._request("GET", "/v1/me", auth=session.access_token)
-            entitlements = self._request("GET", "/v1/entitlements", auth=session.access_token)
-            usage = self._request("GET", "/v1/usage/current", auth=session.access_token)
+            if self._uses_arcforge_gateway():
+                account = {"account_id": session.account_id, "device_id": session.device_id}
+                commerce = self._request("GET", "/api/account/commerce", auth=session.access_token)
+                entitlements = self._request("GET", "/api/dictate/entitlement", auth=session.access_token)
+                usage = None
+                if entitlements.get("active"):
+                    usage = self._request("GET", "/api/dictate/usage", auth=session.access_token)
+            else:
+                account = self._request("GET", "/v1/me", auth=session.access_token)
+                commerce = None
+                entitlements = self._request("GET", "/v1/entitlements", auth=session.access_token)
+                usage = self._request("GET", "/v1/usage/current", auth=session.access_token)
         except ProClientError:
             self.clear_session()
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None}
+            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
         return {
             "signedIn": True,
             "account": account,
+            "commerce": commerce,
             "entitlements": entitlements,
             "usage": usage,
             "apiUrl": self.base_url,
         }
 
-    def create_meeting(self, *, language: str | None = None) -> dict[str, Any]:
+    def create_meeting(
+        self,
+        *,
+        language: str | None = None,
+        audio_duration_seconds: float | None = None,
+    ) -> dict[str, Any]:
         session = self._require_session()
+        if self._uses_arcforge_gateway():
+            if audio_duration_seconds is None or audio_duration_seconds <= 0:
+                raise ProClientError(400, "audio_duration_seconds is required for hosted Dictate jobs")
+            payload: dict[str, Any] = {
+                "device_id": session.device_id,
+                "audio_duration_seconds": audio_duration_seconds,
+            }
+            if language:
+                payload["language"] = language
+            return self._request("POST", "/api/dictate/jobs", payload, auth=session.access_token)
         return self._request(
             "POST",
             "/v1/meetings",
@@ -193,21 +236,99 @@ class ProClient:
     def upload_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
         session = self._require_session()
         data = audio_path.read_bytes()
+        if self._uses_arcforge_gateway():
+            try:
+                return self._upload_meeting_audio_signed(job_id, data, auth=session.access_token)
+            except ProClientError as exc:
+                if exc.status not in {404, 405, 409, 501}:
+                    raise
+                logger.info("Dictate signed upload unavailable; falling back to gateway body upload")
         return self._request(
             "POST",
-            f"/v1/meetings/{job_id}/audio",
-            body=data,
+            self._dictate_job_path(job_id, suffix="/audio"),
+            data,
             content_type="audio/wav",
             auth=session.access_token,
         )
 
+    def _upload_meeting_audio_signed(self, job_id: str, data: bytes, *, auth: str) -> dict[str, Any]:
+        signed = self._request(
+            "POST",
+            self._dictate_job_path(job_id, suffix="/audio-upload-url"),
+            {"byte_size": len(data)},
+            auth=auth,
+        )
+        upload = signed.get("upload")
+        upload_id = str(upload.get("upload_id") if isinstance(upload, dict) else "").strip()
+        upload_url = str(signed.get("url") or "").strip()
+        if not upload_id or not upload_url:
+            raise ProClientError(502, "Arc Forge signed upload response was incomplete")
+        self._put_signed_upload(upload_url, data, content_type="audio/wav")
+        return self._request(
+            "POST",
+            self._dictate_job_path(job_id, suffix="/audio-upload-complete"),
+            {"upload_id": upload_id, "byte_size": len(data)},
+            auth=auth,
+        )
+
+    def _put_signed_upload(self, url: str, data: bytes, *, content_type: str) -> None:
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": content_type},
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
+                response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise ProClientError(exc.code, detail or "Signed upload failed") from exc
+        except urllib.error.URLError as exc:
+            raise ProClientError(503, f"Signed upload unreachable: {exc.reason}") from exc
+
     def get_meeting(self, job_id: str) -> dict[str, Any]:
         session = self._require_session()
-        return self._request("GET", f"/v1/meetings/{job_id}", auth=session.access_token)
+        return self._request("GET", self._dictate_job_path(job_id), auth=session.access_token)
 
     def get_transcript(self, job_id: str) -> dict[str, Any]:
         session = self._require_session()
-        return self._request("GET", f"/v1/meetings/{job_id}/transcript", auth=session.access_token)
+        return self._request("GET", self._dictate_job_path(job_id, suffix="/transcript"), auth=session.access_token)
+
+    def _dictate_job_path(self, job_id: str, *, suffix: str = "") -> str:
+        if self._uses_arcforge_gateway():
+            return f"/api/dictate/jobs/{job_id}{suffix}"
+        return f"/v1/meetings/{job_id}{suffix}"
+
+    def _uses_arcforge_gateway(self) -> bool:
+        mode = os.environ.get("DICTATE_PRO_API_MODE", "").strip().lower()
+        if mode in {"arcforge", "gateway", "hosted"}:
+            return True
+        if mode in {"legacy", "local"}:
+            return False
+        return not _is_local_api_url(self.base_url)
+
+    def _session_from_arcforge_auth_response(
+        self,
+        response: dict[str, Any],
+        *,
+        fallback: ProSession | None = None,
+    ) -> ProSession:
+        access_token = str(response["access_token"])
+        refresh_token = str(response["refresh_token"])
+        now = datetime.now(timezone.utc)
+        expires_in = int(response.get("expires_in") or 3600)
+        account_id = _jwt_subject(access_token) or (fallback.account_id if fallback else "")
+        if not account_id:
+            raise ProClientError(502, "Arc Forge auth response did not include an account subject")
+        return ProSession(
+            account_id=account_id,
+            device_id=fallback.device_id if fallback else "dictate-desktop",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            access_expires_at=(now + timedelta(seconds=expires_in)).isoformat(),
+            refresh_expires_at=(now + timedelta(days=30)).isoformat(),
+        )
 
     def _save_refresh_token(self, token: str) -> bool:
         try:
@@ -290,3 +411,26 @@ class ProClientError(Exception):
 
 def _plaintext_tokens_allowed() -> bool:
     return os.environ.get("DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS", "").strip() == "1"
+
+
+def _is_local_api_url(base_url: str) -> bool:
+    normalized = base_url.strip().lower()
+    return (
+        normalized.startswith("http://127.0.0.1")
+        or normalized.startswith("http://localhost")
+        or normalized.startswith("http://[::1]")
+    )
+
+
+def _jwt_subject(token: str) -> str:
+    parts = token.split(".")
+    if len(parts) < 2:
+        return ""
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
+        parsed = json.loads(decoded.decode("utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError):
+        return ""
+    return str(parsed.get("sub") or "").strip()

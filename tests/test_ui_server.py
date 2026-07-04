@@ -118,6 +118,30 @@ class _FakeNoteDaemon:
         return True
 
 
+class _FakeProClient:
+    def __init__(self) -> None:
+        self.create_calls: list[dict[str, object]] = []
+
+    def get_state(self) -> dict[str, object]:
+        return {
+            "signedIn": True,
+            "entitlements": {"active": True},
+            "usage": None,
+            "account": None,
+            "commerce": {"subscriptions": []},
+        }
+
+    def create_meeting(
+        self,
+        *,
+        language: str | None = None,
+        audio_duration_seconds: float | None = None,
+    ) -> dict[str, object]:
+        call = {"language": language, "audio_duration_seconds": audio_duration_seconds}
+        self.create_calls.append(call)
+        return {"job_id": "job_test", **call}
+
+
 class UiPrefsStoreTests(unittest.TestCase):
     def test_defaults_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -324,6 +348,17 @@ class UiBackendStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(Exception):
                 _backend(d).patch_config({"model": "nope/x"})
+
+    def test_create_pro_meeting_passes_audio_duration_to_client(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            backend = _backend(d, pro_client=pro_client)
+            result = backend.create_pro_meeting(language="en", audio_duration_seconds=12.5)
+        self.assertEqual(result["job_id"], "job_test")
+        self.assertEqual(
+            pro_client.create_calls,
+            [{"language": "en", "audio_duration_seconds": 12.5}],
+        )
 
 
 class UiBackendShortcutPrefsTests(unittest.TestCase):
@@ -567,6 +602,21 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["recording"])
+
+    def test_create_pro_meeting_over_http_passes_audio_duration(self) -> None:
+        pro_client = _FakeProClient()
+        self.handle.backend.pro_client = pro_client
+        with self._post(
+            "/api/pro/meetings",
+            {"language": "en", "audioDurationSeconds": 12.5},
+        ) as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body["job_id"], "job_test")
+        self.assertEqual(
+            pro_client.create_calls,
+            [{"language": "en", "audio_duration_seconds": 12.5}],
+        )
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

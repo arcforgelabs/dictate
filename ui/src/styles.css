@@ -580,6 +580,14 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-preview{max-width:330px;font-size:13.5px;line-height:1.5;color:var(--muted);text-align:center;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .note-preview-wait{color:var(--subtle);}
+/* WaveTimeline: scrolling level meter (right → left). Left edge fades so bars
+   appear to age out of the timeline as they flow off-screen. */
+.wave-timeline{position:relative;width:100%;max-width:330px;height:40px;margin:2px auto 0;}
+.wave-timeline canvas{display:block;width:100%;height:100%;
+  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 18%,#000 100%);
+  mask-image:linear-gradient(to right,transparent 0,#000 18%,#000 100%);}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0;}
 .note-caret{display:inline-block;width:2px;height:14px;background:var(--live);vertical-align:-2px;
   margin-left:2px;animation:blink 1s step-end infinite;}
 /* Degraded recording strip: amber band pinned to the bottom of the capture screen */

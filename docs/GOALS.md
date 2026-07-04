@@ -27,6 +27,45 @@ Release gates:
 5. Review the Partner Center draft.
 6. Submit for Microsoft certification only after explicit approval.
 
+## To Be Implemented / Proven Before Stable
+
+These are product requirements that must be either implemented or explicitly
+closed as already done before the next stable public push.
+
+1. **Production cloud API account path:** The hosted API/control-plane system must
+   be live in production, not only sketched locally. Acceptance requires an
+   owner-linked production account with real entitlement, usage, and hosted
+   transcription API access; that account must be the account used by the
+   maintainer's day-to-day Dictate installs. This must be proven on Windows as
+   well as the current development platform.
+2. **Audio visualizer proof:** The visualizer must be confirmed responsive to
+   real microphone audio, not only synthetic animation. Acceptance requires a
+   runtime smoke showing live input changes the visualizer, plus a graceful
+   denied/no-device fallback.
+3. **Hardware-tiered install defaults:** First-run setup should classify the
+   machine into `minimum`, `recommended`, or `advanced` from simple local facts
+   such as OS, CPU cores, RAM, GPU/CUDA availability, and disk headroom. Default
+   to the recommended config unless the machine is clearly minimum-spec or
+   clearly advanced-spec. Minimum-spec must remain a good experience with
+   consistent transcription quality; it may trade speed and disable heavier
+   features. Advanced-spec is reserved for future local WhisperX/diarization
+   work until that path passes packaging, legal, and benchmark gates.
+4. **Benchmarked quality and speed tiers:** Define simple benchmark targets for
+   quality and speed before changing model defaults. Quality should vary little
+   across tiers; speed and optional features may vary. Benchmark details live in
+   [../benchmarks/README.md](../benchmarks/README.md).
+5. **No default hotwords:** Public builds must not ship user-visible default
+   hotwords. The default config is empty, and UI placeholders must not seed
+   sample words into real or perceived state. Future hotword UX should let a user
+   click an incorrect dictated word, correct it, update the copyable transcript,
+   and add the correction to hotwords automatically. Manual training is an
+   acceptable early-access feature before automated correction.
+6. **Early-access feature releases:** Some working features should be gated from
+   stable releases because customers pay for early access. Decide the release
+   model before shipping paid early access: either keep the repository open
+   source with gated release channels/artifacts, or move to an open-core model
+   where selected features are gated while the core remains open.
+
 ## Production P0: Dictate Pro Purchase And Entitlements
 
 **Status:** Architecture documented; public marketing is live; purchase path is

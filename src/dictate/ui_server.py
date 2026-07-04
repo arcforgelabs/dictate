@@ -131,6 +131,18 @@ class ApiError(Exception):
         self.message = message
 
 
+def _optional_positive_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "audioDurationSeconds must be a positive number") from exc
+    if parsed <= 0:
+        raise ApiError(400, "audioDurationSeconds must be a positive number")
+    return parsed
+
+
 # --------------------------------------------------------------------------- #
 # Provider health — thread-safe runtime outcome tracker
 # --------------------------------------------------------------------------- #
@@ -332,12 +344,13 @@ class UiBackend:
     def _dictate_pro_state(self) -> dict[str, Any]:
         client = self.pro_client
         if client is None:
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None}
+            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
         return self._safe(client.get_state, {
             "signedIn": False,
             "entitlements": None,
             "usage": None,
             "account": None,
+            "commerce": None,
         })
 
     def start_pro_sign_in(self, email: str) -> dict[str, Any]:
@@ -363,9 +376,17 @@ class UiBackend:
         client.clear_session()
         return {"signedIn": False}
 
-    def create_pro_meeting(self, *, language: str | None = None) -> dict[str, Any]:
+    def create_pro_meeting(
+        self,
+        *,
+        language: str | None = None,
+        audio_duration_seconds: float | None = None,
+    ) -> dict[str, Any]:
         client = self._require_pro_client()
-        return client.create_meeting(language=language)
+        return client.create_meeting(
+            language=language,
+            audio_duration_seconds=audio_duration_seconds,
+        )
 
     def upload_pro_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
         client = self._require_pro_client()
@@ -1105,7 +1126,16 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pro/meetings" and method == "POST":
             body = self._read_json() or {}
             language = str(body.get("language") or "").strip() or None
-            return _Response(200, backend.create_pro_meeting(language=language))
+            audio_duration_seconds = _optional_positive_float(
+                body.get("audioDurationSeconds", body.get("audio_duration_seconds"))
+            )
+            return _Response(
+                200,
+                backend.create_pro_meeting(
+                    language=language,
+                    audio_duration_seconds=audio_duration_seconds,
+                ),
+            )
         if path.startswith("/api/pro/meetings/") and method == "GET":
             job_id = path.removeprefix("/api/pro/meetings/").split("/", 1)[0]
             if path.endswith("/transcript"):

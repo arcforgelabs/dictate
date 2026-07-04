@@ -614,7 +614,30 @@ Provider behavior:
 
 ## Backend API sketch
 
-Suggested app-facing endpoints:
+Current hosted Arc Forge gateway endpoints used by the desktop client:
+
+- `POST /api/account/auth/login-code`
+- `POST /api/account/auth/verify-code`
+- `POST /api/account/auth/token`
+- `GET /api/account/commerce`
+- `GET /api/dictate/entitlement`
+- `GET /api/dictate/usage`
+- `POST /api/dictate/jobs`
+- `POST /api/dictate/jobs/{job_id}/audio-upload-url`
+- `PUT {signed_object_upload_url}`
+- `POST /api/dictate/jobs/{job_id}/audio-upload-complete`
+- `POST /api/dictate/jobs/{job_id}/audio` as a compatibility fallback when the
+  gateway has not enabled signed object uploads
+- `GET /api/dictate/jobs/{job_id}`
+- `GET /api/dictate/jobs/{job_id}/transcript`
+
+The desktop default base URL is `https://console.arcforge.au`. The shared Arc
+Forge Gateway owns account, commerce, entitlement, and server-side provider
+credential custody. The Dictate desktop app must not call LiteLLM directly or
+hold Arc Forge provider keys.
+
+Legacy local Pro control-plane endpoints remain for localhost development and
+local workflows:
 
 - `POST /v1/auth/start`
 - `POST /v1/auth/complete`
@@ -693,8 +716,8 @@ product:
 | Layer | Responsibility |
 |---|---|
 | Stripe | Dictate Pro product/price; Checkout Session; subscription webhooks |
-| Gateway / billing API | `POST /v1/billing/checkout`, portal link, webhook → entitlement |
-| Account service | Persist subscription; answer `GET /v1/entitlements` for active Pro |
+| Gateway / commerce API | Arc Forge Checkout/portal links, Stripe webhook → shared commerce subscription and entitlement |
+| Account service | Persist portal account/session state; answer `GET /api/dictate/entitlement` for active Pro |
 | Website | Real checkout URL on **Upgrade to Pro**; post-purchase onboarding links |
 | Desktop app (dictate) | Sign-in, read entitlement from service, gate hosted meeting mode |
 | Portal | Show plan, renewal, usage; link to Stripe Customer Portal where needed |
