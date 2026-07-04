@@ -70,6 +70,7 @@ class MainSttSelectionTests(unittest.TestCase):
         args = parser.parse_args([])
 
         with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "parakeet_available", return_value=False), \
              patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
              patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):
@@ -103,6 +104,7 @@ class MainSttSelectionTests(unittest.TestCase):
 
         # No CUDA + a weak CPU box (little RAM) must resolve to the smaller model.
         with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "parakeet_available", return_value=False), \
              patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
              patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):
@@ -135,6 +137,7 @@ class MainSttSelectionTests(unittest.TestCase):
         args = parser.parse_args([])
 
         with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
+             patch.object(stt_factory, "parakeet_available", return_value=False), \
              patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
              patch("os.cpu_count", return_value=4):
             with contextlib.redirect_stderr(io.StringIO()):

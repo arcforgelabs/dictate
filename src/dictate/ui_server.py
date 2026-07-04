@@ -47,6 +47,7 @@ from dictate.platform_paths import user_config_dir, user_data_dir
 from dictate.stt.factory import (
     BACKEND_REGISTRY,
     DEFAULT_MODELS,
+    resolve_default_local_backend,
     resolve_default_local_model,
     resolve_model_name,
 )
@@ -300,7 +301,8 @@ class UiBackend:
     def get_state(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
         prefs = self.prefs_store.load()
-        backend = cfg.stt_backend or "faster-whisper"
+        # No saved backend → the hardware-aware default (Parakeet English on CPU).
+        backend = cfg.stt_backend or resolve_default_local_backend(cfg.stt_device or "auto")[0]
         if backend not in BACKEND_REGISTRY:
             backend = "faster-whisper"
         model = self._effective_model(cfg, backend)

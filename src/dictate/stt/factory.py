@@ -248,6 +248,27 @@ def resolve_default_local_model(device: ComputeDevice = "auto") -> str:
     return "small"
 
 
+def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBackend, str]:
+    """The default (backend, model) for a fresh local config on this machine.
+
+    English-first: on a GPU we default to multilingual Whisper turbo (fast there);
+    on CPU we default to Parakeet, which is both faster and more accurate than
+    Whisper for English. The UI's English/Multilingual toggle switches between
+    Parakeet and Whisper; a saved config selection always wins over this default.
+    """
+    override = os.environ.get("DICTATE_FORCE_LOCAL_BACKEND")
+    if override in {"parakeet", "faster-whisper"}:
+        backend: SttBackend = override  # type: ignore[assignment]
+        return backend, DEFAULT_MODELS[backend]
+    on_cuda = device == "cuda" or (device == "auto" and _cuda_available_for_faster_whisper())
+    if on_cuda:
+        return "faster-whisper", "turbo"
+    # CPU: Parakeet (English) when its runtime is available, else Whisper fallback.
+    if parakeet_available():
+        return "parakeet", DEFAULT_MODELS["parakeet"]
+    return "faster-whisper", resolve_default_local_model(device)
+
+
 def create_speech_to_text(
     *,
     backend: SttBackend = "faster-whisper",

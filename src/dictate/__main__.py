@@ -66,6 +66,7 @@ from dictate.stt import (
     SttBackend,
     XAI_MODELS,
     create_speech_to_text,
+    resolve_default_local_backend,
     resolve_default_local_model,
     resolve_model_name,
 )
@@ -396,16 +397,20 @@ def _resolve_startup_stt(
             f"Ignoring invalid saved STT backend '{config.stt_backend}' in config.",
             file=sys.stderr,
         )
+    # No saved/flagged selection: pick the hardware-aware default local backend
+    # (Parakeet English on CPU, Whisper turbo on GPU) rather than the argparse default.
+    if not backend_flag and not model_flag:
+        backend, model_name = resolve_default_local_backend(device)
+        print(
+            f"Using automatic STT selection: backend='{backend}' model='{model_name}'",
+            file=sys.stderr,
+        )
+        return (backend, model_name)
     backend: SttBackend = args.stt_backend
     if model_flag:
         model_name = resolve_model_name(backend, args.model)
     else:
         model_name = _resolve_saved_model_name(backend, args.model, device)
-    if not backend_flag and not model_flag and args.model is None:
-        print(
-            f"Using automatic STT selection: backend='{backend}' model='{model_name}'",
-            file=sys.stderr,
-        )
     return (backend, model_name)
 
 

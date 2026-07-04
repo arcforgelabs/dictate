@@ -178,6 +178,9 @@ class UiBackendStateTests(unittest.TestCase):
             with patch(
                 "dictate.ui_server.resolve_default_local_model",
                 return_value="turbo",
+            ), patch(
+                "dictate.ui_server.resolve_default_local_backend",
+                return_value=("faster-whisper", "turbo"),
             ):
                 state = _backend(d).get_state()
             self.assertIn("version", state)
@@ -214,13 +217,15 @@ class UiBackendStateTests(unittest.TestCase):
         # Fresh config (no saved stt_model): the displayed local default must match
         # what the daemon would actually run, per the hardware-aware resolver.
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"), \
+                 patch("dictate.ui_server.resolve_default_local_backend", return_value=("faster-whisper", "turbo")):
                 capable = _backend(d).get_state()
             self.assertEqual(capable["model"]["model"], "turbo")
             self.assertEqual(capable["model"]["id"], "faster-whisper/turbo")
 
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
+            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"), \
+                 patch("dictate.ui_server.resolve_default_local_backend", return_value=("faster-whisper", "small")):
                 weak = _backend(d).get_state()
             self.assertEqual(weak["model"]["model"], "small")
             self.assertEqual(weak["model"]["id"], "faster-whisper/small")
@@ -539,7 +544,7 @@ class HttpIntegrationTests(unittest.TestCase):
         with self._get("/api/state") as resp:
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
-        self.assertEqual(body["model"]["backend"], "faster-whisper")
+        self.assertEqual(body["model"]["backend"], "parakeet")
 
     def test_authorized_update_status(self) -> None:
         with self._get("/api/update-status") as resp:

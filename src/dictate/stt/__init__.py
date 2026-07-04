@@ -22,6 +22,7 @@ from dictate.stt.factory import (
     BackendReadiness,
     check_backend_readiness,
     create_speech_to_text,
+    resolve_default_local_backend,
     resolve_default_local_model,
     resolve_model_name,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "XAISpeechToText",
     "check_backend_readiness",
     "create_speech_to_text",
+    "resolve_default_local_backend",
     "resolve_default_local_model",
     "resolve_model_name",
 ]
