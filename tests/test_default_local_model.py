@@ -91,6 +91,22 @@ class ResolveDefaultLocalBackendTests(unittest.TestCase):
         with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
             self.assertEqual(stt_factory.resolve_default_local_backend("cuda"), ("faster-whisper", "turbo"))
 
+    def test_amd_prefers_parakeet_when_available(self) -> None:
+        with patch.object(stt_factory, "parakeet_available", return_value=True):
+            self.assertEqual(
+                stt_factory.resolve_default_local_backend("amd"),
+                ("parakeet", "parakeet-tdt-0.6b-v2"),
+            )
+
+    def test_amd_falls_back_to_cpu_whisper_heuristic_without_parakeet(self) -> None:
+        with patch.object(stt_factory, "parakeet_available", return_value=False), \
+             patch.object(stt_factory, "_total_system_ram_bytes", return_value=16 * 1024**3), \
+             patch("os.cpu_count", return_value=12):
+            self.assertEqual(
+                stt_factory.resolve_default_local_backend("amd"),
+                ("faster-whisper", "turbo"),
+            )
+
     def test_env_override(self) -> None:
         import os
         orig = os.environ.get("DICTATE_FORCE_LOCAL_BACKEND")

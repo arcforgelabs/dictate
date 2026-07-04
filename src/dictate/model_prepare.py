@@ -8,6 +8,8 @@ from typing import Sequence
 
 from dictate.model_state import mark_model_failed, mark_model_prepared
 from dictate.stt import (
+    COMPUTE_DEVICES,
+    COMPUTE_TYPES,
     STT_BACKENDS,
     SpeechToText,
     create_speech_to_text,
@@ -31,13 +33,13 @@ def run_prepare_model(argv: Sequence[str]) -> int:
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda", "auto"],
+        choices=COMPUTE_DEVICES,
         default="auto",
         help="Compute device for model load validation",
     )
     parser.add_argument(
         "--compute-type",
-        choices=["int8", "float16", "float32"],
+        choices=COMPUTE_TYPES,
         default="int8",
         help="Compute type for backend initialization",
     )

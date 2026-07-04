@@ -52,12 +52,13 @@ SWITCH_STATUS_CLEAR_SECONDS = 6
 LOCAL_RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
     ("cpu", "int8", "CPU"),
     ("cuda", "int8", "GPU"),
+    ("amd", "int8", "AMD GPU"),
 )
 
 
 def _device_for_backend(backend: str, current_device: str) -> str:
     if backend == "faster-whisper":
-        return current_device if current_device in {"cpu", "cuda", "auto"} else "auto"
+        return current_device if current_device in {"cpu", "cuda", "amd", "auto"} else "auto"
     return "auto"
 
 

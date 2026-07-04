@@ -24,8 +24,10 @@ WhisperCppModel = Literal[
     "large-v3-turbo-q5_0",
     "large-v3-turbo-q8_0",
 ]
-ComputeDevice = Literal["cpu", "cuda", "auto"]
+ComputeDevice = Literal["cpu", "cuda", "amd", "auto"]
+COMPUTE_DEVICES: tuple[ComputeDevice, ...] = ("cpu", "cuda", "amd", "auto")
 ComputeType = Literal["int8", "float16", "float32"]
+COMPUTE_TYPES: tuple[ComputeType, ...] = ("int8", "float16", "float32")
 SttBackend = Literal["faster-whisper", "parakeet", "whisperx", "openai", "xai", "gemini"]
 
 

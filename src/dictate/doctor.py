@@ -18,6 +18,7 @@ from dictate.runtime_logging import (
     resolve_log_paths,
 )
 from dictate.stt import (
+    COMPUTE_DEVICES,
     GEMINI_MODELS,
     OPENAI_MODELS,
     STT_BACKENDS,
@@ -56,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda", "auto"],
+        choices=COMPUTE_DEVICES,
         default="auto",
         help="Compute device to validate",
     )

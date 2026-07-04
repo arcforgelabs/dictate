@@ -56,6 +56,8 @@ from dictate.outputs import (
 )
 from dictate.process_lock import ProcessLock, daemon_lock_path
 from dictate.stt import (
+    COMPUTE_DEVICES,
+    COMPUTE_TYPES,
     ComputeDevice,
     ComputeType,
     GEMINI_MODELS,
@@ -124,13 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda", "auto"],
+        choices=COMPUTE_DEVICES,
         default="auto",
-        help="Compute device: cpu, cuda, auto",
+        help="Compute device: cpu, cuda, amd, auto",
     )
     parser.add_argument(
         "--compute-type",
-        choices=["int8", "float16", "float32"],
+        choices=COMPUTE_TYPES,
         default="int8",
         help="faster-whisper compute type (ignored by hosted API backends)",
     )
@@ -451,7 +453,7 @@ def _startup_device(
     default model can be chosen with the same device the daemon will actually use.
     """
     device_flag = _flag_in_args(cli_args, "--device")
-    if not device_flag and config.stt_device in {"cpu", "cuda", "auto"}:
+    if not device_flag and config.stt_device in COMPUTE_DEVICES:
         return config.stt_device  # type: ignore[return-value]
     return args.device
 
@@ -466,7 +468,7 @@ def _resolve_startup_runtime(
     compute_flag = _flag_in_args(cli_args, "--compute-type")
 
     device: ComputeDevice = args.device
-    if not device_flag and config.stt_device in {"cpu", "cuda", "auto"}:
+    if not device_flag and config.stt_device in COMPUTE_DEVICES:
         device = config.stt_device  # type: ignore[assignment]
         print(f"Using saved STT device: {device}", file=sys.stderr)
     elif not device_flag and config.stt_device:
@@ -476,7 +478,7 @@ def _resolve_startup_runtime(
         )
 
     compute_type: ComputeType = args.compute_type
-    if not compute_flag and config.stt_compute_type in {"int8", "float16", "float32"}:
+    if not compute_flag and config.stt_compute_type in COMPUTE_TYPES:
         compute_type = config.stt_compute_type  # type: ignore[assignment]
         print(f"Using saved STT compute type: {compute_type}", file=sys.stderr)
     elif not compute_flag and config.stt_compute_type:

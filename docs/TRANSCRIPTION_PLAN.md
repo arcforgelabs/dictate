@@ -45,6 +45,25 @@ or similar engine terms.
 Current `faster-whisper/large-v3` support is a bridge for this workstation, not
 the product direction.
 
+## Implementation Status
+
+As of 2026-07-05, Dictate accepts `amd` as an explicit compute-device lane in
+the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
+Runtime exposes an AMD-capable execution provider. This is readiness plumbing,
+not completed AMD inference: Parakeet AMD still needs provider-aware model
+loading, representative AMD hardware benchmarks, and Windows AMD validation.
+
+Current AMD readiness behavior:
+
+1. `dictate doctor --stt-backend parakeet --device amd --quick` requires an
+   ONNX Runtime AMD-capable provider.
+2. Accepted provider signals are `MIGraphXExecutionProvider`,
+   `ROCMExecutionProvider`, or `DmlExecutionProvider`.
+3. `faster-whisper --device amd` is rejected because Dictate only has CPU/CUDA
+   coverage for that temporary backend.
+4. Startup preflight blocks an explicit AMD request if the runtime cannot
+   actually satisfy it, avoiding a silent CPU fallback.
+
 ## AMD GPU Path
 
 AMD GPU support is essential. If CUDA is unavailable but an AMD GPU is present,

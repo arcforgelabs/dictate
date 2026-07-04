@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from dictate.stt import (
     BACKEND_REGISTRY,
+    COMPUTE_DEVICES,
     STT_BACKENDS,
     check_backend_readiness,
     create_speech_to_text,
@@ -22,6 +23,9 @@ class SttRegistryTests(unittest.TestCase):
             STT_BACKENDS, ("faster-whisper", "parakeet", "whisperx", "openai", "xai", "gemini")
         )
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
+
+    def test_compute_devices_include_amd_lane(self) -> None:
+        self.assertEqual(COMPUTE_DEVICES, ("cpu", "cuda", "amd", "auto"))
 
     def test_resolve_model_name_defaults(self) -> None:
         self.assertEqual(resolve_model_name("faster-whisper", None), "turbo")
@@ -115,6 +119,50 @@ class SttRegistryTests(unittest.TestCase):
         )
         self.assertTrue(any(note.startswith("STT backend:") for note in report.notes))
         self.assertTrue(any(note.startswith("STT model:") for note in report.notes))
+
+    def test_faster_whisper_readiness_rejects_amd_device(self) -> None:
+        report = check_backend_readiness(
+            backend="faster-whisper",
+            model="turbo",
+            device="amd",
+        )
+        self.assertTrue(
+            any("AMD GPU device requested for faster-whisper" in error for error in report.errors)
+        )
+
+    def test_parakeet_amd_readiness_requires_onnx_amd_provider(self) -> None:
+        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
+        with (
+            patch("dictate.stt.factory.parakeet_available", return_value=True),
+            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
+        ):
+            report = check_backend_readiness(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                device="amd",
+            )
+        self.assertTrue(
+            any("no AMD-capable execution provider" in error for error in report.errors)
+        )
+
+    def test_parakeet_amd_readiness_accepts_migraphx_provider(self) -> None:
+        fake_ort = types.SimpleNamespace(
+            get_available_providers=lambda: [
+                "MIGraphXExecutionProvider",
+                "CPUExecutionProvider",
+            ]
+        )
+        with (
+            patch("dictate.stt.factory.parakeet_available", return_value=True),
+            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
+        ):
+            report = check_backend_readiness(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                device="amd",
+            )
+        self.assertFalse(report.errors)
+        self.assertTrue(any("MIGraphXExecutionProvider" in note for note in report.notes))
 
     def test_openai_readiness_requires_api_key(self) -> None:
         with (

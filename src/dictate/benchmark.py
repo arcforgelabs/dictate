@@ -13,6 +13,7 @@ from typing import Sequence
 import numpy as np
 
 from dictate.stt import (
+    COMPUTE_DEVICES,
     STT_BACKENDS,
     create_speech_to_text,
     resolve_default_local_model,
@@ -61,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda", "auto"],
+        choices=COMPUTE_DEVICES,
         default="auto",
         help="Compute device",
     )

@@ -1,6 +1,8 @@
 """Speech-to-text backend exports."""
 
 from dictate.stt.base import (
+    COMPUTE_DEVICES,
+    COMPUTE_TYPES,
     ComputeDevice,
     ComputeType,
     FasterWhisperModel,
@@ -44,6 +46,8 @@ __all__ = [
     "WHISPERX_MODELS",
     "XAI_MODELS",
     "BackendReadiness",
+    "COMPUTE_DEVICES",
+    "COMPUTE_TYPES",
     "ComputeDevice",
     "ComputeType",
     "FasterWhisperModel",

@@ -265,6 +265,26 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(device, "cuda")
         self.assertEqual(compute_type, "float16")
 
+    def test_saved_amd_runtime_profile_is_valid(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            device, compute_type = main_module._resolve_startup_runtime(
+                args=args,
+                cli_args=[],
+                config=Config(stt_device="amd", stt_compute_type="int8"),
+            )
+
+        self.assertEqual(device, "amd")
+        self.assertEqual(compute_type, "int8")
+
+    def test_cli_accepts_amd_runtime_profile(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args(["--device", "amd"])
+
+        self.assertEqual(args.device, "amd")
+
     def test_cli_runtime_flags_override_saved_profile(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args(["--device", "cpu", "--compute-type", "float32"])

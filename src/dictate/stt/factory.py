@@ -48,6 +48,11 @@ OPENAI_MODELS: tuple[str, ...] = (
 )
 XAI_MODELS: tuple[str, ...] = ("grok-speech-to-text",)
 GEMINI_MODELS: tuple[str, ...] = ("gemini-3-flash-preview",)
+AMD_ONNX_PROVIDERS: tuple[str, ...] = (
+    "MIGraphXExecutionProvider",
+    "ROCMExecutionProvider",
+    "DmlExecutionProvider",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +242,9 @@ def resolve_default_local_model(device: ComputeDevice = "auto") -> str:
         return "turbo"
     if device == "auto" and _cuda_available_for_faster_whisper():
         return "turbo"
-    # device == "cpu", or "auto" with no CUDA: gate turbo on machine capability.
+    # device == "cpu"/"amd", or "auto" with no CUDA: gate turbo on machine capability.
+    # faster-whisper does not have an AMD GPU runtime here; readiness blocks an
+    # explicit AMD request before model load.
     cpu_count = os.cpu_count() or 0
     ram_bytes = _total_system_ram_bytes()
     if ram_bytes is None:
@@ -264,6 +271,8 @@ def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBa
     if override in {"parakeet", "faster-whisper"}:
         backend: SttBackend = override  # type: ignore[assignment]
         return backend, DEFAULT_MODELS[backend]
+    if device == "amd" and parakeet_available():
+        return "parakeet", DEFAULT_MODELS["parakeet"]
     on_cuda = device == "cuda" or (device == "auto" and _cuda_available_for_faster_whisper())
     if on_cuda:
         return "faster-whisper", "turbo"
@@ -301,6 +310,11 @@ def check_backend_readiness(
             import faster_whisper  # noqa: F401
         except Exception:  # noqa: BLE001
             report.errors.append("faster-whisper package is not importable.")
+        if device == "amd":
+            report.errors.append(
+                "AMD GPU device requested for faster-whisper, but this backend only has "
+                "CPU/CUDA coverage in Dictate. Use Parakeet for the AMD GPU lane."
+            )
         if device in {"cuda", "auto"}:
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
@@ -312,6 +326,8 @@ def check_backend_readiness(
                 'Parakeet backend selected but onnx-asr is not importable. '
                 'Install with: uv pip install "onnx-asr[cpu,hub]"'
             )
+        if device in {"amd", "auto"}:
+            _check_amd_with_onnxruntime(report, requested_device=device)
 
     if backend == "whisperx":
         _check_whisperx(report, model_name=model_name, device=device)
@@ -448,3 +464,41 @@ def _check_cuda_with_ctranslate2(
         )
     elif cuda_count > 0:
         report.notes.append(f"CTranslate2 CUDA devices detected: {cuda_count}")
+
+
+def _check_amd_with_onnxruntime(
+    report: BackendReadiness,
+    *,
+    requested_device: ComputeDevice,
+) -> None:
+    try:
+        import onnxruntime as ort
+    except Exception:  # noqa: BLE001
+        if requested_device == "amd":
+            report.errors.append(
+                "AMD GPU device requested but onnxruntime is not importable."
+            )
+        return
+
+    try:
+        providers = tuple(str(provider) for provider in ort.get_available_providers())
+    except Exception as exc:  # noqa: BLE001
+        if requested_device == "amd":
+            report.errors.append(f"Could not inspect ONNX Runtime execution providers: {exc}")
+        return
+
+    matched = tuple(provider for provider in AMD_ONNX_PROVIDERS if provider in providers)
+    if matched:
+        report.notes.append(f"ONNX Runtime AMD-capable provider detected: {matched[0]}")
+        return
+
+    if requested_device == "amd":
+        report.errors.append(
+            "AMD GPU device requested but ONNX Runtime has no AMD-capable execution "
+            f"provider. Expected one of: {', '.join(AMD_ONNX_PROVIDERS)}."
+        )
+    elif providers:
+        report.notes.append(
+            "ONNX Runtime providers detected, but no AMD-capable provider is enabled: "
+            + ", ".join(providers)
+        )
