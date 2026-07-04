@@ -249,17 +249,10 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
             }
         }
     }
-    // 3) Dev/pip: the lightweight control server (a separate `dictate` tray, if
-    //    installed, handles dictation), then the full engine as a last resort.
-    let mut ui_server = Command::new("dictate-ui-server");
-    ui_server.env("DICTATE_SHELL_VERSION", shell_version);
-    if let Some(path) = shell_path.as_ref() {
-        ui_server.env("DICTATE_SHELL_PATH", path);
-    }
-    if let Ok(child) = ui_server.spawn() {
-        *slot = Some(child);
-        return;
-    }
+    // 3) Dev/pip: the full engine — one process that dictates *and* serves the
+    //    control API. Preferred over the control-only `dictate-ui-server`, which
+    //    only makes sense when a separate `dictate` tray is already dictating
+    //    (and that case is handled earlier by an existing live handshake).
     let mut dictate = Command::new("dictate");
     dictate.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
     dictate.env("DICTATE_SHELL_VERSION", shell_version);
@@ -267,6 +260,15 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         dictate.env("DICTATE_SHELL_PATH", path);
     }
     if let Ok(child) = dictate.spawn() {
+        *slot = Some(child);
+        return;
+    }
+    let mut ui_server = Command::new("dictate-ui-server");
+    ui_server.env("DICTATE_SHELL_VERSION", shell_version);
+    if let Some(path) = shell_path.as_ref() {
+        ui_server.env("DICTATE_SHELL_PATH", path);
+    }
+    if let Ok(child) = ui_server.spawn() {
         *slot = Some(child);
     }
 }

@@ -290,6 +290,22 @@ install_desktop_ui() {
   fi
   install -m 755 "$shell_src/src-tauri/target/release/dictate-ui-shell" "$target"
   echo "Installed desktop UI shell: $target"
+
+  # Give the shell an absolute-path engine right next to it. The shell's
+  # bundled-engine lookup checks <exe_dir>/engine first — before any system
+  # path (e.g. a leftover /usr/lib/Dictate from an old .deb) and independent of
+  # the minimal PATH a desktop launcher provides. Pointing it at the per-user
+  # venv means one process both dictates and serves, and keeps sys.executable
+  # inside ~/.local so the install reads as "linux-user" and the in-app updater
+  # never needs sudo/pkexec.
+  local engine_dir="$BIN_DIR/engine"
+  mkdir -p "$engine_dir"
+  cat > "$engine_dir/dictate-engine" <<WRAP
+#!/bin/sh
+exec "$INSTALL_DIR/venv/bin/dictate" "\$@"
+WRAP
+  chmod 755 "$engine_dir/dictate-engine"
+  echo "Installed per-user engine launcher: $engine_dir/dictate-engine"
 }
 
 if [ "$INSTALL_UI" -eq 1 ]; then
