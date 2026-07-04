@@ -48,8 +48,9 @@ closed as already done before the next stable public push.
    to English Parakeet on CPU when available. On NVIDIA CUDA, provide an
    English-only performance lane and a multilingual quality lane; the current
    integrated CUDA-capable backend remains faster-whisper until Parakeet CUDA is
-   implemented and benchmarked. AMD GPUs need a separate ROCm/MIGraphX/Vulkan
-   path rather than assuming the CUDA stack applies. Minimum-spec must remain a
+   implemented and benchmarked. AMD GPUs need separate MIGraphX/ROCm and
+   Windows DirectML/MIGraphX paths rather than assuming the CUDA stack applies.
+   Minimum-spec must remain a
    good experience with consistent transcription quality; it may trade speed and
    disable heavier features. Advanced-spec is reserved for GPU and future local
    WhisperX/diarization work until those paths pass packaging, legal, and
@@ -122,9 +123,10 @@ The product direction is broader than desktop:
 
 ## Transcription Notes Goal
 
-Dictate should move toward a transcript-first note capture model. The first
-production implementation is word-for-word transcription only: no summaries,
-action items, cleanup, or note intelligence in the first slice.
+Dictate should move toward a transcript-first note capture model. The canonical
+local transcription, recording, meeting, model-lane, timestamping, speaker
+attribution, and GPU plan is [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md).
+That document owns the current model direction.
 
 Immediate direction:
 
@@ -132,18 +134,11 @@ Immediate direction:
    same record type with different duration, provider, speaker, and processing
    state.
 2. Preserve two user intents through mode/defaults, not separate heavy screens:
-   - **Dictation:** plain verbatim transcription, no speaker labels by default,
-     suitable for prompts, email, and text insertion.
-   - **Meeting:** verbatim transcript with diarization/speaker labels enabled by
-     default.
+   dictation/plain recording and meeting.
 3. Meeting mode always requires speaker attribution. The UI should expose this
-   as "Meeting" rather than engine terminology such as "diarization"; internally
-   the selected meeting lane must run a diarization/speaker-attribution model.
-4. Keep proven local models available for direct dictation and offline fallback.
-   Local recording and push-to-talk dictation should use the same ASR behavior;
-   only Meeting changes the pipeline by adding speaker attribution. Local meeting
-   lanes should prioritize Parakeet ASR plus a dedicated diarization model, not
-   WhisperX as the primary stack.
+   as "Meeting" rather than engine terminology such as "diarization".
+4. Local recording and push-to-talk dictation should use the same ASR behavior;
+   only Meeting changes the pipeline by adding speaker attribution.
 5. Hide or de-emphasize hosted providers that cannot satisfy the meeting
    contract. Provider selection should be capability-based, not a flat model
    list.
@@ -161,25 +156,12 @@ Immediate direction:
 
 Local meeting diarization:
 
-1. Candidate local meeting paths are documented in
-   [meeting-transcription-research.md](meeting-transcription-research.md).
-2. Parakeet is the local ASR foundation: v2 for English CPU/GPU, v3 for
-   multilingual GPU, and v3 on CPU only if benchmarked as usable.
-3. Primary diarization targets are DiariZen for quality-first local GPU meetings
-   and NVIDIA Streaming Sortformer v2 for speed/live local GPU meetings. Choose
-   the higher-quality lane by default if processing time is bearable.
-4. Ship a pyannote Community-1 wrapper for offline CPU-bound meeting machines if
-   packaging/licensing gates pass.
-5. WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
-   useful, but do not build the product dependency around WhisperX unless a
-   benchmark overturns this decision.
-6. Whisper/faster-whisper are temporary migration scaffolding. Remove them from
-   product lanes once Parakeet CPU, CUDA, multilingual, timestamp, and packaging
-   coverage are implemented.
-7. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
+1. Follow [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md) for ASR, diarization,
+   timestamping, AMD/NVIDIA GPU, and benchmark decisions.
+2. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
    weight, and long-meeting stability on representative recordings.
-8. If local meeting diarization is exposed before it is broadly proven, label it
-   as experimental or high-performance-machine-only.
+3. If local meeting speaker attribution is exposed before it is broadly proven,
+   label it as experimental or high-performance-machine-only.
 
 ### Silence auto-pause (note recording)
 
@@ -390,16 +372,13 @@ manual workaround. Implement, in the capture/pre-decode path:
 3. **Language pinning.** Persist a `language` setting in config (and expose it via
    `dictate config`) and thread it through, so short accented utterances stop
    flipping language per chunk under auto-detect.
-4. **Hardware guidance docs.** Publish a spec sheet in the README/install docs:
-   recommend an NVIDIA GPU for the CUDA lanes, document the AMD GPU lane
-   separately, state the realistic CPU-only minimum, and state that
-   below-minimum machines should use a hosted key.
-5. **GPU local model lanes.** Keep CPU English installs on Parakeet v2 by
-   default. Implement and benchmark an NVIDIA CUDA English-only Parakeet lane
-   for performance, a CUDA multilingual Parakeet v3 lane, a Parakeet v3 CPU
-   multilingual feasibility lane, and an AMD GPU lane using a supported
-   ROCm/MIGraphX/Vulkan runtime. Do not make any GPU or CPU multilingual lane
-   the default until it passes the benchmark matrix and packaging checks.
+4. **Hardware guidance docs.** Publish a spec sheet in the README/install docs
+   from [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md), including CPU minimums,
+   NVIDIA CUDA, and first-class AMD GPU support.
+5. **GPU local model lanes.** Implement and benchmark the model lanes defined in
+   [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md). Do not make any GPU or CPU
+   multilingual lane the default until it passes the benchmark matrix and
+   packaging checks.
 6. **Dead-code cleanup.** Remove the unwired `whisper_cpp_backend.py` (plus its
    test, the `WhisperCppModel` literal, and the stale NeMo `__pycache__`
    remnant), or wire it up deliberately — it is currently unreachable.

@@ -43,6 +43,7 @@ packaging coverage are implemented.
 | English dictation, CPU | `nvidia/parakeet-tdt-0.6b-v2` | Wired today through ONNX/onnx-asr CPU path | English-only, fast, accurate, low hallucination risk. |
 | English dictation, NVIDIA GPU | `nvidia/parakeet-tdt-0.6b-v2` through a CUDA-capable runtime | Target, not wired | Keep the English-only Parakeet quality profile; use GPU for speed once runtime is proven. |
 | Multilingual dictation, NVIDIA GPU | `nvidia/parakeet-tdt-0.6b-v3` | Target, not wired | v3 extends Parakeet from English to 25 European languages. |
+| English/multilingual dictation, AMD GPU | Parakeet v2/v3 through an AMD ONNX/runtime path | Required target, not wired | AMD GPU support is a first-class product requirement. If CUDA is unavailable but an AMD GPU is available, Dictate should still offer a high-performance local Parakeet path. |
 | Multilingual dictation, CPU | `nvidia/parakeet-tdt-0.6b-v3` | Feasibility benchmark | The model card supports CPU/GPU usage through Transformers, but NVIDIA positions it for GPU-accelerated systems. Use it on CPU only if Dictate benchmarks show tolerable latency. |
 | Temporary GPU fallback | `faster-whisper/large-v3` | Wired and verified on RTX 4090 | Temporary bridge only. Remove from product lanes when Parakeet v3 GPU runtime is wired and benchmarked. |
 | Hosted high-quality ASR candidate | Cohere Labs Transcribe | Benchmark candidate | Open ASR table reports the lowest WER among listed short-form English systems, with still-good RTFx. |
@@ -72,6 +73,38 @@ Multilingual table notes:
 | NVIDIA Canary 1B v2 | `4.60` | `634` | DE/FR/IT/ES/PT table | Better WER than Parakeet v3, slower; benchmark as quality option. |
 | Microsoft Phi 4 Multimodal Instruct | `4.41` | `78.2` | DE/FR/IT/ES/PT table | Better WER, substantially slower/heavier. |
 | Cohere Labs Transcribe | `3.83` | `491` | DE/FR/IT/ES/PT table | Best listed open multilingual WER in this table; hosted/high-quality candidate. |
+
+## AMD GPU Direction
+
+AMD GPU support is essential, not a stretch goal. A customer with an AMD GPU
+should not be pushed down to CPU-only quality/speed just because CUDA is absent.
+The product target is:
+
+1. Detect NVIDIA CUDA, AMD GPU, and CPU capability separately.
+2. Select the Parakeet runtime that matches the best available local accelerator.
+3. Keep the ASR model family stable across vendors: Parakeet v2 for English,
+   Parakeet v3 for multilingual.
+4. Benchmark AMD on real customer-class Radeon hardware before making the lane
+   default.
+
+Current AMD runtime candidates:
+
+| Runtime path | Platform | Status | Planning View |
+| --- | --- | --- | --- |
+| ONNX Runtime `MIGraphXExecutionProvider` | Linux / ROCm | Primary Linux AMD target | ONNX Runtime's MIGraphX provider accelerates ONNX graphs on AMD GPUs. ONNX Runtime docs say the older ROCm EP has been removed since 1.23 and applications should migrate to MIGraphX. |
+| MIGraphX native API | Linux / ROCm | Benchmark fallback | Use if ONNX Runtime provider packaging or operator coverage blocks Parakeet. Higher integration cost. |
+| ONNX Runtime DirectML EP | Windows | Windows AMD evaluation path | AMD GPUOpen documents DirectML as an ONNX Runtime acceleration path for AMD hardware on Windows. Evaluate for Windows customers if ROCm/MIGraphX packaging is not viable there. |
+| CPU Parakeet | Linux/Windows/macOS | Required fallback | Good enough for English dictation today, but not the intended high-performance path for AMD GPU customers. |
+
+AMD acceptance gates:
+
+1. Parakeet v2 and v3 load on the selected AMD runtime without unsupported
+   operator fallbacks that erase GPU benefit.
+2. WER matches CPU/CUDA Parakeet within benchmark tolerance.
+3. RTFx is materially better than CPU on representative AMD GPUs.
+4. Packaging works without asking non-technical users to compile ONNX Runtime.
+5. Runtime detection reports a clear AMD lane in logs/doctor while keeping UI
+   language product-level.
 
 ## Local Diarization Direction
 
@@ -104,6 +137,7 @@ Recommended local meeting lanes:
 | --- | --- | --- | --- |
 | Meeting, local GPU, quality default | Parakeet v2/v3 | DiariZen | Preferred default if meeting processing time is bearable. |
 | Meeting, local GPU, live/speed | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2 | Use when responsiveness matters or DiariZen is too slow. |
+| Meeting, local AMD GPU | Parakeet v2/v3 on AMD runtime | DiariZen / Sortformer if supported, otherwise pyannote fallback | Required benchmark lane. If diarization runtime support is weaker than ASR, keep meeting semantics by using the best available speaker-attribution path. |
 | Meeting, local CPU/offline fallback | Parakeet v2, or v3 if CPU multilingual benchmark passes | pyannote Community-1 | Keeps meeting semantics intact on offline CPU machines. |
 | General recording / push-to-talk | Parakeet v2/v3 | None | Same transcript intent: no speaker attribution unless the user chose Meeting. |
 
@@ -160,12 +194,14 @@ For local meetings, the benchmark must measure combined output:
    - v3 for multilingual CPU only if benchmarks prove it is usable.
 4. Treat Whisper/faster-whisper as temporary migration scaffolding and remove
    it from product lanes once Parakeet replacements are wired.
-5. Try both DiariZen and NVIDIA Streaming Sortformer v2 for local GPU meetings;
+5. Build AMD GPU support as a first-class lane using Parakeet v2/v3 through
+   MIGraphX/ROCm on Linux and DirectML/MIGraphX evaluation on Windows.
+6. Try both DiariZen and NVIDIA Streaming Sortformer v2 for local GPU meetings;
    choose quality by default if processing time is bearable.
-6. Ship pyannote Community-1 as the CPU/offline meeting wrapper if packaging and
+7. Ship pyannote Community-1 as the CPU/offline meeting wrapper if packaging and
    licensing gates pass.
-7. Keep Cohere Labs Transcribe on the hosted high-quality ASR table.
-8. Benchmark xAI, OpenAI diarize, and Google Chirp 3 against local Parakeet +
+8. Keep Cohere Labs Transcribe on the hosted high-quality ASR table.
+9. Benchmark xAI, OpenAI diarize, and Google Chirp 3 against local Parakeet +
    Sortformer/DiariZen before picking a hosted production meeting provider.
 
 ## Sources
@@ -185,3 +221,7 @@ For local meetings, the benchmark must measure combined output:
 - OpenAI diarize model page: https://developers.openai.com/api/docs/models/gpt-4o-transcribe-diarize
 - Google Chirp 3 docs: https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3
 - Google Speech-to-Text pricing: https://cloud.google.com/speech-to-text/pricing
+- ONNX Runtime MIGraphX Execution Provider: https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html
+- ONNX Runtime ROCm Execution Provider note: https://onnxruntime.ai/docs/execution-providers/ROCm-ExecutionProvider.html
+- AMD ROCm ONNX Runtime install notes: https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-onnx.html
+- AMD GPUOpen DirectML/ONNX Runtime guide: https://gpuopen.com/learn/onnx-directlml-execution-provider-guide-part1/

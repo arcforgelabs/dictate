@@ -47,22 +47,16 @@ plus Tauri commands in `ui-shell/src-tauri/src/lib.rs` for window/OS actions.
 4. **Meeting mode speaker attribution.** The UI should expose a plain
    `Meeting` action, not a primary "diarization" control. Live meeting mode must
    require an internal speaker-attribution path. Plain recordings and
-   push-to-talk dictation use the same non-speaker-attributed ASR path. Current
-   research targets Parakeet ASR plus DiariZen for quality-first local GPU
-   meetings, NVIDIA Streaming Sortformer v2 for speed/live local GPU meetings,
-   and pyannote Community-1 for offline CPU-bound meeting fallback. See
-   `docs/meeting-transcription-research.md`.
+   push-to-talk dictation use the same non-speaker-attributed ASR path. The
+   canonical model and runtime plan is `docs/TRANSCRIPTION_PLAN.md`.
 
-5. **WhisperX backend.** UI metadata exists for `whisperx`, but this should stay
-   an advanced/experimental local path selected through `dictate config`, not a
-   primary GUI backend picker or main meeting stack. Reuse timestamp/alignment
-   ideas where useful, but do not build the product dependency around WhisperX.
-   Whisper/faster-whisper are temporary migration scaffolding until Parakeet
-   replaces the local ASR product lanes.
+5. **WhisperX backend.** UI metadata exists for `whisperx`, but
+   `docs/TRANSCRIPTION_PLAN.md` says not to make WhisperX the main meeting
+   stack. Keep it advanced/experimental unless that plan changes.
 
 6. **Dictate Pro / subscriptions.** Architecture exists in docs
    (`dictate-pro-subscription-architecture.md`, `msstore-in-app-subscriptions.md`,
-   `xai-diarization-cost-model.md`) but there is **no frontend surface yet**.
+   archived provider cost notes) but there is **no frontend surface yet**.
    **Production P0:** public **Upgrade to Pro** on
    https://arcforge.au/download/dictate is live but still links to `/login` until
    Stripe product + account entitlements are wired (see `docs/GOALS.md` and

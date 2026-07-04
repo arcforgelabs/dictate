@@ -4,11 +4,11 @@ This note estimates the provider cost of using xAI Speech to Text with
 diarization for the first paid Dictate subscription, `Dictate Pro`.
 
 For current model/provider direction, use
-[meeting-transcription-research.md](meeting-transcription-research.md). This
-file is cost-focused and its older "xAI as default" language should not be read
-as overriding the current meeting rule: `Meeting` mode requires
-speaker-attributed output, and local Parakeet + dedicated diarization lanes must
-be benchmarked against hosted providers before a production default is chosen.
+[../TRANSCRIPTION_PLAN.md](../TRANSCRIPTION_PLAN.md). This file is cost-focused
+and its older "xAI as default" language should not be read as overriding the
+current meeting rule: `Meeting` mode requires speaker-attributed output, and
+local Parakeet + dedicated diarization lanes must be benchmarked against hosted
+providers before a production default is chosen.
 
 Research date: 2026-06-25. Prices are USD and should be rechecked before launch.
 

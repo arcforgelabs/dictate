@@ -42,26 +42,16 @@ dataset and hardware matrix are stable.
 | `recommended` | Baseline quality target for stable releases | Dictation RTF <= `1.00` for short-form local captures | Default stable experience |
 | `advanced` | No worse than recommended on dictation; speaker-attribution quality separately measured for Meeting mode | Dictation RTF <= `0.70`; meeting RTF targets set per DiariZen / Sortformer / pyannote benchmark | Optional early-access/experimental local meetings only after packaging and legal gates |
 
-## Local Model Lanes
+## Canonical Model Plan
 
-Fresh installs leave `stt_backend` and `stt_model` unset so runtime detection can
-choose the installed local default. The current supported default matrix is:
+The canonical model lanes live in
+[../docs/TRANSCRIPTION_PLAN.md](../docs/TRANSCRIPTION_PLAN.md). This benchmark
+document defines dataset and measurement format only.
 
-| Lane | Intended Default | Status |
-| --- | --- | --- |
-| CPU English | `parakeet/parakeet-tdt-0.6b-v2` | Default when Parakeet runtime is installed |
-| CPU multilingual | `parakeet/parakeet-tdt-0.6b-v3` | Feasibility benchmark; only default if CPU latency is acceptable |
-| NVIDIA CUDA English performance | Parakeet English-only v2 GPU runtime | Required, not yet wired |
-| NVIDIA CUDA multilingual quality | Parakeet multilingual v3 GPU runtime | Required, not yet wired |
-| AMD GPU | Parakeet v2/v3 through a ROCm/MIGraphX/Vulkan-backed runtime | Required, not yet wired |
-
-Do not promote a GPU lane to default from marketing claims alone; run the same
-manifest on representative hardware and record WER, RTF, RAM/VRAM, install size,
-and package/runtime dependencies.
-
-Whisper/faster-whisper entries are temporary migration scaffolding only. Remove
-them from product lanes once Parakeet CPU, CUDA, multilingual, timestamp, and
-packaging coverage are implemented.
+Do not promote any CPU, NVIDIA GPU, AMD GPU, meeting, or hosted lane to default
+from marketing claims alone. Run the same manifest on representative hardware
+and record WER, DER where applicable, RTF/RTFx, RAM/VRAM, install size, and
+package/runtime dependencies.
 
 The first curated dataset should include:
 
