@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # onnx-asr's registry name and the HF repo that hosts the ONNX export.
 _ONNX_ASR_NAME = "nemo-parakeet-tdt-0.6b-v2"
+_SUPPORTED_MODEL = "parakeet-tdt-0.6b-v2"
 _HF_REPO = "istupakov/parakeet-tdt-0.6b-v2-onnx"
 _MODEL_DIRNAME = "parakeet-tdt-0.6b-v2-onnx"
 
@@ -116,6 +117,16 @@ class ParakeetSpeechToText(SpeechToText):
         device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ):
+        if model_name != _SUPPORTED_MODEL:
+            raise ValueError(
+                f"Parakeet model '{model_name}' is not wired in this runtime yet. "
+                f"Supported today: {_SUPPORTED_MODEL}."
+            )
+        if device in {"cuda", "amd"}:
+            raise ValueError(
+                f"Parakeet device '{device}' is not wired in this runtime yet. "
+                "Use cpu/auto until the provider-specific Parakeet lanes are implemented."
+            )
         self.model_name = model_name
         self.device = device
         # Parakeet ONNX ships fp32 and int8; anything other than int8 loads fp32.

@@ -29,6 +29,7 @@ class ParakeetRegistrationTests(unittest.TestCase):
         self.assertIn("parakeet", BACKEND_REGISTRY)
         self.assertEqual(DEFAULT_MODELS["parakeet"], "parakeet-tdt-0.6b-v2")
         self.assertIn("parakeet-tdt-0.6b-v2", PARAKEET_MODELS)
+        self.assertIn("parakeet-tdt-0.6b-v3", PARAKEET_MODELS)
 
     def test_type_literal_includes_parakeet(self) -> None:
         # SttBackend is a Literal; parakeet must be one of its args.
@@ -48,6 +49,24 @@ class ParakeetRegistrationTests(unittest.TestCase):
         self.assertEqual(stt.backend_name, "parakeet")
         self.assertEqual(stt.compute_type, "int8")
         self.assertIsNone(stt._model)  # lazy — not loaded on construction
+
+    def test_factory_rejects_unwired_v3_model(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not wired"):
+            create_speech_to_text(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v3",
+                device="cpu",
+                compute_type="int8",
+            )
+
+    def test_factory_rejects_unwired_gpu_device(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not wired"):
+            create_speech_to_text(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                device="cuda",
+                compute_type="int8",
+            )
 
 
 class _FakeOnnxModel:
@@ -108,6 +127,30 @@ class ParakeetReadinessTests(unittest.TestCase):
         with patch("dictate.stt.factory.parakeet_available", return_value=True):
             report = check_backend_readiness(backend="parakeet", model=None, device="cpu")
         self.assertEqual(report.errors, [])
+
+    def test_readiness_marks_v3_as_planned_not_wired(self) -> None:
+        from dictate.stt import check_backend_readiness
+
+        with patch("dictate.stt.factory.parakeet_available", return_value=True):
+            report = check_backend_readiness(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v3",
+                device="cpu",
+            )
+        self.assertTrue(
+            any("planned lane but is not wired yet" in error for error in report.errors)
+        )
+
+    def test_readiness_marks_cuda_as_planned_not_wired(self) -> None:
+        from dictate.stt import check_backend_readiness
+
+        with patch("dictate.stt.factory.parakeet_available", return_value=True):
+            report = check_backend_readiness(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                device="cuda",
+            )
+        self.assertTrue(any("device 'cuda'" in error for error in report.errors))
 
 
 if __name__ == "__main__":

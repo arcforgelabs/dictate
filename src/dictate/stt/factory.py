@@ -39,7 +39,8 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "turbo",
     "large-v3-turbo",
 )
-PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2",)
+PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
+WIRED_PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2",)
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
@@ -319,12 +320,22 @@ def check_backend_readiness(
             _check_cuda_with_ctranslate2(report, requested_device=device)
 
     if backend == "parakeet":
+        if model_name not in WIRED_PARAKEET_MODELS:
+            report.errors.append(
+                f"Parakeet model '{model_name}' is a planned lane but is not wired yet. "
+                f"Wired today: {', '.join(WIRED_PARAKEET_MODELS)}."
+            )
         if parakeet_available():
             report.notes.append("Parakeet (onnx-asr) importable.")
         else:
             report.errors.append(
                 'Parakeet backend selected but onnx-asr is not importable. '
                 'Install with: uv pip install "onnx-asr[cpu,hub]"'
+            )
+        if device in {"cuda", "amd"}:
+            report.errors.append(
+                f"Parakeet device '{device}' is a planned lane but is not wired yet. "
+                "Use cpu/auto until provider-specific Parakeet loading is implemented."
             )
         if device in {"amd", "auto"}:
             _check_amd_with_onnxruntime(report, requested_device=device)

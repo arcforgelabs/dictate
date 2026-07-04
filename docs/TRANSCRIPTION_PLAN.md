@@ -52,6 +52,10 @@ the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
 Runtime exposes an AMD-capable execution provider. This is readiness plumbing,
 not completed AMD inference: Parakeet AMD still needs provider-aware model
 loading, representative AMD hardware benchmarks, and Windows AMD validation.
+Parakeet v3 is registered as a planned model lane, but doctor/preflight and the
+backend reject it until a real v3 runtime is implemented. Parakeet CUDA and AMD
+device requests are also rejected rather than silently running the current CPU
+ONNX path.
 
 Current AMD readiness behavior:
 
