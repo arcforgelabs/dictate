@@ -266,6 +266,10 @@ Type=Application
 Categories=AudioVideo;Audio;
 Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
 Terminal=false
+# The Tauri shell window reports app_id "dictate-ui-shell" (GTK prgname). Without
+# this, GNOME can't match the running window to this launcher and shows a second,
+# icon-less "dictate-ui-shell" entry with a generic fallback icon.
+StartupWMClass=dictate-ui-shell
 EOF
 
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
@@ -283,6 +287,7 @@ Type=Application
 Categories=AudioVideo;Audio;
 Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
 Terminal=false
+StartupWMClass=dictate-ui-shell
 X-GNOME-Autostart-enabled=true
 EOF
 fi
