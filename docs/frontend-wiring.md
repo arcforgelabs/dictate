@@ -46,16 +46,19 @@ plus Tauri commands in `ui-shell/src-tauri/src/lib.rs` for window/OS actions.
 
 4. **Meeting mode speaker attribution.** The UI should expose a plain
    `Meeting` action, not a primary "diarization" control. Live meeting mode must
-   require an internal speaker-attribution path; plain recordings may skip it.
-   Current research targets Parakeet ASR plus NVIDIA Streaming Sortformer v2 for
-   local GPU meetings, with DiariZen as an offline quality comparison. See
+   require an internal speaker-attribution path. Plain recordings and
+   push-to-talk dictation use the same non-speaker-attributed ASR path. Current
+   research targets Parakeet ASR plus DiariZen for quality-first local GPU
+   meetings, NVIDIA Streaming Sortformer v2 for speed/live local GPU meetings,
+   and pyannote Community-1 for offline CPU-bound meeting fallback. See
    `docs/meeting-transcription-research.md`.
 
 5. **WhisperX backend.** UI metadata exists for `whisperx`, but this should stay
    an advanced/experimental local path selected through `dictate config`, not a
-   primary GUI backend picker or main meeting stack. Before exposing it broadly,
-   verify packaged install behavior on Windows and Linux and benchmark accuracy,
-   runtime, RAM/VRAM use, model download size, and long-meeting stability.
+   primary GUI backend picker or main meeting stack. Reuse timestamp/alignment
+   ideas where useful, but do not build the product dependency around WhisperX.
+   Whisper/faster-whisper are temporary migration scaffolding until Parakeet
+   replaces the local ASR product lanes.
 
 6. **Dictate Pro / subscriptions.** Architecture exists in docs
    (`dictate-pro-subscription-architecture.md`, `msstore-in-app-subscriptions.md`,

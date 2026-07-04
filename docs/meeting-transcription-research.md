@@ -13,8 +13,9 @@ meeting, Dictate must produce a speaker-attributed transcript. The UI should say
 `Meeting`, `Record`, or similarly plain product language; it should not expose
 engine terms such as "diarization" as primary controls.
 
-Plain recordings may remain available without speaker attribution. Meeting mode
-does not.
+Plain recordings and push-to-talk dictation are the same transcript intent:
+verbatim speech-to-text without speaker attribution. The only user action that
+switches on speaker attribution is `Meeting`.
 
 ## Terms
 
@@ -32,14 +33,18 @@ a live lane.
 
 ## ASR Direction
 
-Parakeet is the default strategic ASR family for local Dictate work:
+Parakeet is the default strategic ASR family for local Dictate work. Whisper and
+faster-whisper are migration scaffolding only; they should be removed from the
+strategic product lanes once Parakeet CPU, CUDA, multilingual, timestamp, and
+packaging coverage are implemented.
 
 | Lane | ASR target | Status | Rationale |
 | --- | --- | --- | --- |
 | English dictation, CPU | `nvidia/parakeet-tdt-0.6b-v2` | Wired today through ONNX/onnx-asr CPU path | English-only, fast, accurate, low hallucination risk. |
 | English dictation, NVIDIA GPU | `nvidia/parakeet-tdt-0.6b-v2` through a CUDA-capable runtime | Target, not wired | Keep the English-only Parakeet quality profile; use GPU for speed once runtime is proven. |
 | Multilingual dictation, NVIDIA GPU | `nvidia/parakeet-tdt-0.6b-v3` | Target, not wired | v3 extends Parakeet from English to 25 European languages. |
-| Current GPU fallback | `faster-whisper/large-v3` | Wired and verified on RTX 4090 | Useful broad multilingual fallback, but not the strategic meeting/default stack. |
+| Multilingual dictation, CPU | `nvidia/parakeet-tdt-0.6b-v3` | Feasibility benchmark | The model card supports CPU/GPU usage through Transformers, but NVIDIA positions it for GPU-accelerated systems. Use it on CPU only if Dictate benchmarks show tolerable latency. |
+| Temporary GPU fallback | `faster-whisper/large-v3` | Wired and verified on RTX 4090 | Temporary bridge only. Remove from product lanes when Parakeet v3 GPU runtime is wired and benchmarked. |
 | Hosted high-quality ASR candidate | Cohere Labs Transcribe | Benchmark candidate | Open ASR table reports the lowest WER among listed short-form English systems, with still-good RTFx. |
 
 Published short-form English ASR comparison:
@@ -70,19 +75,26 @@ Multilingual table notes:
 
 ## Local Diarization Direction
 
-Meeting mode must select a diarization path internally. WhisperX is not the main
-stack: its quality/speed profile is not the desired product baseline. We can
-reuse ideas from WhisperX, especially timestamp reconciliation and alignment
-patterns, but the strategic local stack should pair Parakeet ASR with a
-dedicated diarization model.
+Meeting mode must select a speaker-attribution path internally. WhisperX is not
+the main stack: its quality/speed profile is not the desired product baseline.
+We can reuse ideas from WhisperX, especially timestamp reconciliation and
+alignment patterns, but the strategic local stack should pair Parakeet ASR with
+a dedicated speaker-attribution model.
+
+The mental model is:
+
+1. Parakeet produces the transcript and timestamps.
+2. A diarization model assigns speaker turns over the same audio timeline.
+3. Dictate reconciles ASR segments, word/segment timestamps, and speaker turns
+   into one transcript segment stream.
 
 Primary local candidates:
 
 | Candidate | Local/Hosted | GPU/CPU | DER / Accuracy Evidence | Speed Evidence | Planning View |
 | --- | --- | --- | --- | --- | --- |
-| NVIDIA Streaming Sortformer v2 | Local/open | GPU-oriented | Benchmarking paper reports language DER: Mandarin `9.4`, English `14.1`, German `9.6`, Japanese `12.7`, Spanish `21.1`; 4-speaker DER `13.2`. | `209.5x` RTF streaming / `214.3x` chunked in the same benchmark. | Target for local GPU live meetings. Fast enough to align with live capture. Watch 4-speaker design limits and high-speaker degradation. |
-| DiariZen | Local/open | GPU benchmarked | Benchmarking paper reports overall `13.3` DER; language DER: English `7.0`, German `11.6`, Japanese `15.6`, Spanish `19.1`, Mandarin `10.1`. | `20.2x` RTF. | Strong local offline quality candidate, especially English meetings. |
-| pyannote Community-1 | Local/open | CPU by default, CUDA optional | Model card DER examples: AMI IHM `17.0`, AMI SDM `19.9`, VoxConverse `11.2`, DIHARD 3 `20.2`, CALLHOME `26.7`. | No model-card RTF; pyannote 3.1 benchmark paper reports around `45x` RTF. | Practical local baseline and fallback; offline-capable after gated download. |
+| DiariZen | Local/open | GPU benchmarked | Benchmarking paper reports overall `13.3` DER; language DER: English `7.0`, German `11.6`, Japanese `15.6`, Spanish `19.1`, Mandarin `10.1`. | `20.2x` RTF. | Quality-first local meeting candidate, especially English. Make this the likely default if processing time is acceptable in Dictate's meeting benchmark. |
+| NVIDIA Streaming Sortformer v2 | Local/open | GPU-oriented | Benchmarking paper reports language DER: Mandarin `9.4`, English `14.1`, German `9.6`, Japanese `12.7`, Spanish `21.1`; 4-speaker DER `13.2`. | `209.5x` RTF streaming / `214.3x` chunked in the same benchmark. | Speed-first local GPU candidate. Hard to ignore for live meetings; test whether quality is acceptable enough to use by default or as live mode. |
+| pyannote Community-1 | Local/open | CPU by default, CUDA optional | Model card DER examples: AMI IHM `17.0`, AMI SDM `19.9`, VoxConverse `11.2`, DIHARD 3 `20.2`, CALLHOME `26.7`. | No model-card RTF; pyannote 3.1 benchmark paper reports around `45x` RTF. | Ship as the CPU/offline speaker-attribution wrapper if packaging/licensing gates pass. |
 | pyannote Precision-2 | Hosted | Hosted | Model card comparison: AMI IHM `12.9`, AMI SDM `15.6`, VoxConverse `8.5`, DIHARD 3 `14.7`, CALLHOME `16.6`. | Hosted; local RTF unavailable. | Best pyannote quality numbers, but it is hosted. Use only for hosted/premium comparison. |
 | WhisperX | Local pipeline | GPU strongly preferred | Depends on pyannote and alignment setup; not a separate diarization model. | Depends on faster-whisper + alignment + pyannote. | Do not use as main stack. Mine timestamp/alignment design where useful. |
 
@@ -90,10 +102,10 @@ Recommended local meeting lanes:
 
 | User-facing mode | Internal ASR | Internal speaker attribution | Notes |
 | --- | --- | --- | --- |
-| Meeting, local GPU, live | Parakeet v3 for multilingual or Parakeet v2 for English | NVIDIA Streaming Sortformer v2 | Main target for responsive local meetings. |
-| Meeting, local GPU, offline quality | Parakeet v2/v3 | DiariZen | Benchmark as quality lane for uploaded/finished recordings. |
-| Meeting, local CPU/offline fallback | Parakeet v2 | pyannote Community-1 | Not ideal for live UX until measured, but keeps meeting semantics intact. |
-| General recording | Parakeet v2/v3 or configured ASR | None unless user later converts to meeting | Recordings can be plain transcripts; meetings cannot. |
+| Meeting, local GPU, quality default | Parakeet v2/v3 | DiariZen | Preferred default if meeting processing time is bearable. |
+| Meeting, local GPU, live/speed | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2 | Use when responsiveness matters or DiariZen is too slow. |
+| Meeting, local CPU/offline fallback | Parakeet v2, or v3 if CPU multilingual benchmark passes | pyannote Community-1 | Keeps meeting semantics intact on offline CPU machines. |
+| General recording / push-to-talk | Parakeet v2/v3 | None | Same transcript intent: no speaker attribution unless the user chose Meeting. |
 
 ## Cloud ASR And Meeting Providers
 
@@ -116,15 +128,16 @@ speaker labels in text.
 ## Heavier Local Settings
 
 More GPU does not automatically improve transcription accuracy. It gives us room
-to select heavier models and settings:
+to select heavier runtimes, precision, chunking, timestamping, and diarization
+options:
 
 | Setting / Choice | Accuracy Effect | Speed/Memory Effect | Dictate View |
 | --- | --- | --- | --- |
-| Larger ASR model | Usually improves WER until model-family limits. | More VRAM/RAM, slower. | For Whisper fallback, `large-v3` is quality; `turbo` is speed. For Parakeet, v2/v3 are both 0.6B, so GPU capacity mainly affects runtime/headroom, not a larger Parakeet model. |
-| Beam size | Can improve accuracy, especially for ambiguous audio, but may have diminishing returns. | Slower decode. | Dictate faster-whisper currently uses beam size 5 in quality mode. Benchmark Parakeet runtime options separately if exposed by chosen runtime. |
-| Precision: `float16` vs `int8` | `float16` can avoid quantization loss; `int8` may be close enough. | `float16` uses more VRAM; `int8` is faster/smaller. | On RTX 4090, `faster-whisper/large-v3` `float16` is viable. For production defaults, benchmark `float16`, `int8_float16`, and `int8`. |
+| Larger ASR model | Usually improves WER until model-family limits. | More VRAM/RAM, slower. | For Parakeet, v2/v3 are both 0.6B, so GPU capacity mainly affects runtime/headroom, not a larger Parakeet model. Do not choose Whisper as the quality path unless a benchmark beats Parakeet for Dictate's real data. |
+| Decode/runtime options | Runtime-specific settings can affect accuracy and timestamp quality. | Heavier settings can increase latency or VRAM/RAM. | Benchmark NeMo/Transformers/ONNX Parakeet runtimes before exposing settings. |
+| Precision: `float16`/`bfloat16` vs quantized | Higher precision can avoid quantization loss; quantized models may be close enough. | Higher precision uses more VRAM/RAM; quantized models are smaller/faster. | For Parakeet, benchmark the chosen CPU and CUDA runtimes. `int8` ONNX is current CPU English path. |
 | Batch size | Usually improves throughput, not single-stream latency. | Higher VRAM, better GPU utilization. | Useful for uploaded recordings; not a reason to batch live dictation. |
-| Word/timestamp alignment pass | Improves word-level timing, not ASR text accuracy. | Extra model/pass. | Explore WhisperX-style forced alignment concepts without adopting WhisperX as the main stack. |
+| Word/timestamp alignment pass | Improves word-level timing, not ASR text accuracy. | Extra model/pass. | Parakeet v3 has word and segment timestamp support in its model card. Still explore WhisperX-style alignment/reconciliation patterns without adopting WhisperX as the main stack. |
 | Diarization model choice | Improves speaker attribution, not raw words. | Separate CPU/GPU cost. | Meetings must run diarization; recordings can skip it. |
 
 For local meetings, the benchmark must measure combined output:
@@ -143,12 +156,16 @@ For local meetings, the benchmark must measure combined output:
 2. Do not make WhisperX the primary local meeting stack.
 3. Use Parakeet for local ASR strategy:
    - v2 for English CPU/GPU,
-   - v3 for multilingual GPU.
-4. Target NVIDIA Streaming Sortformer v2 for local GPU live meetings.
-5. Target DiariZen as the local offline quality comparison, especially for
-   English meetings.
-6. Keep Cohere Labs Transcribe on the hosted high-quality ASR table.
-7. Benchmark xAI, OpenAI diarize, and Google Chirp 3 against local Parakeet +
+   - v3 for multilingual GPU,
+   - v3 for multilingual CPU only if benchmarks prove it is usable.
+4. Treat Whisper/faster-whisper as temporary migration scaffolding and remove
+   it from product lanes once Parakeet replacements are wired.
+5. Try both DiariZen and NVIDIA Streaming Sortformer v2 for local GPU meetings;
+   choose quality by default if processing time is bearable.
+6. Ship pyannote Community-1 as the CPU/offline meeting wrapper if packaging and
+   licensing gates pass.
+7. Keep Cohere Labs Transcribe on the hosted high-quality ASR table.
+8. Benchmark xAI, OpenAI diarize, and Google Chirp 3 against local Parakeet +
    Sortformer/DiariZen before picking a hosted production meeting provider.
 
 ## Sources

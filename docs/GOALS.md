@@ -140,8 +140,10 @@ Immediate direction:
    as "Meeting" rather than engine terminology such as "diarization"; internally
    the selected meeting lane must run a diarization/speaker-attribution model.
 4. Keep proven local models available for direct dictation and offline fallback.
-   Local meeting lanes should prioritize Parakeet ASR plus a dedicated
-   diarization model, not WhisperX as the primary stack.
+   Local recording and push-to-talk dictation should use the same ASR behavior;
+   only Meeting changes the pipeline by adding speaker attribution. Local meeting
+   lanes should prioritize Parakeet ASR plus a dedicated diarization model, not
+   WhisperX as the primary stack.
 5. Hide or de-emphasize hosted providers that cannot satisfy the meeting
    contract. Provider selection should be capability-based, not a flat model
    list.
@@ -161,15 +163,22 @@ Local meeting diarization:
 
 1. Candidate local meeting paths are documented in
    [meeting-transcription-research.md](meeting-transcription-research.md).
-2. Primary targets are Parakeet ASR plus NVIDIA Streaming Sortformer v2 for live
-   local GPU meetings, with DiariZen as an offline quality comparison and
-   pyannote Community-1 as a practical local fallback.
-3. WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
+2. Parakeet is the local ASR foundation: v2 for English CPU/GPU, v3 for
+   multilingual GPU, and v3 on CPU only if benchmarked as usable.
+3. Primary diarization targets are DiariZen for quality-first local GPU meetings
+   and NVIDIA Streaming Sortformer v2 for speed/live local GPU meetings. Choose
+   the higher-quality lane by default if processing time is bearable.
+4. Ship a pyannote Community-1 wrapper for offline CPU-bound meeting machines if
+   packaging/licensing gates pass.
+5. WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
    useful, but do not build the product dependency around WhisperX unless a
    benchmark overturns this decision.
-4. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
+6. Whisper/faster-whisper are temporary migration scaffolding. Remove them from
+   product lanes once Parakeet CPU, CUDA, multilingual, timestamp, and packaging
+   coverage are implemented.
+7. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
    weight, and long-meeting stability on representative recordings.
-5. If local meeting diarization is exposed before it is broadly proven, label it
+8. If local meeting diarization is exposed before it is broadly proven, label it
    as experimental or high-performance-machine-only.
 
 ### Silence auto-pause (note recording)
@@ -387,10 +396,10 @@ manual workaround. Implement, in the capture/pre-decode path:
    below-minimum machines should use a hosted key.
 5. **GPU local model lanes.** Keep CPU English installs on Parakeet v2 by
    default. Implement and benchmark an NVIDIA CUDA English-only Parakeet lane
-   for performance, a CUDA multilingual quality lane (Parakeet v3 and/or
-   faster-whisper `large-v3`), and an AMD GPU lane using a supported
-   ROCm/MIGraphX/Vulkan runtime. Do not make any GPU lane the default until it
-   passes the benchmark matrix and packaging checks.
+   for performance, a CUDA multilingual Parakeet v3 lane, a Parakeet v3 CPU
+   multilingual feasibility lane, and an AMD GPU lane using a supported
+   ROCm/MIGraphX/Vulkan runtime. Do not make any GPU or CPU multilingual lane
+   the default until it passes the benchmark matrix and packaging checks.
 6. **Dead-code cleanup.** Remove the unwired `whisper_cpp_backend.py` (plus its
    test, the `WhisperCppModel` literal, and the stale NeMo `__pycache__`
    remnant), or wire it up deliberately — it is currently unreachable.
