@@ -217,7 +217,10 @@ class UiBackendStateTests(unittest.TestCase):
             local_models = [
                 model["model"] for model in state["models"] if model["backend"] == "faster-whisper"
             ]
-            self.assertEqual(local_models, ["tiny", "base", "small", "medium", "turbo", "large-v3-turbo"])
+            self.assertEqual(
+                local_models,
+                ["tiny", "base", "small", "medium", "large-v3", "turbo", "large-v3-turbo"],
+            )
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(
                 backends, {"parakeet", "faster-whisper", "whisperx", "openai", "xai", "gemini"}

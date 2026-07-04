@@ -11,7 +11,7 @@ class RepoDefaultConfigTests(unittest.TestCase):
         config_path = Path(__file__).resolve().parents[1] / "config" / "default-config.yaml"
         data = yaml.safe_load(config_path.read_text())
 
-        self.assertEqual(data["stt_backend"], "faster-whisper")
+        self.assertNotIn("stt_backend", data)
         self.assertNotIn("stt_model", data)
         self.assertEqual(data["stt_device"], "auto")
         self.assertEqual(data["stt_compute_type"], "int8")

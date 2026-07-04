@@ -45,11 +45,15 @@ closed as already done before the next stable public push.
 3. **Hardware-tiered install defaults:** First-run setup should classify the
    machine into `minimum`, `recommended`, or `advanced` from simple local facts
    such as OS, CPU cores, RAM, GPU/CUDA availability, and disk headroom. Default
-   to the recommended config unless the machine is clearly minimum-spec or
-   clearly advanced-spec. Minimum-spec must remain a good experience with
-   consistent transcription quality; it may trade speed and disable heavier
-   features. Advanced-spec is reserved for future local WhisperX/diarization
-   work until that path passes packaging, legal, and benchmark gates.
+   to English Parakeet on CPU when available. On NVIDIA CUDA, provide an
+   English-only performance lane and a multilingual quality lane; the current
+   integrated CUDA-capable backend remains faster-whisper until Parakeet CUDA is
+   implemented and benchmarked. AMD GPUs need a separate ROCm/MIGraphX/Vulkan
+   path rather than assuming the CUDA stack applies. Minimum-spec must remain a
+   good experience with consistent transcription quality; it may trade speed and
+   disable heavier features. Advanced-spec is reserved for GPU and future local
+   WhisperX/diarization work until those paths pass packaging, legal, and
+   benchmark gates.
 4. **Benchmarked quality and speed tiers:** Define simple benchmark targets for
    quality and speed before changing model defaults. Quality should vary little
    across tiers; speed and optional features may vary. Benchmark details live in
@@ -374,14 +378,15 @@ manual workaround. Implement, in the capture/pre-decode path:
    `dictate config`) and thread it through, so short accented utterances stop
    flipping language per chunk under auto-detect.
 4. **Hardware guidance docs.** Publish a spec sheet in the README/install docs:
-   recommend an NVIDIA GPU (CTranslate2 is CUDA-only) for best quality/latency;
-   state the realistic CPU-only minimum (small/base tier on 4-core+/8 GB) and
-   that below-minimum machines should use a hosted key.
-5. **Optional English-only local backend (Parakeet).** Evaluate
-   NVIDIA Parakeet-TDT-0.6B via sherpa-onnx / onnx-asr (no NeMo/torch at
-   inference, ~630 MB int8, runs on Pi-class hardware) as an optional local
-   backend for weak machines where multilingual Whisper turbo cannot keep
-   real-time. English-only; keep faster-whisper as the multilingual default.
+   recommend an NVIDIA GPU for the CUDA lanes, document the AMD GPU lane
+   separately, state the realistic CPU-only minimum, and state that
+   below-minimum machines should use a hosted key.
+5. **GPU local model lanes.** Keep CPU English installs on Parakeet v2 by
+   default. Implement and benchmark an NVIDIA CUDA English-only Parakeet lane
+   for performance, a CUDA multilingual quality lane (Parakeet v3 and/or
+   faster-whisper `large-v3`), and an AMD GPU lane using a supported
+   ROCm/MIGraphX/Vulkan runtime. Do not make any GPU lane the default until it
+   passes the benchmark matrix and packaging checks.
 6. **Dead-code cleanup.** Remove the unwired `whisper_cpp_backend.py` (plus its
    test, the `WhisperCppModel` literal, and the stale NeMo `__pycache__`
    remnant), or wire it up deliberately — it is currently unreachable.

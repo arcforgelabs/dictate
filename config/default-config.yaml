@@ -1,12 +1,16 @@
 hotwords: []
 push_to_talk_combo: ctrl_r
-stt_backend: faster-whisper
 stt_compute_type: int8
 stt_device: auto
-# Local Whisper picks a hardware-aware default model when stt_model is unset:
-# turbo on CUDA or a capable CPU (~8 GB RAM + >=8 cores), otherwise small.
-# Set stt_model explicitly to override (e.g. tiny/base/small/medium/turbo):
+# Leave stt_backend/stt_model unset for the hardware-aware local default:
+# English Parakeet on CPU when available; current CUDA builds use faster-whisper
+# until the Parakeet CUDA lane is implemented and benchmarked.
+# Set stt_backend/stt_model explicitly to override:
+# stt_backend: parakeet
+# stt_model: parakeet-tdt-0.6b-v2
+# stt_backend: faster-whisper
 # stt_model: turbo
+# stt_model: large-v3
 # To avoid local compute, set one hosted backend:
 # stt_backend: openai
 # stt_model: gpt-4o-mini-transcribe

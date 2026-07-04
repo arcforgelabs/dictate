@@ -35,6 +35,7 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "base",
     "small",
     "medium",
+    "large-v3",
     "turbo",
     "large-v3-turbo",
 )
@@ -251,10 +252,13 @@ def resolve_default_local_model(device: ComputeDevice = "auto") -> str:
 def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBackend, str]:
     """The default (backend, model) for a fresh local config on this machine.
 
-    English-first: on a GPU we default to multilingual Whisper turbo (fast there);
-    on CPU we default to Parakeet, which is both faster and more accurate than
-    Whisper for English. The UI's English/Multilingual toggle switches between
-    Parakeet and Whisper; a saved config selection always wins over this default.
+    English-first: on CPU we default to Parakeet, which is both faster and more
+    accurate than Whisper for English. CUDA still defaults to faster-whisper
+    because the integrated Parakeet backend is currently the ONNX CPU path; the
+    Parakeet CUDA and AMD GPU lanes must be implemented and benchmarked before
+    they become install defaults. The UI's English/Multilingual toggle switches
+    between Parakeet and Whisper; a saved config selection always wins over this
+    default.
     """
     override = os.environ.get("DICTATE_FORCE_LOCAL_BACKEND")
     if override in {"parakeet", "faster-whisper"}:
