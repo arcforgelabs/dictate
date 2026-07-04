@@ -21,6 +21,7 @@ PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
+INSTALL_GPU="${DICTATE_INSTALL_GPU:-0}"
 INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -32,7 +33,7 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--user|--system] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
+Usage: $0 [--user|--system] [--gpu] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
 Default: --user.
 
@@ -45,6 +46,9 @@ missing.
 
 --system installs a Linux desktop package into system paths using apt/pkexec or
 sudo. It is intentionally explicit because it requires administrator approval.
+
+--gpu installs Dictate's GPU optional dependencies for local CUDA/ONNX Runtime
+testing on capable machines.
 EOF
 }
 
@@ -116,6 +120,12 @@ while [ "$#" -gt 0 ]; do
     --no-ui)
       INSTALL_UI=0
       ;;
+    --gpu)
+      INSTALL_GPU=1
+      ;;
+    --no-gpu)
+      INSTALL_GPU=0
+      ;;
     --user)
       INSTALL_SCOPE="user"
       ;;
@@ -150,13 +160,21 @@ if [ "$SESSION_BACKEND" = "auto" ]; then
   SESSION_BACKEND="$(detect_session_backend)"
 fi
 
-PIP_TARGET="$SCRIPT_DIR"
+EXTRAS=()
 if [ "$SESSION_BACKEND" = "x11" ]; then
-  PIP_TARGET="${SCRIPT_DIR}[x11]"
+  EXTRAS+=("x11")
 elif [ "$SESSION_BACKEND" = "wayland" ]; then
-  PIP_TARGET="${SCRIPT_DIR}[wayland]"
+  EXTRAS+=("wayland")
 elif [ "$SESSION_BACKEND" = "unknown" ]; then
-  PIP_TARGET="${SCRIPT_DIR}[x11,wayland]"
+  EXTRAS+=("x11" "wayland")
+fi
+if [ "$INSTALL_GPU" -eq 1 ]; then
+  EXTRAS+=("gpu")
+fi
+PIP_TARGET="$SCRIPT_DIR"
+if [ "${#EXTRAS[@]}" -gt 0 ]; then
+  extras_csv="$(IFS=,; printf '%s' "${EXTRAS[*]}")"
+  PIP_TARGET="${SCRIPT_DIR}[${extras_csv}]"
 fi
 
 echo "Detected install session backend: $SESSION_BACKEND"
