@@ -198,6 +198,11 @@ jobs:
       name: npm-publish
     permissions:
       contents: read
+      # Required to mint the OIDC token for `provenance: true` in package.json.
+      # Without it `npm publish` fails to generate provenance and (because the
+      # publish step is best-effort) the release silently ships without the npm
+      # package — which is why 2026.7.x never reached the registry.
+      id-token: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
