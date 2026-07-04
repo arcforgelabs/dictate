@@ -15,6 +15,7 @@ from dictate.stt.factory import (
     FASTER_WHISPER_MODELS,
     GEMINI_MODELS,
     OPENAI_MODELS,
+    PARAKEET_MODELS,
     STT_BACKENDS,
     WHISPERX_MODELS,
     XAI_MODELS,
@@ -27,6 +28,7 @@ from dictate.stt.factory import (
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.gemini_backend import GeminiSpeechToText
 from dictate.stt.openai_backend import OpenAISpeechToText
+from dictate.stt.parakeet_backend import ParakeetSpeechToText
 from dictate.stt.whisperx_backend import WhisperXSpeechToText
 from dictate.stt.xai_backend import XAISpeechToText
 
@@ -36,6 +38,7 @@ __all__ = [
     "FASTER_WHISPER_MODELS",
     "GEMINI_MODELS",
     "OPENAI_MODELS",
+    "PARAKEET_MODELS",
     "STT_BACKENDS",
     "WHISPERX_MODELS",
     "XAI_MODELS",
@@ -46,6 +49,7 @@ __all__ = [
     "FasterWhisperSpeechToText",
     "GeminiSpeechToText",
     "OpenAISpeechToText",
+    "ParakeetSpeechToText",
     "SpeechToText",
     "SttBackend",
     "SttCapabilities",

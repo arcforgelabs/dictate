@@ -40,6 +40,17 @@ try:
 except Exception:
     pass
 
+# Parakeet English backend runtime (onnx-asr + onnxruntime). Lazily imported and
+# degrades gracefully; bundle when installed. Models download at first use.
+for pkg in ("onnx_asr", "onnxruntime"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
+
 # Our own package + its lazily-imported backends/dialogs.
 hiddenimports += collect_submodules("dictate")
 hiddenimports += [

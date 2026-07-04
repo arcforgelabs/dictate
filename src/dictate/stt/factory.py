@@ -18,11 +18,13 @@ from dictate.stt.base import (
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.gemini_backend import GeminiSpeechToText, gemini_api_key_available
 from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
+from dictate.stt.parakeet_backend import ParakeetSpeechToText, parakeet_available
 from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
 from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "turbo",
+    "parakeet": "parakeet-tdt-0.6b-v2",
     "whisperx": "large-v3",
     "openai": "gpt-4o-mini-transcribe",
     "xai": "grok-speech-to-text",
@@ -36,6 +38,7 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "turbo",
     "large-v3-turbo",
 )
+PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2",)
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
 OPENAI_MODELS: tuple[str, ...] = (
     "gpt-4o-mini-transcribe",
@@ -64,6 +67,18 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="CTranslate2-optimized Whisper inference.",
         capabilities=FasterWhisperSpeechToText.capabilities,
         builder=lambda model, device, compute_type: FasterWhisperSpeechToText(
+            model_name=model,
+            device=device,
+            compute_type=compute_type,
+        ),
+    ),
+    "parakeet": BackendSpec(
+        backend="parakeet",
+        default_model=DEFAULT_MODELS["parakeet"],
+        model_examples=PARAKEET_MODELS,
+        description="NVIDIA Parakeet-TDT English ASR via ONNX (fast, accurate on CPU).",
+        capabilities=ParakeetSpeechToText.capabilities,
+        builder=lambda model, device, compute_type: ParakeetSpeechToText(
             model_name=model,
             device=device,
             compute_type=compute_type,
@@ -263,6 +278,15 @@ def check_backend_readiness(
             report.errors.append("faster-whisper package is not importable.")
         if device in {"cuda", "auto"}:
             _check_cuda_with_ctranslate2(report, requested_device=device)
+
+    if backend == "parakeet":
+        if parakeet_available():
+            report.notes.append("Parakeet (onnx-asr) importable.")
+        else:
+            report.errors.append(
+                'Parakeet backend selected but onnx-asr is not importable. '
+                'Install with: uv pip install "onnx-asr[cpu,hub]"'
+            )
 
     if backend == "whisperx":
         _check_whisperx(report, model_name=model_name, device=device)

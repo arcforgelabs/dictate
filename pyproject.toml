@@ -13,6 +13,10 @@ dependencies = [
     # AGC + noise suppression (WebRTC APM) on the capture stream. Linux-only wheels;
     # the code degrades to raw capture where it is unavailable.
     "webrtc-noise-gain>=1.3.0; sys_platform == 'linux'",
+    # NVIDIA Parakeet English backend (ONNX, CPU-friendly). onnxruntime is pinned
+    # below 1.24 to avoid the external-data path check that rejects the model.
+    "onnx-asr>=0.11.0",
+    "onnxruntime>=1.19,<1.24",
 ]
 
 [project.optional-dependencies]

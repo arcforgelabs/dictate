@@ -26,7 +26,7 @@ WhisperCppModel = Literal[
 ]
 ComputeDevice = Literal["cpu", "cuda", "auto"]
 ComputeType = Literal["int8", "float16", "float32"]
-SttBackend = Literal["faster-whisper", "whisperx", "openai", "xai", "gemini"]
+SttBackend = Literal["faster-whisper", "parakeet", "whisperx", "openai", "xai", "gemini"]
 
 
 @dataclass(frozen=True, slots=True)

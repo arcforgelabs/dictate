@@ -18,7 +18,9 @@ from dictate.stt import (
 
 class SttRegistryTests(unittest.TestCase):
     def test_backend_registry_has_expected_backends(self) -> None:
-        self.assertEqual(STT_BACKENDS, ("faster-whisper", "whisperx", "openai", "xai", "gemini"))
+        self.assertEqual(
+            STT_BACKENDS, ("faster-whisper", "parakeet", "whisperx", "openai", "xai", "gemini")
+        )
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
 
     def test_resolve_model_name_defaults(self) -> None:
