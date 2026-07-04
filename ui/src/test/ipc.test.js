@@ -5,6 +5,8 @@ afterEach(() => {
   delete window.__DICTATE__;
   delete window.__TAURI__;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("ipc bridge", () => {
@@ -92,6 +94,55 @@ describe("ipc bridge", () => {
         headers: { Authorization: "Bearer new", "Content-Type": "application/json" },
       }),
     );
+  });
+
+  it("reconnects to the restarted engine and re-hydrates when the stream drops", async () => {
+    vi.useFakeTimers();
+    const streams = [];
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        streams.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "old", platform: "gnome" };
+    window.__TAURI__ = {
+      core: {
+        invoke: vi.fn().mockResolvedValue({
+          baseUrl: "http://127.0.0.1:2",
+          token: "new",
+          platform: "gnome",
+        }),
+      },
+    };
+
+    const onReconnect = vi.fn();
+    const unsub = ipc.subscribe(() => {}, onReconnect);
+
+    // Initial stream on the original engine; first open must NOT fire onReconnect.
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toContain("http://127.0.0.1:1/api/events");
+    streams[0].onopen();
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    // Engine restarts → stream errors → re-resolve bridge and reopen on the new port.
+    streams[0].onerror();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(window.__TAURI__.core.invoke).toHaveBeenCalledWith("refresh_bridge");
+    expect(streams).toHaveLength(2);
+    expect(streams[1].url).toContain("http://127.0.0.1:2/api/events");
+    expect(streams[1].url).toContain("token=new");
+
+    // Reopen fires onReconnect so the caller can re-sync missed state.
+    streams[1].onopen();
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+
+    unsub();
+    expect(streams[1].closed).toBe(true);
   });
 
   it("starts the update flow through the authenticated backend route", async () => {

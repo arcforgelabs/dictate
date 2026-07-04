@@ -577,6 +577,10 @@ export default function App() {
           });
         });
       }
+    }, () => {
+      // SSE reconnected (e.g. engine restarted after an update) — re-sync the
+      // full state so history + quick-copy reflect anything missed while offline.
+      ipc.getState().then((st) => { if (!cancelled && st) hydrate(st); }).catch(() => {});
     });
     return () => { cancelled = true; resetTranscriptOrdering(); clearWatchdog(); unsub && unsub(); };
   }, []);

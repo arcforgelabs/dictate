@@ -127,18 +127,77 @@ export const ipc = {
   },
 
   // Server-sent events: live recording / status pushes from the daemon.
-  subscribe(onEvent) {
-    const cfg = bridge();
-    if (!cfg || typeof EventSource === "undefined") return () => {};
-    const src = new EventSource(`${cfg.baseUrl}/api/events?token=${encodeURIComponent(cfg.token)}`);
-    src.onmessage = (e) => {
+  //
+  // Resilient to engine restarts (in-app updates, crashes): when the stream
+  // drops, the engine typically comes back on a NEW port with a NEW token, so a
+  // plain EventSource — which only ever retries its original URL — would stay
+  // dead forever and the UI would freeze at its last snapshot. We re-resolve the
+  // bridge and reopen. `onReconnect` fires after each successful *re*open so the
+  // caller can re-hydrate state (history, quick-copy, …) missed while offline.
+  subscribe(onEvent, onReconnect) {
+    if (typeof EventSource === "undefined") return () => {};
+    let src = null;
+    let timer = null;
+    let closed = false;
+    let opened = false;
+
+    const scheduleReconnect = () => {
+      if (closed || timer) return;
+      timer = setTimeout(async () => {
+        timer = null;
+        if (closed) return;
+        await refreshBridge(); // re-resolve url+token for the (possibly new) engine
+        if (!closed) openStream();
+      }, 1000);
+    };
+
+    const openStream = () => {
+      const cfg = bridge();
+      if (!cfg) {
+        scheduleReconnect();
+        return;
+      }
+      src = new EventSource(`${cfg.baseUrl}/api/events?token=${encodeURIComponent(cfg.token)}`);
+      src.onopen = () => {
+        if (opened && onReconnect) {
+          try {
+            onReconnect();
+          } catch (err) {
+            /* caller re-hydrate failed; next event still updates */
+          }
+        }
+        opened = true;
+      };
+      src.onmessage = (e) => {
+        try {
+          onEvent(JSON.parse(e.data));
+        } catch (err) {
+          /* ignore malformed frames */
+        }
+      };
+      src.onerror = () => {
+        // EventSource auto-retries the same (now-dead) URL; tear down and
+        // re-resolve instead so a restarted engine on a new port is picked up.
+        try {
+          if (src) src.close();
+        } catch (err) {
+          /* already closed */
+        }
+        src = null;
+        scheduleReconnect();
+      };
+    };
+
+    openStream();
+    return () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
       try {
-        onEvent(JSON.parse(e.data));
+        if (src) src.close();
       } catch (err) {
-        /* ignore malformed frames */
+        /* already closed */
       }
     };
-    return () => src.close();
   },
 
   // Save text through the OS-native file picker (Tauri) or a browser download fallback.
