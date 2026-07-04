@@ -280,10 +280,16 @@ install_desktop_ui() {
   npm --prefix "$SCRIPT_DIR/ui" ci >/dev/null 2>&1 \
     || npm --prefix "$SCRIPT_DIR/ui" install >/dev/null 2>&1 \
     || { echo "UI front-end install failed; skipping the optional shell."; print_ui_hint; return 0; }
-  if ! npm --prefix "$SCRIPT_DIR/ui" run build >/dev/null 2>&1; then
-    echo "UI front-end build failed; skipping the optional shell."; print_ui_hint; return 0
-  fi
-  if ! ( cd "$shell_src" && cargo build --release --manifest-path src-tauri/Cargo.toml ); then
+  npm --prefix "$shell_src" ci >/dev/null 2>&1 \
+    || npm --prefix "$shell_src" install >/dev/null 2>&1 \
+    || { echo "UI shell tooling install failed; skipping the optional shell."; print_ui_hint; return 0; }
+  # Build through the Tauri CLI, NOT a raw `cargo build`. The CLI enables the
+  # `custom-protocol` feature that embeds the frontend and serves it over the
+  # app protocol. A plain cargo build omits that feature, so the shell falls
+  # back to loading the dev server (localhost:5173) and shows "Could not connect
+  # to localhost: Connection refused" at runtime. --no-bundle: we only need the
+  # binary here, not a .deb/AppImage. (beforeBuildCommand rebuilds ui/dist.)
+  if ! ( cd "$shell_src" && npm run tauri -- build --no-bundle ); then
     echo "Desktop UI shell build failed; the engine + tray remain fully functional."
     print_ui_hint
     return 0
