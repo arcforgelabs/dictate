@@ -164,11 +164,16 @@ class ParakeetTranscribeTests(unittest.TestCase):
         ):
             self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
 
-        fake_onnx_asr.load_model.assert_called_once_with(
-            "nemo-parakeet-tdt-0.6b-v2",
-            "/tmp/model",
-            quantization="int8",
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        fake_onnx_asr.load_model.assert_called_once()
+        args, kwargs = fake_onnx_asr.load_model.call_args
+        self.assertEqual(args[0], "nemo-parakeet-tdt-0.6b-v2")
+        self.assertEqual(Path(args[1]), Path("/tmp/model"))
+        self.assertEqual(
+            kwargs,
+            {
+                "quantization": "int8",
+                "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            },
         )
 
     def test_float16_compute_uses_supported_int8_quantization(self) -> None:
