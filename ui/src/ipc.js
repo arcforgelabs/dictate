@@ -36,6 +36,10 @@ export function isLive() {
   return !!bridge();
 }
 
+export function isShell() {
+  return !!injected();
+}
+
 async function call(method, path, body, retry = true) {
   const cfg = bridge();
   if (!cfg) throw new Error("not-live");
@@ -70,6 +74,7 @@ async function call(method, path, body, retry = true) {
 
 export const ipc = {
   isLive,
+  isShell,
 
   // Platform: "gnome" | "kde" | "win11" | "win10" | "mac" | "linux".
   // Read from the injected object directly so the chrome is correct even when

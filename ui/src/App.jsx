@@ -771,6 +771,10 @@ export default function App() {
   const startNoteRecording = () => {
     if (noteRecording) return;
     if (!ipc.isLive()) {
+      if (ipc.isShell()) {
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
       clearWatchdog();
       setNotePaused(false);
       setNotePauseReason(null);
@@ -810,6 +814,12 @@ export default function App() {
   const finishNoteRecording = () => {
     if (!noteRecording) return;
     if (!ipc.isLive()) {
+      if (ipc.isShell()) {
+        setNotePaused(false);
+        setNoteRecording(false);
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
       setNotePaused(false);
       setNoteRecording(false);
       setNoteView("processing");
