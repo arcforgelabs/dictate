@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-07-04
+
+### Added
+
+- NVIDIA Parakeet-TDT English speech-to-text backend (ONNX via `onnx-asr`, no
+  NeMo/torch). On CPU it is both faster and more accurate than Whisper
+  `small.en` (~6% WER, ~13x real-time), emits punctuation and casing directly,
+  and — being a transducer — outputs silence instead of hallucinating filler.
+  It is now the default on-device engine for English on CPU.
+- A Private-mode language toggle (English / Multilingual) on the home: English
+  uses the on-device Parakeet engine; Multilingual falls back to the
+  hardware-aware Whisper tier. No provider or brand names surface in the UI.
+- Automatic capture gain control and optional noise suppression on the input
+  path, so hot microphones no longer clip into garbage transcriptions and no
+  manual level tuning is required across different mics and environments.
+
+### Changed
+
+- Parakeet decodes the whole utterance in one pass rather than through streaming
+  chunks: it has no prompt input to carry context across chunk seams, so
+  full-utterance decoding is both higher quality and, at ~13x real-time, still
+  low-latency.
+- The canonical Linux install is now per-user (`install.sh --user`, under
+  `~/.local`): one venv process both dictates and serves the UI, and in-app
+  updates apply without `sudo`/`pkexec`.
+
+### Fixed
+
+- The desktop shell is now built through the Tauri CLI (not a raw `cargo build`),
+  which embeds the frontend. A plain cargo build omitted the `custom-protocol`
+  feature and the shell tried to load the dev server, showing "Could not connect
+  to localhost: Connection refused" at runtime.
+- The webview reconnects its live event stream after the engine restarts (e.g.
+  an in-app update), re-resolving the new port/token and re-syncing state, so the
+  dictation history and quick-copy no longer freeze at their last snapshot.
+
 ## 2026-07-02
 
 ### Changed
