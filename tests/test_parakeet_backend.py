@@ -38,7 +38,7 @@ class ParakeetRegistrationTests(unittest.TestCase):
 
     def test_capabilities(self) -> None:
         caps = ParakeetSpeechToText.capabilities
-        self.assertTrue(caps.supports_streaming_chunks)
+        self.assertFalse(caps.supports_streaming_chunks)  # full-utterance decode, no chunking
         self.assertFalse(caps.supports_language_hint)  # English-only, no language arg
 
     def test_factory_builds_without_loading_model(self) -> None:

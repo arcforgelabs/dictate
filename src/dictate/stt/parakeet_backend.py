@@ -104,7 +104,10 @@ class ParakeetSpeechToText(SpeechToText):
         supports_prompt_bias=False,
         supports_language_hint=False,
         supports_word_timestamps=False,
-        supports_streaming_chunks=True,
+        # Parakeet has no prompt input to carry context across chunks, so chunked
+        # streaming mangles word boundaries. It's fast enough (~13x realtime) to
+        # decode the whole utterance in one pass instead — higher quality, low tail.
+        supports_streaming_chunks=False,
     )
 
     def __init__(
