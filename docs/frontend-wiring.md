@@ -44,13 +44,20 @@ plus Tauri commands in `ui-shell/src-tauri/src/lib.rs` for window/OS actions.
    exercise needs a newer published release: verify the polkit prompt, the atomic
    file swap, and that the new shell + engine come up together.
 
-4. **WhisperX backend.** UI metadata exists for `whisperx`, but this should stay
-   an advanced/experimental local path selected through `dictate config`, not a
-   primary GUI backend picker. Before exposing it broadly, verify packaged
-   install behavior on Windows and Linux and benchmark accuracy, runtime,
-   RAM/VRAM use, model download size, and long-meeting stability.
+4. **Meeting mode speaker attribution.** The UI should expose a plain
+   `Meeting` action, not a primary "diarization" control. Live meeting mode must
+   require an internal speaker-attribution path; plain recordings may skip it.
+   Current research targets Parakeet ASR plus NVIDIA Streaming Sortformer v2 for
+   local GPU meetings, with DiariZen as an offline quality comparison. See
+   `docs/meeting-transcription-research.md`.
 
-5. **Dictate Pro / subscriptions.** Architecture exists in docs
+5. **WhisperX backend.** UI metadata exists for `whisperx`, but this should stay
+   an advanced/experimental local path selected through `dictate config`, not a
+   primary GUI backend picker or main meeting stack. Before exposing it broadly,
+   verify packaged install behavior on Windows and Linux and benchmark accuracy,
+   runtime, RAM/VRAM use, model download size, and long-meeting stability.
+
+6. **Dictate Pro / subscriptions.** Architecture exists in docs
    (`dictate-pro-subscription-architecture.md`, `msstore-in-app-subscriptions.md`,
    `xai-diarization-cost-model.md`) but there is **no frontend surface yet**.
    **Production P0:** public **Upgrade to Pro** on

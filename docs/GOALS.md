@@ -136,12 +136,12 @@ Immediate direction:
      suitable for prompts, email, and text insertion.
    - **Meeting:** verbatim transcript with diarization/speaker labels enabled by
      default.
-3. Make hosted xAI the first production meeting path because it supports the
-   required meeting contract: streaming/chunked speech-to-text plus speaker
-   labels/diarization.
+3. Meeting mode always requires speaker attribution. The UI should expose this
+   as "Meeting" rather than engine terminology such as "diarization"; internally
+   the selected meeting lane must run a diarization/speaker-attribution model.
 4. Keep proven local models available for direct dictation and offline fallback.
-   Do not present local models as production-ready meeting diarization until
-   separately benchmarked.
+   Local meeting lanes should prioritize Parakeet ASR plus a dedicated
+   diarization model, not WhisperX as the primary stack.
 5. Hide or de-emphasize hosted providers that cannot satisfy the meeting
    contract. Provider selection should be capability-based, not a flat model
    list.
@@ -157,15 +157,19 @@ Immediate direction:
    can read, edit, accept, copy, insert, export, or expand the transcript without
    requiring another focused text field.
 
-Deferred local meeting diarization:
+Local meeting diarization:
 
-1. Local meeting diarization is experimental, not part of the first production
-   meeting path.
-2. Candidate local paths include WhisperX + pyannote, pyannote paired with
-   existing local STT, and NVIDIA NeMo diarization.
-3. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
+1. Candidate local meeting paths are documented in
+   [meeting-transcription-research.md](meeting-transcription-research.md).
+2. Primary targets are Parakeet ASR plus NVIDIA Streaming Sortformer v2 for live
+   local GPU meetings, with DiariZen as an offline quality comparison and
+   pyannote Community-1 as a practical local fallback.
+3. WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
+   useful, but do not build the product dependency around WhisperX unless a
+   benchmark overturns this decision.
+4. Before release, benchmark accuracy, RAM/VRAM use, runtime, installation
    weight, and long-meeting stability on representative recordings.
-4. If local meeting diarization is exposed before it is broadly proven, label it
+5. If local meeting diarization is exposed before it is broadly proven, label it
    as experimental or high-performance-machine-only.
 
 ### Silence auto-pause (note recording)
