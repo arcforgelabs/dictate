@@ -12,7 +12,7 @@ from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteStore
 from dictate.pro.client import ProClient
-from dictate.sync import SyncSettingsStore, decrypt_record, encrypted_record_from_dict
+from dictate.sync import SYNCED_PREF_KEYS, SyncSettingsStore, decrypt_record, encrypted_record_from_dict
 
 
 @dataclass(slots=True)
@@ -164,7 +164,7 @@ class SyncEngine:
         if deleted:
             return False
         key = payload.get("key")
-        if key not in {"theme", "sound", "ambient"}:
+        if key not in SYNCED_PREF_KEYS:
             return False
         if self.prefs_store is None:
             return False

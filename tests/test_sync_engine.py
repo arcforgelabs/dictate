@@ -557,24 +557,31 @@ class SyncEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()
             account_id = "acct_1"
-            record = encrypt_record(
-                account_id,
-                key,
-                PlainSyncRecord(
-                    collection="settings",
-                    record_id="prefs.theme",
-                    rev=1,
-                    updated_at="2026-07-05T12:00:00+00:00",
-                    device_id="device_remote",
-                    deleted=False,
-                    content_type="application/vnd.dictate.setting+json;v=1",
-                    payload={"key": "theme", "value": "dark"},
-                ),
-            )
+            records = [
+                encrypt_record(
+                    account_id,
+                    key,
+                    PlainSyncRecord(
+                        collection="settings",
+                        record_id=f"prefs.{pref_key}",
+                        rev=1,
+                        updated_at="2026-07-05T12:00:00+00:00",
+                        device_id="device_remote",
+                        deleted=False,
+                        content_type="application/vnd.dictate.setting+json;v=1",
+                        payload={"key": pref_key, "value": value},
+                    ),
+                )
+                for pref_key, value in (
+                    ("theme", "dark"),
+                    ("activation", "toggle"),
+                    ("outputFormat", "markdown"),
+                )
+            ]
             prefs = UiPrefsStore(Path(tmp) / "prefs.json")
             engine = SyncEngine(
                 settings=self._settings(tmp, account_id, key),
-                pro_client=_FakeProClient([{**asdict(record), "seq": 3}]),
+                pro_client=_FakeProClient([{**asdict(record), "seq": seq} for seq, record in enumerate(records, start=3)]),
                 history_store=HistoryStore(Path(tmp) / "history.json"),
                 note_store=NoteStore(Path(tmp) / "notes"),
                 config_path=Path(tmp) / "config.yaml",
@@ -583,8 +590,11 @@ class SyncEngineTests(unittest.TestCase):
 
             result = engine.run_once()
 
-            self.assertEqual(result.applied, 1)
-            self.assertEqual(prefs.load()["theme"], "dark")
+            self.assertEqual(result.applied, 3)
+            loaded = prefs.load()
+            self.assertEqual(loaded["theme"], "dark")
+            self.assertEqual(loaded["activation"], "toggle")
+            self.assertEqual(loaded["outputFormat"], "markdown")
 
     def test_pull_applies_lexicon_hotword_and_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

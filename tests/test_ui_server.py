@@ -302,9 +302,10 @@ class UiPrefsStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "p.json"
             store = UiPrefsStore(path)
-            prefs = store.update({"theme": "dark", "overlay": False, "junk": 1})
+            prefs = store.update({"theme": "dark", "overlay": False, "outputFormat": "markdown", "junk": 1})
             self.assertEqual(prefs["theme"], "dark")
             self.assertFalse(prefs["overlay"])
+            self.assertEqual(prefs["outputFormat"], "markdown")
             self.assertNotIn("junk", prefs)
             # reload from disk
             self.assertEqual(UiPrefsStore(path).load()["theme"], "dark")
@@ -312,10 +313,11 @@ class UiPrefsStoreTests(unittest.TestCase):
     def test_invalid_theme_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "p.json"
-            path.write_text(json.dumps({"theme": "neon", "activation": "wat"}))
+            path.write_text(json.dumps({"theme": "neon", "activation": "wat", "outputFormat": "html"}))
             prefs = UiPrefsStore(path).load()
             self.assertEqual(prefs["theme"], DEFAULT_PREFS["theme"])
             self.assertEqual(prefs["activation"], DEFAULT_PREFS["activation"])
+            self.assertEqual(prefs["outputFormat"], DEFAULT_PREFS["outputFormat"])
 
 
 class EventBrokerTests(unittest.TestCase):
@@ -646,7 +648,7 @@ class UiBackendStateTests(unittest.TestCase):
                 pro_client=pro_client,
                 sync_settings=sync_settings,
             )
-            backend.patch_config({"prefs": {"theme": "dark", "sound": True}})
+            backend.patch_config({"prefs": {"theme": "dark", "sound": True, "activation": "toggle", "outputFormat": "markdown"}})
             config_mod.add_hotwords(["OpenClaw"], path=backend.config_path)
             config_mod.add_lexicon_replacements({"openc law": "OpenClaw"}, path=backend.config_path)
 
@@ -656,6 +658,8 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertIsNotNone(key)
             payloads = [decrypt_record("acct_test", key, record) for record in pro_client.drained_sync_records]
             self.assertTrue(any(payload.get("key") == "theme" and payload.get("value") == "dark" for payload in payloads))
+            self.assertTrue(any(payload.get("key") == "activation" and payload.get("value") == "toggle" for payload in payloads))
+            self.assertTrue(any(payload.get("key") == "outputFormat" and payload.get("value") == "markdown" for payload in payloads))
             self.assertTrue(any(payload.get("kind") == "hotword" and payload.get("term") == "OpenClaw" for payload in payloads))
             self.assertTrue(
                 any(
@@ -826,15 +830,34 @@ class UiBackendShortcutPrefsTests(unittest.TestCase):
             backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
             backend.enable_sync()
 
-            backend.patch_config({"prefs": {"theme": "dark", "trayOnly": False}})
+            backend.patch_config({"prefs": {"theme": "dark", "activation": "toggle", "outputFormat": "markdown", "trayOnly": False}})
+
+            outbox = sync_settings.outbox()
+            self.assertIsNotNone(outbox)
+            pending = outbox.pending()
+            payloads = [decrypt_record("acct_test", sync_settings.account_key(), record) for record in pending]
+            values_by_key = {payload["key"]: payload["value"] for payload in payloads}
+            self.assertEqual([record.collection for record in pending], ["settings", "settings", "settings"])
+            self.assertEqual(values_by_key["theme"], "dark")
+            self.assertEqual(values_by_key["activation"], "toggle")
+            self.assertEqual(values_by_key["outputFormat"], "markdown")
+            self.assertNotIn("trayOnly", values_by_key)
+
+    def test_shortcut_activation_enqueues_when_sync_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            sync_settings = _sync_settings(Path(d))
+            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
+            backend.enable_sync()
+
+            backend.patch_config({"shortcut": {"activation": "toggle"}})
 
             outbox = sync_settings.outbox()
             self.assertIsNotNone(outbox)
             pending = outbox.pending()
             self.assertEqual([record.collection for record in pending], ["settings"])
             payload = decrypt_record("acct_test", sync_settings.account_key(), pending[0])
-            self.assertEqual(payload["key"], "theme")
-            self.assertEqual(payload["value"], "dark")
+            self.assertEqual(payload["key"], "activation")
+            self.assertEqual(payload["value"], "toggle")
 
     def test_invalid_theme_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as d:

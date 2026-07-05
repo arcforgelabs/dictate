@@ -31,7 +31,9 @@ RECOVERY_KEY_PREFIX = "dictate-rk-"
 RECOVERY_KEY_ITERATIONS = 390_000
 
 SyncCollection = Literal["history", "note", "segment", "settings", "lexicon"]
+SYNC_SETTINGS_CONTENT_TYPE = "application/vnd.dictate.setting+json;v=1"
 SYNC_LEXICON_CONTENT_TYPE = "application/vnd.dictate.lexicon+json;v=1"
+SYNCED_PREF_KEYS = frozenset({"theme", "sound", "ambient", "activation", "outputFormat"})
 
 
 @dataclass(frozen=True, slots=True)

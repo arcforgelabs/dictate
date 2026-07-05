@@ -58,6 +58,8 @@ from dictate.stt.factory import (
 )
 from dictate.pro.client import ProClient, ProClientError
 from dictate.sync import (
+    SYNC_SETTINGS_CONTENT_TYPE,
+    SYNCED_PREF_KEYS,
     SyncSettingsStore,
     create_recovery_envelope,
     enqueue_lexicon_hotwords,
@@ -85,10 +87,11 @@ DEFAULT_PREFS: dict[str, Any] = {
     "overlay": True,
     "sound": False,
     "ambient": True,
+    "outputFormat": "plain",     # "plain" | "markdown"
 }
 _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
-_SYNCED_PREF_KEYS = frozenset({"theme", "sound", "ambient"})
+_VALID_OUTPUT_FORMATS = ("plain", "markdown")
 
 # Provider display metadata. Backend ids / models are grounded in stt.factory;
 # only the human-facing bits (brand glyph, key shape, blurb) live here.
@@ -284,6 +287,8 @@ class UiPrefsStore:
             prefs["theme"] = DEFAULT_PREFS["theme"]
         if prefs.get("activation") not in _VALID_ACTIVATIONS:
             prefs["activation"] = DEFAULT_PREFS["activation"]
+        if prefs.get("outputFormat") not in _VALID_OUTPUT_FORMATS:
+            prefs["outputFormat"] = DEFAULT_PREFS["outputFormat"]
         for flag in ("trayOnly", "overlay", "sound", "ambient"):
             prefs[flag] = bool(prefs.get(flag, DEFAULT_PREFS[flag]))
         return prefs
@@ -723,7 +728,7 @@ class UiBackend:
         if outbox is None:
             return
         prefs = self.prefs_store.load()
-        for key in sorted(_SYNCED_PREF_KEYS):
+        for key in sorted(SYNCED_PREF_KEYS):
             if key in prefs:
                 self._enqueue_synced_pref(key, prefs[key])
         cfg = config_mod.load_config(self.config_path)
@@ -733,7 +738,7 @@ class UiBackend:
             self._enqueue_synced_replacement(wrong, right, deleted=False)
 
     def _enqueue_synced_pref(self, key: str, value: Any) -> None:
-        if key not in _SYNCED_PREF_KEYS:
+        if key not in SYNCED_PREF_KEYS:
             return
         outbox = self._sync_outbox()
         if outbox is None:
@@ -741,7 +746,7 @@ class UiBackend:
         outbox.enqueue(
             collection="settings",
             record_id=f"prefs.{key}",
-            content_type="application/vnd.dictate.setting+json;v=1",
+            content_type=SYNC_SETTINGS_CONTENT_TYPE,
             payload={"key": key, "value": value, "updated_at": self.now().isoformat()},
         )
 
@@ -957,15 +962,20 @@ class UiBackend:
         if activation is not None:
             if activation not in _VALID_ACTIVATIONS:
                 raise ApiError(400, f"invalid activation: {activation!r}")
-            self.prefs_store.update({"activation": activation})
+            updated = self.prefs_store.update({"activation": activation})
+            self._enqueue_synced_pref("activation", updated["activation"])
 
     def _set_prefs(self, prefs: Any) -> dict[str, Any]:
         if not isinstance(prefs, dict):
             raise ApiError(400, "prefs must be an object")
         if "theme" in prefs and prefs["theme"] not in _VALID_THEMES:
             raise ApiError(400, f"invalid theme: {prefs['theme']!r}")
+        if "activation" in prefs and prefs["activation"] not in _VALID_ACTIVATIONS:
+            raise ApiError(400, f"invalid activation: {prefs['activation']!r}")
+        if "outputFormat" in prefs and prefs["outputFormat"] not in _VALID_OUTPUT_FORMATS:
+            raise ApiError(400, f"invalid outputFormat: {prefs['outputFormat']!r}")
         updated = self.prefs_store.update(prefs)
-        for key in _SYNCED_PREF_KEYS:
+        for key in SYNCED_PREF_KEYS:
             if key in prefs:
                 self._enqueue_synced_pref(key, updated[key])
         return updated
