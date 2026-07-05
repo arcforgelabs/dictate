@@ -516,6 +516,7 @@ class UiBackend:
             except Exception as exc:  # noqa: BLE001
                 raise ApiError(403, "Recovery key unlocked sync, but this device could not be trusted.") from exc
             state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)
+            self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
         else:
             try:
                 device_envelopes = client.list_key_envelopes(envelope_kind="device").get("envelopes", [])
@@ -555,6 +556,7 @@ class UiBackend:
                     account_key=account_key,
                     recovery_key=returned_recovery_key,
                 )
+                self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
                 client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
         engine = self._sync_engine()
         engine.attach_outbox()
@@ -620,6 +622,37 @@ class UiBackend:
             recipient_public_key=public_key,
         )
         return client.approve_device(target, envelope=envelope)
+
+    def _save_current_device_key_envelope(
+        self,
+        client: ProClient,
+        account_id: str,
+        device_id: str,
+        account_key: bytes,
+    ) -> None:
+        public_key = self._current_device_public_key(client, device_id)
+        if not public_key:
+            raise ApiError(409, "This device cannot enable encrypted sync because it did not register a sync public key.")
+        envelope = wrap_account_key_for_device(
+            account_id=account_id,
+            account_key=account_key,
+            recipient_public_key=public_key,
+        )
+        client.save_key_envelope(envelope_kind="device", envelope=envelope)
+
+    def _current_device_public_key(self, client: ProClient, device_id: str) -> str:
+        target = device_id.strip()
+        if not target:
+            return ""
+        devices = client.list_devices().get("devices", [])
+        for item in devices:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("device_id") or item.get("deviceId") or "").strip()
+            if item_id != target:
+                continue
+            return str(item.get("public_key") or item.get("publicKey") or "").strip()
+        return ""
 
     def export_pro_cloud_data(self) -> dict[str, Any]:
         client = self._require_pro_client()

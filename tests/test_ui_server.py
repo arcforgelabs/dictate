@@ -166,6 +166,7 @@ class _FakeNoteDaemon:
 
 class _FakeProClient:
     def __init__(self) -> None:
+        self.current_device_keys = generate_device_key_pair()
         self.create_calls: list[dict[str, object]] = []
         self.sync_drains = 0
         self.sync_pulls: list[dict[str, int]] = []
@@ -239,6 +240,7 @@ class _FakeProClient:
                 {
                     "device_id": "device_test",
                     "label": "Test Desktop",
+                    "public_key": self.current_device_keys.public_key,
                     "trusted_at": "2026-07-05T12:00:00+00:00",
                     "revoked_at": None,
                 },
@@ -581,6 +583,58 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertTrue(result["sync"]["keyAvailable"])
             self.assertEqual(pro_client.sync_drains, 1)
             self.assertEqual(len(backend.history_store._sync_outbox.pending()), 1)
+
+    def test_enable_sync_uploads_current_device_key_envelope(self) -> None:
+        from dictate.sync import unwrap_account_key_for_device
+
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            sync_settings = _sync_settings(Path(d))
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=sync_settings,
+            )
+
+            backend.enable_sync()
+
+            device_envelopes = [
+                item for item in pro_client.saved_key_envelopes
+                if item["envelope_kind"] == "device"
+            ]
+            self.assertEqual(len(device_envelopes), 1)
+            restored = unwrap_account_key_for_device(
+                account_id="acct_test",
+                private_key=pro_client.current_device_keys.private_key,
+                envelope=device_envelopes[0]["envelope"],
+            )
+            self.assertEqual(restored, sync_settings.account_key())
+
+    def test_enable_sync_requires_current_device_public_key(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+
+            def list_devices() -> dict[str, object]:
+                return {
+                    "devices": [
+                        {
+                            "device_id": "device_test",
+                            "label": "Test Desktop",
+                            "trusted_at": "2026-07-05T12:00:00+00:00",
+                            "revoked_at": None,
+                        }
+                    ]
+                }
+
+            pro_client.list_devices = list_devices  # type: ignore[method-assign]
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=_sync_settings(Path(d)),
+            )
+
+            with self.assertRaisesRegex(ApiError, "sync public key"):
+                backend.enable_sync()
 
     def test_enable_sync_snapshots_portable_prefs_and_lexicon(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1293,7 +1347,10 @@ class HttpIntegrationTests(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["sync"]["enabled"])
         self.assertIn("recoveryKey", body)
-        self.assertEqual(len(self.handle.backend.pro_client.saved_key_envelopes), 1)
+        self.assertEqual(
+            {item["envelope_kind"] for item in self.handle.backend.pro_client.saved_key_envelopes},
+            {"device", "recovery"},
+        )
 
         self.handle.backend.history_store.append("queued private")
         with self._post("/api/pro/sync/run") as resp:

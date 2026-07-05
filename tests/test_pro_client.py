@@ -237,6 +237,40 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(session.account_id, "arc_account_1")
         self.assertEqual(session.device_id, "dictate-desktop")
 
+    def test_arc_forge_sign_in_registers_device_public_key_when_supplied(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        client.responses = [
+            {"message": "If an account exists, a login code has been sent."},
+            {
+                "access_token": _unsigned_jwt("arc_account_1"),
+                "refresh_token": "refresh_1",
+                "expires_in": 3600,
+            },
+            {"device": {"account_id": "arc_account_1", "device_id": "device_registered"}},
+        ]
+
+        with patch.object(client, "_save_refresh_token", return_value=True):
+            start = client.start_sign_in("user@example.com")
+            session = client.complete_sign_in(
+                challenge_id=start["challenge_id"],
+                code="12345678",
+                device_label="Workstation",
+                device_public_key="public_key_1",
+            )
+
+        self.assertEqual(client.calls[2]["method"], "POST")
+        self.assertEqual(client.calls[2]["path"], "/api/dictate/devices/register")
+        self.assertEqual(
+            client.calls[2]["payload"],
+            {
+                "device_id": "dictate-desktop",
+                "device_label": "Workstation",
+                "device_public_key": "public_key_1",
+            },
+        )
+        self.assertEqual(client.calls[2]["auth"], _unsigned_jwt("arc_account_1"))
+        self.assertEqual(session.device_id, "device_registered")
+
     def test_arc_forge_gateway_routes_hosted_jobs_under_api_dictate(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
         session = ProSession(
@@ -332,16 +366,19 @@ class ProClientTests(unittest.TestCase):
 
         with patch.object(client, "load_session", return_value=session):
             client.list_devices()
+            client.register_device(device_label="Desktop", device_public_key="public_key_1")
             client.revoke_device("device_2")
             client.export_cloud_data()
             client.delete_cloud_data()
 
         self.assertEqual([call["path"] for call in client.calls], [
             "/api/dictate/devices",
+            "/api/dictate/devices/register",
             "/api/dictate/devices/device_2/revoke",
             "/api/dictate/account/export",
             "/api/dictate/account/cloud-data",
         ])
+        self.assertEqual(client.calls[1]["payload"]["device_public_key"], "public_key_1")
 
     def test_drain_sync_outbox_removes_accepted_records(self) -> None:
         from dictate.sync import SyncOutbox

@@ -147,6 +147,12 @@ class ProClient:
             email = (self._pending_email or challenge_id).strip().lower()
             response = self._request("POST", "/api/account/auth/verify-code", {"email": email, "code": code})
             session = self._session_from_arcforge_auth_response(response)
+            if device_public_key:
+                session = self._register_gateway_device(
+                    session,
+                    device_label=device_label,
+                    device_public_key=device_public_key,
+                )
         else:
             response = self._request("POST", "/v1/auth/complete", payload)
             session = ProSession(
@@ -345,6 +351,15 @@ class ProClient:
         session = self._require_session()
         return self._request("GET", self._account_path("devices"), auth=session.access_token)
 
+    def register_device(self, *, device_label: str, device_public_key: str) -> dict[str, Any]:
+        session = self._require_session()
+        payload = {
+            "device_id": session.device_id,
+            "device_label": device_label,
+            "device_public_key": device_public_key,
+        }
+        return self._request("POST", self._account_path("devices/register"), payload, auth=session.access_token)
+
     def revoke_device(self, device_id: str) -> dict[str, Any]:
         session = self._require_session()
         target = device_id.strip()
@@ -417,6 +432,43 @@ class ProClient:
         if self._uses_arcforge_gateway():
             return f"/api/dictate/{clean}"
         return f"/v1/{clean}"
+
+    def _register_gateway_device(
+        self,
+        session: ProSession,
+        *,
+        device_label: str,
+        device_public_key: str,
+    ) -> ProSession:
+        try:
+            response = self._request(
+                "POST",
+                "/api/dictate/devices/register",
+                {
+                    "device_id": session.device_id,
+                    "device_label": device_label,
+                    "device_public_key": device_public_key,
+                },
+                auth=session.access_token,
+            )
+        except ProClientError as exc:
+            if exc.status in {404, 405, 501}:
+                logger.info("Arc Forge Dictate device registration is unavailable on this gateway")
+                return session
+            raise
+        device = response.get("device") if isinstance(response.get("device"), dict) else response
+        device_id = str(device.get("device_id") or device.get("deviceId") or "").strip() if isinstance(device, dict) else ""
+        account_id = str(device.get("account_id") or device.get("accountId") or "").strip() if isinstance(device, dict) else ""
+        if not device_id:
+            return session
+        return ProSession(
+            account_id=account_id or session.account_id,
+            device_id=device_id,
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+            access_expires_at=session.access_expires_at,
+            refresh_expires_at=session.refresh_expires_at,
+        )
 
     def _uses_arcforge_gateway(self) -> bool:
         mode = os.environ.get("DICTATE_PRO_API_MODE", "").strip().lower()
