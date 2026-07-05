@@ -18,6 +18,7 @@ class _FakeProClient:
         self.records = list(records or [])
         self.drained = False
         self.changes_since: list[int] = []
+        self.cursor_updates: list[int] = []
 
     def drain_sync_outbox(self, outbox):  # noqa: ANN001
         self.drained = True
@@ -28,6 +29,10 @@ class _FakeProClient:
     def get_sync_changes(self, *, since: int = 0, limit: int = 500):
         self.changes_since.append(since)
         return {"next_seq": self.records[-1]["seq"] if self.records else since, "records": self.records}
+
+    def update_sync_cursor(self, *, last_seq: int):
+        self.cursor_updates.append(last_seq)
+        return {"last_seq": last_seq}
 
 
 class SyncEngineTests(unittest.TestCase):
@@ -86,9 +91,10 @@ class SyncEngineTests(unittest.TestCase):
             settings = self._settings(tmp, account_id, key)
             history = HistoryStore(Path(tmp) / "history.json")
             notes = NoteStore(Path(tmp) / "notes")
+            client = _FakeProClient(changes)
             engine = SyncEngine(
                 settings=settings,
-                pro_client=_FakeProClient(changes),
+                pro_client=client,
                 history_store=history,
                 note_store=notes,
             )
@@ -97,6 +103,7 @@ class SyncEngineTests(unittest.TestCase):
 
             self.assertEqual(result.applied, 1)
             self.assertEqual(settings.load().last_seq, 11)
+            self.assertEqual(client.cursor_updates, [11])
             self.assertEqual(history.load()[0].text, "synced private note")
 
     def test_pull_applies_note_and_segment_records(self) -> None:

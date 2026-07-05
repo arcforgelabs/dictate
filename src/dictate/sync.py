@@ -17,7 +17,9 @@ from typing import Any, Literal
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from dictate.platform_paths import user_data_dir
 from dictate import api_keys as api_keys_mod
@@ -84,6 +86,12 @@ class RecoveryKeyEnvelope:
     aad_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceKeyPair:
+    private_key: str
+    public_key: str
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -126,6 +134,76 @@ def decode_key(value: str) -> bytes:
 def generate_recovery_key() -> str:
     """Generate a user-held recovery key for restoring encrypted sync on new devices."""
     return RECOVERY_KEY_PREFIX + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
+
+
+def generate_device_key_pair() -> DeviceKeyPair:
+    private = x25519.X25519PrivateKey.generate()
+    public = private.public_key()
+    return DeviceKeyPair(
+        private_key=base64.b64encode(
+            private.private_bytes(
+                encoding=Encoding.Raw,
+                format=PrivateFormat.Raw,
+                encryption_algorithm=NoEncryption(),
+            )
+        ).decode("ascii"),
+        public_key=base64.b64encode(public.public_bytes(encoding=Encoding.Raw, format=PublicFormat.Raw)).decode("ascii"),
+    )
+
+
+def wrap_account_key_for_device(
+    *,
+    account_id: str,
+    account_key: bytes,
+    recipient_public_key: str,
+) -> dict[str, Any]:
+    _validate_key(account_key)
+    ephemeral = x25519.X25519PrivateKey.generate()
+    recipient = x25519.X25519PublicKey.from_public_bytes(_decode_raw_key(recipient_public_key, "device public key"))
+    shared = ephemeral.exchange(recipient)
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    aad = _device_envelope_aad(account_id)
+    wrapping_key = _derive_device_wrapping_key(shared, salt)
+    ciphertext = AESGCM(wrapping_key).encrypt(nonce, account_key, aad)
+    return {
+        "version": 1,
+        "algorithm": "x25519-aes-256-gcm",
+        "ephemeral_public_key": base64.b64encode(
+            ephemeral.public_key().public_bytes(encoding=Encoding.Raw, format=PublicFormat.Raw)
+        ).decode("ascii"),
+        "salt": base64.b64encode(salt).decode("ascii"),
+        "nonce": base64.b64encode(nonce).decode("ascii"),
+        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+        "aad_hash": base64.b64encode(hashlib.sha256(aad).digest()).decode("ascii"),
+    }
+
+
+def unwrap_account_key_for_device(
+    *,
+    account_id: str,
+    private_key: str,
+    envelope: dict[str, Any],
+) -> bytes:
+    if int(envelope.get("version") or 0) != 1:
+        raise ValueError("unsupported device key envelope version")
+    if envelope.get("algorithm") != "x25519-aes-256-gcm":
+        raise ValueError("unsupported device key envelope algorithm")
+    aad = _device_envelope_aad(account_id)
+    expected_hash = base64.b64encode(hashlib.sha256(aad).digest()).decode("ascii")
+    if envelope.get("aad_hash") != expected_hash:
+        raise ValueError("device key envelope metadata authentication hash mismatch")
+    private = x25519.X25519PrivateKey.from_private_bytes(_decode_raw_key(private_key, "device private key"))
+    ephemeral_public = x25519.X25519PublicKey.from_public_bytes(
+        _decode_raw_key(str(envelope.get("ephemeral_public_key") or ""), "ephemeral public key")
+    )
+    shared = private.exchange(ephemeral_public)
+    salt = base64.b64decode(str(envelope["salt"]).encode("ascii"), validate=True)
+    nonce = base64.b64decode(str(envelope["nonce"]).encode("ascii"), validate=True)
+    ciphertext = base64.b64decode(str(envelope["ciphertext"]).encode("ascii"), validate=True)
+    account_key = AESGCM(_derive_device_wrapping_key(shared, salt)).decrypt(nonce, ciphertext, aad)
+    _validate_key(account_key)
+    return account_key
 
 
 def create_recovery_envelope(
@@ -468,6 +546,22 @@ def _recovery_aad(account_id: str) -> bytes:
     return f"dictate-sync-recovery:v1:{account}".encode("utf-8")
 
 
+def _device_envelope_aad(account_id: str) -> bytes:
+    account = account_id.strip()
+    if not account:
+        raise ValueError("account_id is required for device key envelopes")
+    return f"dictate-sync-device-envelope:v1:{account}".encode("utf-8")
+
+
+def _derive_device_wrapping_key(shared_secret: bytes, salt: bytes) -> bytes:
+    return PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=200_000,
+    ).derive(shared_secret)
+
+
 def _derive_recovery_wrapping_key(recovery_key: str, salt: bytes, iterations: int) -> bytes:
     if not recovery_key.startswith(RECOVERY_KEY_PREFIX):
         raise ValueError("invalid sync recovery key format")
@@ -487,6 +581,16 @@ def _derive_recovery_wrapping_key(recovery_key: str, salt: bytes, iterations: in
         salt=salt,
         iterations=int(iterations),
     ).derive(material)
+
+
+def _decode_raw_key(value: str, label: str) -> bytes:
+    try:
+        raw = base64.b64decode(value.encode("ascii"), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError(f"invalid {label}") from exc
+    if len(raw) != 32:
+        raise ValueError(f"invalid {label} length")
+    return raw
 
 
 def _validate_key(key: bytes) -> None:

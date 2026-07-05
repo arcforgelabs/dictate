@@ -162,6 +162,7 @@ class ProStoreTests(unittest.TestCase):
             account_id=account.account_id,
             device_id="device_1",
             label="Desktop",
+            public_key="public_key_1",
         )
         self.store.save_auth_token(
             token_hash="tok_1",
@@ -178,6 +179,26 @@ class ProStoreTests(unittest.TestCase):
         token = self.store.get_auth_token("tok_1")
         assert token is not None
         self.assertIsNotNone(token["revoked_at"])
+
+    def test_device_registration_persists_public_key_and_cursor(self) -> None:
+        account = self.store.get_or_create_account("cursor@example.com")
+        device_id = self.store.register_device(
+            account_id=account.account_id,
+            device_id="device_1",
+            label="Desktop",
+            public_key="public_key_1",
+        )
+
+        device = self.store.get_device(account_id=account.account_id, device_id=device_id)
+        assert device is not None
+        self.assertEqual(device.public_key, "public_key_1")
+
+        cursor = self.store.set_sync_cursor(account_id=account.account_id, device_id=device_id, last_seq=12)
+        self.assertEqual(cursor.last_seq, 12)
+        self.store.set_sync_cursor(account_id=account.account_id, device_id=device_id, last_seq=7)
+        saved = self.store.get_sync_cursor(account_id=account.account_id, device_id=device_id)
+        assert saved is not None
+        self.assertEqual(saved.last_seq, 12)
 
     def test_delete_account_cloud_data_removes_sync_and_revokes_devices(self) -> None:
         account = self.store.get_or_create_account("delete@example.com")
@@ -231,10 +252,14 @@ class ProStoreTests(unittest.TestCase):
         self.assertEqual(len(envelopes), 1)
         exported = self.store.export_account_cloud_data(account.account_id)
         self.assertEqual(exported["key_envelopes"][0]["envelope"]["ciphertext"], "opaque")
+        self.store.set_sync_cursor(account_id=account.account_id, device_id=device_id, last_seq=3)
+        exported = self.store.export_account_cloud_data(account.account_id)
+        self.assertEqual(exported["sync_cursors"][0]["last_seq"], 3)
 
         counts = self.store.delete_account_cloud_data(account.account_id)
 
         self.assertEqual(counts["key_envelopes"], 1)
+        self.assertEqual(counts["sync_cursors"], 1)
         self.assertEqual(self.store.list_key_envelopes(account_id=account.account_id), [])
 
 

@@ -19,10 +19,13 @@ from dictate.sync import (
     decode_key,
     encrypt_record,
     generate_account_key,
+    generate_device_key_pair,
     generate_recovery_key,
     load_or_create_device,
     recover_account_key,
     recovery_envelope_from_dict,
+    unwrap_account_key_for_device,
+    wrap_account_key_for_device,
 )
 
 
@@ -154,6 +157,41 @@ class SyncCryptoTests(unittest.TestCase):
             recover_account_key(
                 account_id="acct_1",
                 recovery_key=generate_recovery_key(),
+                envelope=envelope,
+            )
+
+    def test_device_key_envelope_wraps_account_key_for_recipient_device(self) -> None:
+        account_key = generate_account_key()
+        recipient = generate_device_key_pair()
+
+        envelope = wrap_account_key_for_device(
+            account_id="acct_1",
+            account_key=account_key,
+            recipient_public_key=recipient.public_key,
+        )
+
+        self.assertNotIn(encode_key(account_key), json.dumps(envelope))
+        restored = unwrap_account_key_for_device(
+            account_id="acct_1",
+            private_key=recipient.private_key,
+            envelope=envelope,
+        )
+        self.assertEqual(restored, account_key)
+
+    def test_device_key_envelope_rejects_wrong_device(self) -> None:
+        account_key = generate_account_key()
+        recipient = generate_device_key_pair()
+        wrong_device = generate_device_key_pair()
+        envelope = wrap_account_key_for_device(
+            account_id="acct_1",
+            account_key=account_key,
+            recipient_public_key=recipient.public_key,
+        )
+
+        with self.assertRaises(InvalidTag):
+            unwrap_account_key_for_device(
+                account_id="acct_1",
+                private_key=wrong_device.private_key,
                 envelope=envelope,
             )
 

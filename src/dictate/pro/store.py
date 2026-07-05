@@ -117,10 +117,19 @@ class DeviceRow:
     account_id: str
     device_id: str
     label: str
+    public_key: str | None
     created_at: str
     trusted_at: str | None
     revoked_at: str | None
     last_seen_at: str
+
+
+@dataclass(slots=True)
+class SyncCursorRow:
+    account_id: str
+    device_id: str
+    last_seq: int
+    updated_at: str
 
 
 @dataclass(slots=True)
@@ -170,6 +179,7 @@ class ProStore:
                     device_id TEXT PRIMARY KEY,
                     account_id TEXT NOT NULL,
                     label TEXT NOT NULL DEFAULT 'Desktop',
+                    public_key TEXT,
                     trusted_at TEXT,
                     revoked_at TEXT,
                     created_at TEXT NOT NULL,
@@ -297,6 +307,14 @@ class ProStore:
                 CREATE INDEX IF NOT EXISTS idx_sync_records_account_device
                     ON sync_records(account_id, device_id);
 
+                CREATE TABLE IF NOT EXISTS sync_cursors (
+                    account_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    last_seq INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (account_id, device_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS key_envelopes (
                     account_id TEXT NOT NULL,
                     device_id TEXT NOT NULL,
@@ -321,6 +339,10 @@ class ProStore:
                 pass
             try:
                 conn.execute("ALTER TABLE devices ADD COLUMN revoked_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE devices ADD COLUMN public_key TEXT")
             except sqlite3.OperationalError:
                 pass
             conn.execute(
@@ -439,6 +461,45 @@ class ProStore:
             ).fetchall()
             return [_sync_record_row(row) for row in rows]
 
+    def set_sync_cursor(self, *, account_id: str, device_id: str, last_seq: int) -> SyncCursorRow:
+        device = device_id.strip()
+        if not device:
+            raise ValueError("device_id is required")
+        seq = max(0, int(last_seq))
+        now = iso()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO sync_cursors (account_id, device_id, last_seq, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(account_id, device_id) DO UPDATE SET
+                    last_seq = MAX(sync_cursors.last_seq, excluded.last_seq),
+                    updated_at = excluded.updated_at
+                """,
+                (account_id, device, seq, now),
+            )
+            row = conn.execute(
+                """
+                SELECT account_id, device_id, last_seq, updated_at
+                FROM sync_cursors
+                WHERE account_id = ? AND device_id = ?
+                """,
+                (account_id, device),
+            ).fetchone()
+            return _sync_cursor_row(row)
+
+    def get_sync_cursor(self, *, account_id: str, device_id: str) -> SyncCursorRow | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT account_id, device_id, last_seq, updated_at
+                FROM sync_cursors
+                WHERE account_id = ? AND device_id = ?
+                """,
+                (account_id, device_id),
+            ).fetchone()
+            return _sync_cursor_row(row) if row else None
+
     def save_key_envelope(
         self,
         *,
@@ -517,7 +578,7 @@ class ProStore:
                 return {}
             devices = conn.execute(
                 """
-                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
                 FROM devices
                 WHERE account_id = ?
                 ORDER BY created_at ASC
@@ -537,6 +598,15 @@ class ProStore:
                 """
                 SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
                 FROM key_envelopes
+                WHERE account_id = ?
+                ORDER BY updated_at ASC
+                """,
+                (account_id,),
+            ).fetchall()
+            sync_cursors = conn.execute(
+                """
+                SELECT account_id, device_id, last_seq, updated_at
+                FROM sync_cursors
                 WHERE account_id = ?
                 ORDER BY updated_at ASC
                 """,
@@ -567,6 +637,7 @@ class ProStore:
                 "account": dict(account),
                 "devices": [dict(row) for row in devices],
                 "key_envelopes": [_key_envelope_payload(row) for row in key_envelopes],
+                "sync_cursors": [dict(row) for row in sync_cursors],
                 "sync_records": [_sync_record_payload(row) for row in sync_records],
                 "meeting_jobs": [dict(row) for row in meetings],
                 "transcript_segments": transcripts,
@@ -590,7 +661,7 @@ class ProStore:
                 counts["transcript_segments"] = cur.rowcount
             else:
                 counts["transcript_segments"] = 0
-            for table in ("key_envelopes", "sync_records", "meeting_jobs", "usage_events", "usage_periods"):
+            for table in ("key_envelopes", "sync_cursors", "sync_records", "meeting_jobs", "usage_events", "usage_periods"):
                 cur = conn.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
                 counts[table] = cur.rowcount
             cur = conn.execute(
@@ -665,8 +736,16 @@ class ProStore:
                 return None
             return AccountRow(row["account_id"], row["email"], row["stripe_customer_id"])
 
-    def register_device(self, *, account_id: str, device_id: str | None, label: str) -> str:
+    def register_device(
+        self,
+        *,
+        account_id: str,
+        device_id: str | None,
+        label: str,
+        public_key: str | None = None,
+    ) -> str:
         device = device_id or f"dev_{uuid.uuid4().hex}"
+        normalized_public_key = public_key.strip() if isinstance(public_key, str) and public_key.strip() else None
         now = iso()
         with self._conn() as conn:
             existing = conn.execute(
@@ -675,16 +754,23 @@ class ProStore:
             ).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE devices SET last_seen_at = ?, label = ? WHERE device_id = ?",
-                    (now, label, device),
+                    """
+                    UPDATE devices
+                    SET last_seen_at = ?,
+                        label = ?,
+                        public_key = COALESCE(?, public_key)
+                    WHERE device_id = ?
+                    """,
+                    (now, label, normalized_public_key, device),
                 )
                 return device
             conn.execute(
                 """
-                INSERT INTO devices (device_id, account_id, label, trusted_at, revoked_at, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, NULL, ?, ?)
+                INSERT INTO devices (
+                    device_id, account_id, label, public_key, trusted_at, revoked_at, created_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
                 """,
-                (device, account_id, label, now, now, now),
+                (device, account_id, label, normalized_public_key, now, now, now),
             )
             return device
 
@@ -699,7 +785,7 @@ class ProStore:
         with self._conn() as conn:
             rows = conn.execute(
                 """
-                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
                 FROM devices
                 WHERE account_id = ?
                 ORDER BY created_at ASC
@@ -712,7 +798,7 @@ class ProStore:
         with self._conn() as conn:
             row = conn.execute(
                 """
-                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
                 FROM devices
                 WHERE account_id = ? AND device_id = ?
                 """,
@@ -1338,11 +1424,21 @@ def _sync_record_row(row: sqlite3.Row) -> SyncRecordRow:
     )
 
 
+def _sync_cursor_row(row: sqlite3.Row) -> SyncCursorRow:
+    return SyncCursorRow(
+        account_id=row["account_id"],
+        device_id=row["device_id"],
+        last_seq=int(row["last_seq"]),
+        updated_at=row["updated_at"],
+    )
+
+
 def _device_row(row: sqlite3.Row) -> DeviceRow:
     return DeviceRow(
         account_id=row["account_id"],
         device_id=row["device_id"],
         label=row["label"],
+        public_key=row["public_key"],
         created_at=row["created_at"],
         trusted_at=row["trusted_at"],
         revoked_at=row["revoked_at"],

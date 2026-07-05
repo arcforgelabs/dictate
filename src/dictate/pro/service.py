@@ -177,6 +177,24 @@ class ProService:
         next_seq = records[-1]["seq"] if records else max(0, since)
         return {"next_seq": next_seq, "has_more": len(records) >= max(1, min(limit, 1000)), "records": records}
 
+    def update_sync_cursor(self, account_id: str, device_id: str | None, *, last_seq: int) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
+        try:
+            row = self.store.set_sync_cursor(
+                account_id=account_id,
+                device_id=str(device_id),
+                last_seq=last_seq,
+            )
+        except ValueError as exc:
+            raise ProServiceError(400, str(exc)) from exc
+        return {
+            "account_id": row.account_id,
+            "device_id": row.device_id,
+            "last_seq": row.last_seq,
+            "updated_at": row.updated_at,
+        }
+
     def save_key_envelope(
         self,
         account_id: str,
@@ -237,6 +255,7 @@ class ProService:
                     "account_id": device.account_id,
                     "device_id": device.device_id,
                     "label": device.label,
+                    "public_key": device.public_key,
                     "created_at": device.created_at,
                     "trusted_at": device.trusted_at,
                     "revoked_at": device.revoked_at,

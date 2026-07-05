@@ -58,6 +58,15 @@ class ProServiceTests(unittest.TestCase):
             self.service.get_sync_changes(self.account_id, self.device_id)
         self.assertEqual(ctx.exception.status, 403)
 
+    def test_sync_cursor_requires_active_device(self) -> None:
+        cursor = self.service.update_sync_cursor(self.account_id, self.device_id, last_seq=9)
+
+        self.assertEqual(cursor["last_seq"], 9)
+        self.service.revoke_device(self.account_id, self.device_id)
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.update_sync_cursor(self.account_id, self.device_id, last_seq=10)
+        self.assertEqual(ctx.exception.status, 403)
+
     def test_sync_rejects_device_mismatch(self) -> None:
         record = encrypt_record(
             "acct_local",

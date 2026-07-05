@@ -85,6 +85,7 @@ class ProAuth:
         code: str,
         device_id: str | None = None,
         device_label: str = "Desktop",
+        device_public_key: str | None = None,
     ) -> AuthSession:
         challenge = self._store.get_auth_challenge(challenge_id)
         if challenge is None:
@@ -115,6 +116,7 @@ class ProAuth:
             account_id=account.account_id,
             device_id=device_id,
             label=device_label,
+            public_key=device_public_key,
         )
         if not self._store.device_is_active(account_id=account.account_id, device_id=device):
             raise ValueError("device revoked")

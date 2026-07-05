@@ -95,6 +95,8 @@ class SyncEngine:
                 applied += 1
                 max_seq = max(max_seq, seq)
         self.settings.set_cursor(max_seq)
+        if max_seq > state.last_seq:
+            self.pro_client.update_sync_cursor(last_seq=max_seq)
         return SyncRunResult(
             enabled=True,
             pushed=int(pushed.get("pushed", 0)),

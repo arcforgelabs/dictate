@@ -80,7 +80,11 @@ class ProServerTests(unittest.TestCase):
             self.base_url,
             "POST",
             "/v1/auth/complete",
-            {"challenge_id": start["challenge_id"], "code": start["dev_code"]},
+            {
+                "challenge_id": start["challenge_id"],
+                "code": start["dev_code"],
+                "device_public_key": "public_key_1",
+            },
         )
         self.assertEqual(status, 200)
         return complete
@@ -269,6 +273,24 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(listed["envelopes"][0]["envelope"], payload)
         self.assertNotIn("account data key", json.dumps(listed).lower())
+
+    def test_sync_cursor_acknowledges_applied_sequence(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+
+        status, cursor = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/cursor",
+            {"last_seq": 12},
+            token=token,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(cursor["last_seq"], 12)
+        status, devices = _request(self.base_url, "GET", "/v1/devices", token=token)
+        self.assertEqual(status, 200)
+        self.assertEqual(devices["devices"][0]["public_key"], "public_key_1")
 
     def test_device_revoke_blocks_future_sync(self) -> None:
         session = self._sign_in_session()

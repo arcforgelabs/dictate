@@ -125,7 +125,14 @@ class ProClient:
             return {**response, "challenge_id": email, "email": email}
         return self._request("POST", "/v1/auth/start", {"email": email})
 
-    def complete_sign_in(self, *, challenge_id: str, code: str, device_label: str = "Desktop") -> ProSession:
+    def complete_sign_in(
+        self,
+        *,
+        challenge_id: str,
+        code: str,
+        device_label: str = "Desktop",
+        device_public_key: str | None = None,
+    ) -> ProSession:
         session_data = self.load_session()
         payload = {
             "challenge_id": challenge_id,
@@ -134,6 +141,8 @@ class ProClient:
         }
         if session_data:
             payload["device_id"] = session_data.device_id
+        if device_public_key:
+            payload["device_public_key"] = device_public_key
         if self._uses_arcforge_gateway():
             email = (self._pending_email or challenge_id).strip().lower()
             response = self._request("POST", "/api/account/auth/verify-code", {"email": email, "code": code})
@@ -307,6 +316,15 @@ class ProClient:
         path = f"{self._sync_path('changes')}?since={max(0, int(since))}&limit={max(1, int(limit))}"
         return self._request("GET", path, auth=session.access_token)
 
+    def update_sync_cursor(self, *, last_seq: int) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request(
+            "POST",
+            self._sync_path("cursor"),
+            {"device_id": session.device_id, "last_seq": max(0, int(last_seq))},
+            auth=session.access_token,
+        )
+
     def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, Any]) -> dict[str, Any]:
         session = self._require_session()
         return self._request(
@@ -369,7 +387,7 @@ class ProClient:
         return f"/v1/meetings/{job_id}{suffix}"
 
     def _sync_path(self, action: str) -> str:
-        if action not in {"push", "changes", "key-envelopes"}:
+        if action not in {"push", "changes", "cursor", "key-envelopes"}:
             raise ValueError("unknown sync action")
         if self._uses_arcforge_gateway():
             return f"/api/dictate/sync/{action}"

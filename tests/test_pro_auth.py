@@ -95,8 +95,12 @@ class ProAuthDeliveryTests(unittest.TestCase):
             challenge_id=start["challenge_id"],
             code=start["dev_code"],
             device_label="Dev Desktop",
+            device_public_key="public_key_1",
         )
         self.assertTrue(session.access_token)
+        device = self.store.get_device(account_id=session.account_id, device_id=session.device_id)
+        assert device is not None
+        self.assertEqual(device.public_key, "public_key_1")
 
     def test_production_without_smtp_fails_closed(self) -> None:
         auth = ProAuth(self.store, dev_expose_code=False)

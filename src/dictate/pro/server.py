@@ -162,6 +162,7 @@ class ProRequestHandler(BaseHTTPRequestHandler):
                     code=code,
                     device_id=str(body.get("device_id") or "").strip() or None,
                     device_label=str(body.get("device_label") or "Desktop"),
+                    device_public_key=str(body.get("device_public_key") or "").strip() or None,
                 )
             except ValueError as exc:
                 raise ApiError(401, str(exc)) from exc
@@ -241,6 +242,9 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             since = _query_int(query, "since", 0)
             limit = _query_int(query, "limit", 500)
             return _Response(200, service.get_sync_changes(account_id, device_id, since=since, limit=limit))
+        if path == "/v1/sync/cursor" and method == "POST":
+            body = self._read_json()
+            return _Response(200, service.update_sync_cursor(account_id, device_id, last_seq=int(body.get("last_seq") or 0)))
         if path == "/v1/sync/key-envelopes" and method == "GET":
             kind = query.get("kind", [""])[0].strip() or None
             return _Response(200, service.list_key_envelopes(account_id, device_id, envelope_kind=kind))
