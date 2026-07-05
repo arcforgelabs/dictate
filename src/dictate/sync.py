@@ -31,6 +31,7 @@ RECOVERY_KEY_PREFIX = "dictate-rk-"
 RECOVERY_KEY_ITERATIONS = 390_000
 
 SyncCollection = Literal["history", "note", "segment", "settings", "lexicon"]
+SYNC_LEXICON_CONTENT_TYPE = "application/vnd.dictate.lexicon+json;v=1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,6 +507,69 @@ class SyncSettingsStore:
         )
 
 
+def enqueue_lexicon_hotwords(
+    outbox: SyncOutbox | None,
+    terms: list[str],
+    *,
+    deleted: bool = False,
+    updated_at: str | None = None,
+) -> int:
+    """Queue encrypted hotword mutations for cloud sync when sync is enabled."""
+    if outbox is None:
+        return 0
+    count = 0
+    timestamp = updated_at or utc_now_iso()
+    for term in terms:
+        if not isinstance(term, str):
+            continue
+        normalized = " ".join(term.split()).casefold()
+        if not normalized:
+            continue
+        outbox.enqueue(
+            collection="lexicon",
+            record_id=f"hotword:{_stable_lexicon_id(normalized)}",
+            content_type=SYNC_LEXICON_CONTENT_TYPE,
+            payload={"kind": "hotword", "term": term, "updated_at": timestamp},
+            deleted=deleted,
+        )
+        count += 1
+    return count
+
+
+def enqueue_lexicon_replacements(
+    outbox: SyncOutbox | None,
+    replacements: dict[str, str | None],
+    *,
+    deleted: bool = False,
+    updated_at: str | None = None,
+) -> int:
+    """Queue encrypted lexical replacement mutations for cloud sync when sync is enabled."""
+    if outbox is None:
+        return 0
+    count = 0
+    timestamp = updated_at or utc_now_iso()
+    for wrong, right in replacements.items():
+        if not isinstance(wrong, str):
+            continue
+        normalized = " ".join(wrong.split()).casefold()
+        if not normalized:
+            continue
+        outbox.enqueue(
+            collection="lexicon",
+            record_id=f"replacement:{_stable_lexicon_id(normalized)}",
+            content_type=SYNC_LEXICON_CONTENT_TYPE,
+            payload={
+                "kind": "replacement",
+                "wrong": wrong,
+                "right": right or "",
+                "updated_at": timestamp,
+            },
+            deleted=deleted,
+        )
+        count += 1
+    return count
+
+
 def encrypted_record_from_dict(raw: dict[str, Any]) -> EncryptedSyncRecord:
     return EncryptedSyncRecord(
         collection=_collection(str(raw["collection"])),
@@ -538,6 +602,10 @@ def _collection(value: str) -> SyncCollection:
     if value not in {"history", "note", "segment", "settings", "lexicon"}:
         raise ValueError(f"unknown sync collection: {value}")
     return value  # type: ignore[return-value]
+
+
+def _stable_lexicon_id(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _aad(account_id: str, record: PlainSyncRecord) -> bytes:

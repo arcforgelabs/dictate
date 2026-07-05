@@ -218,7 +218,7 @@ class ConfigDailySettingsTests(unittest.TestCase):
 
         with patch("dictate.__main__.add_hotwords") as add, patch(
             "dictate.__main__.load_config", return_value=Config(hotwords=["Baz"])
-        ):
+        ), patch("dictate.__main__._sync_cli_outbox", return_value=None):
             code, out, _ = _run_config(["hotwords", "--add", "Baz"])
         self.assertEqual(code, 0)
         add.assert_called_once_with(["Baz"])
@@ -228,7 +228,7 @@ class ConfigDailySettingsTests(unittest.TestCase):
 
         with patch("dictate.__main__.remove_hotwords") as rm, patch(
             "dictate.__main__.load_config", return_value=Config(hotwords=["X", "Y"])
-        ):
+        ), patch("dictate.__main__._sync_cli_outbox", return_value=None):
             code, out, _ = _run_config(["hotwords", "--clear"])
         self.assertEqual(code, 0)
         rm.assert_called_once_with(["X", "Y"])

@@ -19,7 +19,6 @@ Design notes
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import secrets
@@ -61,6 +60,8 @@ from dictate.pro.client import ProClient, ProClientError
 from dictate.sync import (
     SyncSettingsStore,
     create_recovery_envelope,
+    enqueue_lexicon_hotwords,
+    enqueue_lexicon_replacements,
     generate_device_key_pair,
     generate_recovery_key,
     recover_account_key,
@@ -745,38 +746,19 @@ class UiBackend:
         )
 
     def _enqueue_synced_hotword(self, term: str, *, deleted: bool) -> None:
-        normalized = " ".join(term.split()).casefold()
-        if not normalized:
-            return
-        outbox = self._sync_outbox()
-        if outbox is None:
-            return
-        outbox.enqueue(
-            collection="lexicon",
-            record_id=f"hotword:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}",
-            content_type="application/vnd.dictate.lexicon+json;v=1",
-            payload={"kind": "hotword", "term": term, "updated_at": self.now().isoformat()},
+        enqueue_lexicon_hotwords(
+            self._sync_outbox(),
+            [term],
             deleted=deleted,
+            updated_at=self.now().isoformat(),
         )
 
     def _enqueue_synced_replacement(self, wrong: str, right: str | None, *, deleted: bool) -> None:
-        normalized = " ".join(wrong.split()).casefold()
-        if not normalized:
-            return
-        outbox = self._sync_outbox()
-        if outbox is None:
-            return
-        outbox.enqueue(
-            collection="lexicon",
-            record_id=f"replacement:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}",
-            content_type="application/vnd.dictate.lexicon+json;v=1",
-            payload={
-                "kind": "replacement",
-                "wrong": wrong,
-                "right": right or "",
-                "updated_at": self.now().isoformat(),
-            },
+        enqueue_lexicon_replacements(
+            self._sync_outbox(),
+            {wrong: right},
             deleted=deleted,
+            updated_at=self.now().isoformat(),
         )
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:

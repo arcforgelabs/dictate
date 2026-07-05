@@ -346,6 +346,7 @@ class SttRegistryTests(unittest.TestCase):
                     "GEMINI_API_KEY": "",
                     "GOOGLE_API_KEY": "",
                     "DICTATE_GEMINI_API_KEY": "",
+                    "DICTATE_GEMINI_API_KEY_COMMAND": "",
                 },
             ),
             patch("dictate.stt.gemini_backend.read_api_key", return_value=None),
@@ -360,7 +361,14 @@ class SttRegistryTests(unittest.TestCase):
 
     def test_xai_readiness_requires_api_key(self) -> None:
         with (
-            patch.dict("os.environ", {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": ""}),
+            patch.dict(
+                "os.environ",
+                {
+                    "XAI_API_KEY": "",
+                    "DICTATE_XAI_API_KEY": "",
+                    "DICTATE_XAI_API_KEY_COMMAND": "",
+                },
+            ),
             patch("dictate.stt.xai_backend.read_api_key", return_value=None),
             patch("dictate.api_keys.read_api_key", return_value=None),
         ):

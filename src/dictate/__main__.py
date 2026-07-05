@@ -58,6 +58,7 @@ from dictate.outputs import (
     resolve_typing_backend,
 )
 from dictate.process_lock import ProcessLock, daemon_lock_path
+from dictate.sync import SyncSettingsStore, enqueue_lexicon_hotwords, enqueue_lexicon_replacements
 from dictate.stt import (
     COMPUTE_DEVICES,
     COMPUTE_TYPES,
@@ -698,9 +699,17 @@ def _parse_csv_words(value: str) -> list[str]:
     return parse_hotwords_text(value)
 
 
+def _sync_cli_outbox():
+    try:
+        return SyncSettingsStore().outbox()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
     if args.add_hotword:
         added = add_hotwords(_parse_csv_words(args.add_hotword))
+        enqueue_lexicon_hotwords(_sync_cli_outbox(), added, deleted=False)
         if added:
             print(f"Added: {', '.join(added)}", file=sys.stderr)
             print("Restart dictate to apply.", file=sys.stderr)
@@ -710,6 +719,7 @@ def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
 
     if args.remove_hotword:
         removed = remove_hotwords(_parse_csv_words(args.remove_hotword))
+        enqueue_lexicon_hotwords(_sync_cli_outbox(), removed, deleted=True)
         if removed:
             print(f"Removed: {', '.join(removed)}", file=sys.stderr)
             print("Restart dictate to apply.", file=sys.stderr)
@@ -746,6 +756,7 @@ def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
                 return 2
             replacements[wrong_clean] = right_clean
         added = add_lexicon_replacements(replacements)
+        enqueue_lexicon_replacements(_sync_cli_outbox(), added, deleted=False)
         if added:
             for wrong, right in added.items():
                 print(f"Added replacement: {wrong} -> {right}", file=sys.stderr)
@@ -755,6 +766,7 @@ def _handle_hotword_commands(args) -> int | None:  # noqa: ANN001
 
     if args.remove_lexicon_replacement:
         removed = remove_lexicon_replacements(args.remove_lexicon_replacement)
+        enqueue_lexicon_replacements(_sync_cli_outbox(), {wrong: None for wrong in removed}, deleted=True)
         if removed:
             print(f"Removed replacements: {', '.join(removed)}", file=sys.stderr)
         else:
@@ -965,15 +977,18 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         if args.clear:
             current = load_config().hotwords
             if current:
-                remove_hotwords(current)
+                removed = remove_hotwords(current)
+                enqueue_lexicon_hotwords(_sync_cli_outbox(), removed, deleted=True)
             print("ok: hotwords cleared")
             return 0
         changed = False
         if args.add:
-            add_hotwords(_parse_csv_words(args.add))
+            added = add_hotwords(_parse_csv_words(args.add))
+            enqueue_lexicon_hotwords(_sync_cli_outbox(), added, deleted=False)
             changed = True
         if args.remove:
-            remove_hotwords(_parse_csv_words(args.remove))
+            removed = remove_hotwords(_parse_csv_words(args.remove))
+            enqueue_lexicon_hotwords(_sync_cli_outbox(), removed, deleted=True)
             changed = True
         words = load_config().hotwords
         if changed:
