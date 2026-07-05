@@ -376,6 +376,19 @@ Minimum UI surfaces:
 5. Recovery key setup and warning.
 6. Export/delete cloud data actions.
 
+Advanced CLI parity is required for support, packaged-app recovery, and headless
+testing:
+
+| Command | Purpose |
+| --- | --- |
+| `dictate pro status` | Show sign-in, entitlement, and encrypted-sync state. |
+| `dictate pro sign-in <email>` / `dictate pro verify ...` | Start and complete Dictate Pro sign-in while registering this device's sync public key. |
+| `dictate pro sync enable [--recovery-key ...]` | Explicitly opt into encrypted sync or restore an existing sync key. |
+| `dictate pro sync run` | Push local encrypted outbox records and pull remote changes once. |
+| `dictate pro sync disable [--clear-key]` | Disable sync on this device without deleting local dictations. |
+| `dictate pro devices list\|approve\|revoke` | Review, trust, and revoke devices. |
+| `dictate pro cloud export` / `dictate pro cloud delete --yes` | Export or delete account-owned cloud records. |
+
 ## Threat Model
 
 Protect against:

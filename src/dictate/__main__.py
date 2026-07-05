@@ -9,6 +9,7 @@ Usage:
     dictate benchmark ...     Benchmark STT backends on local WAV files
     dictate controls          Open Windows-friendly configuration/history controls
     dictate doctor ...        Diagnose environment/runtime setup
+    dictate pro ...           Manage Dictate Pro sign-in and encrypted sync
     dictate prepare-model ... Prepare/download a model before activation
     dictate --stt-backend faster-whisper
     dictate --type-backend wtype  Force typing backend for daemon mode
@@ -222,6 +223,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_doctor(cli_args[1:])
     if cli_args and cli_args[0] == "config":
         return _handle_config_commands(cli_args[1:])
+    if cli_args and cli_args[0] == "pro":
+        return _handle_pro_commands(cli_args[1:])
 
     parser = build_parser()
     args = parser.parse_args(cli_args)
@@ -343,6 +346,228 @@ def _handle_stop_command(argv: Sequence[str]) -> int:
     if not quiet:
         print(message, file=sys.stderr)
     return 0 if stopped else 1
+
+
+def _handle_pro_commands(argv: Sequence[str]) -> int:  # noqa: C901
+    """Manage Dictate Pro account state and explicit encrypted sync opt-in."""
+    import argparse as _ap
+    import json
+    from pathlib import Path as _Path
+
+    from dictate.pro.client import ProClientError
+    from dictate.ui_server import ApiError, UiBackend
+
+    parser = _ap.ArgumentParser(
+        prog="dictate pro",
+        description="Manage Dictate Pro sign-in, devices, and encrypted cloud sync",
+        add_help=True,
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    sub.add_parser("status", help="Show sign-in and encrypted sync status")
+
+    sign_in = sub.add_parser("sign-in", help="Request a Dictate Pro sign-in code")
+    sign_in.add_argument("email")
+
+    verify = sub.add_parser("verify", help="Complete Dictate Pro sign-in with a code")
+    verify.add_argument("--challenge-id", required=True)
+    verify.add_argument("--code", required=True)
+    verify.add_argument("--device-label", default="Desktop")
+
+    sub.add_parser("sign-out", help="Sign out without deleting local dictations")
+
+    sync = sub.add_parser("sync", help="Manage encrypted cloud sync")
+    sync_sub = sync.add_subparsers(dest="sync_cmd")
+    sync_sub.add_parser("status", help="Show encrypted sync status")
+    sync_enable = sync_sub.add_parser("enable", help="Opt into encrypted cloud sync")
+    sync_enable.add_argument(
+        "--recovery-key",
+        help="Restore an existing encrypted sync account data key on this device",
+    )
+    sync_sub.add_parser("run", help="Run one push/pull sync pass")
+    sync_disable = sync_sub.add_parser("disable", help="Disable sync on this device")
+    sync_disable.add_argument(
+        "--clear-key",
+        action="store_true",
+        help="Also remove this device's local sync account key",
+    )
+
+    devices = sub.add_parser("devices", help="List, approve, or revoke Dictate Pro devices")
+    devices_sub = devices.add_subparsers(dest="devices_cmd")
+    devices_sub.add_parser("list", help="List registered devices")
+    approve = devices_sub.add_parser("approve", help="Approve a pending device from this trusted device")
+    approve.add_argument("device_id")
+    revoke = devices_sub.add_parser("revoke", help="Revoke a device")
+    revoke.add_argument("device_id")
+
+    cloud = sub.add_parser("cloud", help="Export or delete cloud data")
+    cloud_sub = cloud.add_subparsers(dest="cloud_cmd")
+    export = cloud_sub.add_parser("export", help="Export server-side Dictate cloud records")
+    export.add_argument("--output", help="Write JSON export to this file instead of stdout")
+    delete = cloud_sub.add_parser("delete", help="Delete server-side Dictate cloud data")
+    delete.add_argument("--yes", action="store_true", help="Confirm deletion")
+
+    args = parser.parse_args(list(argv))
+    if args.cmd is None:
+        parser.print_help()
+        return 2
+
+    backend = UiBackend()
+
+    try:
+        if args.cmd == "status":
+            _print_pro_status(backend.get_state())
+            return 0
+        if args.cmd == "sign-in":
+            result = backend.start_pro_sign_in(args.email)
+            print(f"ok: sign-in code requested for {result.get('email') or args.email}")
+            if result.get("challenge_id"):
+                print(f"challenge_id: {result['challenge_id']}")
+            if result.get("dev_code"):
+                print(f"dev_code: {result['dev_code']}")
+            return 0
+        if args.cmd == "verify":
+            result = backend.complete_pro_sign_in(
+                challenge_id=args.challenge_id,
+                code=args.code,
+                device_label=args.device_label,
+            )
+            print(f"ok: signed in account_id={result['account_id']} device_id={result['device_id']}")
+            return 0
+        if args.cmd == "sign-out":
+            backend.sign_out_pro()
+            print("ok: signed out; local dictations remain on this device")
+            return 0
+        if args.cmd == "sync":
+            if args.sync_cmd is None:
+                sync.print_help()
+                return 2
+            if args.sync_cmd == "status":
+                _print_sync_status(backend.get_state()["sync"])
+                return 0
+            if args.sync_cmd == "enable":
+                result = backend.enable_sync(recovery_key=args.recovery_key)
+                _print_sync_status(result["sync"])
+                if result.get("recoveryKey"):
+                    print(f"recovery_key: {result['recoveryKey']}")
+                    print("warning: save this recovery key now; it is not shown again")
+                return 0
+            if args.sync_cmd == "run":
+                result = backend.run_sync()
+                sync_result = result.get("result", {})
+                print(
+                    "ok: sync "
+                    f"pushed={sync_result.get('pushed', 0)} "
+                    f"pulled={sync_result.get('pulled', 0)} "
+                    f"applied={sync_result.get('applied', 0)} "
+                    f"last_seq={sync_result.get('lastSeq', sync_result.get('last_seq', 0))}"
+                )
+                if sync_result.get("error"):
+                    print(f"warning: {sync_result['error']}", file=sys.stderr)
+                    return 1
+                return 0
+            if args.sync_cmd == "disable":
+                result = backend.disable_sync(clear_key=args.clear_key)
+                _print_sync_status(result["sync"])
+                return 0
+        if args.cmd == "devices":
+            if args.devices_cmd is None:
+                devices.print_help()
+                return 2
+            if args.devices_cmd == "list":
+                _print_pro_devices(backend.list_pro_devices().get("devices", []))
+                return 0
+            if args.devices_cmd == "approve":
+                result = backend.approve_pro_device(args.device_id)
+                device = result.get("device") or {}
+                print(f"ok: approved device_id={device.get('device_id') or args.device_id}")
+                return 0
+            if args.devices_cmd == "revoke":
+                result = backend.revoke_pro_device(args.device_id)
+                print(f"ok: revoked device_id={result.get('device_id') or args.device_id}")
+                return 0
+        if args.cmd == "cloud":
+            if args.cloud_cmd is None:
+                cloud.print_help()
+                return 2
+            if args.cloud_cmd == "export":
+                payload = backend.export_pro_cloud_data()
+                rendered = json.dumps(payload, indent=2, sort_keys=True)
+                if args.output:
+                    output = _Path(args.output).expanduser()
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(rendered + "\n", encoding="utf-8")
+                    print(f"ok: cloud export written to {output}")
+                else:
+                    print(rendered)
+                return 0
+            if args.cloud_cmd == "delete":
+                if not args.yes:
+                    print("error: cloud delete requires --yes", file=sys.stderr)
+                    return 2
+                result = backend.delete_pro_cloud_data()
+                print("ok: cloud data deleted")
+                print(json.dumps(result.get("cloud", result), indent=2, sort_keys=True))
+                return 0
+    except (ApiError, ProClientError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 2
+
+
+def _print_pro_status(state: dict) -> None:
+    pro = state.get("dictatePro") or {}
+    sync = state.get("sync") or {}
+    signed_in = bool(pro.get("signedIn"))
+    account = pro.get("account") if isinstance(pro.get("account"), dict) else {}
+    entitlements = pro.get("entitlements") if isinstance(pro.get("entitlements"), dict) else {}
+    features = entitlements.get("features") if isinstance(entitlements.get("features"), dict) else {}
+    print(f"signed_in: {'yes' if signed_in else 'no'}")
+    if account:
+        account_id = account.get("account_id") or account.get("accountId")
+        device_id = account.get("device_id") or account.get("deviceId")
+        if account_id:
+            print(f"account_id: {account_id}")
+        if device_id:
+            print(f"device_id: {device_id}")
+    if entitlements:
+        print(f"pro_active: {'yes' if entitlements.get('active') else 'no'}")
+        print(f"sync_entitled: {'yes' if features.get('sync') else 'no'}")
+    _print_sync_status(sync)
+
+
+def _print_sync_status(sync: dict) -> None:
+    print(f"sync_enabled: {'yes' if sync.get('enabled') else 'no'}")
+    print(f"sync_account_id: {sync.get('accountId') or '(none)'}")
+    print(f"sync_device_id: {sync.get('deviceId') or '(none)'}")
+    print(f"sync_key_available: {'yes' if sync.get('keyAvailable') else 'no'}")
+    print(f"sync_last_seq: {sync.get('lastSeq', 0)}")
+    last_result = sync.get("lastResult")
+    if isinstance(last_result, dict) and last_result.get("error"):
+        print(f"sync_last_error: {last_result['error']}")
+
+
+def _print_pro_devices(devices: object) -> None:
+    if not isinstance(devices, list) or not devices:
+        print("(no devices)")
+        return
+    for device in devices:
+        if not isinstance(device, dict):
+            continue
+        device_id = device.get("device_id") or device.get("deviceId") or "(unknown)"
+        label = device.get("label") or "Desktop"
+        trusted = bool(device.get("trusted_at") or device.get("trustedAt"))
+        revoked = bool(device.get("revoked_at") or device.get("revokedAt"))
+        if revoked:
+            status = "revoked"
+        elif trusted:
+            status = "trusted"
+        else:
+            status = "pending"
+        print(f"{device_id}\t{status}\t{label}")
 
 
 def _ensure_desktop_integration() -> None:
