@@ -82,70 +82,85 @@ class SyncEngine:
                 last_seq=state.last_seq,
                 error=f"sync push failed: {exc}",
             )
-        try:
-            changes = self.pro_client.get_sync_changes(since=state.last_seq, limit=limit)
-        except Exception as exc:  # noqa: BLE001
-            return SyncRunResult(
-                enabled=True,
-                pushed=int(pushed.get("pushed", 0)),
-                remaining=int(pushed.get("remaining", 0)),
-                last_seq=state.last_seq,
-                error=f"sync pull failed: {exc}",
-            )
-        records = changes.get("records") if isinstance(changes, dict) else []
-        if not isinstance(records, list):
-            return SyncRunResult(
-                enabled=True,
-                pushed=int(pushed.get("pushed", 0)),
-                remaining=int(pushed.get("remaining", 0)),
-                last_seq=state.last_seq,
-                error="invalid sync changes response",
-            )
-
+        pulled = 0
         applied = 0
-        max_seq = state.last_seq
-        for raw in records:
-            if not isinstance(raw, dict):
-                continue
-            seq = int(raw.get("seq") or 0)
+        current_seq = state.last_seq
+        while True:
             try:
-                encrypted = encrypted_record_from_dict(raw)
-                payload = decrypt_record(state.account_id, account_key, encrypted)
-                payload.setdefault("updated_at", encrypted.updated_at)
-            except (InvalidTag, KeyError, TypeError, ValueError) as exc:
-                return SyncRunResult(
-                    enabled=True,
-                    pushed=int(pushed.get("pushed", 0)),
-                    remaining=int(pushed.get("remaining", 0)),
-                    pulled=len(records),
-                    applied=applied,
-                    last_seq=state.last_seq,
-                    error=f"invalid encrypted sync record at seq {seq}: {exc}",
-                )
-            if self.apply_record(encrypted.collection, payload, deleted=encrypted.deleted):
-                applied += 1
-            max_seq = max(max_seq, seq)
-        self.settings.set_cursor(max_seq)
-        if max_seq > state.last_seq:
-            try:
-                self.pro_client.update_sync_cursor(last_seq=max_seq)
+                changes = self.pro_client.get_sync_changes(since=current_seq, limit=limit)
             except Exception as exc:  # noqa: BLE001
                 return SyncRunResult(
                     enabled=True,
                     pushed=int(pushed.get("pushed", 0)),
                     remaining=int(pushed.get("remaining", 0)),
-                    pulled=len(records),
+                    pulled=pulled,
                     applied=applied,
-                    last_seq=max_seq,
-                    error=f"sync cursor update failed: {exc}",
+                    last_seq=current_seq,
+                    error=f"sync pull failed: {exc}",
                 )
+            records = changes.get("records") if isinstance(changes, dict) else []
+            if not isinstance(records, list):
+                return SyncRunResult(
+                    enabled=True,
+                    pushed=int(pushed.get("pushed", 0)),
+                    remaining=int(pushed.get("remaining", 0)),
+                    pulled=pulled,
+                    applied=applied,
+                    last_seq=current_seq,
+                    error="invalid sync changes response",
+                )
+            if not records:
+                break
+
+            page_applied = 0
+            page_max_seq = current_seq
+            for raw in records:
+                if not isinstance(raw, dict):
+                    continue
+                seq = int(raw.get("seq") or 0)
+                try:
+                    encrypted = encrypted_record_from_dict(raw)
+                    payload = decrypt_record(state.account_id, account_key, encrypted)
+                    payload.setdefault("updated_at", encrypted.updated_at)
+                except (InvalidTag, KeyError, TypeError, ValueError) as exc:
+                    return SyncRunResult(
+                        enabled=True,
+                        pushed=int(pushed.get("pushed", 0)),
+                        remaining=int(pushed.get("remaining", 0)),
+                        pulled=pulled + len(records),
+                        applied=applied + page_applied,
+                        last_seq=current_seq,
+                        error=f"invalid encrypted sync record at seq {seq}: {exc}",
+                    )
+                if self.apply_record(encrypted.collection, payload, deleted=encrypted.deleted):
+                    page_applied += 1
+                page_max_seq = max(page_max_seq, seq)
+            pulled += len(records)
+            applied += page_applied
+            if page_max_seq > current_seq:
+                self.settings.set_cursor(page_max_seq)
+                try:
+                    self.pro_client.update_sync_cursor(last_seq=page_max_seq)
+                except Exception as exc:  # noqa: BLE001
+                    return SyncRunResult(
+                        enabled=True,
+                        pushed=int(pushed.get("pushed", 0)),
+                        remaining=int(pushed.get("remaining", 0)),
+                        pulled=pulled,
+                        applied=applied,
+                        last_seq=page_max_seq,
+                        error=f"sync cursor update failed: {exc}",
+                    )
+                current_seq = page_max_seq
+            if not _has_more(changes):
+                break
         return SyncRunResult(
             enabled=True,
             pushed=int(pushed.get("pushed", 0)),
             remaining=int(pushed.get("remaining", 0)),
-            pulled=len(records),
+            pulled=pulled,
             applied=applied,
-            last_seq=max_seq,
+            last_seq=current_seq,
         )
 
     def apply_record(self, collection: str, payload: dict[str, Any], *, deleted: bool = False) -> bool:
@@ -203,3 +218,7 @@ class SyncEngine:
             config_mod.add_lexicon_replacements({wrong: right}, path=self.config_path)
             return True
         return False
+
+
+def _has_more(changes: dict[str, Any]) -> bool:
+    return changes.get("has_more") is True or changes.get("hasMore") is True

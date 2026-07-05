@@ -28,7 +28,10 @@ class _FakeProClient:
 
     def get_sync_changes(self, *, since: int = 0, limit: int = 500):
         self.changes_since.append(since)
-        return {"next_seq": self.records[-1]["seq"] if self.records else since, "records": self.records}
+        candidates = [record for record in self.records if int(record["seq"]) > since]
+        records = candidates[:limit]
+        next_seq = records[-1]["seq"] if records else since
+        return {"next_seq": next_seq, "has_more": len(candidates) > limit, "records": records}
 
     def update_sync_cursor(self, *, last_seq: int):
         self.cursor_updates.append(last_seq)
@@ -73,7 +76,8 @@ class _SharedCloudClient:
     def get_sync_changes(self, *, since: int = 0, limit: int = 500):
         records = [record for record in self.cloud if int(record["seq"]) > since][:limit]
         next_seq = records[-1]["seq"] if records else since
-        return {"next_seq": next_seq, "records": records}
+        remaining = len([record for record in self.cloud if int(record["seq"]) > since])
+        return {"next_seq": next_seq, "has_more": remaining > limit, "records": records}
 
     def update_sync_cursor(self, *, last_seq: int):
         self.cursor_updates.append(last_seq)
@@ -258,12 +262,13 @@ class SyncEngineTests(unittest.TestCase):
                 note_store=NoteStore(Path(tmp) / "notes"),
             )
 
-            result = engine.run_once(limit=1000)
+            result = engine.run_once(limit=125)
 
             self.assertEqual(result.pulled, 1000)
             self.assertEqual(result.applied, 1000)
             self.assertEqual(settings.load().last_seq, 1000)
-            self.assertEqual(client.cursor_updates, [1000])
+            self.assertEqual(client.changes_since, [0, 125, 250, 375, 500, 625, 750, 875])
+            self.assertEqual(client.cursor_updates, [125, 250, 375, 500, 625, 750, 875, 1000])
             loaded = history.load()
             self.assertEqual(len(loaded), 20)
             self.assertEqual(loaded[0].text, "private synced note 1000")
