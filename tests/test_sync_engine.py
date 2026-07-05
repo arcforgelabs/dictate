@@ -58,8 +58,37 @@ class _FailingProClient(_FakeProClient):
         return super().update_sync_cursor(last_seq=last_seq)
 
 
+class _SharedCloudClient:
+    def __init__(self, cloud: list[dict], cursor_updates: list[int]) -> None:
+        self.cloud = cloud
+        self.cursor_updates = cursor_updates
+
+    def drain_sync_outbox(self, outbox):  # noqa: ANN001
+        pending = outbox.pending()
+        for record in pending:
+            self.cloud.append({**asdict(record), "seq": len(self.cloud) + 1})
+        outbox.replace_pending([])
+        return {"pushed": len(pending), "remaining": 0, "results": []}
+
+    def get_sync_changes(self, *, since: int = 0, limit: int = 500):
+        records = [record for record in self.cloud if int(record["seq"]) > since][:limit]
+        next_seq = records[-1]["seq"] if records else since
+        return {"next_seq": next_seq, "records": records}
+
+    def update_sync_cursor(self, *, last_seq: int):
+        self.cursor_updates.append(last_seq)
+        return {"last_seq": last_seq}
+
+
 class SyncEngineTests(unittest.TestCase):
-    def _settings(self, tmp: str, account_id: str, key: bytes) -> SyncSettingsStore:
+    def _settings(
+        self,
+        tmp: str,
+        account_id: str,
+        key: bytes,
+        *,
+        device_id: str | None = None,
+    ) -> SyncSettingsStore:
         saved: dict[str, str] = {}
         store = SyncSettingsStore(
             path=Path(tmp) / "state.json",
@@ -69,7 +98,7 @@ class SyncEngineTests(unittest.TestCase):
             read_key=lambda account: saved.get(account),
             clear_key=lambda account: saved.pop(account, None),
         )
-        store.enable(account_id, account_key=key)
+        store.enable(account_id, account_key=key, device_id=device_id)
         return store
 
     def test_disabled_sync_detaches_outboxes(self) -> None:
@@ -476,6 +505,53 @@ class SyncEngineTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].text, "newer local version")
             self.assertEqual(entries[0].rev, 2)
+
+    def test_first_sync_two_populated_devices_converges_without_deleting_local_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key = generate_account_key()
+            account_id = "acct_1"
+            cloud: list[dict] = []
+            cursor_updates_a: list[int] = []
+            cursor_updates_b: list[int] = []
+
+            settings_a = self._settings(str(root / "device-a"), account_id, key, device_id="device_a")
+            settings_b = self._settings(str(root / "device-b"), account_id, key, device_id="device_b")
+            history_a = HistoryStore(root / "device-a" / "history.json")
+            history_b = HistoryStore(root / "device-b" / "history.json")
+            engine_a = SyncEngine(
+                settings=settings_a,
+                pro_client=_SharedCloudClient(cloud, cursor_updates_a),
+                history_store=history_a,
+                note_store=NoteStore(root / "device-a" / "notes"),
+            )
+            engine_b = SyncEngine(
+                settings=settings_b,
+                pro_client=_SharedCloudClient(cloud, cursor_updates_b),
+                history_store=history_b,
+                note_store=NoteStore(root / "device-b" / "notes"),
+            )
+            engine_a.attach_outbox()
+            engine_b.attach_outbox()
+            local_a = history_a.append("device A offline note")
+            local_b = history_b.append("device B offline note")
+
+            first_a = engine_a.run_once()
+            first_b = engine_b.run_once()
+            second_a = engine_a.run_once()
+
+            self.assertEqual(first_a.pushed, 1)
+            self.assertEqual(first_b.pushed, 1)
+            self.assertEqual(second_a.pushed, 0)
+            self.assertEqual({entry.text for entry in history_a.load()}, {"device A offline note", "device B offline note"})
+            self.assertEqual({entry.text for entry in history_b.load()}, {"device A offline note", "device B offline note"})
+            self.assertEqual([record["seq"] for record in cloud], [1, 2])
+            self.assertFalse(any(record["deleted"] for record in cloud))
+            self.assertEqual({record["record_id"] for record in cloud}, {local_a.id, local_b.id})
+            self.assertEqual(settings_a.load().last_seq, 2)
+            self.assertEqual(settings_b.load().last_seq, 2)
+            self.assertEqual(cursor_updates_a, [1, 2])
+            self.assertEqual(cursor_updates_b, [2])
 
     def test_pull_applies_portable_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
