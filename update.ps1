@@ -107,7 +107,7 @@ try {
     }
     $dictateExe = Join-Path $sourceDir ".venv\Scripts\dictate.exe"
     if (Test-Path $dictateExe) {
-        & $dictateExe set-installed-package-version $DictateVersion | Out-Null
+        & $dictateExe config set-installed-package-version $DictateVersion | Out-Null
     }
 } finally {
     if (Test-Path $stagingRoot) {
