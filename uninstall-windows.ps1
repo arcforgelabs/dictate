@@ -14,22 +14,44 @@ function Remove-IfExists {
 
 function Stop-DictateProcesses {
     $currentPid = $PID
-    $matches = Get-CimInstance Win32_Process |
+    for ($attempt = 0; $attempt -lt 6; $attempt++) {
+        $matches = @(Get-CimInstance Win32_Process |
+            Where-Object {
+                $_.ProcessId -ne $currentPid -and (
+                    $_.Name -in @("Dictate.exe", "dictate.exe", "dictate-controls.exe", "dictate-ui-shell.exe", "dictate-engine.exe") -or
+                    $_.ExecutablePath -like '*\Dictate\source\*' -or
+                    $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
+                    $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
+                    $_.CommandLine -like '*dictate-daemon.cmd*' -or
+                    $_.CommandLine -like '*dictate-controls*' -or
+                    $_.CommandLine -like '*dictate-ui-shell.exe*' -or
+                    $_.CommandLine -like '*dictate-engine.exe*'
+                )
+            })
+        if ($matches.Count -eq 0) {
+            return
+        }
+        foreach ($match in ($matches | Sort-Object ParentProcessId -Descending)) {
+            Stop-Process -Id $match.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        foreach ($match in $matches) {
+            Wait-Process -Id $match.ProcessId -Timeout 5 -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    $remaining = @(Get-CimInstance Win32_Process |
         Where-Object {
             $_.ProcessId -ne $currentPid -and (
                 $_.Name -in @("Dictate.exe", "dictate.exe", "dictate-controls.exe", "dictate-ui-shell.exe", "dictate-engine.exe") -or
-                $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
-                $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
-                $_.CommandLine -like '*dictate-daemon.cmd*' -or
-                $_.CommandLine -like '*dictate-controls*' -or
+                $_.ExecutablePath -like '*\Dictate\source\*' -or
                 $_.CommandLine -like '*dictate-ui-shell.exe*' -or
                 $_.CommandLine -like '*dictate-engine.exe*'
             )
-        }
-    foreach ($match in $matches) {
-        Stop-Process -Id $match.ProcessId -Force -ErrorAction SilentlyContinue
+        })
+    if ($remaining.Count -gt 0) {
+        $details = ($remaining | ForEach-Object { "$($_.ProcessId):$($_.Name)" }) -join ", "
+        throw "Could not stop running Dictate processes: $details"
     }
-    Start-Sleep -Milliseconds 500
 }
 
 $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
