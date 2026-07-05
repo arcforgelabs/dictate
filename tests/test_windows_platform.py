@@ -200,9 +200,16 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("[switch]$NoStartup", script)
         self.assertIn("[switch]$Meeting", script)
+        self.assertIn("[switch]$ForceCuda", script)
+        self.assertIn("[switch]$NoCuda", script)
         self.assertIn('$installExtras = @("windows")', script)
         self.assertIn('$installExtras += "meeting"', script)
         self.assertIn('$installTarget = "${PSScriptRoot}[$($installExtras -join', script)
+        self.assertIn("function Test-NvidiaGpu", script)
+        self.assertIn("function Ensure-OnnxCudaRuntime", script)
+        self.assertIn('onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24', script)
+        self.assertIn('$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))', script)
+        self.assertIn('"dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
         self.assertIn('"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*', script)
@@ -344,6 +351,18 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("function Ensure-VcRuntime", script)
         self.assertIn("https://aka.ms/vs/17/release/vc_redist.x64.exe", script)
         self.assertIn("Ensure-VcRuntime", script)
+
+    def test_hosted_windows_wrappers_pass_cuda_options_through(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        install_script = (root / "install.ps1").read_text(encoding="utf-8")
+        update_script = (root / "update.ps1").read_text(encoding="utf-8")
+        source_update_script = (root / "update-windows.ps1").read_text(encoding="utf-8")
+
+        for script in (install_script, update_script, source_update_script):
+            self.assertIn("[switch]$ForceCuda", script)
+            self.assertIn("[switch]$NoCuda", script)
+            self.assertIn('if ($ForceCuda) {', script)
+            self.assertIn('if ($NoCuda) {', script)
 
     def test_doctor_fix_items_include_vc_runtime_hint(self) -> None:
         report = types.SimpleNamespace(

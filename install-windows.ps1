@@ -4,7 +4,9 @@ param(
     [switch]$NoShortcut,
     [switch]$NoStartup,
     [switch]$Meeting,
-    [switch]$RecreateVenv
+    [switch]$RecreateVenv,
+    [switch]$ForceCuda,
+    [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +92,41 @@ function Ensure-VcRuntime {
     if (($process.ExitCode -ne 0) -and ($process.ExitCode -ne 3010)) {
         throw "Microsoft Visual C++ runtime install failed with exit code $($process.ExitCode)."
     }
+}
+
+function Test-NvidiaGpu {
+    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($nvidiaSmi) {
+        return $true
+    }
+
+    try {
+        $controllers = Get-CimInstance Win32_VideoController -ErrorAction Stop
+        foreach ($controller in $controllers) {
+            $name = [string]$controller.Name
+            $compatibility = [string]$controller.AdapterCompatibility
+            $pnpDeviceId = [string]$controller.PNPDeviceID
+            if (
+                $name -match "NVIDIA" -or
+                $compatibility -match "NVIDIA" -or
+                $pnpDeviceId -match "VEN_10DE"
+            ) {
+                return $true
+            }
+        }
+    } catch {
+        return $false
+    }
+
+    return $false
+}
+
+function Ensure-OnnxCudaRuntime {
+    param([string]$PythonExe)
+
+    Write-Host "==> Installing ONNX Runtime CUDA provider"
+    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "uninstall", "-y", "onnxruntime") -Description "Removing CPU-only ONNX Runtime"
+    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "install", "--upgrade", "onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24") -Description "Installing ONNX Runtime GPU with CUDA/cuDNN DLLs"
 }
 
 function Get-AppDataConfigPath {
@@ -391,6 +428,11 @@ if ($Meeting) {
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
 
+$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))
+if ($installCuda) {
+    Ensure-OnnxCudaRuntime -PythonExe $venvPython
+}
+
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
 $trayVbs = Join-Path $scriptsDir "dictate-tray.vbs"
@@ -409,6 +451,9 @@ if (-not $NoPrepareTurbo) {
 
 if (-not $NoVerify) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--quick", "--type-backend", "pynput") -Description "Running Dictate doctor"
+    if ($installCuda) {
+        Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda", "--quick", "--type-backend", "pynput") -Description "Running Dictate CUDA doctor"
+    }
 }
 
 Write-Host ""

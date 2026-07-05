@@ -176,6 +176,27 @@ NVIDIA CUDA evidence on Samuel's workstation:
     benchmark JSON-shape, DER, speaker-confusion, and boundary-metric smoke
     validation.
 
+Windows CUDA packaging status:
+
+1. `install-windows.ps1` now detects NVIDIA hardware through `nvidia-smi`,
+   `Win32_VideoController`, or PCI vendor `VEN_10DE`.
+2. On detected NVIDIA hardware, or when called with `-ForceCuda`, the installer
+   replaces the CPU-only `onnxruntime` wheel with
+   `onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24`. This follows ONNX Runtime's
+   documented CUDA/cuDNN site-package preload path and avoids requiring a manual
+   CUDA Toolkit install for the Parakeet ONNX CUDA lane.
+3. `-NoCuda` suppresses CUDA package installation for CI, constrained machines,
+   and user support cases.
+4. The hosted npm install/update wrappers pass `-ForceCuda` and `-NoCuda`
+   through to the source installer/updater.
+5. The `win11-dev` lab VM currently exposes only a `Red Hat QXL controller`.
+   It verifies the non-NVIDIA Windows install path and startup/user-profile
+   surface. With `-ForceCuda`, it also verifies that the GPU wheel installs,
+   `onnxruntime.preload_dlls()` can load the bundled CUDA/cuDNN runtime DLLs,
+   `CUDAExecutionProvider` appears, and `dictate doctor --device cuda` is
+   healthy. It still cannot prove real NVIDIA inference until a GPU is passed
+   through or a physical Windows NVIDIA test host is used.
+
 Windows VM evidence on `win11-dev`:
 
 1. `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax` passes.

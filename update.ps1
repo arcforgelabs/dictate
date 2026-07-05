@@ -6,7 +6,9 @@ param(
     [switch]$NoShortcut,
     [switch]$NoStartup,
     [switch]$ForceStartup,
-    [switch]$RecreateVenv
+    [switch]$RecreateVenv,
+    [switch]$ForceCuda,
+    [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,6 +101,8 @@ try {
     if ($NoStartup) { $updaterArgs += "-NoStartup" }
     if ($ForceStartup) { $updaterArgs += "-ForceStartup" }
     if ($RecreateVenv) { $updaterArgs += "-RecreateVenv" }
+    if ($ForceCuda) { $updaterArgs += "-ForceCuda" }
+    if ($NoCuda) { $updaterArgs += "-NoCuda" }
 
     Write-Host "==> Running Dictate Windows updater"
     & powershell @updaterArgs

@@ -5,7 +5,9 @@ param(
     [switch]$NoStartup,
     [switch]$ForceStartup,
     [switch]$RecreateVenv,
-    [switch]$SkipGitPull
+    [switch]$SkipGitPull,
+    [switch]$ForceCuda,
+    [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,6 +65,8 @@ if ($NoPrepareTurbo) { $installerArgs += "-NoPrepareTurbo" }
 if ($NoShortcut) { $installerArgs += "-NoShortcut" }
 if ($NoStartup -or ((-not $ForceStartup) -and (-not (Test-Path (Get-StartupShortcutPath))))) { $installerArgs += "-NoStartup" }
 if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
+if ($ForceCuda) { $installerArgs += "-ForceCuda" }
+if ($NoCuda) { $installerArgs += "-NoCuda" }
 
 & powershell @installerArgs
 if ($LASTEXITCODE -ne 0) {

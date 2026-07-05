@@ -6,7 +6,9 @@ param(
     [switch]$NoShortcut,
     [switch]$NoStartup,
     [switch]$Wizard,
-    [switch]$RecreateVenv
+    [switch]$RecreateVenv,
+    [switch]$ForceCuda,
+    [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,6 +71,8 @@ try {
         if ($NoShortcut) { $installerArgs += "-NoShortcut" }
         if ($NoStartup) { $installerArgs += "-NoStartup" }
         if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
+        if ($ForceCuda) { $installerArgs += "-ForceCuda" }
+        if ($NoCuda) { $installerArgs += "-NoCuda" }
     }
 
     Write-Host "==> Running Dictate Windows installer"
