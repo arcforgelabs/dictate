@@ -111,6 +111,7 @@ class SyncEngine:
             try:
                 encrypted = encrypted_record_from_dict(raw)
                 payload = decrypt_record(state.account_id, account_key, encrypted)
+                payload.setdefault("updated_at", encrypted.updated_at)
             except (InvalidTag, KeyError, TypeError, ValueError) as exc:
                 return SyncRunResult(
                     enabled=True,
@@ -123,7 +124,7 @@ class SyncEngine:
                 )
             if self.apply_record(encrypted.collection, payload, deleted=encrypted.deleted):
                 applied += 1
-                max_seq = max(max_seq, seq)
+            max_seq = max(max_seq, seq)
         self.settings.set_cursor(max_seq)
         if max_seq > state.last_seq:
             try:
@@ -168,6 +169,15 @@ class SyncEngine:
             return False
         if self.prefs_store is None:
             return False
+        if hasattr(self.prefs_store, "apply_synced_setting"):
+            return bool(
+                self.prefs_store.apply_synced_setting(
+                    str(key),
+                    payload.get("value"),
+                    updated_at=payload.get("updated_at"),
+                    deleted=deleted,
+                )
+            )
         self.prefs_store.update({str(key): payload.get("value")})
         return True
 

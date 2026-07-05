@@ -596,6 +596,45 @@ class SyncEngineTests(unittest.TestCase):
             self.assertEqual(loaded["activation"], "toggle")
             self.assertEqual(loaded["outputFormat"], "markdown")
 
+    def test_pull_skips_stale_portable_setting_and_advances_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            record = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="settings",
+                    record_id="prefs.theme",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:00+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.setting+json;v=1",
+                    payload={"key": "theme", "value": "light"},
+                ),
+            )
+            prefs = UiPrefsStore(Path(tmp) / "prefs.json")
+            prefs.update({"theme": "dark"}, updated_at="2026-07-05T12:00:01+00:00")
+            settings = self._settings(tmp, account_id, key)
+            client = _FakeProClient([{**asdict(record), "seq": 3}])
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=client,
+                history_store=HistoryStore(Path(tmp) / "history.json"),
+                note_store=NoteStore(Path(tmp) / "notes"),
+                config_path=Path(tmp) / "config.yaml",
+                prefs_store=prefs,
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.applied, 0)
+            self.assertEqual(result.last_seq, 3)
+            self.assertEqual(settings.load().last_seq, 3)
+            self.assertEqual(client.cursor_updates, [3])
+            self.assertEqual(prefs.load()["theme"], "dark")
+
     def test_pull_applies_lexicon_hotword_and_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()

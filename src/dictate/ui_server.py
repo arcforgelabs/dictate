@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 RUNTIME_HANDSHAKE_PATH = user_data_dir() / "ui-server.json"
 UI_PREFS_PATH = user_data_dir() / "ui-prefs.json"
+UI_PREFS_SYNC_META_PATH = user_data_dir() / "ui-prefs-sync-meta.json"
 
 # Default UI-only preferences (things the engine does not already persist).
 DEFAULT_PREFS: dict[str, Any] = {
@@ -254,8 +255,9 @@ class _ProviderHealthState:
 class UiPrefsStore:
     """Tiny JSON-backed store for UI-only preferences."""
 
-    def __init__(self, path: Path = UI_PREFS_PATH) -> None:
+    def __init__(self, path: Path = UI_PREFS_PATH, meta_path: Path | None = None) -> None:
         self._path = path
+        self._meta_path = meta_path or path.with_name(f"{path.stem}-sync-meta{path.suffix}")
 
     def load(self) -> dict[str, Any]:
         prefs = dict(DEFAULT_PREFS)
@@ -271,15 +273,78 @@ class UiPrefsStore:
                     prefs[key] = raw[key]
         return self._coerce(prefs)
 
-    def update(self, changes: dict[str, Any]) -> dict[str, Any]:
+    def update(self, changes: dict[str, Any], *, updated_at: str | None = None) -> dict[str, Any]:
         prefs = self.load()
+        accepted: set[str] = set()
         for key, value in changes.items():
             if key in DEFAULT_PREFS:
                 prefs[key] = value
+                accepted.add(key)
         prefs = self._coerce(prefs)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(prefs, indent=2))
+        if updated_at:
+            self.mark_synced(*(key for key in accepted if key in SYNCED_PREF_KEYS), updated_at=updated_at)
         return prefs
+
+    def load_sync_meta(self) -> dict[str, str]:
+        if not self._meta_path.is_file():
+            return {}
+        try:
+            raw = json.loads(self._meta_path.read_text())
+        except Exception:  # noqa: BLE001
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(key): str(value)
+            for key, value in raw.items()
+            if key in SYNCED_PREF_KEYS and isinstance(value, str)
+        }
+
+    def mark_synced(self, *keys: str, updated_at: str) -> None:
+        clean_keys = [key for key in keys if key in SYNCED_PREF_KEYS]
+        if not clean_keys:
+            return
+        meta = self.load_sync_meta()
+        for key in clean_keys:
+            meta[key] = updated_at
+        self._meta_path.parent.mkdir(parents=True, exist_ok=True)
+        self._meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    def sync_updated_at(self, key: str) -> str | None:
+        return self.load_sync_meta().get(key)
+
+    def apply_synced_setting(self, key: str, value: Any, *, updated_at: str | None, deleted: bool = False) -> bool:
+        if key not in SYNCED_PREF_KEYS:
+            return False
+        if not self._incoming_setting_wins(self.sync_updated_at(key), updated_at):
+            return False
+        next_value = DEFAULT_PREFS[key] if deleted else value
+        self.update({key: next_value}, updated_at=updated_at)
+        return True
+
+    @classmethod
+    def _incoming_setting_wins(cls, local: str | None, incoming: str | None) -> bool:
+        if local is None:
+            return True
+        if incoming is None:
+            return False
+        local_ts = cls._timestamp_value(local)
+        incoming_ts = cls._timestamp_value(incoming)
+        if local_ts is None or incoming_ts is None:
+            return incoming > local
+        return incoming_ts > local_ts
+
+    @staticmethod
+    def _timestamp_value(value: str) -> float | None:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
 
     @staticmethod
     def _coerce(prefs: dict[str, Any]) -> dict[str, Any]:
@@ -739,17 +804,19 @@ class UiBackend:
         for wrong, right in cfg.lexicon_replacements.items():
             self._enqueue_synced_replacement(wrong, right, deleted=False)
 
-    def _enqueue_synced_pref(self, key: str, value: Any) -> None:
+    def _enqueue_synced_pref(self, key: str, value: Any, *, updated_at: str | None = None) -> None:
         if key not in SYNCED_PREF_KEYS:
             return
         outbox = self._sync_outbox()
         if outbox is None:
             return
+        updated_at = updated_at or self.now().isoformat()
+        self.prefs_store.mark_synced(key, updated_at=updated_at)
         outbox.enqueue(
             collection="settings",
             record_id=f"prefs.{key}",
             content_type=SYNC_SETTINGS_CONTENT_TYPE,
-            payload={"key": key, "value": value, "updated_at": self.now().isoformat()},
+            payload={"key": key, "value": value, "updated_at": updated_at},
         )
 
     def _enqueue_synced_hotword(self, term: str, *, deleted: bool) -> None:
@@ -984,8 +1051,9 @@ class UiBackend:
         if activation is not None:
             if activation not in _VALID_ACTIVATIONS:
                 raise ApiError(400, f"invalid activation: {activation!r}")
-            updated = self.prefs_store.update({"activation": activation})
-            self._enqueue_synced_pref("activation", updated["activation"])
+            updated_at = self.now().isoformat()
+            updated = self.prefs_store.update({"activation": activation}, updated_at=updated_at)
+            self._enqueue_synced_pref("activation", updated["activation"], updated_at=updated_at)
 
     def _set_prefs(self, prefs: Any) -> dict[str, Any]:
         if not isinstance(prefs, dict):
@@ -996,10 +1064,11 @@ class UiBackend:
             raise ApiError(400, f"invalid activation: {prefs['activation']!r}")
         if "outputFormat" in prefs and prefs["outputFormat"] not in _VALID_OUTPUT_FORMATS:
             raise ApiError(400, f"invalid outputFormat: {prefs['outputFormat']!r}")
-        updated = self.prefs_store.update(prefs)
+        updated_at = self.now().isoformat()
+        updated = self.prefs_store.update(prefs, updated_at=updated_at)
         for key in SYNCED_PREF_KEYS:
             if key in prefs:
-                self._enqueue_synced_pref(key, updated[key])
+                self._enqueue_synced_pref(key, updated[key], updated_at=updated_at)
         return updated
 
     def _set_startup(self, enabled: Any) -> None:

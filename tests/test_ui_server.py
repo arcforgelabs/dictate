@@ -310,6 +310,42 @@ class UiPrefsStoreTests(unittest.TestCase):
             # reload from disk
             self.assertEqual(UiPrefsStore(path).load()["theme"], "dark")
 
+    def test_synced_pref_metadata_is_separate_from_prefs(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "p.json"
+            meta_path = Path(d) / "p-meta.json"
+            store = UiPrefsStore(path, meta_path)
+            store.update({"theme": "dark", "trayOnly": False}, updated_at="2026-07-05T12:00:00+00:00")
+
+            self.assertEqual(store.load()["theme"], "dark")
+            self.assertNotIn("2026-07-05T12:00:00+00:00", path.read_text())
+            self.assertEqual(store.sync_updated_at("theme"), "2026-07-05T12:00:00+00:00")
+            self.assertIsNone(store.sync_updated_at("trayOnly"))
+
+    def test_apply_synced_setting_uses_last_writer_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "p.json"
+            meta_path = Path(d) / "p-meta.json"
+            store = UiPrefsStore(path, meta_path)
+            store.update({"theme": "dark"}, updated_at="2026-07-05T12:10:00+00:00")
+
+            self.assertFalse(
+                store.apply_synced_setting(
+                    "theme",
+                    "light",
+                    updated_at="2026-07-05T12:09:59+00:00",
+                )
+            )
+            self.assertEqual(store.load()["theme"], "dark")
+            self.assertTrue(
+                store.apply_synced_setting(
+                    "theme",
+                    "light",
+                    updated_at="2026-07-05T12:11:00+00:00",
+                )
+            )
+            self.assertEqual(store.load()["theme"], "light")
+
     def test_invalid_theme_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "p.json"
