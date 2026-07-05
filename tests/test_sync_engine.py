@@ -106,6 +106,66 @@ class SyncEngineTests(unittest.TestCase):
             self.assertEqual(client.cursor_updates, [11])
             self.assertEqual(history.load()[0].text, "synced private note")
 
+    def test_pull_tampered_record_returns_error_without_advancing_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            good = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="history",
+                    record_id="hist_good",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:00+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.history+json;v=1",
+                    payload={
+                        "id": "hist_good",
+                        "created_at": "2026-07-05T12:00:00+00:00",
+                        "updated_at": "2026-07-05T12:00:00+00:00",
+                        "rev": 1,
+                        "text": "valid private note",
+                        "archived": False,
+                    },
+                ),
+            )
+            bad = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="history",
+                    record_id="hist_bad",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:01+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.history+json;v=1",
+                    payload={"id": "hist_bad", "text": "tampered private note"},
+                ),
+            )
+            tampered = {**asdict(bad), "seq": 2}
+            tampered["ciphertext"] = tampered["ciphertext"][:-2] + "AA"
+            settings = self._settings(tmp, account_id, key)
+            history = HistoryStore(Path(tmp) / "history.json")
+            client = _FakeProClient([{**asdict(good), "seq": 1}, tampered])
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=client,
+                history_store=history,
+                note_store=NoteStore(Path(tmp) / "notes"),
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.applied, 1)
+            self.assertEqual(result.last_seq, 0)
+            self.assertIn("invalid encrypted sync record at seq 2", result.error or "")
+            self.assertEqual(settings.load().last_seq, 0)
+            self.assertEqual(client.cursor_updates, [])
+            self.assertEqual(history.load()[0].text, "valid private note")
+
     def test_pull_applies_realistic_history_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()

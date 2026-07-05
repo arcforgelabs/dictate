@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidTag
+
 from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteStore
@@ -89,8 +91,19 @@ class SyncEngine:
             if not isinstance(raw, dict):
                 continue
             seq = int(raw.get("seq") or 0)
-            encrypted = encrypted_record_from_dict(raw)
-            payload = decrypt_record(state.account_id, account_key, encrypted)
+            try:
+                encrypted = encrypted_record_from_dict(raw)
+                payload = decrypt_record(state.account_id, account_key, encrypted)
+            except (InvalidTag, KeyError, TypeError, ValueError) as exc:
+                return SyncRunResult(
+                    enabled=True,
+                    pushed=int(pushed.get("pushed", 0)),
+                    remaining=int(pushed.get("remaining", 0)),
+                    pulled=len(records),
+                    applied=applied,
+                    last_seq=state.last_seq,
+                    error=f"invalid encrypted sync record at seq {seq}: {exc}",
+                )
             if self.apply_record(encrypted.collection, payload, deleted=encrypted.deleted):
                 applied += 1
                 max_seq = max(max_seq, seq)
