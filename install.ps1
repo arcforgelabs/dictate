@@ -76,7 +76,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Dictate Windows installer failed with exit code $LASTEXITCODE."
     }
-    $dictateExe = Join-Path $installRootPath ".venv\Scripts\dictate.exe"
+    $dictateExe = Join-Path $sourceDir ".venv\Scripts\dictate.exe"
     if (Test-Path $dictateExe) {
         & $dictateExe set-installed-package-version $DictateVersion | Out-Null
     }
