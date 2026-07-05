@@ -46,6 +46,7 @@ class ApiKeyStatus:
 
 PRO_REFRESH_TOKEN_BACKEND = "dictate-pro-refresh"
 SYNC_ACCOUNT_KEY_BACKEND = "dictate-sync-account-key"
+SYNC_DEVICE_PRIVATE_KEY_BACKEND = "dictate-sync-device-private-key"
 
 
 def save_pro_refresh_token(token: str) -> None:
@@ -117,6 +118,45 @@ def clear_sync_account_key(account_id: str) -> None:
         return
     if shutil.which("secret-tool") is not None:
         _secret_tool_clear_sync_account_key(account)
+
+
+def save_sync_device_private_key(device_id: str, encoded_key: str) -> None:
+    """Persist a Dictate Pro sync device private key in the OS secret store."""
+    device = device_id.strip()
+    key = encoded_key.strip()
+    if not device or not key:
+        raise ApiKeyStorageError("Sync device id and private key are required.")
+    if _is_windows():
+        _windows_save_secret(_windows_sync_device_private_key_target_name(device), key, "sync device private key")
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_save_sync_device_private_key(device, key)
+        return
+    raise ApiKeyStorageError("No supported OS secret store is available for sync device private key storage.")
+
+
+def read_sync_device_private_key(device_id: str) -> str | None:
+    """Read a Dictate Pro sync device private key from the OS secret store."""
+    device = device_id.strip()
+    if not device:
+        return None
+    if _is_windows():
+        return _windows_read_secret(_windows_sync_device_private_key_target_name(device))
+    if shutil.which("secret-tool") is not None:
+        return _secret_tool_read_sync_device_private_key(device)
+    return None
+
+
+def clear_sync_device_private_key(device_id: str) -> None:
+    """Remove a Dictate Pro sync device private key from the OS secret store."""
+    device = device_id.strip()
+    if not device:
+        return
+    if _is_windows():
+        _windows_clear_secret(_windows_sync_device_private_key_target_name(device), "sync device private key")
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_clear_sync_device_private_key(device)
 
 
 def save_api_key(backend: str, api_key: str) -> None:
@@ -502,6 +542,76 @@ def _secret_tool_clear_sync_account_key(account_id: str) -> None:
         raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
 
 
+def _secret_tool_save_sync_device_private_key(device_id: str, encoded_key: str) -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "store",
+            "--label",
+            "Dictate Pro sync device private key",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
+            "kind",
+            "sync-device-private-key",
+            "device",
+            device_id,
+        ],
+        action="store",
+        input=encoded_key,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+
+
+def _secret_tool_read_sync_device_private_key(device_id: str) -> str | None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "lookup",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
+            "kind",
+            "sync-device-private-key",
+            "device",
+            device_id,
+        ],
+        action="lookup",
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def _secret_tool_clear_sync_device_private_key(device_id: str) -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "clear",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
+            "kind",
+            "sync-device-private-key",
+            "device",
+            device_id,
+        ],
+        action="clear",
+        timeout=10,
+    )
+    if completed.returncode not in {0, 1}:
+        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
+
+
 def _run_secret_tool(
     args: list[str],
     *,
@@ -614,6 +724,10 @@ def _windows_pro_refresh_target_name() -> str:
 
 def _windows_sync_account_key_target_name(account_id: str) -> str:
     return f"Dictate:{SYNC_ACCOUNT_KEY_BACKEND}:{account_id}:sync-account-key"
+
+
+def _windows_sync_device_private_key_target_name(device_id: str) -> str:
+    return f"Dictate:{SYNC_DEVICE_PRIVATE_KEY_BACKEND}:{device_id}:sync-device-private-key"
 
 
 def _windows_error(action: str, *, code: int | None = None) -> str:

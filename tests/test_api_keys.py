@@ -130,6 +130,54 @@ class ApiKeysTests(unittest.TestCase):
         self.assertIn("acct_1", joined_args)
         self.assertNotIn("encoded-key", joined_args)
 
+    def test_sync_device_private_key_requires_secret_store(self) -> None:
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value=None),
+        ):
+            with self.assertRaises(api_keys.ApiKeyStorageError):
+                api_keys.save_sync_device_private_key("device_1", "encoded-private-key")
+            self.assertIsNone(api_keys.read_sync_device_private_key("device_1"))
+
+    def test_secret_tool_stores_sync_device_private_key_with_device_scope(self) -> None:
+        calls = []
+
+        def fake_run(args, **kwargs):  # noqa: ANN001
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="encoded-private-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value="/usr/bin/secret-tool"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            api_keys.save_sync_device_private_key("device_1", "encoded-private-key")
+            self.assertEqual(api_keys.read_sync_device_private_key("device_1"), "encoded-private-key")
+            api_keys.clear_sync_device_private_key("device_1")
+
+        args, kwargs = calls[0]
+        self.assertEqual(kwargs["input"], "encoded-private-key")
+        joined_args = " ".join(args)
+        self.assertIn("sync-device-private-key", joined_args)
+        self.assertIn("device_1", joined_args)
+        self.assertNotIn("encoded-private-key", joined_args)
+
+    def test_windows_sync_device_private_key_uses_device_scoped_target(self) -> None:
+        with (
+            patch("dictate.api_keys._is_windows", return_value=True),
+            patch("dictate.api_keys._windows_save_secret") as save_secret,
+            patch("dictate.api_keys._windows_read_secret", return_value="encoded-private-key") as read_secret,
+            patch("dictate.api_keys._windows_clear_secret") as clear_secret,
+        ):
+            api_keys.save_sync_device_private_key("device_1", "encoded-private-key")
+            self.assertEqual(api_keys.read_sync_device_private_key("device_1"), "encoded-private-key")
+            api_keys.clear_sync_device_private_key("device_1")
+
+        target = "Dictate:dictate-sync-device-private-key:device_1:sync-device-private-key"
+        save_secret.assert_called_once_with(target, "encoded-private-key", "sync device private key")
+        read_secret.assert_called_once_with(target)
+        clear_secret.assert_called_once_with(target, "sync device private key")
+
     def test_backend_rejects_unknown_provider(self) -> None:
         with self.assertRaises(api_keys.ApiKeyStorageError):
             api_keys.save_api_key("not-a-provider", "secret")

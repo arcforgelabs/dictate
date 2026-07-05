@@ -61,9 +61,12 @@ from dictate.pro.client import ProClient, ProClientError
 from dictate.sync import (
     SyncSettingsStore,
     create_recovery_envelope,
+    generate_device_key_pair,
     generate_recovery_key,
     recover_account_key,
     recovery_envelope_from_dict,
+    unwrap_account_key_for_device,
+    wrap_account_key_for_device,
 )
 from dictate.sync_engine import SyncEngine
 from dictate.version import RELEASE_VERSION
@@ -445,11 +448,17 @@ class UiBackend:
 
     def complete_pro_sign_in(self, *, challenge_id: str, code: str, device_label: str = "Desktop") -> dict[str, Any]:
         client = self._require_pro_client()
+        device_key_pair = generate_device_key_pair()
         session = client.complete_sign_in(
             challenge_id=challenge_id,
             code=code,
             device_label=device_label,
+            device_public_key=device_key_pair.public_key,
         )
+        try:
+            api_keys_mod.save_sync_device_private_key(session.device_id, device_key_pair.private_key)
+        except (api_keys_mod.ApiKeyStorageError, OSError) as exc:
+            logger.warning("could not persist Dictate sync device private key: %s", exc)
         return {
             "account_id": session.account_id,
             "device_id": session.device_id,
@@ -502,16 +511,51 @@ class UiBackend:
                 )
             except (InvalidTag, ValueError) as exc:
                 raise ApiError(400, "Recovery key could not unlock Dictate Pro sync for this account.") from exc
+            try:
+                client.approve_current_device_with_recovery()
+            except Exception as exc:  # noqa: BLE001
+                raise ApiError(403, "Recovery key unlocked sync, but this device could not be trusted.") from exc
             state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)
         else:
-            state, account_key = settings.enable(session.account_id, device_id=session.device_id)
-            returned_recovery_key = generate_recovery_key()
-            recovery_envelope = create_recovery_envelope(
-                account_id=session.account_id,
-                account_key=account_key,
-                recovery_key=returned_recovery_key,
+            try:
+                device_envelopes = client.list_key_envelopes(envelope_kind="device").get("envelopes", [])
+            except ProClientError as exc:
+                if exc.status not in {404, 405, 501}:
+                    raise
+                device_envelopes = []
+            device_envelope = next(
+                (
+                    item for item in device_envelopes
+                    if isinstance(item, dict) and str(item.get("device_id") or item.get("deviceId") or "") == session.device_id
+                ),
+                None,
             )
-            client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
+            if isinstance(device_envelope, dict):
+                private_key = api_keys_mod.read_sync_device_private_key(session.device_id)
+                if not private_key:
+                    raise ApiError(409, "This device was approved, but its local sync device key is missing.")
+                try:
+                    account_key = unwrap_account_key_for_device(
+                        account_id=session.account_id,
+                        private_key=private_key,
+                        envelope=device_envelope.get("envelope"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    raise ApiError(400, "This device could not unlock its approved sync key.") from exc
+                state, account_key = settings.enable(
+                    session.account_id,
+                    account_key=account_key,
+                    device_id=session.device_id,
+                )
+            else:
+                state, account_key = settings.enable(session.account_id, device_id=session.device_id)
+                returned_recovery_key = generate_recovery_key()
+                recovery_envelope = create_recovery_envelope(
+                    account_id=session.account_id,
+                    account_key=account_key,
+                    recovery_key=returned_recovery_key,
+                )
+                client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
         engine = self._sync_engine()
         engine.attach_outbox()
         self._enqueue_sync_snapshot()
@@ -545,6 +589,37 @@ class UiBackend:
     def revoke_pro_device(self, device_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
         return client.revoke_device(device_id)
+
+    def approve_pro_device(self, device_id: str) -> dict[str, Any]:
+        client = self._require_pro_client()
+        session = client.refresh_if_needed()
+        if session is None:
+            raise ApiError(401, "Sign in to Dictate Pro before approving a device.")
+        account_key = self._require_sync_settings().account_key()
+        if account_key is None:
+            raise ApiError(409, "Enable encrypted sync on this device before approving another device.")
+        target = device_id.strip()
+        if not target:
+            raise ApiError(400, "device_id is required")
+        devices = client.list_devices().get("devices", [])
+        device = next(
+            (
+                item for item in devices
+                if isinstance(item, dict) and str(item.get("device_id") or item.get("deviceId") or "") == target
+            ),
+            None,
+        )
+        if not isinstance(device, dict):
+            raise ApiError(404, "Device not found.")
+        public_key = str(device.get("public_key") or device.get("publicKey") or "").strip()
+        if not public_key:
+            raise ApiError(409, "This device cannot be approved because it did not register a sync public key.")
+        envelope = wrap_account_key_for_device(
+            account_id=session.account_id,
+            account_key=account_key,
+            recipient_public_key=public_key,
+        )
+        return client.approve_device(target, envelope=envelope)
 
     def export_pro_cloud_data(self) -> dict[str, Any]:
         client = self._require_pro_client()
@@ -1583,6 +1658,9 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pro/devices/revoke" and method == "POST":
             body = self._read_json() or {}
             return _Response(200, backend.revoke_pro_device(str(body.get("deviceId") or body.get("device_id") or "")))
+        if path == "/api/pro/devices/approve" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.approve_pro_device(str(body.get("deviceId") or body.get("device_id") or "")))
         if path == "/api/pro/cloud/export" and method == "GET":
             return _Response(200, backend.export_pro_cloud_data())
         if path == "/api/pro/cloud/delete" and method == "DELETE":

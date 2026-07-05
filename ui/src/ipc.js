@@ -174,6 +174,9 @@ export const ipc = {
   async revokeProDevice(deviceId) {
     return call("POST", "/api/pro/devices/revoke", { deviceId });
   },
+  async approveProDevice(deviceId) {
+    return call("POST", "/api/pro/devices/approve", { deviceId });
+  },
   async exportProCloudData() {
     return call("GET", "/api/pro/cloud/export");
   },

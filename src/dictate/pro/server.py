@@ -227,11 +227,28 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, service.list_devices(account_id))
         device_match = re.fullmatch(r"/v1/devices/([^/]+)/revoke", path)
         if device_match and method == "POST":
-            return _Response(200, service.revoke_device(account_id, device_match.group(1)))
+            return _Response(200, service.revoke_device(account_id, device_id, device_match.group(1)))
+        device_approve_match = re.fullmatch(r"/v1/devices/([^/]+)/approve", path)
+        if device_approve_match and method == "POST":
+            body = self._read_json()
+            envelope = body.get("envelope")
+            if envelope is not None and not isinstance(envelope, dict):
+                raise ApiError(400, "envelope must be a JSON object")
+            return _Response(
+                200,
+                service.approve_device(
+                    account_id,
+                    device_id,
+                    device_approve_match.group(1),
+                    envelope=envelope,
+                ),
+            )
+        if path == "/v1/devices/current/approve-with-recovery" and method == "POST":
+            return _Response(200, service.approve_current_device_with_recovery(account_id, device_id))
         if path == "/v1/account/export" and method == "GET":
-            return _Response(200, service.export_account_cloud_data(account_id))
+            return _Response(200, service.export_account_cloud_data(account_id, device_id))
         if path == "/v1/account/cloud-data" and method == "DELETE":
-            return _Response(200, service.delete_account_cloud_data(account_id))
+            return _Response(200, service.delete_account_cloud_data(account_id, device_id))
         if path == "/v1/sync/push" and method == "POST":
             body = self._read_json()
             records = body.get("records")

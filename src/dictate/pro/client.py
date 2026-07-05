@@ -352,6 +352,25 @@ class ProClient:
             raise ProClientError(400, "device_id is required")
         return self._request("POST", self._account_path(f"devices/{target}/revoke"), {}, auth=session.access_token)
 
+    def approve_device(self, device_id: str, *, envelope: dict[str, Any] | None = None) -> dict[str, Any]:
+        session = self._require_session()
+        target = device_id.strip()
+        if not target:
+            raise ProClientError(400, "device_id is required")
+        payload: dict[str, Any] = {}
+        if envelope is not None:
+            payload["envelope"] = envelope
+        return self._request("POST", self._account_path(f"devices/{target}/approve"), payload, auth=session.access_token)
+
+    def approve_current_device_with_recovery(self) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request(
+            "POST",
+            self._account_path("devices/current/approve-with-recovery"),
+            {},
+            auth=session.access_token,
+        )
+
     def export_cloud_data(self) -> dict[str, Any]:
         session = self._require_session()
         return self._request("GET", self._account_path("account/export"), auth=session.access_token)

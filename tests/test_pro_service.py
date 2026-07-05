@@ -51,7 +51,7 @@ class ProServiceTests(unittest.TestCase):
         devices = self.service.list_devices(self.account_id)["devices"]
         self.assertTrue(any(device["device_id"] == self.device_id for device in devices))
 
-        revoked = self.service.revoke_device(self.account_id, self.device_id)
+        revoked = self.service.revoke_device(self.account_id, self.device_id, self.device_id)
 
         self.assertTrue(revoked["revoked"])
         with self.assertRaises(ProServiceError) as ctx:
@@ -62,10 +62,76 @@ class ProServiceTests(unittest.TestCase):
         cursor = self.service.update_sync_cursor(self.account_id, self.device_id, last_seq=9)
 
         self.assertEqual(cursor["last_seq"], 9)
-        self.service.revoke_device(self.account_id, self.device_id)
+        self.service.revoke_device(self.account_id, self.device_id, self.device_id)
         with self.assertRaises(ProServiceError) as ctx:
             self.service.update_sync_cursor(self.account_id, self.device_id, last_seq=10)
         self.assertEqual(ctx.exception.status, 403)
+
+    def test_additional_device_is_pending_until_approved(self) -> None:
+        start = self.service.auth.start_sign_in("customer@example.com")
+        pending = self.service.auth.complete_sign_in(
+            challenge_id=start["challenge_id"],
+            code=start["dev_code"],
+            device_label="Laptop",
+            device_public_key="pending_public_key",
+        )
+
+        devices = self.service.list_devices(self.account_id)["devices"]
+        pending_device = next(device for device in devices if device["device_id"] == pending.device_id)
+        self.assertIsNone(pending_device["trusted_at"])
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.get_sync_changes(self.account_id, pending.device_id)
+        self.assertEqual(ctx.exception.status, 403)
+
+        approved = self.service.approve_device(
+            self.account_id,
+            self.device_id,
+            pending.device_id,
+            envelope={"version": 1, "ciphertext": "wrapped-for-pending"},
+        )
+
+        self.assertTrue(approved["approved"])
+        self.assertIsNotNone(approved["device"]["trusted_at"])
+        changes = self.service.get_sync_changes(self.account_id, pending.device_id)
+        self.assertEqual(changes["records"], [])
+        envelopes = self.service.list_key_envelopes(self.account_id, pending.device_id, envelope_kind="device")
+        self.assertEqual(envelopes["envelopes"][0]["device_id"], pending.device_id)
+
+    def test_pending_device_can_be_trusted_after_recovery_unlock(self) -> None:
+        self.service.save_key_envelope(
+            self.account_id,
+            self.device_id,
+            envelope_kind="recovery",
+            envelope={"version": 1, "ciphertext": "opaque-recovery-envelope"},
+        )
+        start = self.service.auth.start_sign_in("customer@example.com")
+        pending = self.service.auth.complete_sign_in(
+            challenge_id=start["challenge_id"],
+            code=start["dev_code"],
+            device_label="Recovered laptop",
+        )
+
+        listed = self.service.list_key_envelopes(self.account_id, pending.device_id, envelope_kind="recovery")
+        self.assertEqual(listed["envelopes"][0]["envelope"]["ciphertext"], "opaque-recovery-envelope")
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.save_key_envelope(
+                self.account_id,
+                pending.device_id,
+                envelope_kind="recovery",
+                envelope={"version": 1, "ciphertext": "should-not-write-yet"},
+            )
+        self.assertEqual(ctx.exception.status, 403)
+
+        approved = self.service.approve_current_device_with_recovery(self.account_id, pending.device_id)
+
+        self.assertEqual(approved["method"], "recovery")
+        self.assertIsNotNone(approved["device"]["trusted_at"])
+        self.service.save_key_envelope(
+            self.account_id,
+            pending.device_id,
+            envelope_kind="device",
+            envelope={"version": 1, "ciphertext": "now-trusted"},
+        )
 
     def test_sync_rejects_device_mismatch(self) -> None:
         record = encrypt_record(
@@ -125,10 +191,10 @@ class ProServiceTests(unittest.TestCase):
         )
         self.service.push_sync_records(self.account_id, self.device_id, [asdict(record)])
 
-        exported = self.service.export_account_cloud_data(self.account_id)
+        exported = self.service.export_account_cloud_data(self.account_id, self.device_id)
         self.assertEqual(len(exported["sync_records"]), 1)
 
-        deleted = self.service.delete_account_cloud_data(self.account_id)
+        deleted = self.service.delete_account_cloud_data(self.account_id, self.device_id)
 
         self.assertGreaterEqual(deleted["deleted"]["sync_records"], 1)
         self.assertEqual(self.service.store.list_sync_changes(account_id=self.account_id, since=0, limit=10), [])
@@ -144,10 +210,10 @@ class ProServiceTests(unittest.TestCase):
         self.assertEqual(saved["device_id"], self.device_id)
         listed = self.service.list_key_envelopes(self.account_id, self.device_id, envelope_kind="recovery")
         self.assertEqual(listed["envelopes"][0]["envelope"]["ciphertext"], "opaque")
-        exported = self.service.export_account_cloud_data(self.account_id)
+        exported = self.service.export_account_cloud_data(self.account_id, self.device_id)
         self.assertEqual(exported["key_envelopes"][0]["envelope_kind"], "recovery")
 
-        self.service.revoke_device(self.account_id, self.device_id)
+        self.service.revoke_device(self.account_id, self.device_id, self.device_id)
         with self.assertRaises(ProServiceError) as ctx:
             self.service.save_key_envelope(
                 self.account_id,

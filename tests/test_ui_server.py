@@ -15,7 +15,7 @@ from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
 from dictate.pro.client import ProSession
-from dictate.sync import SyncSettingsStore, decrypt_record
+from dictate.sync import SyncSettingsStore, decrypt_record, generate_device_key_pair
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
@@ -172,6 +172,7 @@ class _FakeProClient:
         self.drained_sync_records = []
         self.saved_key_envelopes = []
         self.revoked_devices: list[str] = []
+        self.approved_devices: list[dict[str, object]] = []
         self.deleted_cloud = False
         self.session = ProSession(
             account_id="acct_test",
@@ -247,12 +248,27 @@ class _FakeProClient:
                     "trusted_at": "2026-07-05T12:00:00+00:00",
                     "revoked_at": None,
                 },
+                {
+                    "device_id": "device_pending",
+                    "label": "New laptop",
+                    "public_key": "MoQq/Kdp1dGMzaBKnJ6bN1DRe4E9eKUGq9MfSi7vHEA=",
+                    "trusted_at": None,
+                    "revoked_at": None,
+                },
             ]
         }
 
     def revoke_device(self, device_id: str) -> dict[str, object]:
         self.revoked_devices.append(device_id)
         return {"revoked": True, "device_id": device_id}
+
+    def approve_device(self, device_id: str, *, envelope: dict[str, object] | None = None) -> dict[str, object]:
+        self.approved_devices.append({"device_id": device_id, "envelope": envelope})
+        return {"approved": True, "device": {"device_id": device_id, "trusted_at": "2026-07-05T12:00:00+00:00"}}
+
+    def approve_current_device_with_recovery(self) -> dict[str, object]:
+        self.approved_with_recovery = True
+        return {"approved": True, "method": "recovery"}
 
     def export_cloud_data(self) -> dict[str, object]:
         return {"account": {"account_id": "acct_test"}, "sync_records": []}
@@ -613,6 +629,7 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertTrue(restored["sync"]["enabled"])
             self.assertNotIn("recoveryKey", restored)
             self.assertEqual(sync_settings.account_key(), original_key)
+            self.assertTrue(pro_client.approved_with_recovery)
 
     def test_enable_sync_rejects_wrong_recovery_key(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -625,6 +642,77 @@ class UiBackendStateTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ApiError, "Recovery key could not unlock"):
                 backend.enable_sync(recovery_key="dictate-rk-wrong")
+
+    def test_approve_pro_device_wraps_local_sync_key(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            sync_settings = _sync_settings(Path(d))
+            pro_client = _FakeProClient()
+            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
+            backend.enable_sync()
+
+            result = backend.approve_pro_device("device_pending")
+
+            self.assertTrue(result["approved"])
+            self.assertEqual(pro_client.approved_devices[0]["device_id"], "device_pending")
+            envelope = pro_client.approved_devices[0]["envelope"]
+            self.assertIsInstance(envelope, dict)
+            assert isinstance(envelope, dict)
+            self.assertEqual(envelope["algorithm"], "x25519-aes-256-gcm")
+
+    def test_enable_sync_can_restore_existing_key_from_device_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pending_keys = generate_device_key_pair()
+            sync_settings = _sync_settings(Path(d))
+            pro_client = _FakeProClient()
+            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
+            backend.enable_sync()
+            original_key = sync_settings.account_key()
+            assert original_key is not None
+
+            def list_devices() -> dict[str, object]:
+                return {
+                    "devices": [
+                        {
+                            "device_id": "device_test",
+                            "label": "Test Desktop",
+                            "trusted_at": "2026-07-05T12:00:00+00:00",
+                            "revoked_at": None,
+                        },
+                        {
+                            "device_id": "device_pending",
+                            "label": "New laptop",
+                            "public_key": pending_keys.public_key,
+                            "trusted_at": None,
+                            "revoked_at": None,
+                        },
+                    ]
+                }
+
+            pro_client.list_devices = list_devices  # type: ignore[method-assign]
+            backend.approve_pro_device("device_pending")
+            envelope = pro_client.approved_devices[0]["envelope"]
+            assert isinstance(envelope, dict)
+            pro_client.saved_key_envelopes.append({
+                "envelope_kind": "device",
+                "device_id": "device_pending",
+                "envelope": envelope,
+            })
+            pro_client.session = ProSession(
+                account_id="acct_test",
+                device_id="device_pending",
+                access_token="access",
+                refresh_token="refresh",
+                access_expires_at="2027-01-01T00:00:00+00:00",
+                refresh_expires_at="2028-01-01T00:00:00+00:00",
+            )
+            sync_settings.disable(clear_key=True)
+
+            with patch("dictate.ui_server.api_keys_mod.read_sync_device_private_key", return_value=pending_keys.private_key):
+                restored = backend.enable_sync()
+
+            self.assertTrue(restored["sync"]["enabled"])
+            self.assertNotIn("recoveryKey", restored)
+            self.assertEqual(sync_settings.account_key(), original_key)
 
     def test_run_sync_drains_outbox_and_returns_history(self) -> None:
         with tempfile.TemporaryDirectory() as d:

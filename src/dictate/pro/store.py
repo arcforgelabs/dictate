@@ -333,8 +333,10 @@ class ProStore:
                 conn.execute("ALTER TABLE subscriptions ADD COLUMN last_event_created INTEGER")
             except sqlite3.OperationalError:
                 pass
+            trusted_at_column_added = False
             try:
                 conn.execute("ALTER TABLE devices ADD COLUMN trusted_at TEXT")
+                trusted_at_column_added = True
             except sqlite3.OperationalError:
                 pass
             try:
@@ -345,13 +347,14 @@ class ProStore:
                 conn.execute("ALTER TABLE devices ADD COLUMN public_key TEXT")
             except sqlite3.OperationalError:
                 pass
-            conn.execute(
-                """
-                UPDATE devices
-                SET trusted_at = COALESCE(trusted_at, created_at)
-                WHERE trusted_at IS NULL
-                """
-            )
+            if trusted_at_column_added:
+                conn.execute(
+                    """
+                    UPDATE devices
+                    SET trusted_at = COALESCE(trusted_at, created_at)
+                    WHERE trusted_at IS NULL
+                    """
+                )
 
     def upsert_sync_records(
         self,
@@ -764,15 +767,37 @@ class ProStore:
                     (now, label, normalized_public_key, device),
                 )
                 return device
+            trusted_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM devices
+                WHERE account_id = ? AND revoked_at IS NULL AND trusted_at IS NOT NULL
+                """,
+                (account_id,),
+            ).fetchone()
+            trusted_at = now if int(trusted_count["count"] if trusted_count else 0) == 0 else None
             conn.execute(
                 """
                 INSERT INTO devices (
                     device_id, account_id, label, public_key, trusted_at, revoked_at, created_at, last_seen_at
                 ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
                 """,
-                (device, account_id, label, normalized_public_key, now, now, now),
+                (device, account_id, label, normalized_public_key, trusted_at, now, now),
             )
             return device
+
+    def approve_device(self, *, account_id: str, device_id: str) -> bool:
+        now = iso()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE devices
+                SET trusted_at = COALESCE(trusted_at, ?), last_seen_at = ?
+                WHERE account_id = ? AND device_id = ? AND revoked_at IS NULL
+                """,
+                (now, now, account_id, device_id),
+            )
+            return cur.rowcount > 0
 
     def touch_device(self, device_id: str) -> None:
         with self._conn() as conn:
@@ -833,6 +858,12 @@ class ProStore:
             return False
         device = self.get_device(account_id=account_id, device_id=device_id)
         return bool(device and device.revoked_at is None and device.trusted_at is not None)
+
+    def device_is_known(self, *, account_id: str, device_id: str | None) -> bool:
+        if not device_id:
+            return False
+        device = self.get_device(account_id=account_id, device_id=device_id)
+        return bool(device and device.revoked_at is None)
 
     def save_auth_challenge(
         self,

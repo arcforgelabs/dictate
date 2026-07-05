@@ -73,18 +73,28 @@ class ProServerTests(unittest.TestCase):
     def _sign_in(self) -> str:
         return str(self._sign_in_session()["access_token"])
 
-    def _sign_in_session(self) -> dict:
+    def _sign_in_session(
+        self,
+        *,
+        device_id: str | None = None,
+        device_label: str = "Desktop",
+        device_public_key: str = "public_key_1",
+    ) -> dict:
         status, start = _request(self.base_url, "POST", "/v1/auth/start", {"email": "server@example.com"})
         self.assertEqual(status, 200)
+        payload = {
+            "challenge_id": start["challenge_id"],
+            "code": start["dev_code"],
+            "device_label": device_label,
+            "device_public_key": device_public_key,
+        }
+        if device_id:
+            payload["device_id"] = device_id
         status, complete = _request(
             self.base_url,
             "POST",
             "/v1/auth/complete",
-            {
-                "challenge_id": start["challenge_id"],
-                "code": start["dev_code"],
-                "device_public_key": "public_key_1",
-            },
+            payload,
         )
         self.assertEqual(status, 200)
         return complete
@@ -204,6 +214,98 @@ class ProServerTests(unittest.TestCase):
             ),
         )
         self.assertEqual(decrypted["text"], "private dictated text")
+
+    def test_additional_device_requires_approval_before_sync(self) -> None:
+        trusted = self._sign_in_session(device_id="device_trusted", device_public_key="trusted_public_key")
+        pending = self._sign_in_session(
+            device_id="device_pending",
+            device_label="Laptop",
+            device_public_key="pending_public_key",
+        )
+
+        status, devices = _request(self.base_url, "GET", "/v1/devices", token=pending["access_token"])
+        self.assertEqual(status, 200)
+        pending_device = next(device for device in devices["devices"] if device["device_id"] == "device_pending")
+        self.assertIsNone(pending_device["trusted_at"])
+
+        status, blocked = _request(
+            self.base_url,
+            "GET",
+            "/v1/sync/changes?since=0",
+            token=pending["access_token"],
+        )
+        self.assertEqual(status, 403)
+        self.assertIn("not trusted", blocked["error"])
+
+        status, approved = _request(
+            self.base_url,
+            "POST",
+            "/v1/devices/device_pending/approve",
+            {"envelope": {"version": 1, "ciphertext": "wrapped-for-pending"}},
+            token=trusted["access_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(approved["approved"])
+        self.assertIsNotNone(approved["device"]["trusted_at"])
+
+        status, changes = _request(
+            self.base_url,
+            "GET",
+            "/v1/sync/changes?since=0",
+            token=pending["access_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(changes["records"], [])
+
+    def test_recovery_approval_trusts_current_pending_device(self) -> None:
+        trusted = self._sign_in_session(device_id="device_trusted", device_public_key="trusted_public_key")
+        status, saved = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/key-envelopes",
+            {"envelope_kind": "recovery", "envelope": {"version": 1, "ciphertext": "opaque-recovery"}},
+            token=trusted["access_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["device_id"], "device_trusted")
+        pending = self._sign_in_session(device_id="device_recovered", device_public_key="recovered_public_key")
+
+        status, listed = _request(
+            self.base_url,
+            "GET",
+            "/v1/sync/key-envelopes?kind=recovery",
+            token=pending["access_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(listed["envelopes"][0]["envelope"]["ciphertext"], "opaque-recovery")
+        status, blocked = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/key-envelopes",
+            {"envelope_kind": "device", "envelope": {"ciphertext": "not-yet"}},
+            token=pending["access_token"],
+        )
+        self.assertEqual(status, 403)
+
+        status, approved = _request(
+            self.base_url,
+            "POST",
+            "/v1/devices/current/approve-with-recovery",
+            {},
+            token=pending["access_token"],
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(approved["method"], "recovery")
+        status, saved_after = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/key-envelopes",
+            {"envelope_kind": "device", "envelope": {"ciphertext": "now-trusted"}},
+            token=pending["access_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(saved_after["device_id"], "device_recovered")
 
     def test_sync_push_drops_accidental_plaintext_fields(self) -> None:
         session = self._sign_in_session()

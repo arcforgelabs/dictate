@@ -336,6 +336,18 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
+  const approveDevice = (deviceId) => {
+    if (!deviceId || !ipc.isLive()) return;
+    s.setSyncBusy(true);
+    ipc.approveProDevice(deviceId)
+      .then(() => {
+        s.toast("Device approved");
+        refreshDevices();
+      })
+      .catch((e) => s.toast(e.message || "Could not approve device", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
   const exportCloudData = () => {
     if (!ipc.isLive()) return;
     s.setSyncBusy(true);
@@ -433,16 +445,26 @@ function AccountDialog() {
               {devices.length ? devices.map((device) => {
                 const id = device.device_id || device.deviceId;
                 const isThis = id && sync.deviceId && id === sync.deviceId;
+                const revoked = !!(device.revoked_at || device.revokedAt);
+                const trusted = !!(device.trusted_at || device.trustedAt);
+                const status = isThis ? "This device" : revoked ? "Removed" : trusted ? "Active" : "Action needed";
                 return (
                   <div className="account-device" key={id || device.label || "device"}>
                     <div>
                       <strong>{device.label || (isThis ? "This device" : "Desktop")}</strong>
-                      <span>{isThis ? "This device" : (device.revoked_at || device.revokedAt ? "Removed" : "Active")}</span>
+                      <span>{status}</span>
                     </div>
-                    {!isThis && !(device.revoked_at || device.revokedAt) && (
-                      <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => revokeDevice(id)}>
-                        Remove
-                      </button>
+                    {!isThis && !revoked && (
+                      <div className="account-device-actions">
+                        {!trusted && (
+                          <button type="button" className="account-primary mini" disabled={s.syncBusy || !sync.keyAvailable} onClick={() => approveDevice(id)}>
+                            Approve
+                          </button>
+                        )}
+                        <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => revokeDevice(id)}>
+                          Remove
+                        </button>
+                      </div>
                     )}
                   </div>
                 );

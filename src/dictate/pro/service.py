@@ -240,7 +240,10 @@ class ProService:
         envelope_kind: str | None = None,
     ) -> dict[str, Any]:
         self._require_active_subscription(account_id)
-        self._require_active_device(account_id, device_id)
+        if envelope_kind == "recovery":
+            self._require_known_device(account_id, device_id)
+        else:
+            self._require_active_device(account_id, device_id)
         envelopes = [
             {
                 "account_id": row.account_id,
@@ -272,23 +275,64 @@ class ProService:
             ]
         }
 
-    def revoke_device(self, account_id: str, device_id: str) -> dict[str, Any]:
+    def revoke_device(self, account_id: str, current_device_id: str | None, device_id: str) -> dict[str, Any]:
         if not device_id.strip():
             raise ProServiceError(400, "device_id is required")
         self._require_active_subscription(account_id)
+        self._require_active_device(account_id, current_device_id)
         if not self.store.revoke_device(account_id=account_id, device_id=device_id.strip()):
             raise ProServiceError(404, "device not found")
         return {"revoked": True, "device_id": device_id.strip()}
 
-    def export_account_cloud_data(self, account_id: str) -> dict[str, Any]:
+    def approve_device(
+        self,
+        account_id: str,
+        approving_device_id: str | None,
+        target_device_id: str,
+        *,
+        envelope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._require_active_subscription(account_id)
+        self._require_active_device(account_id, approving_device_id)
+        target = target_device_id.strip()
+        if not target:
+            raise ProServiceError(400, "device_id is required")
+        if envelope is not None:
+            if not isinstance(envelope, dict) or not envelope:
+                raise ProServiceError(400, "envelope must be a JSON object")
+            try:
+                self.store.save_key_envelope(
+                    account_id=account_id,
+                    device_id=target,
+                    envelope_kind="device",
+                    envelope=envelope,
+                )
+            except ValueError as exc:
+                raise ProServiceError(400, str(exc)) from exc
+        if not self.store.approve_device(account_id=account_id, device_id=target):
+            raise ProServiceError(404, "device not found")
+        device = self.store.get_device(account_id=account_id, device_id=target)
+        return {"approved": True, "device": self._device_payload(device)}
+
+    def approve_current_device_with_recovery(self, account_id: str, device_id: str | None) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_known_device(account_id, device_id)
+        if not self.store.approve_device(account_id=account_id, device_id=str(device_id)):
+            raise ProServiceError(404, "device not found")
+        device = self.store.get_device(account_id=account_id, device_id=str(device_id))
+        return {"approved": True, "device": self._device_payload(device), "method": "recovery"}
+
+    def export_account_cloud_data(self, account_id: str, device_id: str | None) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
         data = self.store.export_account_cloud_data(account_id)
         if not data:
             raise ProServiceError(404, "account not found")
         return data
 
-    def delete_account_cloud_data(self, account_id: str) -> dict[str, Any]:
+    def delete_account_cloud_data(self, account_id: str, device_id: str | None) -> dict[str, Any]:
         self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
         return {"deleted": self.store.delete_account_cloud_data(account_id)}
 
     def get_current_usage(self, account_id: str) -> dict[str, Any]:
@@ -518,6 +562,10 @@ class ProService:
         if not self.store.device_is_active(account_id=account_id, device_id=device_id):
             raise ProServiceError(403, "device is not trusted for sync")
 
+    def _require_known_device(self, account_id: str, device_id: str | None) -> None:
+        if not self.store.device_is_known(account_id=account_id, device_id=device_id):
+            raise ProServiceError(403, "device is not registered")
+
     def _subscription_period_expired(self, subscription: SubscriptionRow) -> bool:
         grace_seconds = int(os.environ.get("DICTATE_PRO_PERIOD_GRACE_SECONDS", str(DEFAULT_PERIOD_GRACE_SECONDS)))
         period_end = self._parse_period_end(subscription.current_period_end)
@@ -569,6 +617,20 @@ class ProService:
                 "twenty_four_hours": usage.used_seconds >= USAGE_THRESHOLDS.warn_seconds[1],
                 "exhausted": usage.used_seconds >= USAGE_THRESHOLDS.hard_stop_seconds,
             },
+        }
+
+    def _device_payload(self, device) -> dict[str, Any] | None:
+        if device is None:
+            return None
+        return {
+            "account_id": device.account_id,
+            "device_id": device.device_id,
+            "label": device.label,
+            "public_key": device.public_key,
+            "created_at": device.created_at,
+            "trusted_at": device.trusted_at,
+            "revoked_at": device.revoked_at,
+            "last_seen_at": device.last_seen_at,
         }
 
     def _meeting_payload(self, job: MeetingJobRow) -> dict[str, Any]:
