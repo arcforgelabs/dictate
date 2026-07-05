@@ -71,6 +71,9 @@ class ProServerTests(unittest.TestCase):
         self.service.grant_subscription_for_testing(email="server@example.com")
 
     def _sign_in(self) -> str:
+        return str(self._sign_in_session()["access_token"])
+
+    def _sign_in_session(self) -> dict:
         status, start = _request(self.base_url, "POST", "/v1/auth/start", {"email": "server@example.com"})
         self.assertEqual(status, 200)
         status, complete = _request(
@@ -80,7 +83,7 @@ class ProServerTests(unittest.TestCase):
             {"challenge_id": start["challenge_id"], "code": start["dev_code"]},
         )
         self.assertEqual(status, 200)
-        return str(complete["access_token"])
+        return complete
 
     def tearDown(self) -> None:
         self.httpd.shutdown()
@@ -141,7 +144,9 @@ class ProServerTests(unittest.TestCase):
         self.assertIn("hi", transcript["text"])
 
     def test_sync_push_pull_stores_only_encrypted_payload(self) -> None:
-        token = self._sign_in()
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
         key = generate_account_key()
         encrypted = encrypt_record(
             "acct_local",
@@ -151,7 +156,7 @@ class ProServerTests(unittest.TestCase):
                 record_id="hist_1",
                 rev=1,
                 updated_at="2026-07-05T12:00:00+00:00",
-                device_id="device_test",
+                device_id=device_id,
                 deleted=False,
                 content_type="application/vnd.dictate.history+json;v=1",
                 payload={"text": "private dictated text"},
@@ -197,7 +202,9 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(decrypted["text"], "private dictated text")
 
     def test_sync_push_uses_metadata_lww(self) -> None:
-        token = self._sign_in()
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
         key = generate_account_key()
         newer = encrypt_record(
             "acct_local",
@@ -207,7 +214,7 @@ class ProServerTests(unittest.TestCase):
                 record_id="hist_1",
                 rev=2,
                 updated_at="2026-07-05T12:02:00+00:00",
-                device_id="device_b",
+                device_id=device_id,
                 deleted=False,
                 content_type="application/vnd.dictate.history+json;v=1",
                 payload={"text": "newer"},
@@ -221,7 +228,7 @@ class ProServerTests(unittest.TestCase):
                 record_id="hist_1",
                 rev=1,
                 updated_at="2026-07-05T12:01:00+00:00",
-                device_id="device_a",
+                device_id=device_id,
                 deleted=False,
                 content_type="application/vnd.dictate.history+json;v=1",
                 payload={"text": "older"},
@@ -234,6 +241,58 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(first["results"][0]["status"], "accepted")
         self.assertEqual(second["results"][0]["status"], "superseded")
+
+    def test_device_revoke_blocks_future_sync(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+
+        status, devices = _request(self.base_url, "GET", "/v1/devices", token=token)
+        self.assertEqual(status, 200)
+        self.assertTrue(any(device["device_id"] == device_id for device in devices["devices"]))
+
+        status, revoked = _request(self.base_url, "POST", f"/v1/devices/{device_id}/revoke", {}, token=token)
+        self.assertEqual(status, 200)
+        self.assertTrue(revoked["revoked"])
+
+        status, body = _request(self.base_url, "GET", "/v1/sync/changes?since=0", token=token)
+        self.assertEqual(status, 401)
+        self.assertIn("unauthorized", body["error"])
+
+    def test_account_export_and_delete_cloud_data(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+        key = generate_account_key()
+        encrypted = encrypt_record(
+            "acct_local",
+            key,
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_export",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private export text"},
+            ),
+        )
+        status, _ = _request(self.base_url, "POST", "/v1/sync/push", {"records": [asdict(encrypted)]}, token=token)
+        self.assertEqual(status, 200)
+
+        status, exported = _request(self.base_url, "GET", "/v1/account/export", token=token)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(exported["sync_records"]), 1)
+        self.assertNotIn("private export text", json.dumps(exported))
+
+        status, deleted = _request(self.base_url, "DELETE", "/v1/account/cloud-data", token=token)
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(deleted["deleted"]["sync_records"], 1)
+
+        status, changes = _request(self.base_url, "GET", "/v1/sync/changes?since=0", token=token)
+        self.assertEqual(status, 401)
+        self.assertIn("unauthorized", changes["error"])
 
     def test_stripe_webhook_and_healthz_bypass_rate_limiter(self) -> None:
         import dictate.pro.server as server_module

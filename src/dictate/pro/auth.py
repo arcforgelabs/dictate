@@ -116,6 +116,8 @@ class ProAuth:
             device_id=device_id,
             label=device_label,
         )
+        if not self._store.device_is_active(account_id=account.account_id, device_id=device):
+            raise ValueError("device revoked")
         self._store.delete_auth_challenge(challenge_id)
         return self._issue_session(account.account_id, device)
 
@@ -131,6 +133,8 @@ class ProAuth:
         if utcnow() > expires_at:
             raise ValueError("refresh token expired")
         device_id = row.get("device_id") or ""
+        if device_id and not self._store.device_is_active(account_id=row["account_id"], device_id=device_id):
+            raise ValueError("device revoked")
         self._store.revoke_auth_token(_hash_token(refresh_token))
         return self._issue_session(row["account_id"], device_id)
 
@@ -146,6 +150,8 @@ class ProAuth:
         if utcnow() > expires_at:
             raise ValueError("access token expired")
         device_id = row.get("device_id")
+        if device_id and not self._store.device_is_active(account_id=row["account_id"], device_id=device_id):
+            raise ValueError("device revoked")
         if device_id:
             self._store.touch_device(device_id)
         return row["account_id"], device_id

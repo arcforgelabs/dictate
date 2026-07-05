@@ -136,20 +136,25 @@ class ProService:
             },
         }
 
-    def push_sync_records(self, account_id: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+    def push_sync_records(self, account_id: str, device_id: str | None, records: list[dict[str, Any]]) -> dict[str, Any]:
         self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
         if not isinstance(records, list):
             raise ProServiceError(400, "records must be a list")
         if len(records) > 500:
             raise ProServiceError(413, "too many sync records")
+        for record in records:
+            if isinstance(record, dict) and str(record.get("device_id") or "") != str(device_id or ""):
+                raise ProServiceError(403, "sync record device mismatch")
         try:
             results = self.store.upsert_sync_records(account_id=account_id, records=records)
         except ValueError as exc:
             raise ProServiceError(400, str(exc)) from exc
         return {"results": results}
 
-    def get_sync_changes(self, account_id: str, *, since: int = 0, limit: int = 500) -> dict[str, Any]:
+    def get_sync_changes(self, account_id: str, device_id: str | None, *, since: int = 0, limit: int = 500) -> dict[str, Any]:
         self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
         rows = self.store.list_sync_changes(account_id=account_id, since=since, limit=limit)
         records = [
             {
@@ -170,6 +175,42 @@ class ProService:
         ]
         next_seq = records[-1]["seq"] if records else max(0, since)
         return {"next_seq": next_seq, "has_more": len(records) >= max(1, min(limit, 1000)), "records": records}
+
+    def list_devices(self, account_id: str) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        return {
+            "devices": [
+                {
+                    "account_id": device.account_id,
+                    "device_id": device.device_id,
+                    "label": device.label,
+                    "created_at": device.created_at,
+                    "trusted_at": device.trusted_at,
+                    "revoked_at": device.revoked_at,
+                    "last_seen_at": device.last_seen_at,
+                }
+                for device in self.store.list_devices(account_id)
+            ]
+        }
+
+    def revoke_device(self, account_id: str, device_id: str) -> dict[str, Any]:
+        if not device_id.strip():
+            raise ProServiceError(400, "device_id is required")
+        self._require_active_subscription(account_id)
+        if not self.store.revoke_device(account_id=account_id, device_id=device_id.strip()):
+            raise ProServiceError(404, "device not found")
+        return {"revoked": True, "device_id": device_id.strip()}
+
+    def export_account_cloud_data(self, account_id: str) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        data = self.store.export_account_cloud_data(account_id)
+        if not data:
+            raise ProServiceError(404, "account not found")
+        return data
+
+    def delete_account_cloud_data(self, account_id: str) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        return {"deleted": self.store.delete_account_cloud_data(account_id)}
 
     def get_current_usage(self, account_id: str) -> dict[str, Any]:
         subscription = self._require_active_subscription(account_id)
@@ -393,6 +434,10 @@ class ProService:
         if self._subscription_period_expired(subscription):
             raise ProServiceError(403, "Dictate Pro subscription period has expired.")
         return subscription
+
+    def _require_active_device(self, account_id: str, device_id: str | None) -> None:
+        if not self.store.device_is_active(account_id=account_id, device_id=device_id):
+            raise ProServiceError(403, "device is not trusted for sync")
 
     def _subscription_period_expired(self, subscription: SubscriptionRow) -> bool:
         grace_seconds = int(os.environ.get("DICTATE_PRO_PERIOD_GRACE_SECONDS", str(DEFAULT_PERIOD_GRACE_SECONDS)))

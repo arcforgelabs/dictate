@@ -112,6 +112,17 @@ class SyncRecordRow:
     payload_bytes: int
 
 
+@dataclass(slots=True)
+class DeviceRow:
+    account_id: str
+    device_id: str
+    label: str
+    created_at: str
+    trusted_at: str | None
+    revoked_at: str | None
+    last_seen_at: str
+
+
 class ProStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -149,6 +160,8 @@ class ProStore:
                     device_id TEXT PRIMARY KEY,
                     account_id TEXT NOT NULL,
                     label TEXT NOT NULL DEFAULT 'Desktop',
+                    trusted_at TEXT,
+                    revoked_at TEXT,
                     created_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL
                 );
@@ -279,6 +292,21 @@ class ProStore:
                 conn.execute("ALTER TABLE subscriptions ADD COLUMN last_event_created INTEGER")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE devices ADD COLUMN trusted_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE devices ADD COLUMN revoked_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                """
+                UPDATE devices
+                SET trusted_at = COALESCE(trusted_at, created_at)
+                WHERE trusted_at IS NULL
+                """
+            )
 
     def upsert_sync_records(
         self,
@@ -388,6 +416,90 @@ class ProStore:
             ).fetchall()
             return [_sync_record_row(row) for row in rows]
 
+    def export_account_cloud_data(self, account_id: str) -> dict[str, Any]:
+        """Return account-scoped cloud data without decrypting sync payloads."""
+        with self._conn() as conn:
+            account = conn.execute(
+                "SELECT account_id, email, stripe_customer_id, created_at, updated_at FROM accounts WHERE account_id = ?",
+                (account_id,),
+            ).fetchone()
+            if account is None:
+                return {}
+            devices = conn.execute(
+                """
+                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                FROM devices
+                WHERE account_id = ?
+                ORDER BY created_at ASC
+                """,
+                (account_id,),
+            ).fetchall()
+            sync_records = conn.execute(
+                """
+                SELECT *
+                FROM sync_records
+                WHERE account_id = ?
+                ORDER BY seq ASC
+                """,
+                (account_id,),
+            ).fetchall()
+            meetings = conn.execute(
+                """
+                SELECT *
+                FROM meeting_jobs
+                WHERE account_id = ?
+                ORDER BY created_at ASC
+                """,
+                (account_id,),
+            ).fetchall()
+            transcripts: dict[str, list[dict[str, Any]]] = {}
+            for job in meetings:
+                rows = conn.execute(
+                    """
+                    SELECT seq, speaker_id, speaker_label, text, t_start, t_end
+                    FROM transcript_segments
+                    WHERE job_id = ?
+                    ORDER BY seq ASC
+                    """,
+                    (job["job_id"],),
+                ).fetchall()
+                transcripts[job["job_id"]] = [dict(row) for row in rows]
+            return {
+                "account": dict(account),
+                "devices": [dict(row) for row in devices],
+                "sync_records": [_sync_record_payload(row) for row in sync_records],
+                "meeting_jobs": [dict(row) for row in meetings],
+                "transcript_segments": transcripts,
+            }
+
+    def delete_account_cloud_data(self, account_id: str) -> dict[str, int]:
+        """Delete account-owned Dictate cloud data while retaining billing identity."""
+        counts: dict[str, int] = {}
+        with self._conn() as conn:
+            meeting_rows = conn.execute(
+                "SELECT job_id FROM meeting_jobs WHERE account_id = ?",
+                (account_id,),
+            ).fetchall()
+            job_ids = [row["job_id"] for row in meeting_rows]
+            if job_ids:
+                placeholders = ",".join("?" * len(job_ids))
+                cur = conn.execute(
+                    f"DELETE FROM transcript_segments WHERE job_id IN ({placeholders})",
+                    job_ids,
+                )
+                counts["transcript_segments"] = cur.rowcount
+            else:
+                counts["transcript_segments"] = 0
+            for table in ("sync_records", "meeting_jobs", "usage_events", "usage_periods"):
+                cur = conn.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
+                counts[table] = cur.rowcount
+            cur = conn.execute(
+                "UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE account_id = ?",
+                (iso(), account_id),
+            )
+            counts["devices_revoked"] = cur.rowcount
+        return counts
+
     def get_or_create_account(self, email: str) -> AccountRow:
         normalized = email.strip().lower()
         with self._conn() as conn:
@@ -469,10 +581,10 @@ class ProStore:
                 return device
             conn.execute(
                 """
-                INSERT INTO devices (device_id, account_id, label, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, account_id, label, trusted_at, revoked_at, created_at, last_seen_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?)
                 """,
-                (device, account_id, label, now, now),
+                (device, account_id, label, now, now, now),
             )
             return device
 
@@ -482,6 +594,59 @@ class ProStore:
                 "UPDATE devices SET last_seen_at = ? WHERE device_id = ?",
                 (iso(), device_id),
             )
+
+    def list_devices(self, account_id: str) -> list[DeviceRow]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                FROM devices
+                WHERE account_id = ?
+                ORDER BY created_at ASC
+                """,
+                (account_id,),
+            ).fetchall()
+            return [_device_row(row) for row in rows]
+
+    def get_device(self, *, account_id: str, device_id: str) -> DeviceRow | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT account_id, device_id, label, created_at, trusted_at, revoked_at, last_seen_at
+                FROM devices
+                WHERE account_id = ? AND device_id = ?
+                """,
+                (account_id, device_id),
+            ).fetchone()
+            return _device_row(row) if row else None
+
+    def revoke_device(self, *, account_id: str, device_id: str) -> bool:
+        now = iso()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE devices
+                SET revoked_at = COALESCE(revoked_at, ?), last_seen_at = last_seen_at
+                WHERE account_id = ? AND device_id = ?
+                """,
+                (now, account_id, device_id),
+            )
+            if cur.rowcount:
+                conn.execute(
+                    """
+                    UPDATE auth_tokens
+                    SET revoked_at = COALESCE(revoked_at, ?)
+                    WHERE account_id = ? AND device_id = ?
+                    """,
+                    (now, account_id, device_id),
+                )
+            return cur.rowcount > 0
+
+    def device_is_active(self, *, account_id: str, device_id: str | None) -> bool:
+        if not device_id:
+            return False
+        device = self.get_device(account_id=account_id, device_id=device_id)
+        return bool(device and device.revoked_at is None and device.trusted_at is not None)
 
     def save_auth_challenge(
         self,
@@ -1070,6 +1235,18 @@ def _sync_record_row(row: sqlite3.Row) -> SyncRecordRow:
         nonce=row["nonce"],
         aad_hash=row["aad_hash"],
         payload_bytes=int(row["payload_bytes"]),
+    )
+
+
+def _device_row(row: sqlite3.Row) -> DeviceRow:
+    return DeviceRow(
+        account_id=row["account_id"],
+        device_id=row["device_id"],
+        label=row["label"],
+        created_at=row["created_at"],
+        trusted_at=row["trusted_at"],
+        revoked_at=row["revoked_at"],
+        last_seen_at=row["last_seen_at"],
     )
 
 

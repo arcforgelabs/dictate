@@ -153,6 +153,31 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[0]["payload"]["records"][0]["record_id"], "hist_1")
         self.assertEqual(client.calls[1]["path"], "/v1/sync/changes?since=7&limit=50")
 
+    def test_local_api_url_uses_v1_account_device_routes(self) -> None:
+        client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
+        session = ProSession(
+            account_id="acct_test",
+            device_id="dev_test",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+
+        with patch.object(client, "load_session", return_value=session):
+            client.list_devices()
+            client.revoke_device("dev_other")
+            client.export_cloud_data()
+            client.delete_cloud_data()
+
+        self.assertEqual([call["path"] for call in client.calls], [
+            "/v1/devices",
+            "/v1/devices/dev_other/revoke",
+            "/v1/account/export",
+            "/v1/account/cloud-data",
+        ])
+        self.assertEqual([call["method"] for call in client.calls], ["GET", "POST", "GET", "DELETE"])
+
     def test_arc_forge_sign_in_uses_shared_account_login_code_routes(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
         client.responses = [
@@ -250,6 +275,30 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[0]["path"], "/api/dictate/sync/push")
         self.assertEqual(client.calls[0]["auth"], "access")
         self.assertEqual(client.calls[1]["path"], "/api/dictate/sync/changes?since=3&limit=10")
+
+    def test_arc_forge_gateway_routes_account_device_actions_under_api_dictate(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+
+        with patch.object(client, "load_session", return_value=session):
+            client.list_devices()
+            client.revoke_device("device_2")
+            client.export_cloud_data()
+            client.delete_cloud_data()
+
+        self.assertEqual([call["path"] for call in client.calls], [
+            "/api/dictate/devices",
+            "/api/dictate/devices/device_2/revoke",
+            "/api/dictate/account/export",
+            "/api/dictate/account/cloud-data",
+        ])
 
     def test_drain_sync_outbox_removes_accepted_records(self) -> None:
         from dictate.sync import SyncOutbox

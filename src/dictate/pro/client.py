@@ -306,6 +306,25 @@ class ProClient:
         path = f"{self._sync_path('changes')}?since={max(0, int(since))}&limit={max(1, int(limit))}"
         return self._request("GET", path, auth=session.access_token)
 
+    def list_devices(self) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("GET", self._account_path("devices"), auth=session.access_token)
+
+    def revoke_device(self, device_id: str) -> dict[str, Any]:
+        session = self._require_session()
+        target = device_id.strip()
+        if not target:
+            raise ProClientError(400, "device_id is required")
+        return self._request("POST", self._account_path(f"devices/{target}/revoke"), {}, auth=session.access_token)
+
+    def export_cloud_data(self) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("GET", self._account_path("account/export"), auth=session.access_token)
+
+    def delete_cloud_data(self) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("DELETE", self._account_path("account/cloud-data"), auth=session.access_token)
+
     def drain_sync_outbox(self, outbox: SyncOutbox) -> dict[str, Any]:
         pending = outbox.pending()
         if not pending:
@@ -338,6 +357,12 @@ class ProClient:
         if self._uses_arcforge_gateway():
             return f"/api/dictate/sync/{action}"
         return f"/v1/sync/{action}"
+
+    def _account_path(self, path: str) -> str:
+        clean = path.strip("/")
+        if self._uses_arcforge_gateway():
+            return f"/api/dictate/{clean}"
+        return f"/v1/{clean}"
 
     def _uses_arcforge_gateway(self) -> bool:
         mode = os.environ.get("DICTATE_PRO_API_MODE", "").strip().lower()

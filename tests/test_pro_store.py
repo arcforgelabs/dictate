@@ -156,6 +156,61 @@ class ProStoreTests(unittest.TestCase):
         self.assertEqual(subscription.status, "canceled")
         self.assertEqual(subscription.last_event_created, 500)
 
+    def test_device_revocation_marks_tokens_and_inactive(self) -> None:
+        account = self.store.get_or_create_account("device@example.com")
+        device_id = self.store.register_device(
+            account_id=account.account_id,
+            device_id="device_1",
+            label="Desktop",
+        )
+        self.store.save_auth_token(
+            token_hash="tok_1",
+            account_id=account.account_id,
+            device_id=device_id,
+            token_type="access",
+            expires_at=iso(),
+        )
+
+        revoked = self.store.revoke_device(account_id=account.account_id, device_id=device_id)
+
+        self.assertTrue(revoked)
+        self.assertFalse(self.store.device_is_active(account_id=account.account_id, device_id=device_id))
+        token = self.store.get_auth_token("tok_1")
+        assert token is not None
+        self.assertIsNotNone(token["revoked_at"])
+
+    def test_delete_account_cloud_data_removes_sync_and_revokes_devices(self) -> None:
+        account = self.store.get_or_create_account("delete@example.com")
+        device_id = self.store.register_device(
+            account_id=account.account_id,
+            device_id="device_1",
+            label="Desktop",
+        )
+        self.store.upsert_sync_records(
+            account_id=account.account_id,
+            records=[
+                {
+                    "collection": "history",
+                    "record_id": "hist_1",
+                    "rev": 1,
+                    "device_id": device_id,
+                    "updated_at": "2026-07-05T12:00:00+00:00",
+                    "deleted": False,
+                    "content_type": "application/vnd.dictate.history+json;v=1",
+                    "ciphertext": "opaque",
+                    "nonce": "nonce",
+                    "aad_hash": "hash",
+                    "payload_bytes": 6,
+                }
+            ],
+        )
+
+        counts = self.store.delete_account_cloud_data(account.account_id)
+
+        self.assertEqual(counts["sync_records"], 1)
+        self.assertEqual(self.store.list_sync_changes(account_id=account.account_id, since=0, limit=10), [])
+        self.assertFalse(self.store.device_is_active(account_id=account.account_id, device_id=device_id))
+
 
 if __name__ == "__main__":
     unittest.main()

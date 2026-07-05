@@ -222,16 +222,25 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, service.get_entitlements(account_id))
         if path == "/v1/usage/current" and method == "GET":
             return _Response(200, service.get_current_usage(account_id))
+        if path == "/v1/devices" and method == "GET":
+            return _Response(200, service.list_devices(account_id))
+        device_match = re.fullmatch(r"/v1/devices/([^/]+)/revoke", path)
+        if device_match and method == "POST":
+            return _Response(200, service.revoke_device(account_id, device_match.group(1)))
+        if path == "/v1/account/export" and method == "GET":
+            return _Response(200, service.export_account_cloud_data(account_id))
+        if path == "/v1/account/cloud-data" and method == "DELETE":
+            return _Response(200, service.delete_account_cloud_data(account_id))
         if path == "/v1/sync/push" and method == "POST":
             body = self._read_json()
             records = body.get("records")
             if not isinstance(records, list):
                 raise ApiError(400, "records must be a list")
-            return _Response(200, service.push_sync_records(account_id, records))
+            return _Response(200, service.push_sync_records(account_id, device_id, records))
         if path == "/v1/sync/changes" and method == "GET":
             since = _query_int(query, "since", 0)
             limit = _query_int(query, "limit", 500)
-            return _Response(200, service.get_sync_changes(account_id, since=since, limit=limit))
+            return _Response(200, service.get_sync_changes(account_id, device_id, since=since, limit=limit))
         if path == "/v1/meetings" and method == "POST":
             body = self._read_json()
             return _Response(
@@ -336,6 +345,9 @@ class ProRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         self._dispatch("POST")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._dispatch("DELETE")
 
 
 def _audio_suffix(content_type: str) -> str:

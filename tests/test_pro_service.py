@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 import wave
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +16,7 @@ import numpy as np
 from dictate.pro.relay import RelayResult
 from dictate.pro.service import ProService, ProServiceError, ProSettings
 from dictate.pro.store import SubscriptionRow, TranscriptSegmentRow, iso, utcnow
+from dictate.sync import PlainSyncRecord, encrypt_record, generate_account_key
 
 
 class ProServiceTests(unittest.TestCase):
@@ -45,6 +46,62 @@ class ProServiceTests(unittest.TestCase):
         self.assertEqual(entitlements["plan_id"], "dictate_pro_monthly")
         self.assertEqual(usage["included_seconds"], 90_000)
         self.assertEqual(usage["used_seconds"], 0)
+
+    def test_device_revocation_blocks_sync(self) -> None:
+        devices = self.service.list_devices(self.account_id)["devices"]
+        self.assertTrue(any(device["device_id"] == self.device_id for device in devices))
+
+        revoked = self.service.revoke_device(self.account_id, self.device_id)
+
+        self.assertTrue(revoked["revoked"])
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.get_sync_changes(self.account_id, self.device_id)
+        self.assertEqual(ctx.exception.status, 403)
+
+    def test_sync_rejects_device_mismatch(self) -> None:
+        record = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id="other_device",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.push_sync_records(self.account_id, self.device_id, [asdict(record)])
+        self.assertEqual(ctx.exception.status, 403)
+
+    def test_export_and_delete_cloud_data(self) -> None:
+        record = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=self.device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+        self.service.push_sync_records(self.account_id, self.device_id, [asdict(record)])
+
+        exported = self.service.export_account_cloud_data(self.account_id)
+        self.assertEqual(len(exported["sync_records"]), 1)
+
+        deleted = self.service.delete_account_cloud_data(self.account_id)
+
+        self.assertGreaterEqual(deleted["deleted"]["sync_records"], 1)
+        self.assertEqual(self.service.store.list_sync_changes(account_id=self.account_id, since=0, limit=10), [])
 
     def test_meeting_upload_debits_usage_once(self) -> None:
         fake = RelayResult(
