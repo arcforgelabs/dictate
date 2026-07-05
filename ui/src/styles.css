@@ -456,6 +456,11 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 [data-shell="tauri"][data-native-decorations="true"] #root{background:var(--bg);}
 [data-shell="tauri"][data-native-decorations="true"] .win{border-radius:0;box-shadow:none;}
 [data-shell="tauri"][data-native-decorations="true"] .titlebar{display:none;}
+[data-shell="tauri"] .win.native-chrome,
+[data-platform^="win"] .win.native-chrome{position:relative;left:auto;top:auto;width:100vw;height:100vh;
+  border:none;border-radius:0;box-shadow:none;transform:none!important;}
+[data-shell="tauri"] .win.native-chrome .titlebar,
+[data-platform^="win"] .win.native-chrome .titlebar{display:none;}
 
 /* Mica hint — a whisper of warmth on the Win11 headerbar only */
 .win.win11 .titlebar::after{content:"";position:absolute;inset:0;pointer-events:none;

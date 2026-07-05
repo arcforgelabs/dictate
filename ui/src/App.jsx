@@ -1303,14 +1303,19 @@ export default function App() {
 
   // Resolve the current settings view component (null when on capture home).
   const Current = view !== "home" ? VIEWS[view] : null;
+  const nativeDecorations = typeof document !== "undefined"
+    && document.documentElement.getAttribute("data-native-decorations") === "true";
+  const nativeChrome = nativeDecorations || platform === "win11" || platform === "win10";
 
   return (
     <StoreCtx.Provider value={store}>
-      <div className={"win " + platform} ref={winRef}>
-        <TitleBar
-          platform={platform}
-          hasUpdate={!!updateStatus.updateAvailable}
-        />
+      <div className={"win " + platform + (nativeChrome ? " native-chrome" : "")} ref={winRef}>
+        {!nativeChrome && (
+          <TitleBar
+            platform={platform}
+            hasUpdate={!!updateStatus.updateAvailable}
+          />
+        )}
 
         <div className="shell">
           {view === "home" ? (
