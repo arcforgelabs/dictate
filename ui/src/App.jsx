@@ -506,7 +506,7 @@ function AccountDialog() {
             <div className="account-enable-stack">
               <div className="account-consent">
                 <strong>Sign in to Dictate Pro</strong>
-                <span>Sign in before enabling encrypted sync or hosted Pro models.</span>
+                <span>Sign-in checks your plan and devices. It does not upload local dictations.</span>
               </div>
               <input
                 className="account-input"
@@ -636,6 +636,7 @@ function AccountDialog() {
           )}
         </div>
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
+        {signedIn && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
       </div>
     </div>

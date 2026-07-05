@@ -34,6 +34,12 @@ def _line_number(text: str, needle: str) -> int:
     return text[:index].count("\n") + 1
 
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    normalized_text = " ".join(text.split())
+    normalized_phrase = " ".join(phrase.split())
+    return normalized_phrase in normalized_text
+
+
 def audit(root: Path = ROOT) -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(_audit_hotword_routine_output(root))
@@ -134,8 +140,39 @@ def _audit_privacy_docs(root: Path) -> list[Finding]:
         "analytics",
     ]
     for phrase in required_phrases:
-        if phrase not in text:
+        if not _contains_phrase(text, phrase):
             findings.append(Finding(deployment, 1, f"missing privacy review phrase: {phrase}"))
+    privacy = root / "docs" / "dictate-privacy-policy.md"
+    privacy_text = _read(privacy)
+    for phrase in [
+        "Signing in does not automatically upload existing local dictations",
+        "encrypts synced dictation content on the device before upload",
+        "Hosted Pro transcription is separate from encrypted sync",
+        "Routine logs, analytics, crash reports, billing records, and support tooling",
+        "Deleting cloud data removes cloud sync records",
+    ]:
+        if not _contains_phrase(privacy_text, phrase):
+            findings.append(Finding(privacy, 1, f"missing privacy policy phrase: {phrase}"))
+    terms = root / "docs" / "dictate-pro-terms.md"
+    terms_text = _read(terms)
+    for phrase in [
+        "Encrypted cloud sync is optional",
+        "Hosted Pro transcription is separate from cloud sync",
+        "governed by Dictate Pro entitlement and usage limits",
+        "Cloud deletion removes cloud sync records",
+    ]:
+        if not _contains_phrase(terms_text, phrase):
+            findings.append(Finding(terms, 1, f"missing terms phrase: {phrase}"))
+    listing = root / "docs" / "msstore-listing.md"
+    listing_text = _read(listing)
+    for phrase in [
+        "Local Parakeet transcription option",
+        "Signing in does not silently upload local dictations",
+        "encrypted before upload",
+        "Hosted Pro transcription is separate from sync",
+    ]:
+        if not _contains_phrase(listing_text, phrase):
+            findings.append(Finding(listing, 1, f"missing Store listing phrase: {phrase}"))
     return findings
 
 

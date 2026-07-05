@@ -111,6 +111,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Sync off")).toBeInTheDocument();
     expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
     expect(screen.getByText("This encrypts your synced dictations before upload.")).toBeInTheDocument();
+    expect(screen.getByText("Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "dictate-rk-existing" } });
     expect(screen.getByText("Restore sync")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "" } });
@@ -189,6 +190,7 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
     expect(screen.getByText("Sign in to Dictate Pro")).toBeInTheDocument();
+    expect(screen.getByText("Sign-in checks your plan and devices. It does not upload local dictations.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Dictate Pro email"), { target: { value: "samuel@example.test" } });
     fireEvent.click(screen.getByText("Send sign-in code"));
     await waitFor(() => expect(screen.getByText("Sign-in code sent")).toBeInTheDocument());

@@ -87,7 +87,15 @@ Related user-facing Microsoft Store reference:
 
 ## Current Dictate stance
 
-The current Store listing draft still treats Dictate as a free app without
-in-app purchases. If hosted/frontier model access is added as a paid feature,
-update [msstore-listing.md](msstore-listing.md) before submission so the listing,
-age rating answers, certification notes, and screenshots match the actual app.
+The current Store listing draft now reserves Dictate Pro for handled hosted
+model access and optional encrypted cloud sync. Before stable Store submission,
+confirm the live listing, Partner Center pricing answers, public privacy policy,
+public terms, age rating answers, certification notes, and screenshots all match
+the actual app.
+
+When Dictate Pro is enabled, the listing must keep three user choices separate:
+
+- Sign in to Dictate Pro for account, entitlement, and hosted-model access.
+- Enable encrypted cloud sync only after explicit consent.
+- Use hosted Pro transcription only when the user intentionally sends audio to a
+  hosted model path.

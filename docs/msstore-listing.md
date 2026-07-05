@@ -36,10 +36,11 @@ for Dictate. Keep claims conservative and aligned with the current app behavior.
 
 Privacy policy status:
 
-- The dedicated Dictate privacy page is live and covers microphone/audio
-  capture, local transcript history, downloaded speech models, optional hosted
-  transcription providers, API key storage, logs, download/update metadata,
-  user-submitted support data, and deletion/removal paths.
+- The dedicated Dictate privacy page must match
+  [dictate-privacy-policy.md](dictate-privacy-policy.md) before stable
+  submission. It covers local-first use, explicit Dictate Pro sign-in,
+  encrypted cloud sync, hosted Pro transcription, device/recovery flows, API key
+  storage, logs, analytics, crash reports, support data, export, and deletion.
 
 ## Short Description
 
@@ -52,10 +53,18 @@ Dictate is a desktop push-to-talk dictation app for Windows. It runs from the
 system tray, listens while you hold your configured shortcut, transcribes your
 speech, and types the result into the currently focused app.
 
-Dictate supports local transcription through faster-whisper. Advanced users can
-configure their own transcription provider through the Dictate CLI, but the main
-desktop app keeps the dictation workflow simple: press the microphone control,
-dictate, and recover recent text from the local dictations view.
+Dictate supports local transcription through Parakeet. Advanced users can
+configure supported local and hosted transcription paths through the Dictate
+CLI, but the main desktop app keeps the dictation workflow simple: press the
+microphone control, dictate, and recover recent text from the local dictations
+view.
+
+Dictate Pro, when enabled, adds account sign-in, hosted model access governed by
+subscription and usage limits, and optional encrypted cloud sync. Signing in
+does not silently upload local dictations. Cloud sync starts only when the user
+chooses to sync dictations across devices, and synced dictation content is
+encrypted before upload. Hosted Pro transcription is separate from sync and may
+send audio to hosted model providers when the user intentionally uses that path.
 
 Dictate is designed for people who want fast text entry without changing their
 current workflow. Use it for notes, drafts, forms, messages, and other everyday
@@ -65,10 +74,14 @@ typing tasks. Always review important transcriptions before relying on them.
 
 - Push-to-talk dictation from the Windows tray
 - Types transcribed text into the focused app
-- Local faster-whisper transcription option
-- Dictate Pro subscription path for handled hosted/frontier transcription when
-  enabled
+- Local Parakeet transcription option
+- Dictate Pro subscription path for handled hosted/frontier transcription and
+  encrypted cloud sync when enabled
 - Local dictations view for copy/paste recovery
+- Explicit sync consent before uploading local dictations
+- Encrypted cloud sync for dictation history, notes, transcript segments,
+  portable preferences, and synced custom vocabulary
+- Export and cloud-deletion controls for Dictate Pro data
 - Simple desktop controls with advanced configuration available through the CLI
 - API keys stored through the operating system secret store
 - Local config, logs, history, and model cache paths
@@ -97,7 +110,9 @@ Use the repository license for open-source package terms:
 - `LICENSE`
 
 Before public Store submission, confirm whether Arc Forge wants additional
-commercial terms beyond the MIT license and `https://arcforge.au/terms`.
+commercial terms beyond the MIT license and `https://arcforge.au/terms`. If
+Dictate Pro sync or hosted models are enabled, public terms must match
+[dictate-pro-terms.md](dictate-pro-terms.md) or a stricter published version.
 
 ## Store Assets
 
