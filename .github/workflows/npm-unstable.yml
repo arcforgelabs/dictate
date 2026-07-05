@@ -175,10 +175,56 @@ jobs:
           cargo build --release --manifest-path ui-shell/src-tauri/Cargo.toml
           cargo test --release --manifest-path ui-shell/src-tauri/Cargo.toml
 
+  windows-desktop-bundle:
+    name: Windows desktop prebuild (.msi + setup .exe)
+    if: inputs.run_tests == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Install Windows bundling dependencies
+        shell: pwsh
+        run: choco install wixtoolset nsis -y --no-progress
+
+      - name: Build Windows desktop installers
+        shell: pwsh
+        env:
+          DICTATE_BUNDLES: "msi,nsis"
+        run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-desktop-prebuild.log"
+
+      - name: Upload Windows installer artifacts
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: windows-desktop-prebuild-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ui-shell/src-tauri/target/release/bundle/msi/*.msi
+            ui-shell/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Upload Windows prebuild log
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: windows-desktop-prebuild-log-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\windows-desktop-prebuild.log
+          if-no-files-found: warn
+
   publish:
     name: Publish npm unstable shim
     runs-on: ubuntu-latest
-    needs: [tests, windows-user-smoke, ui, desktop-shell]
+    needs: [tests, windows-user-smoke, ui, desktop-shell, windows-desktop-bundle]
     if: >-
       ${{
         always() &&
@@ -188,7 +234,8 @@ jobs:
             needs.tests.result == 'success' &&
             needs.windows-user-smoke.result == 'success' &&
             needs.ui.result == 'success' &&
-            needs.desktop-shell.result == 'success'
+            needs.desktop-shell.result == 'success' &&
+            needs.windows-desktop-bundle.result == 'success'
           )
         )
       }}

@@ -74,6 +74,10 @@ scripts/build-windows-desktop.ps1
   `.msi`/installer `.exe` assets
   to the GitHub release only when Authenticode signatures validate; unsigned
   artifacts are uploaded as internal workflow artifacts instead.
+- **Unstable (`.github/workflows/npm-unstable.yml`, job
+  `windows-desktop-bundle`)** runs the same Windows desktop build before moving
+  the npm `unstable` dist-tag. It uploads the `.msi` and NSIS setup `.exe` as
+  workflow artifacts for lab validation of the exact unstable commit.
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
   builds the Windows bundle and uploads artifacts + the full log without cutting
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
@@ -101,12 +105,10 @@ Microsoft's `winapp` CLI and a repo-owned manifest:
 
 ```
 scripts/build-windows-msix-store.ps1
-  ├─ npm --prefix ui run build
-  ├─ create packaging\.build-venv-windows
-  ├─ pip install -e ".[windows]" pyinstaller
-  ├─ DICTATE_ONEFILE=1 pyinstaller packaging\dictate-engine.spec
-  ├─ tauri build --no-bundle
-  ├─ stage dictate-ui-shell.exe + engine\dictate-engine.exe
+  ├─ run scripts\build-windows-desktop.ps1 -Bundles no-bundle
+  ├─ read shared target\release\dictate-ui-shell.exe
+  ├─ read shared target\release\engine\dictate-engine.exe
+  ├─ stage shell + engine into the MSIX loose layout
   ├─ render packaging\msix\Package.appxmanifest.in
   ├─ winapp tool makeappx pack, or Windows SDK makeappx.exe
   └─ unpack and validate manifest identity + shell/engine payloads
@@ -115,6 +117,10 @@ scripts/build-windows-msix-store.ps1
 - **Manual (`.github/workflows/windows-msix-store-bundle.yml`,
   `workflow_dispatch`)** builds `packaging/msix/out/*.msix` for Partner Center
   package validation. Trigger: `gh workflow run windows-msix-store-bundle.yml`.
+- Store MSIX packaging consumes the same no-bundle Windows desktop payload that
+  is used to produce the direct installer artifacts. The Store wrapper changes
+  package format, identity, and manifest metadata; it does not rebuild a
+  different shell/engine application stack.
 - `scripts/build-windows-msix-store.ps1` prefers Microsoft's `winapp` CLI, but
   can fall back to Windows SDK `makeappx.exe` when `winapp` is not installed.
   After packing, it unpacks the MSIX and validates the Partner Center identity,

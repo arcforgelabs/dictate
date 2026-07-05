@@ -23,6 +23,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 Set-StrictMode -Version Latest
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -174,68 +175,19 @@ $TauriConfigPath = Join-Path $Root "ui-shell\src-tauri\tauri.conf.json"
 $TauriConfig = Get-Content $TauriConfigPath -Raw | ConvertFrom-Json
 $MsixVersion = Convert-ToMsixVersion $TauriConfig.version
 
-Write-Host "building the front-end (ui/ -> dist/)"
-try {
-    npm --prefix ui ci
-} catch {
-    npm --prefix ui install
-}
-npm --prefix ui run build
-
-$BuildVenv = Join-Path $Root "packaging\.build-venv-windows"
-$VenvPython = Join-Path $BuildVenv "Scripts\python.exe"
-
-Write-Host "creating isolated Windows build venv"
-if (Test-Path $BuildVenv) {
-    Remove-Item -Recurse -Force $BuildVenv
-}
-& $Python -m venv $BuildVenv
-& $VenvPython -m pip install --upgrade pip --quiet
-& $VenvPython -m pip install -e "$Root[windows]" pyinstaller --quiet
-
-Write-Host "freezing the Python engine sidecar (PyInstaller, onefile)"
-$env:DICTATE_ONEFILE = "1"
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-    (Join-Path $Root "packaging\dist"), `
-    (Join-Path $Root "packaging\build")
-
-Push-Location $Root
-try {
-    & $VenvPython -m PyInstaller (Join-Path $Root "packaging\dictate-engine.spec") --noconfirm `
-        --distpath (Join-Path $Root "packaging\dist") `
-        --workpath (Join-Path $Root "packaging\build") `
-        --log-level WARN
-} finally {
-    Pop-Location
-}
-
-$Engine = Join-Path $Root "packaging\dist\dictate-engine.exe"
-if (-not (Test-Path $Engine)) {
-    throw "Freeze did not produce $Engine"
-}
-
-Write-Host "smoke-testing the frozen binary"
-& $Engine --version | Out-Null
-
-Write-Host "staging the engine into Tauri resources for compile-time resource validation"
-$TauriEngineDir = Join-Path $Root "ui-shell\src-tauri\engine"
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TauriEngineDir
-New-Item -ItemType Directory -Force -Path $TauriEngineDir | Out-Null
-Copy-Item $Engine (Join-Path $TauriEngineDir "dictate-engine.exe")
-
-Write-Host "building the Tauri shell executable without an installer"
-npm --prefix ui-shell install
-npm --prefix ui-shell exec -- tauri --version | Out-Null
-Push-Location (Join-Path $Root "ui-shell")
-try {
-    npm run tauri -- build --no-bundle
-} finally {
-    Pop-Location
+Write-Host "building shared Windows desktop payload"
+& (Join-Path $Root "scripts\build-windows-desktop.ps1") -Python $Python -Bundles "no-bundle"
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows desktop payload build failed with exit code $LASTEXITCODE."
 }
 
 $ShellExe = Join-Path $Root "ui-shell\src-tauri\target\release\dictate-ui-shell.exe"
 if (-not (Test-Path $ShellExe)) {
     throw "Tauri build did not produce $ShellExe"
+}
+$Engine = Join-Path $Root "ui-shell\src-tauri\target\release\engine\dictate-engine.exe"
+if (-not (Test-Path $Engine)) {
+    throw "Desktop payload build did not produce $Engine"
 }
 
 $MsixRoot = Join-Path $Root "packaging\msix"
