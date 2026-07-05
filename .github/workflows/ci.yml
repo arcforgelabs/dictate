@@ -53,12 +53,31 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m unittest discover -s tests
 
+      - name: Run cloud sync integration tests on Linux
+        if: runner.os == 'Linux'
+        run: |
+          python -m unittest discover -s tests -p "test_sync.py"
+          python -m unittest discover -s tests -p "test_sync_engine.py"
+          python -m unittest discover -s tests -p "test_pro_server.py"
+          python -m unittest discover -s tests -p "test_ui_server.py"
+
       - name: Run unit tests on Windows
         if: runner.os == 'Windows'
         shell: cmd
         env:
           PYTHONFAULTHANDLER: "1"
         run: .venv\Scripts\python.exe scripts\ci_test_runner.py
+
+      - name: Run cloud sync integration tests on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          .venv\Scripts\python.exe -m unittest discover -s tests -p "test_sync.py"
+          .venv\Scripts\python.exe -m unittest discover -s tests -p "test_sync_engine.py"
+          .venv\Scripts\python.exe -m unittest discover -s tests -p "test_pro_server.py"
+          .venv\Scripts\python.exe -m unittest discover -s tests -p "test_ui_server.py"
 
       - name: Show version on Linux
         if: runner.os == 'Linux'
