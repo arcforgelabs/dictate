@@ -191,6 +191,106 @@ class SyncEngineTests(unittest.TestCase):
             self.assertEqual(result.pushed, 1)
             self.assertEqual(outbox.pending(), [])
 
+    def test_first_sync_keeps_local_and_remote_history_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            settings = self._settings(tmp, account_id, key)
+            history = HistoryStore(Path(tmp) / "history.json")
+            notes = NoteStore(Path(tmp) / "notes")
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=_FakeProClient([
+                    {
+                        **asdict(encrypt_record(
+                            account_id,
+                            key,
+                            PlainSyncRecord(
+                                collection="history",
+                                record_id="hist_remote",
+                                rev=1,
+                                updated_at="2026-07-05T12:00:00+00:00",
+                                device_id="device_remote",
+                                deleted=False,
+                                content_type="application/vnd.dictate.history+json;v=1",
+                                payload={
+                                    "id": "hist_remote",
+                                    "created_at": "2026-07-05T12:00:00+00:00",
+                                    "updated_at": "2026-07-05T12:00:00+00:00",
+                                    "rev": 1,
+                                    "text": "remote first-sync note",
+                                    "archived": False,
+                                },
+                            ),
+                        )),
+                        "seq": 1,
+                    }
+                ]),
+                history_store=history,
+                note_store=notes,
+            )
+            engine.attach_outbox()
+            history.append("local first-sync note")
+
+            result = engine.run_once()
+
+            self.assertEqual(result.pushed, 1)
+            texts = {entry.text for entry in history.load()}
+            self.assertEqual(texts, {"local first-sync note", "remote first-sync note"})
+
+    def test_first_sync_remote_older_history_does_not_overwrite_local(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            history = HistoryStore(Path(tmp) / "history.json")
+            self.assertTrue(
+                history.apply_synced_entry(
+                    {
+                        "id": "hist_shared",
+                        "created_at": "2026-07-05T12:00:00+00:00",
+                        "updated_at": "2026-07-05T12:02:00+00:00",
+                        "rev": 2,
+                        "text": "newer local version",
+                        "archived": False,
+                    }
+                )
+            )
+            older_remote = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="history",
+                    record_id="hist_shared",
+                    rev=1,
+                    updated_at="2026-07-05T12:01:00+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.history+json;v=1",
+                    payload={
+                        "id": "hist_shared",
+                        "created_at": "2026-07-05T12:00:00+00:00",
+                        "updated_at": "2026-07-05T12:01:00+00:00",
+                        "rev": 1,
+                        "text": "older remote version",
+                        "archived": False,
+                    },
+                ),
+            )
+            engine = SyncEngine(
+                settings=self._settings(tmp, account_id, key),
+                pro_client=_FakeProClient([{**asdict(older_remote), "seq": 2}]),
+                history_store=history,
+                note_store=NoteStore(Path(tmp) / "notes"),
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.applied, 1)
+            entries = history.load()
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].text, "newer local version")
+            self.assertEqual(entries[0].rev, 2)
+
     def test_pull_applies_portable_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()
