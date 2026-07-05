@@ -34,6 +34,14 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("uses native Windows chrome without the inner mock titlebar", () => {
+    window.__DICTATE__ = { platform: "win11" };
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".win.native-chrome.win11")).toBeTruthy();
+    expect(container.querySelector(".titlebar")).toBeNull();
+  });
+
   it("has no settings gear — config lives in the dictate config CLI", () => {
     render(<App />);
     expect(screen.queryByTitle("Settings")).not.toBeInTheDocument();

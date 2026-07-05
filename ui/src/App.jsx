@@ -15,6 +15,7 @@ import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.7.4";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
+const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
   const now = Date.now();
   // Newest-first: matches the real backend ordering and pushHistory behaviour.
@@ -31,6 +32,19 @@ function fmtSecs(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
   const p = (n) => String(n).padStart(2, "0");
   return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
+}
+
+function initialPlatform() {
+  if (typeof document !== "undefined") {
+    const tagged = document.documentElement.getAttribute("data-platform");
+    if (tagged) return tagged;
+  }
+  const bridged = ipc.platform();
+  if (bridged && bridged !== "gnome") return bridged;
+  if (typeof navigator !== "undefined" && WINDOWS_PLATFORM_RE.test(navigator.userAgent || "")) {
+    return "win11";
+  }
+  return bridged || "gnome";
 }
 
 function normalizeSegments(segments) {
@@ -980,7 +994,7 @@ export default function App() {
     catch { return null; }
   });
   const [updateDismissed, setUpdateDismissed] = useState(false);
-  const [platform, setPlatform] = useState("gnome");
+  const [platform, setPlatform] = useState(initialPlatform);
   const [live, setLive] = useState(false);
   // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
