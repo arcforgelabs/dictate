@@ -70,6 +70,18 @@ describe("Quiet Console app (mock mode)", () => {
           ok: true,
           json: async () => ({
             sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: true, lastSeq: 4 },
+            recoveryKey: "dictate-rk-test",
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") {
+        return {
+          ok: true,
+          json: async () => ({
+            devices: [
+              { device_id: "dev_1", label: "This workstation", revoked_at: null },
+              { device_id: "dev_2", label: "Windows lab", revoked_at: null },
+            ],
           }),
         };
       }
@@ -88,6 +100,8 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(screen.getByText("Enable encrypted sync"));
     await waitFor(() => expect(screen.getByText("Encrypted sync on")).toBeInTheDocument());
     expect(screen.getByText("Encrypted sync enabled")).toBeInTheDocument();
+    expect(screen.getByText("dictate-rk-test")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Windows lab")).toBeInTheDocument());
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://127.0.0.1:1/api/pro/sync/enable",
       expect.objectContaining({ method: "POST" }),

@@ -538,29 +538,41 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .account-mark.synced{color:var(--live);}
 .account-scrim{position:absolute;inset:0;z-index:45;display:flex;align-items:flex-start;justify-content:flex-end;
   padding:52px 16px 16px;background:color-mix(in srgb,var(--bg) 28%,transparent);}
-.account-dialog{width:min(360px,calc(100vw - 32px));border:1px solid var(--border-2);border-radius:12px;
+.account-dialog{width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 76px);overflow:auto;border:1px solid var(--border-2);border-radius:12px;
   background:var(--surface);box-shadow:var(--shadow-pop);padding:14px;animation:menuIn .16s var(--ease-out);}
 .account-head{display:flex;align-items:center;gap:10px;}
 .account-logo{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
   color:var(--fg);background:var(--surface-2);border:1px solid var(--border);}
 .account-title-wrap{min-width:0;flex:1;}
-.account-title{font-size:15px;font-weight:800;letter-spacing:-.02em;color:var(--fg);}
+.account-title{font-size:15px;font-weight:800;letter-spacing:0;color:var(--fg);}
 .account-sub{margin-top:2px;font-size:11.5px;color:var(--subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .account-grid{display:flex;flex-direction:column;gap:1px;margin-top:14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);}
 .account-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:34px;padding:6px 0;
   font-size:12.5px;color:var(--muted);}
 .account-row+ .account-row{border-top:1px solid var(--hairline);}
 .account-row strong{min-width:0;text-align:right;color:var(--fg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.account-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;}
-.account-primary,.account-secondary{height:31px;padding:0 13px;border-radius:var(--r-pill);font-size:12px;font-weight:650;
+.account-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+.account-actions--split{justify-content:space-between;}
+.account-primary,.account-secondary,.account-danger{height:31px;padding:0 13px;border-radius:var(--r-pill);font-size:12px;font-weight:650;
   transition:var(--t-fast);display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;}
 .account-primary{border:1px solid var(--live);background:var(--live-bg);color:var(--live-text);}
 .account-primary:hover:not(:disabled){background:var(--live);color:#fff;}
 .account-secondary{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);}
 .account-secondary:hover:not(:disabled){background:var(--surface-3);}
-.account-primary:disabled,.account-secondary:disabled{opacity:.48;cursor:default;}
+.account-danger{border:1px solid color-mix(in srgb,var(--danger) 34%,var(--border));background:var(--surface-2);color:var(--danger);}
+.account-danger:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 12%,var(--surface-2));}
+.account-primary:disabled,.account-secondary:disabled,.account-danger:disabled{opacity:.48;cursor:default;}
 .account-note{margin-top:10px;font-size:11.5px;line-height:1.4;color:var(--subtle);}
 .account-note.bad{color:var(--danger);}
+.account-section-title{margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline);font-size:11px;font-weight:750;color:var(--subtle);text-transform:uppercase;letter-spacing:0;}
+.account-device-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
+.account-device{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border:1px solid var(--hairline);border-radius:8px;background:var(--surface-2);}
+.account-device strong{display:block;max-width:210px;font-size:12px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.account-device span{display:block;margin-top:2px;font-size:11px;color:var(--subtle);}
+.account-empty{padding:10px 8px;border:1px dashed var(--border);border-radius:8px;color:var(--subtle);font-size:12px;}
+.account-recovery{margin-top:12px;padding:9px;border:1px solid color-mix(in srgb,var(--live) 28%,var(--border));border-radius:8px;background:var(--live-bg);}
+.account-recovery span{display:block;margin-bottom:6px;font-size:11px;font-weight:750;color:var(--live-text);}
+.account-recovery code{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;font-size:11.5px;line-height:1.35;color:var(--fg);}
 /* Themed tooltip — matches toast/surface tokens. */
 .tip-wrap{position:relative;display:inline-flex;vertical-align:middle;}
 .tip-wrap .tip{position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);

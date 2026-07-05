@@ -170,6 +170,9 @@ class _FakeProClient:
         self.sync_drains = 0
         self.sync_pulls: list[dict[str, int]] = []
         self.drained_sync_records = []
+        self.saved_key_envelopes = []
+        self.revoked_devices: list[str] = []
+        self.deleted_cloud = False
         self.session = ProSession(
             account_id="acct_test",
             device_id="device_test",
@@ -214,6 +217,42 @@ class _FakeProClient:
     def get_sync_changes(self, *, since: int = 0, limit: int = 500):
         self.sync_pulls.append({"since": since, "limit": limit})
         return {"records": [], "next_seq": since, "has_more": False}
+
+    def update_sync_cursor(self, *, last_seq: int):
+        return {"last_seq": last_seq}
+
+    def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, object]) -> dict[str, object]:
+        self.saved_key_envelopes.append({"envelope_kind": envelope_kind, "envelope": envelope})
+        return {"envelope_kind": envelope_kind, "envelope": envelope}
+
+    def list_devices(self) -> dict[str, object]:
+        return {
+            "devices": [
+                {
+                    "device_id": "device_test",
+                    "label": "Test Desktop",
+                    "trusted_at": "2026-07-05T12:00:00+00:00",
+                    "revoked_at": None,
+                },
+                {
+                    "device_id": "device_other",
+                    "label": "Other Desktop",
+                    "trusted_at": "2026-07-05T12:00:00+00:00",
+                    "revoked_at": None,
+                },
+            ]
+        }
+
+    def revoke_device(self, device_id: str) -> dict[str, object]:
+        self.revoked_devices.append(device_id)
+        return {"revoked": True, "device_id": device_id}
+
+    def export_cloud_data(self) -> dict[str, object]:
+        return {"account": {"account_id": "acct_test"}, "sync_records": []}
+
+    def delete_cloud_data(self) -> dict[str, object]:
+        self.deleted_cloud = True
+        return {"deleted": {"sync_records": 0}}
 
 
 def _sync_settings(base: Path) -> SyncSettingsStore:
@@ -1128,6 +1167,8 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["sync"]["enabled"])
+        self.assertIn("recoveryKey", body)
+        self.assertEqual(len(self.handle.backend.pro_client.saved_key_envelopes), 1)
 
         self.handle.backend.history_store.append("queued private")
         with self._post("/api/pro/sync/run") as resp:
@@ -1139,6 +1180,32 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertFalse(body["sync"]["enabled"])
+
+        req = urllib.request.Request(self.base + "/api/pro/devices", method="GET")
+        req.add_header("Authorization", "Bearer test-token")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            devices = json.loads(resp.read())
+        self.assertEqual(devices["devices"][0]["device_id"], "device_test")
+
+        with self._post("/api/pro/devices/revoke", {"deviceId": "device_other"}) as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["revoked"])
+        self.assertEqual(self.handle.backend.pro_client.revoked_devices, ["device_other"])
+
+        req = urllib.request.Request(self.base + "/api/pro/cloud/export", method="GET")
+        req.add_header("Authorization", "Bearer test-token")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            exported = json.loads(resp.read())
+        self.assertEqual(exported["account"]["account_id"], "acct_test")
+
+        req = urllib.request.Request(self.base + "/api/pro/cloud/delete", data=b"{}", method="DELETE")
+        req.add_header("Authorization", "Bearer test-token")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            deleted = json.loads(resp.read())
+        self.assertEqual(deleted["cloud"]["deleted"]["sync_records"], 0)
+        self.assertTrue(self.handle.backend.pro_client.deleted_cloud)
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

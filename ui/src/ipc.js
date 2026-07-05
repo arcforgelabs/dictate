@@ -168,6 +168,18 @@ export const ipc = {
   async runProSync() {
     return call("POST", "/api/pro/sync/run");
   },
+  async listProDevices() {
+    return call("GET", "/api/pro/devices");
+  },
+  async revokeProDevice(deviceId) {
+    return call("POST", "/api/pro/devices/revoke", { deviceId });
+  },
+  async exportProCloudData() {
+    return call("GET", "/api/pro/cloud/export");
+  },
+  async deleteProCloudData() {
+    return call("DELETE", "/api/pro/cloud/delete");
+  },
 
   // Server-sent events: live recording / status pushes from the daemon.
   //

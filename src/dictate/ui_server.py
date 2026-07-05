@@ -25,7 +25,7 @@ import logging
 import secrets
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,7 +56,7 @@ from dictate.stt.factory import (
     resolve_model_name,
 )
 from dictate.pro.client import ProClient, ProClientError
-from dictate.sync import SyncSettingsStore
+from dictate.sync import SyncSettingsStore, create_recovery_envelope, generate_recovery_key
 from dictate.sync_engine import SyncEngine
 from dictate.version import RELEASE_VERSION
 
@@ -467,14 +467,21 @@ class UiBackend:
         if session is None:
             raise ApiError(401, "Sign in to Dictate Pro before enabling sync.")
         settings = self._require_sync_settings()
-        settings.enable(session.account_id)
+        state, account_key = settings.enable(session.account_id, device_id=session.device_id)
+        recovery_key = generate_recovery_key()
+        recovery_envelope = create_recovery_envelope(
+            account_id=session.account_id,
+            account_key=account_key,
+            recovery_key=recovery_key,
+        )
+        client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
         engine = self._sync_engine()
         engine.attach_outbox()
         self._enqueue_sync_snapshot()
         result = engine.run_once().as_dict()
         if self.broker is not None:
             self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
-        return {"sync": self._sync_state(last_result=result)}
+        return {"sync": self._sync_state(last_result=result), "recoveryKey": recovery_key, "deviceId": state.device_id}
 
     def disable_sync(self, *, clear_key: bool = False) -> dict[str, Any]:
         settings = self._require_sync_settings()
@@ -490,6 +497,28 @@ class UiBackend:
             self.broker.publish("history-changed")
             self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
         return {"sync": self._sync_state(last_result=result), "result": result, "history": self.get_history()}
+
+    def list_pro_devices(self) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.list_devices()
+
+    def revoke_pro_device(self, device_id: str) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.revoke_device(device_id)
+
+    def export_pro_cloud_data(self) -> dict[str, Any]:
+        client = self._require_pro_client()
+        return client.export_cloud_data()
+
+    def delete_pro_cloud_data(self) -> dict[str, Any]:
+        client = self._require_pro_client()
+        result = client.delete_cloud_data()
+        if self.sync_settings is not None:
+            self.sync_settings.disable(clear_key=False)
+        self._sync_engine().attach_outbox()
+        if self.broker is not None:
+            self.broker.publish("sync-changed", sync=self._sync_state())
+        return {"cloud": result, "sync": self._sync_state()}
 
     def create_pro_meeting(
         self,
@@ -1508,6 +1537,15 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))
         if path == "/api/pro/sync/run" and method == "POST":
             return _Response(200, backend.run_sync())
+        if path == "/api/pro/devices" and method == "GET":
+            return _Response(200, backend.list_pro_devices())
+        if path == "/api/pro/devices/revoke" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.revoke_pro_device(str(body.get("deviceId") or body.get("device_id") or "")))
+        if path == "/api/pro/cloud/export" and method == "GET":
+            return _Response(200, backend.export_pro_cloud_data())
+        if path == "/api/pro/cloud/delete" and method == "DELETE":
+            return _Response(200, backend.delete_pro_cloud_data())
         if path == "/api/pro/meetings" and method == "POST":
             body = self._read_json() or {}
             language = str(body.get("language") or "").strip() or None

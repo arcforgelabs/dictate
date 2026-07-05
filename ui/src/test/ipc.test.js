@@ -217,11 +217,31 @@ describe("ipc bridge", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ sync: { enabled: false } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ devices: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ revoked: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account: {} }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ deleted: {} }),
       });
 
     await expect(ipc.enableProSync()).resolves.toEqual({ sync: { enabled: true } });
     await expect(ipc.runProSync()).resolves.toEqual({ result: { ok: true } });
     await expect(ipc.disableProSync(true)).resolves.toEqual({ sync: { enabled: false } });
+    await expect(ipc.listProDevices()).resolves.toEqual({ devices: [] });
+    await expect(ipc.revokeProDevice("dev_2")).resolves.toEqual({ revoked: true });
+    await expect(ipc.exportProCloudData()).resolves.toEqual({ account: {} });
+    await expect(ipc.deleteProCloudData()).resolves.toEqual({ deleted: {} });
 
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       1,
@@ -241,6 +261,30 @@ describe("ipc bridge", () => {
         headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
         body: JSON.stringify({ clearKey: true }),
       }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:1/api/pro/devices",
+      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:1/api/pro/devices/revoke",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: "dev_2" }),
+      }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:1/api/pro/cloud/export",
+      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:1/api/pro/cloud/delete",
+      expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer t" } }),
     );
   });
 });

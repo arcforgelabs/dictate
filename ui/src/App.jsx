@@ -242,6 +242,8 @@ function AccountDialog() {
   const pro = s.dictatePro || { signedIn: false };
   const model = modelById(s.model);
   const signedIn = !!pro.signedIn;
+  const [devices, setDevices] = useState([]);
+  const [recoveryKey, setRecoveryKey] = useState(null);
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncLabel = sync.enabled
     ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
@@ -255,6 +257,19 @@ function AccountDialog() {
     return () => window.removeEventListener("keydown", onKey);
   }, [s]);
 
+  useEffect(() => {
+    if (!signedIn || !ipc.isLive()) return;
+    let cancelled = false;
+    ipc.listProDevices()
+      .then((r) => {
+        if (!cancelled) setDevices(Array.isArray(r?.devices) ? r.devices : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDevices([]);
+      });
+    return () => { cancelled = true; };
+  }, [signedIn]);
+
   const enableSync = () => {
     if (!ipc.isLive()) {
       s.toast("Sign in on the installed app to enable sync", { bad: true });
@@ -264,6 +279,7 @@ function AccountDialog() {
     ipc.enableProSync()
       .then((r) => {
         if (r?.sync) s.setSyncState(r.sync);
+        if (r?.recoveryKey) setRecoveryKey(r.recoveryKey);
         s.toast("Encrypted sync enabled");
       })
       .catch((e) => s.toast(e.message || "Could not enable sync", { bad: true }))
@@ -298,6 +314,50 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
+  const refreshDevices = () => {
+    if (!ipc.isLive()) return;
+    ipc.listProDevices()
+      .then((r) => setDevices(Array.isArray(r?.devices) ? r.devices : []))
+      .catch((e) => s.toast(e.message || "Could not load devices", { bad: true }));
+  };
+
+  const revokeDevice = (deviceId) => {
+    if (!deviceId || !ipc.isLive()) return;
+    if (!window.confirm("Remove this device from Dictate Pro sync?")) return;
+    s.setSyncBusy(true);
+    ipc.revokeProDevice(deviceId)
+      .then(() => {
+        s.toast("Device removed");
+        refreshDevices();
+      })
+      .catch((e) => s.toast(e.message || "Could not remove device", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const exportCloudData = () => {
+    if (!ipc.isLive()) return;
+    s.setSyncBusy(true);
+    ipc.exportProCloudData()
+      .then((data) => ipc.saveTextFile("dictate-pro-cloud-export.json", JSON.stringify(data, null, 2)))
+      .then(() => s.toast("Cloud export saved"))
+      .catch((e) => s.toast(e.message || "Could not export cloud data", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const deleteCloudData = () => {
+    if (!ipc.isLive()) return;
+    if (!window.confirm("Delete Dictate Pro cloud data for this account? Local notes stay on this device.")) return;
+    s.setSyncBusy(true);
+    ipc.deleteProCloudData()
+      .then((r) => {
+        if (r?.sync) s.setSyncState(r.sync);
+        setDevices([]);
+        s.toast("Cloud data deleted");
+      })
+      .catch((e) => s.toast(e.message || "Could not delete cloud data", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
   return (
     <div className="account-scrim" onMouseDown={() => s.setAccountOpen(false)}>
       <div
@@ -327,7 +387,7 @@ function AccountDialog() {
             <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
           {sync.enabled && (
-            <div className="account-row"><span>Cursor</span><strong>{sync.lastSeq || 0}</strong></div>
+            <div className="account-row"><span>Synced</span><strong>{sync.lastSeq ? "Up to date" : "Starting"}</strong></div>
           )}
         </div>
 
@@ -349,6 +409,46 @@ function AccountDialog() {
             </>
           )}
         </div>
+        {recoveryKey && (
+          <div className="account-recovery">
+            <span>Recovery key</span>
+            <code>{recoveryKey}</code>
+          </div>
+        )}
+        {signedIn && (
+          <>
+            <div className="account-section-title">Devices</div>
+            <div className="account-device-list">
+              {devices.length ? devices.map((device) => {
+                const id = device.device_id || device.deviceId;
+                const isThis = id && sync.deviceId && id === sync.deviceId;
+                return (
+                  <div className="account-device" key={id || device.label || "device"}>
+                    <div>
+                      <strong>{device.label || (isThis ? "This device" : "Desktop")}</strong>
+                      <span>{isThis ? "This device" : (device.revoked_at || device.revokedAt ? "Removed" : "Active")}</span>
+                    </div>
+                    {!isThis && !(device.revoked_at || device.revokedAt) && (
+                      <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => revokeDevice(id)}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              }) : (
+                <div className="account-empty">No devices to show.</div>
+              )}
+            </div>
+            <div className="account-actions account-actions--split">
+              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={exportCloudData}>
+                Export my data
+              </button>
+              <button type="button" className="account-danger" disabled={s.syncBusy} onClick={deleteCloudData}>
+                Delete cloud data
+              </button>
+            </div>
+          </>
+        )}
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
       </div>

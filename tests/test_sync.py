@@ -24,6 +24,7 @@ from dictate.sync import (
     load_or_create_device,
     recover_account_key,
     recovery_envelope_from_dict,
+    save_sync_device,
     unwrap_account_key_for_device,
     wrap_account_key_for_device,
 )
@@ -38,6 +39,15 @@ class SyncCryptoTests(unittest.TestCase):
 
             self.assertEqual(first.device_id, second.device_id)
             self.assertTrue(first.device_id.startswith("device_"))
+
+    def test_sync_device_can_be_seeded_from_registered_pro_device(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "device.json"
+
+            saved = save_sync_device("pro_device_1", path=path)
+
+            self.assertEqual(saved.device_id, "pro_device_1")
+            self.assertEqual(load_or_create_device(path).device_id, "pro_device_1")
 
     def test_key_round_trips_as_base64(self) -> None:
         key = generate_account_key()

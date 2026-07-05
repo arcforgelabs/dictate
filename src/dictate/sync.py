@@ -106,10 +106,19 @@ def load_or_create_device(path: Path = SYNC_DEVICE_PATH) -> SyncDevice:
         if isinstance(raw, dict):
             device_id = str(raw.get("device_id") or "").strip()
             created_at = str(raw.get("created_at") or "").strip()
-            if device_id.startswith("device_") and created_at:
+            if device_id and created_at:
                 return SyncDevice(device_id=device_id, created_at=created_at)
 
     device = SyncDevice(device_id=f"device_{uuid.uuid4().hex}", created_at=utc_now_iso())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(path, asdict(device))
+    return device
+
+
+def save_sync_device(device_id: str, *, path: Path = SYNC_DEVICE_PATH) -> SyncDevice:
+    device = SyncDevice(device_id=device_id.strip(), created_at=utc_now_iso())
+    if not device.device_id:
+        raise ValueError("device_id is required")
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_json(path, asdict(device))
     return device
@@ -425,13 +434,19 @@ class SyncSettingsStore:
             last_seq=_positive_state_int(raw.get("last_seq"), 0),
         )
 
-    def enable(self, account_id: str, *, account_key: bytes | None = None) -> tuple[SyncState, bytes]:
+    def enable(
+        self,
+        account_id: str,
+        *,
+        account_key: bytes | None = None,
+        device_id: str | None = None,
+    ) -> tuple[SyncState, bytes]:
         account = account_id.strip()
         if not account:
             raise ValueError("account_id is required to enable sync")
         key = account_key or generate_account_key()
         _validate_key(key)
-        device = load_or_create_device(self.device_path)
+        device = save_sync_device(device_id, path=self.device_path) if device_id else load_or_create_device(self.device_path)
         self._save_key(account, encode_key(key))
         state = SyncState(
             enabled=True,
