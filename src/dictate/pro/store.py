@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
+from dictate.pro.signing import MetadataSigner
+
 MeetingStatus = Literal[
     "queued",
     "uploading",
@@ -122,6 +124,7 @@ class DeviceRow:
     trusted_at: str | None
     revoked_at: str | None
     last_seen_at: str
+    signature: dict[str, str] | None
 
 
 @dataclass(slots=True)
@@ -140,6 +143,7 @@ class KeyEnvelopeRow:
     envelope_json: str
     created_at: str
     updated_at: str
+    signature: dict[str, str] | None
 
 
 class ProStore:
@@ -147,6 +151,7 @@ class ProStore:
         self._db_path = db_path
         self._lock = threading.Lock()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._signer = MetadataSigner.load_or_create(self._db_path.parent / "server-signing-key.pem")
         self._init_schema()
 
     @contextmanager
@@ -183,7 +188,8 @@ class ProStore:
                     trusted_at TEXT,
                     revoked_at TEXT,
                     created_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL
+                    last_seen_at TEXT NOT NULL,
+                    signature_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS auth_challenges (
@@ -322,6 +328,7 @@ class ProStore:
                     envelope_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    signature_json TEXT,
                     PRIMARY KEY (account_id, device_id, envelope_kind)
                 );
 
@@ -347,6 +354,14 @@ class ProStore:
                 conn.execute("ALTER TABLE devices ADD COLUMN public_key TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE devices ADD COLUMN signature_json TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE key_envelopes ADD COLUMN signature_json TEXT")
+            except sqlite3.OperationalError:
+                pass
             if trusted_at_column_added:
                 conn.execute(
                     """
@@ -354,6 +369,27 @@ class ProStore:
                     SET trusted_at = COALESCE(trusted_at, created_at)
                     WHERE trusted_at IS NULL
                     """
+                )
+            for row in conn.execute(
+                """
+                SELECT account_id, device_id
+                FROM devices
+                WHERE signature_json IS NULL
+                """
+            ).fetchall():
+                self._refresh_device_signature(conn, account_id=row["account_id"], device_id=row["device_id"])
+            for row in conn.execute(
+                """
+                SELECT account_id, device_id, envelope_kind
+                FROM key_envelopes
+                WHERE signature_json IS NULL
+                """
+            ).fetchall():
+                self._refresh_key_envelope_signature(
+                    conn,
+                    account_id=row["account_id"],
+                    device_id=row["device_id"],
+                    envelope_kind=row["envelope_kind"],
                 )
 
     def upsert_sync_records(
@@ -583,17 +619,18 @@ class ProStore:
             conn.execute(
                 """
                 INSERT INTO key_envelopes (
-                    account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    account_id, device_id, envelope_kind, envelope_json, created_at, updated_at, signature_json
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL)
                 ON CONFLICT(account_id, device_id, envelope_kind) DO UPDATE SET
                     envelope_json = excluded.envelope_json,
                     updated_at = excluded.updated_at
                 """,
                 (account_id, device, kind, envelope_json, now, now),
             )
+            self._refresh_key_envelope_signature(conn, account_id=account_id, device_id=device, envelope_kind=kind)
             row = conn.execute(
                 """
-                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at, signature_json
                 FROM key_envelopes
                 WHERE account_id = ? AND device_id = ? AND envelope_kind = ?
                 """,
@@ -611,7 +648,7 @@ class ProStore:
             if envelope_kind:
                 rows = conn.execute(
                     """
-                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at, signature_json
                     FROM key_envelopes
                     WHERE account_id = ? AND envelope_kind = ?
                     ORDER BY updated_at ASC
@@ -621,7 +658,7 @@ class ProStore:
             else:
                 rows = conn.execute(
                     """
-                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at, signature_json
                     FROM key_envelopes
                     WHERE account_id = ?
                     ORDER BY updated_at ASC
@@ -641,7 +678,8 @@ class ProStore:
                 return {}
             devices = conn.execute(
                 """
-                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at,
+                       revoked_at, last_seen_at, signature_json
                 FROM devices
                 WHERE account_id = ?
                 ORDER BY created_at ASC
@@ -659,7 +697,7 @@ class ProStore:
             ).fetchall()
             key_envelopes = conn.execute(
                 """
-                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at, signature_json
                 FROM key_envelopes
                 WHERE account_id = ?
                 ORDER BY updated_at ASC
@@ -698,7 +736,7 @@ class ProStore:
                 transcripts[job["job_id"]] = [dict(row) for row in rows]
             return {
                 "account": dict(account),
-                "devices": [dict(row) for row in devices],
+                "devices": [_device_payload(row) for row in devices],
                 "key_envelopes": [_key_envelope_payload(row) for row in key_envelopes],
                 "sync_cursors": [dict(row) for row in sync_cursors],
                 "sync_records": [_sync_record_payload(row) for row in sync_records],
@@ -826,6 +864,7 @@ class ProStore:
                     """,
                     (now, label, normalized_public_key, device),
                 )
+                self._refresh_device_signature(conn, account_id=account_id, device_id=device)
                 return device
             trusted_count = conn.execute(
                 """
@@ -839,11 +878,13 @@ class ProStore:
             conn.execute(
                 """
                 INSERT INTO devices (
-                    device_id, account_id, label, public_key, trusted_at, revoked_at, created_at, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                    device_id, account_id, label, public_key, trusted_at, revoked_at,
+                    created_at, last_seen_at, signature_json
+                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL)
                 """,
                 (device, account_id, label, normalized_public_key, trusted_at, now, now),
             )
+            self._refresh_device_signature(conn, account_id=account_id, device_id=device)
             return device
 
     def approve_device(self, *, account_id: str, device_id: str) -> bool:
@@ -857,6 +898,8 @@ class ProStore:
                 """,
                 (now, now, account_id, device_id),
             )
+            if cur.rowcount:
+                self._refresh_device_signature(conn, account_id=account_id, device_id=device_id)
             return cur.rowcount > 0
 
     def touch_device(self, device_id: str) -> None:
@@ -870,7 +913,8 @@ class ProStore:
         with self._conn() as conn:
             rows = conn.execute(
                 """
-                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at,
+                       revoked_at, last_seen_at, signature_json
                 FROM devices
                 WHERE account_id = ?
                 ORDER BY created_at ASC
@@ -883,7 +927,8 @@ class ProStore:
         with self._conn() as conn:
             row = conn.execute(
                 """
-                SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at, last_seen_at
+                SELECT account_id, device_id, label, public_key, created_at, trusted_at,
+                       revoked_at, last_seen_at, signature_json
                 FROM devices
                 WHERE account_id = ? AND device_id = ?
                 """,
@@ -903,6 +948,7 @@ class ProStore:
                 (now, account_id, device_id),
             )
             if cur.rowcount:
+                self._refresh_device_signature(conn, account_id=account_id, device_id=device_id)
                 conn.execute(
                     """
                     UPDATE auth_tokens
@@ -924,6 +970,55 @@ class ProStore:
             return False
         device = self.get_device(account_id=account_id, device_id=device_id)
         return bool(device and device.revoked_at is None)
+
+    def _refresh_device_signature(self, conn: sqlite3.Connection, *, account_id: str, device_id: str) -> None:
+        row = conn.execute(
+            """
+            SELECT account_id, device_id, label, public_key, created_at, trusted_at, revoked_at
+            FROM devices
+            WHERE account_id = ? AND device_id = ?
+            """,
+            (account_id, device_id),
+        ).fetchone()
+        if row is None:
+            return
+        signature = self._signer.bundle(_device_signature_payload(row))
+        conn.execute(
+            """
+            UPDATE devices
+            SET signature_json = ?
+            WHERE account_id = ? AND device_id = ?
+            """,
+            (json.dumps(signature, sort_keys=True, separators=(",", ":")), account_id, device_id),
+        )
+
+    def _refresh_key_envelope_signature(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        account_id: str,
+        device_id: str,
+        envelope_kind: str,
+    ) -> None:
+        row = conn.execute(
+            """
+            SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+            FROM key_envelopes
+            WHERE account_id = ? AND device_id = ? AND envelope_kind = ?
+            """,
+            (account_id, device_id, envelope_kind),
+        ).fetchone()
+        if row is None:
+            return
+        signature = self._signer.bundle(_key_envelope_signature_payload(row))
+        conn.execute(
+            """
+            UPDATE key_envelopes
+            SET signature_json = ?
+            WHERE account_id = ? AND device_id = ? AND envelope_kind = ?
+            """,
+            (json.dumps(signature, sort_keys=True, separators=(",", ":")), account_id, device_id, envelope_kind),
+        )
 
     def save_auth_challenge(
         self,
@@ -1534,18 +1629,68 @@ def _device_row(row: sqlite3.Row) -> DeviceRow:
         trusted_at=row["trusted_at"],
         revoked_at=row["revoked_at"],
         last_seen_at=row["last_seen_at"],
+        signature=_decode_signature(row["signature_json"]),
     )
+
+
+def _device_payload(row: sqlite3.Row | DeviceRow) -> dict[str, Any]:
+    if isinstance(row, DeviceRow):
+        payload_source = {
+            "account_id": row.account_id,
+            "device_id": row.device_id,
+            "label": row.label,
+            "public_key": row.public_key,
+            "created_at": row.created_at,
+            "trusted_at": row.trusted_at,
+            "revoked_at": row.revoked_at,
+            "last_seen_at": row.last_seen_at,
+            "signature": row.signature,
+        }
+    else:
+        payload_source = {
+            "account_id": row["account_id"],
+            "device_id": row["device_id"],
+            "label": row["label"],
+            "public_key": row["public_key"],
+            "created_at": row["created_at"],
+            "trusted_at": row["trusted_at"],
+            "revoked_at": row["revoked_at"],
+            "last_seen_at": row["last_seen_at"],
+            "signature": _decode_signature(row["signature_json"]),
+        }
+    return {
+        "account_id": payload_source["account_id"],
+        "device_id": payload_source["device_id"],
+        "label": payload_source["label"],
+        "public_key": payload_source["public_key"],
+        "created_at": payload_source["created_at"],
+        "trusted_at": payload_source["trusted_at"],
+        "revoked_at": payload_source["revoked_at"],
+        "last_seen_at": payload_source["last_seen_at"],
+        "signed_metadata": _device_signature_payload(payload_source),
+        "server_signature": payload_source["signature"],
+    }
 
 
 def _key_envelope_payload(row: sqlite3.Row | KeyEnvelopeRow) -> dict[str, Any]:
     envelope_json = row.envelope_json if isinstance(row, KeyEnvelopeRow) else row["envelope_json"]
-    return {
+    payload_source = {
         "account_id": row.account_id if isinstance(row, KeyEnvelopeRow) else row["account_id"],
         "device_id": row.device_id if isinstance(row, KeyEnvelopeRow) else row["device_id"],
         "envelope_kind": row.envelope_kind if isinstance(row, KeyEnvelopeRow) else row["envelope_kind"],
-        "envelope": json.loads(envelope_json),
+        "envelope_json": envelope_json,
         "created_at": row.created_at if isinstance(row, KeyEnvelopeRow) else row["created_at"],
         "updated_at": row.updated_at if isinstance(row, KeyEnvelopeRow) else row["updated_at"],
+    }
+    return {
+        "account_id": payload_source["account_id"],
+        "device_id": payload_source["device_id"],
+        "envelope_kind": payload_source["envelope_kind"],
+        "envelope": json.loads(envelope_json),
+        "created_at": payload_source["created_at"],
+        "updated_at": payload_source["updated_at"],
+        "signed_metadata": _key_envelope_signature_payload(payload_source),
+        "server_signature": row.signature if isinstance(row, KeyEnvelopeRow) else _decode_signature(row["signature_json"]),
     }
 
 
@@ -1557,7 +1702,51 @@ def _key_envelope_row(row: sqlite3.Row) -> KeyEnvelopeRow:
         envelope_json=row["envelope_json"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        signature=_decode_signature(row["signature_json"]),
     )
+
+
+def _decode_signature(value: str | None) -> dict[str, str] | None:
+    if not value:
+        return None
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return {str(key): str(item) for key, item in decoded.items()}
+
+
+def _device_signature_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    return {
+        "metadata_type": "dictate.pro.device",
+        "account_id": row["account_id"],
+        "device_id": row["device_id"],
+        "label": row["label"],
+        "public_key": row["public_key"],
+        "created_at": row["created_at"],
+        "trusted_at": row["trusted_at"],
+        "revoked_at": row["revoked_at"],
+    }
+
+
+def _key_envelope_signature_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    return {
+        "metadata_type": "dictate.pro.key_envelope",
+        "account_id": row["account_id"],
+        "device_id": row["device_id"],
+        "envelope_kind": row["envelope_kind"],
+        "envelope_hash": _sha256_text(row["envelope_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _sha256_text(value: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _meeting_row(row: sqlite3.Row) -> MeetingJobRow:

@@ -15,6 +15,7 @@ import numpy as np
 
 from dictate.pro.relay import RelayResult
 from dictate.pro.service import ProService, ProServiceError, ProSettings
+from dictate.pro.signing import verify_metadata_signature
 from dictate.pro.store import SubscriptionRow, TranscriptSegmentRow, iso, utcnow
 from dictate.sync import PlainSyncRecord, encrypt_record, generate_account_key
 
@@ -81,6 +82,7 @@ class ProServiceTests(unittest.TestCase):
         devices = self.service.list_devices(self.account_id)["devices"]
         pending_device = next(device for device in devices if device["device_id"] == pending.device_id)
         self.assertIsNone(pending_device["trusted_at"])
+        self.assertTrue(verify_metadata_signature(pending_device["signed_metadata"], pending_device["server_signature"]))
         with self.assertRaises(ProServiceError) as ctx:
             self.service.get_sync_changes(self.account_id, pending.device_id)
         self.assertEqual(ctx.exception.status, 403)
@@ -94,10 +96,19 @@ class ProServiceTests(unittest.TestCase):
 
         self.assertTrue(approved["approved"])
         self.assertIsNotNone(approved["device"]["trusted_at"])
+        self.assertTrue(
+            verify_metadata_signature(approved["device"]["signed_metadata"], approved["device"]["server_signature"])
+        )
         changes = self.service.get_sync_changes(self.account_id, pending.device_id)
         self.assertEqual(changes["records"], [])
         envelopes = self.service.list_key_envelopes(self.account_id, pending.device_id, envelope_kind="device")
         self.assertEqual(envelopes["envelopes"][0]["device_id"], pending.device_id)
+        self.assertTrue(
+            verify_metadata_signature(
+                envelopes["envelopes"][0]["signed_metadata"],
+                envelopes["envelopes"][0]["server_signature"],
+            )
+        )
 
     def test_pending_device_can_be_trusted_after_recovery_unlock(self) -> None:
         self.service.save_key_envelope(
@@ -242,10 +253,32 @@ class ProServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(saved["device_id"], self.device_id)
+        self.assertTrue(verify_metadata_signature(saved["signed_metadata"], saved["server_signature"]))
+        tampered_metadata = {**saved["signed_metadata"], "envelope_hash": "0" * 64}
+        self.assertFalse(verify_metadata_signature(tampered_metadata, saved["server_signature"]))
         listed = self.service.list_key_envelopes(self.account_id, self.device_id, envelope_kind="recovery")
         self.assertEqual(listed["envelopes"][0]["envelope"]["ciphertext"], "opaque")
+        self.assertTrue(
+            verify_metadata_signature(
+                listed["envelopes"][0]["signed_metadata"],
+                listed["envelopes"][0]["server_signature"],
+            )
+        )
         exported = self.service.export_account_cloud_data(self.account_id, self.device_id)
         self.assertEqual(exported["key_envelopes"][0]["envelope_kind"], "recovery")
+        self.assertTrue(
+            verify_metadata_signature(
+                exported["key_envelopes"][0]["signed_metadata"],
+                exported["key_envelopes"][0]["server_signature"],
+            )
+        )
+        self.assertTrue(
+            verify_metadata_signature(
+                exported["devices"][0]["signed_metadata"],
+                exported["devices"][0]["server_signature"],
+            )
+        )
+        self.assertNotIn("signature_json", exported["devices"][0])
 
         self.service.revoke_device(self.account_id, self.device_id, self.device_id)
         with self.assertRaises(ProServiceError) as ctx:

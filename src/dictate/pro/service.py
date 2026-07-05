@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import hashlib
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -223,14 +224,7 @@ class ProService:
             )
         except ValueError as exc:
             raise ProServiceError(400, str(exc)) from exc
-        return {
-            "account_id": row.account_id,
-            "device_id": row.device_id,
-            "envelope_kind": row.envelope_kind,
-            "envelope": json.loads(row.envelope_json),
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
+        return self._key_envelope_payload(row)
 
     def list_key_envelopes(
         self,
@@ -245,14 +239,7 @@ class ProService:
         else:
             self._require_active_device(account_id, device_id)
         envelopes = [
-            {
-                "account_id": row.account_id,
-                "device_id": row.device_id,
-                "envelope_kind": row.envelope_kind,
-                "envelope": json.loads(row.envelope_json),
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-            }
+            self._key_envelope_payload(row)
             for row in self.store.list_key_envelopes(account_id=account_id, envelope_kind=envelope_kind)
         ]
         return {"envelopes": envelopes}
@@ -261,16 +248,7 @@ class ProService:
         self._require_active_subscription(account_id)
         return {
             "devices": [
-                {
-                    "account_id": device.account_id,
-                    "device_id": device.device_id,
-                    "label": device.label,
-                    "public_key": device.public_key,
-                    "created_at": device.created_at,
-                    "trusted_at": device.trusted_at,
-                    "revoked_at": device.revoked_at,
-                    "last_seen_at": device.last_seen_at,
-                }
+                self._device_payload(device)
                 for device in self.store.list_devices(account_id)
             ]
         }
@@ -633,6 +611,43 @@ class ProService:
             "trusted_at": device.trusted_at,
             "revoked_at": device.revoked_at,
             "last_seen_at": device.last_seen_at,
+            "signed_metadata": self._device_signed_metadata(device),
+            "server_signature": device.signature,
+        }
+
+    def _device_signed_metadata(self, device) -> dict[str, Any]:
+        return {
+            "metadata_type": "dictate.pro.device",
+            "account_id": device.account_id,
+            "device_id": device.device_id,
+            "label": device.label,
+            "public_key": device.public_key,
+            "created_at": device.created_at,
+            "trusted_at": device.trusted_at,
+            "revoked_at": device.revoked_at,
+        }
+
+    def _key_envelope_payload(self, row) -> dict[str, Any]:
+        return {
+            "account_id": row.account_id,
+            "device_id": row.device_id,
+            "envelope_kind": row.envelope_kind,
+            "envelope": json.loads(row.envelope_json),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "signed_metadata": self._key_envelope_signed_metadata(row),
+            "server_signature": row.signature,
+        }
+
+    def _key_envelope_signed_metadata(self, row) -> dict[str, Any]:
+        return {
+            "metadata_type": "dictate.pro.key_envelope",
+            "account_id": row.account_id,
+            "device_id": row.device_id,
+            "envelope_kind": row.envelope_kind,
+            "envelope_hash": hashlib.sha256(row.envelope_json.encode("utf-8")).hexdigest(),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
         }
 
     def _meeting_payload(self, job: MeetingJobRow) -> dict[str, Any]:
