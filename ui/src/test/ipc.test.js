@@ -202,4 +202,45 @@ describe("ipc bridge", () => {
       expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
     );
   });
+
+  it("controls encrypted sync through authenticated backend routes", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sync: { enabled: true } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: { ok: true } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sync: { enabled: false } }),
+      });
+
+    await expect(ipc.enableProSync()).resolves.toEqual({ sync: { enabled: true } });
+    await expect(ipc.runProSync()).resolves.toEqual({ result: { ok: true } });
+    await expect(ipc.disableProSync(true)).resolves.toEqual({ sync: { enabled: false } });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:1/api/pro/sync/enable",
+      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:1/api/pro/sync/run",
+      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:1/api/pro/sync/disable",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({ clearKey: true }),
+      }),
+    );
+  });
 });

@@ -14,6 +14,8 @@ from dictate.api_keys import ApiKeyStatus
 from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
+from dictate.pro.client import ProSession
+from dictate.sync import SyncSettingsStore
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
@@ -165,6 +167,16 @@ class _FakeNoteDaemon:
 class _FakeProClient:
     def __init__(self) -> None:
         self.create_calls: list[dict[str, object]] = []
+        self.sync_drains = 0
+        self.sync_pulls: list[dict[str, int]] = []
+        self.session = ProSession(
+            account_id="acct_test",
+            device_id="device_test",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
 
     def get_state(self) -> dict[str, object]:
         return {
@@ -184,6 +196,34 @@ class _FakeProClient:
         call = {"language": language, "audio_duration_seconds": audio_duration_seconds}
         self.create_calls.append(call)
         return {"job_id": "job_test", **call}
+
+    def refresh_if_needed(self) -> ProSession:
+        return self.session
+
+    def clear_session(self) -> None:
+        self.session = None
+
+    def drain_sync_outbox(self, outbox):  # noqa: ANN001
+        self.sync_drains += 1
+        pending = outbox.pending()
+        outbox.replace_pending([])
+        return {"pushed": len(pending), "remaining": 0, "results": []}
+
+    def get_sync_changes(self, *, since: int = 0, limit: int = 500):
+        self.sync_pulls.append({"since": since, "limit": limit})
+        return {"records": [], "next_seq": since, "has_more": False}
+
+
+def _sync_settings(base: Path) -> SyncSettingsStore:
+    saved: dict[str, str] = {}
+    return SyncSettingsStore(
+        path=base / "sync-state.json",
+        device_path=base / "sync-device.json",
+        outbox_path=base / "sync-outbox.jsonl",
+        save_key=lambda account, encoded: saved.__setitem__(account, encoded),
+        read_key=lambda account: saved.get(account),
+        clear_key=lambda account: saved.pop(account, None),
+    )
 
 
 class UiPrefsStoreTests(unittest.TestCase):
@@ -435,6 +475,82 @@ class UiBackendStateTests(unittest.TestCase):
             pro_client.create_calls,
             [{"language": "en", "audio_duration_seconds": 12.5}],
         )
+
+    def test_state_includes_disabled_sync_status(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, sync_settings=_sync_settings(Path(d)))
+            state = backend.get_state()
+
+        self.assertFalse(state["sync"]["enabled"])
+        self.assertIsNone(state["sync"]["accountId"])
+        self.assertFalse(state["sync"]["keyAvailable"])
+
+    def test_enable_sync_requires_pro_sign_in(self) -> None:
+        class _UnsignedClient(_FakeProClient):
+            def refresh_if_needed(self):  # noqa: ANN201
+                return None
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(
+                d,
+                pro_client=_UnsignedClient(),
+                sync_settings=_sync_settings(Path(d)),
+            )
+
+            with self.assertRaisesRegex(ApiError, "Sign in to Dictate Pro"):
+                backend.enable_sync()
+
+    def test_enable_sync_attaches_outbox_and_runs_initial_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=_sync_settings(Path(d)),
+            )
+
+            result = backend.enable_sync()
+            backend.history_store.append("private local text")
+
+            self.assertTrue(result["sync"]["enabled"])
+            self.assertEqual(result["sync"]["accountId"], "acct_test")
+            self.assertTrue(result["sync"]["keyAvailable"])
+            self.assertEqual(pro_client.sync_drains, 1)
+            self.assertEqual(len(backend.history_store._sync_outbox.pending()), 1)
+
+    def test_run_sync_drains_outbox_and_returns_history(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=_sync_settings(Path(d)),
+            )
+            backend.enable_sync()
+            backend.history_store.append("private local text")
+
+            result = backend.run_sync()
+
+            self.assertEqual(result["result"]["pushed"], 1)
+            self.assertEqual(result["result"]["remaining"], 0)
+            self.assertEqual(result["history"][0]["text"], "private local text")
+            self.assertEqual(backend.history_store._sync_outbox.pending(), [])
+
+    def test_sign_out_disables_sync_without_deleting_local_history(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=_sync_settings(Path(d)),
+            )
+            backend.enable_sync()
+            backend.history_store.append("keep local")
+
+            backend.sign_out_pro()
+
+            self.assertFalse(backend.get_state()["sync"]["enabled"])
+            self.assertEqual(backend.get_history()[0]["text"], "keep local")
 
 
 class UiBackendShortcutPrefsTests(unittest.TestCase):
@@ -936,6 +1052,26 @@ class HttpIntegrationTests(unittest.TestCase):
             pro_client.create_calls,
             [{"language": "en", "audio_duration_seconds": 12.5}],
         )
+
+    def test_sync_enable_run_disable_over_http(self) -> None:
+        base = Path(self._tmp.name)
+        self.handle.backend.pro_client = _FakeProClient()
+        self.handle.backend.sync_settings = _sync_settings(base)
+        with self._post("/api/pro/sync/enable") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["sync"]["enabled"])
+
+        self.handle.backend.history_store.append("queued private")
+        with self._post("/api/pro/sync/run") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body["result"]["pushed"], 1)
+
+        with self._post("/api/pro/sync/disable", {"clearKey": True}) as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertFalse(body["sync"]["enabled"])
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

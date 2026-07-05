@@ -159,6 +159,15 @@ export const ipc = {
   async startUpdate() {
     return call("POST", "/api/update");
   },
+  async enableProSync() {
+    return call("POST", "/api/pro/sync/enable");
+  },
+  async disableProSync(clearKey = false) {
+    return call("POST", "/api/pro/sync/disable", { clearKey });
+  },
+  async runProSync() {
+    return call("POST", "/api/pro/sync/run");
+  },
 
   // Server-sent events: live recording / status pushes from the daemon.
   //

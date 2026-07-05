@@ -150,6 +150,7 @@ class SyncSettingsStoreTests(unittest.TestCase):
             store = SyncSettingsStore(
                 path=Path(tmp) / "state.json",
                 device_path=Path(tmp) / "device.json",
+                outbox_path=Path(tmp) / "outbox.jsonl",
                 save_key=lambda account_id, encoded: saved.__setitem__(account_id, encoded),
                 read_key=lambda account_id: saved.get(account_id),
                 clear_key=lambda account_id: saved.pop(account_id, None),
@@ -170,6 +171,7 @@ class SyncSettingsStoreTests(unittest.TestCase):
             store = SyncSettingsStore(
                 path=Path(tmp) / "state.json",
                 device_path=Path(tmp) / "device.json",
+                outbox_path=Path(tmp) / "outbox.jsonl",
                 save_key=lambda account_id, encoded: saved.__setitem__(account_id, encoded),
                 read_key=lambda account_id: saved.get(account_id),
                 clear_key=lambda account_id: saved.pop(account_id, None),

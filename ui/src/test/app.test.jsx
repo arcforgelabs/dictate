@@ -42,6 +42,58 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
   });
 
+  it("opens account status behind the Dictate mark and enables encrypted sync", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            device: { device: "cuda", compute: "float16" },
+            history: [],
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/pro/sync/enable" && opts.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: true, lastSeq: 4 },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByRole("dialog", { name: "Dictate" })).toBeInTheDocument();
+    expect(screen.getByText("Version 2026.7.4 · unstable")).toBeInTheDocument();
+    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Sync off")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Enable encrypted sync"));
+    await waitFor(() => expect(screen.getByText("Encrypted sync on")).toBeInTheDocument());
+    expect(screen.getByText("Encrypted sync enabled")).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/pro/sync/enable",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("shows API key toast with copy instructions when enabling cloud without a key", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

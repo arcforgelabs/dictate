@@ -55,6 +55,8 @@ from dictate.stt.factory import (
     resolve_model_name,
 )
 from dictate.pro.client import ProClient, ProClientError
+from dictate.sync import SyncSettingsStore
+from dictate.sync_engine import SyncEngine
 from dictate.version import RELEASE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -309,6 +311,7 @@ class UiBackend:
     history_store: HistoryStore | None = None
     note_store: NoteStore | None = None
     prefs_store: UiPrefsStore | None = None
+    sync_settings: SyncSettingsStore | None = None
     broker: EventBroker | None = None
     pro_client: ProClient | None = None
     daemon: Any | None = None
@@ -344,8 +347,11 @@ class UiBackend:
             self.note_store = NoteStore()
         if self.prefs_store is None:
             self.prefs_store = UiPrefsStore()
+        if self.sync_settings is None:
+            self.sync_settings = SyncSettingsStore()
         if self.pro_client is None:
             self.pro_client = ProClient()
+        self._sync_engine().attach_outbox()
 
     # ----- read ----------------------------------------------------------- #
     def _effective_model(self, cfg: config_mod.Config, backend: str) -> str:
@@ -396,6 +402,7 @@ class UiBackend:
             "micConnected": True,
             "providerHealth": self._compute_provider_health(cfg),
             "dictatePro": self._dictate_pro_state(),
+            "sync": self._sync_state(),
         }
 
     def _dictate_pro_state(self) -> dict[str, Any]:
@@ -431,7 +438,55 @@ class UiBackend:
     def sign_out_pro(self) -> dict[str, Any]:
         client = self._require_pro_client()
         client.clear_session()
+        if self.sync_settings is not None:
+            self.sync_settings.disable(clear_key=False)
+        self._sync_engine().attach_outbox()
         return {"signedIn": False}
+
+    def _sync_state(self, *, last_result: dict[str, Any] | None = None) -> dict[str, Any]:
+        settings = self._require_sync_settings()
+        state = settings.load()
+        has_key = False
+        if state.enabled:
+            has_key = bool(self._safe(lambda: settings.account_key() is not None, False))
+        return {
+            "enabled": state.enabled,
+            "accountId": state.account_id or None,
+            "deviceId": state.device_id or None,
+            "enabledAt": state.enabled_at,
+            "lastSeq": state.last_seq,
+            "keyAvailable": has_key,
+            "lastResult": last_result,
+        }
+
+    def enable_sync(self) -> dict[str, Any]:
+        client = self._require_pro_client()
+        session = client.refresh_if_needed()
+        if session is None:
+            raise ApiError(401, "Sign in to Dictate Pro before enabling sync.")
+        settings = self._require_sync_settings()
+        settings.enable(session.account_id)
+        engine = self._sync_engine()
+        engine.attach_outbox()
+        result = engine.run_once().as_dict()
+        if self.broker is not None:
+            self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
+        return {"sync": self._sync_state(last_result=result)}
+
+    def disable_sync(self, *, clear_key: bool = False) -> dict[str, Any]:
+        settings = self._require_sync_settings()
+        settings.disable(clear_key=clear_key)
+        self._sync_engine().attach_outbox()
+        if self.broker is not None:
+            self.broker.publish("sync-changed", sync=self._sync_state())
+        return {"sync": self._sync_state()}
+
+    def run_sync(self) -> dict[str, Any]:
+        result = self._sync_engine().run_once().as_dict()
+        if self.broker is not None:
+            self.broker.publish("history-changed")
+            self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
+        return {"sync": self._sync_state(last_result=result), "result": result, "history": self.get_history()}
 
     def create_pro_meeting(
         self,
@@ -461,6 +516,19 @@ class UiBackend:
         if self.pro_client is None:
             raise ApiError(503, "Dictate Pro client is not configured")
         return self.pro_client
+
+    def _require_sync_settings(self) -> SyncSettingsStore:
+        if self.sync_settings is None:
+            raise ApiError(503, "Dictate sync is not configured")
+        return self.sync_settings
+
+    def _sync_engine(self) -> SyncEngine:
+        return SyncEngine(
+            settings=self._require_sync_settings(),
+            pro_client=self._require_pro_client(),
+            history_store=self.history_store,
+            note_store=self.note_store,
+        )
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:
         combo = cfg.push_to_talk_combo or cfg.push_to_talk_key or DEFAULT_PUSH_TO_TALK_COMBO
@@ -1353,6 +1421,13 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             )
         if path == "/api/pro/sign-out" and method == "POST":
             return _Response(200, backend.sign_out_pro())
+        if path == "/api/pro/sync/enable" and method == "POST":
+            return _Response(200, backend.enable_sync())
+        if path == "/api/pro/sync/disable" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))
+        if path == "/api/pro/sync/run" and method == "POST":
+            return _Response(200, backend.run_sync())
         if path == "/api/pro/meetings" and method == "POST":
             body = self._read_json() or {}
             language = str(body.get("language") or "").strip() or None

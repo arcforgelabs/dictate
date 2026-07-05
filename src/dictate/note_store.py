@@ -56,6 +56,9 @@ class NoteStore:
         self._last_note_timestamp: datetime | None = None
         self._sync_outbox = sync_outbox
 
+    def attach_sync_outbox(self, sync_outbox: SyncOutbox | None) -> None:
+        self._sync_outbox = sync_outbox
+
     def create_note(
         self,
         *,
@@ -250,6 +253,56 @@ class NoteStore:
                     recovered.append(note.note_id)
         return recovered
 
+    def apply_synced_note(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
+        note_id = payload.get("note_id")
+        if not isinstance(note_id, str) or not note_id.strip():
+            return False
+        if deleted:
+            shutil.rmtree(self._note_dir(note_id), ignore_errors=True)
+            return True
+        incoming = _note_from_payload(payload, fallback_note_id=note_id)
+        if incoming is None:
+            return False
+        existing = self.load_note(note_id)
+        if existing is not None and _note_sort_tuple(existing) > _note_sort_tuple(incoming):
+            return True
+        self._write_note(incoming, enqueue=False)
+        return True
+
+    def apply_synced_segment(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
+        note_id = payload.get("note_id")
+        if not isinstance(note_id, str) or not note_id.strip():
+            return False
+        try:
+            seq = int(payload.get("seq"))
+        except (TypeError, ValueError):
+            return False
+        note_dir = self._note_dir(note_id)
+        note_dir.mkdir(parents=True, exist_ok=True)
+        path = note_dir / "segments.jsonl"
+        existing = [segment for segment in self.load_segments(note_id) if segment.seq != seq]
+        if not deleted:
+            text = payload.get("text")
+            if not isinstance(text, str):
+                return False
+            existing.append(
+                NoteSegment(
+                    seq=seq,
+                    t_start=float(payload.get("t_start", payload.get("tStart", 0.0))),
+                    t_end=float(payload.get("t_end", payload.get("tEnd", 0.0))),
+                    provider=str(payload.get("provider") or ""),
+                    model=str(payload.get("model") or ""),
+                    text=text,
+                    speaker_id=_optional_str(payload.get("speaker_id", payload.get("speakerId"))),
+                    speaker_label=_optional_str(payload.get("speaker_label", payload.get("speakerLabel"))),
+                )
+            )
+        existing.sort(key=lambda segment: segment.seq)
+        with path.open("w", encoding="utf-8") as handle:
+            for segment in existing:
+                handle.write(json.dumps(asdict(segment), ensure_ascii=False) + "\n")
+        return True
+
     def _update_note(self, note_id: str, **changes: object) -> None:
         record = self.load_note(note_id)
         if record is None:
@@ -260,7 +313,7 @@ class NoteStore:
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._write_note(NoteRecord(**data))
 
-    def _write_note(self, record: NoteRecord) -> None:
+    def _write_note(self, record: NoteRecord, *, enqueue: bool = True) -> None:
         note_dir = self._note_dir(record.note_id)
         note_dir.mkdir(parents=True, exist_ok=True)
         path = note_dir / "note.json"
@@ -283,7 +336,8 @@ class NoteStore:
             except Exception:  # noqa: BLE001
                 pass
             raise
-        self._enqueue_note(record)
+        if enqueue:
+            self._enqueue_note(record)
 
     def _note_dir(self, note_id: str) -> Path:
         return self._root / note_id
@@ -330,6 +384,32 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _note_from_payload(payload: dict[str, Any], *, fallback_note_id: str) -> NoteRecord | None:
+    try:
+        return NoteRecord(
+            note_id=str(payload.get("note_id") or fallback_note_id),
+            mode=str(payload.get("mode") or "note"),
+            provider=str(payload.get("provider") or ""),
+            model=str(payload.get("model") or ""),
+            started_at=str(payload.get("started_at") or payload.get("startedAt") or ""),
+            ended_at=_optional_str(payload.get("ended_at", payload.get("endedAt"))),
+            duration_s=payload.get("duration_s", payload.get("durationSeconds")),
+            status=payload.get("status") or "ready",
+            speaker_labels=bool(payload.get("speaker_labels", payload.get("speakerLabels", False))),
+            archived=bool(payload.get("archived", False)),
+            recording_id=payload.get("recording_id", payload.get("recordingId")),
+            error=_optional_str(payload.get("error")),
+            rev=_positive_int(payload.get("rev"), 1),
+            updated_at=_optional_str(payload.get("updated_at", payload.get("updatedAt"))),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _note_sort_tuple(note: NoteRecord) -> tuple[int, str, str]:
+    return (note.rev, note.updated_at or note.ended_at or note.started_at, note.note_id)
 
 
 def _note_sort_key(note: NoteRecord) -> str:

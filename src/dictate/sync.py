@@ -37,6 +37,7 @@ class SyncState:
     account_id: str
     device_id: str
     enabled_at: str | None = None
+    last_seq: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,12 +236,14 @@ class SyncSettingsStore:
         *,
         path: Path = SYNC_STATE_PATH,
         device_path: Path = SYNC_DEVICE_PATH,
+        outbox_path: Path = SYNC_OUTBOX_PATH,
         save_key=api_keys_mod.save_sync_account_key,
         read_key=api_keys_mod.read_sync_account_key,
         clear_key=api_keys_mod.clear_sync_account_key,
     ) -> None:
         self.path = path
         self.device_path = device_path
+        self.outbox_path = outbox_path
         self._save_key = save_key
         self._read_key = read_key
         self._clear_key = clear_key
@@ -259,6 +262,7 @@ class SyncSettingsStore:
             account_id=str(raw.get("account_id") or ""),
             device_id=str(raw.get("device_id") or ""),
             enabled_at=_optional_state_str(raw.get("enabled_at")),
+            last_seq=_positive_state_int(raw.get("last_seq"), 0),
         )
 
     def enable(self, account_id: str, *, account_key: bytes | None = None) -> tuple[SyncState, bytes]:
@@ -274,6 +278,7 @@ class SyncSettingsStore:
             account_id=account,
             device_id=device.device_id,
             enabled_at=utc_now_iso(),
+            last_seq=0,
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(self.path, asdict(state))
@@ -283,7 +288,25 @@ class SyncSettingsStore:
         current = self.load()
         if clear_key and current.account_id:
             self._clear_key(current.account_id)
-        state = SyncState(enabled=False, account_id=current.account_id, device_id=current.device_id)
+        state = SyncState(
+            enabled=False,
+            account_id=current.account_id,
+            device_id=current.device_id,
+            last_seq=current.last_seq,
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(self.path, asdict(state))
+        return state
+
+    def set_cursor(self, last_seq: int) -> SyncState:
+        current = self.load()
+        state = SyncState(
+            enabled=current.enabled,
+            account_id=current.account_id,
+            device_id=current.device_id,
+            enabled_at=current.enabled_at,
+            last_seq=max(0, int(last_seq)),
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(self.path, asdict(state))
         return state
@@ -295,13 +318,13 @@ class SyncSettingsStore:
         encoded = self._read_key(state.account_id)
         return decode_key(encoded) if encoded else None
 
-    def outbox(self, *, path: Path = SYNC_OUTBOX_PATH) -> SyncOutbox | None:
+    def outbox(self, *, path: Path | None = None) -> SyncOutbox | None:
         state = self.load()
         key = self.account_key()
         if key is None or not state.account_id or not state.device_id:
             return None
         return SyncOutbox(
-            path=path,
+            path=path or self.outbox_path,
             account_id=state.account_id,
             account_key=key,
             device_id=state.device_id,
@@ -326,6 +349,14 @@ def encrypted_record_from_dict(raw: dict[str, Any]) -> EncryptedSyncRecord:
 
 def _optional_state_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _positive_state_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
 
 
 def _collection(value: str) -> SyncCollection:

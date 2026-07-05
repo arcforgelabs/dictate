@@ -34,6 +34,9 @@ class HistoryStore:
         self._path = path
         self._sync_outbox = sync_outbox
 
+    def attach_sync_outbox(self, sync_outbox: SyncOutbox | None) -> None:
+        self._sync_outbox = sync_outbox
+
     def load(self, *, include_archived: bool = False) -> list[HistoryEntry]:
         if not self._path.is_file():
             return []
@@ -131,6 +134,35 @@ class HistoryStore:
         self._enqueue_entry(entry)
         return entry
 
+    def apply_synced_entry(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
+        entry_id = payload.get("id")
+        created_at = payload.get("created_at")
+        text = payload.get("text")
+        if not isinstance(entry_id, str) or not isinstance(created_at, str) or not isinstance(text, str):
+            return False
+        incoming = HistoryEntry(
+            id=entry_id,
+            created_at=created_at,
+            text=text,
+            archived=bool(payload.get("archived", False) or deleted),
+            rev=_positive_int(payload.get("rev"), 1),
+            updated_at=_optional_str(payload.get("updated_at")) or created_at,
+        )
+        entries = self.load(include_archived=True)
+        replaced = False
+        merged: list[HistoryEntry] = []
+        for entry in entries:
+            if entry.id != incoming.id:
+                merged.append(entry)
+                continue
+            replaced = True
+            merged.append(_newer_history_entry(incoming, entry))
+        if not replaced:
+            merged.insert(0, incoming)
+        merged.sort(key=lambda item: item.created_at, reverse=True)
+        self._save(merged[:MAX_ENTRIES])
+        return True
+
     def _save(self, entries: list[HistoryEntry]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = {
@@ -180,3 +212,9 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _newer_history_entry(left: HistoryEntry, right: HistoryEntry) -> HistoryEntry:
+    left_key = (left.rev, left.updated_at or left.created_at, left.id)
+    right_key = (right.rev, right.updated_at or right.created_at, right.id)
+    return left if left_key >= right_key else right

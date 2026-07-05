@@ -4,7 +4,7 @@
 // only non-home view is the Notes list. All advanced config lives in the
 // `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon } from "./icons.jsx";
+import { Icon, Mark } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
 import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
@@ -60,6 +60,15 @@ function normalizeSegments(segments) {
     })
     .filter(Boolean)
     .sort((a, b) => a.seq - b.seq);
+}
+
+function mapHistoryPayload(history) {
+  return (history || []).map((h) => ({
+    id: h.id,
+    text: h.text,
+    createdAt: h.createdAt,
+    segments: normalizeSegments(h.segments),
+  }));
 }
 
 function noteText(note) {
@@ -209,6 +218,144 @@ function UpdatePill() {
   );
 }
 
+function AccountButton() {
+  const s = useStore();
+  const syncOn = !!s.syncState?.enabled;
+  return (
+    <Tooltip label="Dictate">
+      <button
+        type="button"
+        className={"account-mark" + (syncOn ? " synced" : "")}
+        aria-label="Dictate account and status"
+        title="Dictate account and status"
+        onClick={() => s.setAccountOpen(true)}
+      >
+        <Mark size={17} />
+      </button>
+    </Tooltip>
+  );
+}
+
+function AccountDialog() {
+  const s = useStore();
+  const sync = s.syncState || { enabled: false, keyAvailable: false, lastSeq: 0 };
+  const pro = s.dictatePro || { signedIn: false };
+  const model = modelById(s.model);
+  const signedIn = !!pro.signedIn;
+  const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
+  const syncLabel = sync.enabled
+    ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
+    : "Sync off";
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); s.setAccountOpen(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [s]);
+
+  const enableSync = () => {
+    if (!ipc.isLive()) {
+      s.toast("Sign in on the installed app to enable sync", { bad: true });
+      return;
+    }
+    s.setSyncBusy(true);
+    ipc.enableProSync()
+      .then((r) => {
+        if (r?.sync) s.setSyncState(r.sync);
+        s.toast("Encrypted sync enabled");
+      })
+      .catch((e) => s.toast(e.message || "Could not enable sync", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const runSync = () => {
+    if (!ipc.isLive()) return;
+    s.setSyncBusy(true);
+    ipc.runProSync()
+      .then((r) => {
+        if (r?.sync) s.setSyncState(r.sync);
+        if (Array.isArray(r?.history)) s.setHistory(mapHistoryPayload(r.history));
+        s.toast("Sync complete");
+      })
+      .catch((e) => s.toast(e.message || "Could not sync", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const disableSync = () => {
+    if (!ipc.isLive()) {
+      s.setSyncState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
+      return;
+    }
+    s.setSyncBusy(true);
+    ipc.disableProSync(false)
+      .then((r) => {
+        if (r?.sync) s.setSyncState(r.sync);
+        s.toast("Sync disabled");
+      })
+      .catch((e) => s.toast(e.message || "Could not disable sync", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  return (
+    <div className="account-scrim" onMouseDown={() => s.setAccountOpen(false)}>
+      <div
+        className="account-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="account-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="account-head">
+          <span className="account-logo"><Mark size={22} /></span>
+          <div className="account-title-wrap">
+            <div id="account-title" className="account-title">Dictate</div>
+            <div className="account-sub">Version {s.version}{s.updateChannel ? ` · ${s.updateChannel}` : ""}</div>
+          </div>
+          <button type="button" className="ibtn" aria-label="Close" title="Close" onClick={() => s.setAccountOpen(false)}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <div className="account-grid">
+          <div className="account-row"><span>Account</span><strong>{accountLabel}</strong></div>
+          <div className="account-row"><span>Sync</span><strong>{syncLabel}</strong></div>
+          <div className="account-row"><span>Model</span><strong>{model.name}</strong></div>
+          <div className="account-row"><span>Runtime</span><strong>{s.device2 || "auto"} · {s.compute || "int8"}</strong></div>
+          {s.installedPackageVersion && (
+            <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
+          )}
+          {sync.enabled && (
+            <div className="account-row"><span>Cursor</span><strong>{sync.lastSeq || 0}</strong></div>
+          )}
+        </div>
+
+        <div className="account-actions">
+          {!sync.enabled ? (
+            <button type="button" className="account-primary" disabled={s.syncBusy || !signedIn} onClick={enableSync}>
+              <Icon name="lock" size={14} />
+              <span>Enable encrypted sync</span>
+            </button>
+          ) : (
+            <>
+              <button type="button" className="account-primary" disabled={s.syncBusy || !sync.keyAvailable} onClick={runSync}>
+                <Icon name="refresh" size={14} />
+                <span>Sync now</span>
+              </button>
+              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={disableSync}>
+                Disable
+              </button>
+            </>
+          )}
+        </div>
+        {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
+        {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
+      </div>
+    </div>
+  );
+}
+
 function DiscardConfirmDialog({ meeting, onCancel, onConfirm }) {
   const confirmRef = useRef(null);
   useEffect(() => {
@@ -284,7 +431,7 @@ function CaptureHome() {
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
       <HomeBar
         left={<><PrivacyPill /><LocalEngineToggle /></>}
-        right={<UpdatePill />}
+        right={<><UpdatePill /><AccountButton /></>}
         meeting={!s.noteRecording ? (
           <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
             <Icon name="users" size={14} />
@@ -558,6 +705,10 @@ export default function App() {
   const [providerDegraded, setProviderDegraded] = useState(false);
   const [providerReason, setProviderReason] = useState(null);
   const [providerActive, setProviderActive] = useState(null);
+  const [dictatePro, setDictatePro] = useState({ signedIn: false });
+  const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   // flash: one-shot ring pulse on provider switch (local=amber, remote=green). Never silent.
   const [flash, setFlash] = useState(null);
   // expandedFrom: where the expanded view was opened from — "capture" (just dictated) or
@@ -745,6 +896,8 @@ export default function App() {
         setProviderActive(ev.active || "online");
         triggerFlash("remote");
         toast("Back online", { icon: "cloud" });
+      } else if (ev.type === "sync-changed") {
+        if (ev.sync) setSyncState(ev.sync);
       } else if (ev.type === "history-changed") {
         ipc.getState().then((st) => {
           if (!st) return;
@@ -831,15 +984,11 @@ export default function App() {
       if (ph.reason !== undefined) setProviderReason(ph.reason || null);
       if (ph.active) setProviderActive(ph.active);
     }
+    if (st.dictatePro) setDictatePro(st.dictatePro);
+    if (st.sync) setSyncState(st.sync);
   }, []);
 
-  const mapHistory = (st) =>
-    (st.history || []).map((h) => ({
-      id: h.id,
-      text: h.text,
-      createdAt: h.createdAt,
-      segments: normalizeSegments(h.segments),
-    }));
+  const mapHistory = (st) => mapHistoryPayload(st.history);
 
   // ---- toasts ----
   const dismiss = (id) => setToasts((ts) => ts.filter((t) => t.id !== id));
@@ -1440,6 +1589,8 @@ export default function App() {
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
+    dictatePro, setDictatePro, syncState, setSyncState, syncBusy, setSyncBusy,
+    accountOpen, setAccountOpen, setHistory,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -1473,6 +1624,7 @@ export default function App() {
 
         <ListeningHUD />
         <CommandPalette />
+        {accountOpen && <AccountDialog />}
         <Toasts />
       </div>
     </StoreCtx.Provider>
