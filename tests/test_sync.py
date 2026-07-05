@@ -10,6 +10,7 @@ from cryptography.exceptions import InvalidTag
 
 from dictate.sync import (
     PlainSyncRecord,
+    SyncSettingsStore,
     SyncOutbox,
     decrypt_record,
     encode_key,
@@ -139,6 +140,47 @@ class SyncOutboxTests(unittest.TestCase):
 
             self.assertEqual([record.record_id for record in outbox.pending()], ["hist_2"])
             self.assertEqual(first.record_id, "hist_1")
+
+
+class SyncSettingsStoreTests(unittest.TestCase):
+    def test_enable_sync_stores_only_non_secret_state_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            saved: dict[str, str] = {}
+            key = generate_account_key()
+            store = SyncSettingsStore(
+                path=Path(tmp) / "state.json",
+                device_path=Path(tmp) / "device.json",
+                save_key=lambda account_id, encoded: saved.__setitem__(account_id, encoded),
+                read_key=lambda account_id: saved.get(account_id),
+                clear_key=lambda account_id: saved.pop(account_id, None),
+            )
+
+            state, returned_key = store.enable("acct_1", account_key=key)
+
+            self.assertTrue(state.enabled)
+            self.assertEqual(returned_key, key)
+            raw_state = (Path(tmp) / "state.json").read_text()
+            self.assertIn("acct_1", raw_state)
+            self.assertNotIn(encode_key(key), raw_state)
+            self.assertEqual(store.account_key(), key)
+
+    def test_disable_can_clear_secret_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            saved: dict[str, str] = {}
+            store = SyncSettingsStore(
+                path=Path(tmp) / "state.json",
+                device_path=Path(tmp) / "device.json",
+                save_key=lambda account_id, encoded: saved.__setitem__(account_id, encoded),
+                read_key=lambda account_id: saved.get(account_id),
+                clear_key=lambda account_id: saved.pop(account_id, None),
+            )
+            store.enable("acct_1")
+
+            state = store.disable(clear_key=True)
+
+            self.assertFalse(state.enabled)
+            self.assertEqual(saved, {})
+            self.assertIsNone(store.account_key())
 
 
 if __name__ == "__main__":

@@ -16,9 +16,11 @@ from typing import Any, Literal
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from dictate.platform_paths import user_data_dir
+from dictate import api_keys as api_keys_mod
 
 SYNC_DEVICE_PATH = user_data_dir() / "sync-device.json"
 SYNC_OUTBOX_PATH = user_data_dir() / "sync-outbox.jsonl"
+SYNC_STATE_PATH = user_data_dir() / "sync-state.json"
 
 SyncCollection = Literal["history", "note", "segment", "settings", "lexicon"]
 
@@ -27,6 +29,14 @@ SyncCollection = Literal["history", "note", "segment", "settings", "lexicon"]
 class SyncDevice:
     device_id: str
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncState:
+    enabled: bool
+    account_id: str
+    device_id: str
+    enabled_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +227,87 @@ class SyncOutbox:
         _atomic_write_text(self.path, "\n".join(lines) + ("\n" if lines else ""))
 
 
+class SyncSettingsStore:
+    """Non-secret sync consent state plus OS-secret-backed account key access."""
+
+    def __init__(
+        self,
+        *,
+        path: Path = SYNC_STATE_PATH,
+        device_path: Path = SYNC_DEVICE_PATH,
+        save_key=api_keys_mod.save_sync_account_key,
+        read_key=api_keys_mod.read_sync_account_key,
+        clear_key=api_keys_mod.clear_sync_account_key,
+    ) -> None:
+        self.path = path
+        self.device_path = device_path
+        self._save_key = save_key
+        self._read_key = read_key
+        self._clear_key = clear_key
+
+    def load(self) -> SyncState:
+        if not self.path.is_file():
+            return SyncState(enabled=False, account_id="", device_id="")
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return SyncState(enabled=False, account_id="", device_id="")
+        if not isinstance(raw, dict):
+            return SyncState(enabled=False, account_id="", device_id="")
+        return SyncState(
+            enabled=bool(raw.get("enabled", False)),
+            account_id=str(raw.get("account_id") or ""),
+            device_id=str(raw.get("device_id") or ""),
+            enabled_at=_optional_state_str(raw.get("enabled_at")),
+        )
+
+    def enable(self, account_id: str, *, account_key: bytes | None = None) -> tuple[SyncState, bytes]:
+        account = account_id.strip()
+        if not account:
+            raise ValueError("account_id is required to enable sync")
+        key = account_key or generate_account_key()
+        _validate_key(key)
+        device = load_or_create_device(self.device_path)
+        self._save_key(account, encode_key(key))
+        state = SyncState(
+            enabled=True,
+            account_id=account,
+            device_id=device.device_id,
+            enabled_at=utc_now_iso(),
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(self.path, asdict(state))
+        return state, key
+
+    def disable(self, *, clear_key: bool = False) -> SyncState:
+        current = self.load()
+        if clear_key and current.account_id:
+            self._clear_key(current.account_id)
+        state = SyncState(enabled=False, account_id=current.account_id, device_id=current.device_id)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(self.path, asdict(state))
+        return state
+
+    def account_key(self) -> bytes | None:
+        state = self.load()
+        if not state.enabled or not state.account_id:
+            return None
+        encoded = self._read_key(state.account_id)
+        return decode_key(encoded) if encoded else None
+
+    def outbox(self, *, path: Path = SYNC_OUTBOX_PATH) -> SyncOutbox | None:
+        state = self.load()
+        key = self.account_key()
+        if key is None or not state.account_id or not state.device_id:
+            return None
+        return SyncOutbox(
+            path=path,
+            account_id=state.account_id,
+            account_key=key,
+            device_id=state.device_id,
+        )
+
+
 def encrypted_record_from_dict(raw: dict[str, Any]) -> EncryptedSyncRecord:
     return EncryptedSyncRecord(
         collection=_collection(str(raw["collection"])),
@@ -231,6 +322,10 @@ def encrypted_record_from_dict(raw: dict[str, Any]) -> EncryptedSyncRecord:
         aad_hash=str(raw["aad_hash"]),
         payload_bytes=int(raw["payload_bytes"]),
     )
+
+
+def _optional_state_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _collection(value: str) -> SyncCollection:

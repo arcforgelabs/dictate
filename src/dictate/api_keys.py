@@ -45,6 +45,7 @@ class ApiKeyStatus:
 
 
 PRO_REFRESH_TOKEN_BACKEND = "dictate-pro-refresh"
+SYNC_ACCOUNT_KEY_BACKEND = "dictate-sync-account-key"
 
 
 def save_pro_refresh_token(token: str) -> None:
@@ -77,6 +78,45 @@ def clear_pro_refresh_token() -> None:
         return
     if shutil.which("secret-tool") is not None:
         _secret_tool_clear_pro_refresh_token()
+
+
+def save_sync_account_key(account_id: str, encoded_key: str) -> None:
+    """Persist a Dictate Pro sync account data key in the OS secret store."""
+    account = account_id.strip()
+    key = encoded_key.strip()
+    if not account or not key:
+        raise ApiKeyStorageError("Sync account id and key are required.")
+    if _is_windows():
+        _windows_save_secret(_windows_sync_account_key_target_name(account), key, "sync account key")
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_save_sync_account_key(account, key)
+        return
+    raise ApiKeyStorageError("No supported OS secret store is available for sync account key storage.")
+
+
+def read_sync_account_key(account_id: str) -> str | None:
+    """Read a Dictate Pro sync account data key from the OS secret store."""
+    account = account_id.strip()
+    if not account:
+        return None
+    if _is_windows():
+        return _windows_read_secret(_windows_sync_account_key_target_name(account))
+    if shutil.which("secret-tool") is not None:
+        return _secret_tool_read_sync_account_key(account)
+    return None
+
+
+def clear_sync_account_key(account_id: str) -> None:
+    """Remove a Dictate Pro sync account data key from the OS secret store."""
+    account = account_id.strip()
+    if not account:
+        return
+    if _is_windows():
+        _windows_clear_secret(_windows_sync_account_key_target_name(account), "sync account key")
+        return
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_clear_sync_account_key(account)
 
 
 def save_api_key(backend: str, api_key: str) -> None:
@@ -392,6 +432,76 @@ def _secret_tool_clear_pro_refresh_token() -> None:
         raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
 
 
+def _secret_tool_save_sync_account_key(account_id: str, encoded_key: str) -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "store",
+            "--label",
+            "Dictate Pro sync account key",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_ACCOUNT_KEY_BACKEND,
+            "kind",
+            "sync-account-key",
+            "account",
+            account_id,
+        ],
+        action="store",
+        input=encoded_key,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+
+
+def _secret_tool_read_sync_account_key(account_id: str) -> str | None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "lookup",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_ACCOUNT_KEY_BACKEND,
+            "kind",
+            "sync-account-key",
+            "account",
+            account_id,
+        ],
+        action="lookup",
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def _secret_tool_clear_sync_account_key(account_id: str) -> None:
+    secret_tool = _require_secret_tool()
+    completed = _run_secret_tool(
+        [
+            secret_tool,
+            "clear",
+            "application",
+            "dictate",
+            "backend",
+            SYNC_ACCOUNT_KEY_BACKEND,
+            "kind",
+            "sync-account-key",
+            "account",
+            account_id,
+        ],
+        action="clear",
+        timeout=10,
+    )
+    if completed.returncode not in {0, 1}:
+        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
+
+
 def _run_secret_tool(
     args: list[str],
     *,
@@ -429,64 +539,46 @@ def _secret_tool_error(action: str, stderr: str) -> str:
 
 
 def _windows_save_api_key(backend: str, api_key: str) -> None:
-    blob = api_key.encode("utf-16-le")
-    credential = _CREDENTIALW()
-    credential.Type = _CRED_TYPE_GENERIC
-    credential.TargetName = _windows_target_name(backend)
-    credential.CredentialBlobSize = len(blob)
-    credential.CredentialBlob = ctypes.cast(ctypes.create_string_buffer(blob), wintypes.LPBYTE)
-    credential.Persist = _CRED_PERSIST_LOCAL_MACHINE
-    credential.UserName = "dictate"
-    if not _advapi32().CredWriteW(ctypes.byref(credential), 0):
-        raise ApiKeyStorageError(_windows_error("write"))
+    _windows_save_secret(_windows_target_name(backend), api_key, "API key")
 
 
 def _windows_read_api_key(backend: str) -> str | None:
-    credential_ptr = ctypes.POINTER(_CREDENTIALW)()
-    ok = _advapi32().CredReadW(
-        _windows_target_name(backend),
-        _CRED_TYPE_GENERIC,
-        0,
-        ctypes.byref(credential_ptr),
-    )
-    if not ok:
-        return None
-    try:
-        credential = credential_ptr.contents
-        if not credential.CredentialBlob or credential.CredentialBlobSize <= 0:
-            return None
-        blob = ctypes.string_at(credential.CredentialBlob, credential.CredentialBlobSize)
-        return blob.decode("utf-16-le").strip() or None
-    finally:
-        _advapi32().CredFree(credential_ptr)
+    return _windows_read_secret(_windows_target_name(backend))
 
 
 def _windows_clear_api_key(backend: str) -> None:
-    if _advapi32().CredDeleteW(_windows_target_name(backend), _CRED_TYPE_GENERIC, 0):
-        return
-    code = _windows_last_error()
-    if code == _ERROR_NOT_FOUND:
-        return
-    raise ApiKeyStorageError(_windows_error("delete", code=code))
+    _windows_clear_secret(_windows_target_name(backend), "API key")
 
 
 def _windows_save_pro_refresh_token(token: str) -> None:
-    blob = token.encode("utf-16-le")
+    _windows_save_secret(_windows_pro_refresh_target_name(), token, "pro refresh token")
+
+
+def _windows_read_pro_refresh_token() -> str | None:
+    return _windows_read_secret(_windows_pro_refresh_target_name())
+
+
+def _windows_clear_pro_refresh_token() -> None:
+    _windows_clear_secret(_windows_pro_refresh_target_name(), "pro refresh token")
+
+
+def _windows_save_secret(target_name: str, value: str, label: str) -> None:
+    blob = value.encode("utf-16-le")
     credential = _CREDENTIALW()
     credential.Type = _CRED_TYPE_GENERIC
-    credential.TargetName = _windows_pro_refresh_target_name()
+    credential.TargetName = target_name
     credential.CredentialBlobSize = len(blob)
     credential.CredentialBlob = ctypes.cast(ctypes.create_string_buffer(blob), wintypes.LPBYTE)
     credential.Persist = _CRED_PERSIST_LOCAL_MACHINE
     credential.UserName = "dictate"
     if not _advapi32().CredWriteW(ctypes.byref(credential), 0):
-        raise ApiKeyStorageError(_windows_error("write"))
+        raise ApiKeyStorageError(_windows_error(f"write {label}"))
 
 
-def _windows_read_pro_refresh_token() -> str | None:
+def _windows_read_secret(target_name: str) -> str | None:
     credential_ptr = ctypes.POINTER(_CREDENTIALW)()
     ok = _advapi32().CredReadW(
-        _windows_pro_refresh_target_name(),
+        target_name,
         _CRED_TYPE_GENERIC,
         0,
         ctypes.byref(credential_ptr),
@@ -503,13 +595,13 @@ def _windows_read_pro_refresh_token() -> str | None:
         _advapi32().CredFree(credential_ptr)
 
 
-def _windows_clear_pro_refresh_token() -> None:
-    if _advapi32().CredDeleteW(_windows_pro_refresh_target_name(), _CRED_TYPE_GENERIC, 0):
+def _windows_clear_secret(target_name: str, label: str) -> None:
+    if _advapi32().CredDeleteW(target_name, _CRED_TYPE_GENERIC, 0):
         return
     code = _windows_last_error()
     if code == _ERROR_NOT_FOUND:
         return
-    raise ApiKeyStorageError(_windows_error("delete", code=code))
+    raise ApiKeyStorageError(_windows_error(f"delete {label}", code=code))
 
 
 def _windows_target_name(backend: str) -> str:
@@ -518,6 +610,10 @@ def _windows_target_name(backend: str) -> str:
 
 def _windows_pro_refresh_target_name() -> str:
     return f"Dictate:{PRO_REFRESH_TOKEN_BACKEND}:pro-refresh-token"
+
+
+def _windows_sync_account_key_target_name(account_id: str) -> str:
+    return f"Dictate:{SYNC_ACCOUNT_KEY_BACKEND}:{account_id}:sync-account-key"
 
 
 def _windows_error(action: str, *, code: int | None = None) -> str:

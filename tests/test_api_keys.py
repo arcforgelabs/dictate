@@ -98,6 +98,38 @@ class ApiKeysTests(unittest.TestCase):
         ):
             self.assertIn("private local key file", api_keys.secret_store_description())
 
+    def test_sync_account_key_requires_secret_store(self) -> None:
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value=None),
+        ):
+            with self.assertRaises(api_keys.ApiKeyStorageError):
+                api_keys.save_sync_account_key("acct_1", "encoded-key")
+            self.assertIsNone(api_keys.read_sync_account_key("acct_1"))
+
+    def test_secret_tool_stores_sync_account_key_with_account_scope(self) -> None:
+        calls = []
+
+        def fake_run(args, **kwargs):  # noqa: ANN001
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="encoded-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value="/usr/bin/secret-tool"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            api_keys.save_sync_account_key("acct_1", "encoded-key")
+            self.assertEqual(api_keys.read_sync_account_key("acct_1"), "encoded-key")
+            api_keys.clear_sync_account_key("acct_1")
+
+        args, kwargs = calls[0]
+        self.assertEqual(kwargs["input"], "encoded-key")
+        joined_args = " ".join(args)
+        self.assertIn("sync-account-key", joined_args)
+        self.assertIn("acct_1", joined_args)
+        self.assertNotIn("encoded-key", joined_args)
+
     def test_backend_rejects_unknown_provider(self) -> None:
         with self.assertRaises(api_keys.ApiKeyStorageError):
             api_keys.save_api_key("not-a-provider", "secret")
