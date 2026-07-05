@@ -115,9 +115,10 @@ without a version bump can report the base CalVer while being delivered through
 the unstable channel.
 
 With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
-matrix, the Windows user install/update/uninstall smoke, UI build/server smoke,
-desktop shell compile/Rust tests, and npm package dry-run. Store upload/publish
-and signed Windows artifact release remain separate guarded workflows.
+matrix, the Windows user install/update/uninstall smoke, the Linux user
+encrypted-sync install smoke, UI build/server smoke, desktop shell compile/Rust
+tests, and npm package dry-run. Store upload/publish and signed Windows artifact
+release remain separate guarded workflows.
 
 To publish an unstable bootstrap:
 

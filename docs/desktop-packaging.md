@@ -74,8 +74,8 @@ scripts/build-windows-desktop.ps1
   `.msi`/installer `.exe` assets
   to the GitHub release only when Authenticode signatures validate; unsigned
   artifacts are uploaded as internal workflow artifacts instead.
-- **Unstable (`.github/workflows/npm-unstable.yml`, job
-  `windows-desktop-bundle`)** runs the same Windows desktop build before moving
+- **Unstable (`.github/workflows/npm-unstable.yml`)** runs the same Windows
+  desktop build and the Linux user encrypted-sync install smoke before moving
   the npm `unstable` dist-tag. It uploads the `.msi` and NSIS setup `.exe` as
   workflow artifacts for lab validation of the exact unstable commit.
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**

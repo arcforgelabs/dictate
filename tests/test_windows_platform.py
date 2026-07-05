@@ -640,6 +640,13 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("UNSTABLE_VERSION", workflow)
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
+        self.assertIn("Linux user install sync smoke", workflow)
+        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
+        self.assertIn(
+            "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle]",
+            workflow,
+        )
+        self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
         self.assertIn("desktop-shell", workflow)
         self.assertIn("needs.tests.result == 'success'", workflow)
@@ -649,6 +656,18 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("install.ps1", workflow)
         self.assertIn("update.ps1", workflow)
         self.assertNotIn("--tag latest", workflow)
+
+    def test_release_workflow_gates_on_linux_sync_smoke(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Linux user install sync smoke", workflow)
+        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
+        self.assertIn(
+            "needs: [validate-release-ref, tests, windows-user-smoke, linux-user-sync-smoke]",
+            workflow,
+        )
 
 
 if __name__ == "__main__":
