@@ -115,6 +115,84 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
+  it("shows an offline sync status when the last sync could not reach the service", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            device: { device: "cuda", compute: "float16" },
+            history: [],
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            sync: {
+              enabled: true,
+              accountId: "acct_1",
+              deviceId: "dev_1",
+              keyAvailable: true,
+              lastSeq: 4,
+              lastResult: { error: "sync push failed: network unreachable" },
+            },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByText("Encrypted sync on")).toBeInTheDocument();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+  });
+
+  it("shows action needed when encrypted sync is enabled but the local key is missing", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            device: { device: "cuda", compute: "float16" },
+            history: [],
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: false, lastSeq: 4 },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByText("Sync key unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Action needed")).toBeInTheDocument();
+    expect(screen.getByText("The encryption key is missing from this device.")).toBeInTheDocument();
+  });
+
   it("shows API key toast with copy instructions when enabling cloud without a key", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

@@ -249,6 +249,21 @@ function AccountDialog() {
   const syncLabel = sync.enabled
     ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
     : "Sync off";
+  const syncError = String(sync.lastResult?.error || sync.error || "").trim();
+  const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
+  const syncedLabel = !sync.enabled
+    ? "Off"
+    : !sync.keyAvailable
+      ? "Action needed"
+      : s.syncBusy
+        ? "Syncing"
+        : offlineSyncError
+          ? "Offline"
+          : syncError
+            ? "Action needed"
+            : sync.lastSeq
+              ? "Up to date"
+              : "Starting";
 
   useEffect(() => {
     const onKey = (e) => {
@@ -401,7 +416,7 @@ function AccountDialog() {
             <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
           {sync.enabled && (
-            <div className="account-row"><span>Synced</span><strong>{sync.lastSeq ? "Up to date" : "Starting"}</strong></div>
+            <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
           )}
         </div>
 
