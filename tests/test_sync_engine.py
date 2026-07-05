@@ -106,6 +106,57 @@ class SyncEngineTests(unittest.TestCase):
             self.assertEqual(client.cursor_updates, [11])
             self.assertEqual(history.load()[0].text, "synced private note")
 
+    def test_pull_applies_realistic_history_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            records = []
+            for idx in range(1000):
+                seq = idx + 1
+                record_id = f"hist_{seq}"
+                encrypted = encrypt_record(
+                    account_id,
+                    key,
+                    PlainSyncRecord(
+                        collection="history",
+                        record_id=record_id,
+                        rev=1,
+                        updated_at=f"2026-07-05T12:{idx // 60:02d}:{idx % 60:02d}+00:00",
+                        device_id="device_remote",
+                        deleted=False,
+                        content_type="application/vnd.dictate.history+json;v=1",
+                        payload={
+                            "id": record_id,
+                            "created_at": "2026-07-05T12:00:00+00:00",
+                            "updated_at": f"2026-07-05T12:{idx // 60:02d}:{idx % 60:02d}+00:00",
+                            "rev": 1,
+                            "text": f"private synced note {seq}",
+                            "archived": False,
+                        },
+                    ),
+                )
+                records.append({**asdict(encrypted), "seq": seq})
+            settings = self._settings(tmp, account_id, key)
+            history = HistoryStore(Path(tmp) / "history.json")
+            client = _FakeProClient(records)
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=client,
+                history_store=history,
+                note_store=NoteStore(Path(tmp) / "notes"),
+            )
+
+            result = engine.run_once(limit=1000)
+
+            self.assertEqual(result.pulled, 1000)
+            self.assertEqual(result.applied, 1000)
+            self.assertEqual(settings.load().last_seq, 1000)
+            self.assertEqual(client.cursor_updates, [1000])
+            loaded = history.load()
+            self.assertEqual(len(loaded), 20)
+            self.assertEqual(loaded[0].text, "private synced note 1000")
+            self.assertEqual(loaded[-1].text, "private synced note 981")
+
     def test_pull_applies_note_and_segment_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()
