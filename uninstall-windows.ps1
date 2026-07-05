@@ -17,11 +17,13 @@ function Stop-DictateProcesses {
     $matches = Get-CimInstance Win32_Process |
         Where-Object {
             $_.ProcessId -ne $currentPid -and (
-                $_.Name -in @("dictate.exe", "dictate-controls.exe") -or
+                $_.Name -in @("Dictate.exe", "dictate.exe", "dictate-controls.exe", "dictate-ui-shell.exe", "dictate-engine.exe") -or
                 $_.CommandLine -like '*dictate.exe* --type-backend pynput*' -or
                 $_.CommandLine -like '*pythonw.exe* -m dictate --type-backend pynput*' -or
                 $_.CommandLine -like '*dictate-daemon.cmd*' -or
-                $_.CommandLine -like '*dictate-controls*'
+                $_.CommandLine -like '*dictate-controls*' -or
+                $_.CommandLine -like '*dictate-ui-shell.exe*' -or
+                $_.CommandLine -like '*dictate-engine.exe*'
             )
         }
     foreach ($match in $matches) {
