@@ -343,8 +343,10 @@ Hosted Pro transcription is different from sync:
 
 1. User intentionally sends audio to a hosted model job.
 2. The gateway meters usage and talks to the provider.
-3. Returned transcripts are encrypted by the client before entering sync.
-4. Provider-side retention and privacy terms must be disclosed separately from
+3. Returned transcripts are sent back to the requesting client, but the Dictate
+   control plane must not persist readable transcript text.
+4. Returned transcripts are encrypted by the client before entering sync.
+5. Provider-side retention and privacy terms must be disclosed separately from
    Dictate sync storage.
 
 For the strongest privacy posture, prefer local transcription for normal

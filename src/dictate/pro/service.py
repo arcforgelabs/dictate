@@ -525,6 +525,17 @@ class ProService:
             "job": self._meeting_payload(updated),  # type: ignore[arg-type]
             "usage": self.get_current_usage(account_id),
             "text": result.text,
+            "segments": [
+                {
+                    "seq": segment.seq,
+                    "speaker_id": segment.speaker_id,
+                    "speaker_label": segment.speaker_label,
+                    "text": segment.text,
+                    "t_start": segment.t_start,
+                    "t_end": segment.t_end,
+                }
+                for segment in result.segments
+            ],
         }
 
     def get_meeting_job(self, account_id: str, job_id: str) -> dict[str, Any]:

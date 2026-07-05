@@ -117,14 +117,15 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         job_id = meeting["job_id"]
 
+        private_text = "private hosted transcript sentinel"
         fake = RelayResult(
-            text="Speaker 1: hi",
+            text=f"Speaker 1: {private_text}",
             segments=[
                 TranscriptSegmentRow(
                     seq=0,
                     speaker_id="0",
                     speaker_label="Speaker 1",
-                    text="hi",
+                    text=private_text,
                     t_start=0.0,
                     t_end=1.0,
                 )
@@ -148,6 +149,8 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(upload["job"]["status"], "ready")
         self.assertEqual(upload["usage"]["used_seconds"], 5)
         self.assertIn("sync", upload["usage"])
+        self.assertIn(private_text, upload["text"])
+        self.assertEqual(upload["segments"][0]["text"], private_text)
 
         status, transcript = _request(
             self.base_url,
@@ -156,7 +159,13 @@ class ProServerTests(unittest.TestCase):
             token=token,
         )
         self.assertEqual(status, 200)
-        self.assertIn("hi", transcript["text"])
+        self.assertNotIn(private_text, transcript["text"])
+        self.assertEqual(transcript["segments"][0]["text"], "")
+        status, exported = _request(self.base_url, "GET", "/v1/account/export", token=token)
+        self.assertEqual(status, 200)
+        self.assertNotIn(private_text, json.dumps(exported))
+        raw_db = (Path(self._tmp.name) / "pro-control-plane.sqlite3").read_bytes()
+        self.assertNotIn(private_text.encode("utf-8"), raw_db)
 
     def test_sync_push_pull_stores_only_encrypted_payload(self) -> None:
         session = self._sign_in_session()

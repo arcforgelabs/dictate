@@ -1444,6 +1444,12 @@ class ProStore:
             return cursor.rowcount == 1
 
     def save_transcript_segments(self, job_id: str, segments: list[TranscriptSegmentRow]) -> None:
+        """Persist hosted meeting segment metadata without storing transcript text.
+
+        Hosted transcription text is returned to the requesting client so it can be
+        saved locally and synced through the encrypted sync lane. The Pro control
+        plane must not retain readable dictated content.
+        """
         with self._conn() as conn:
             conn.execute("DELETE FROM transcript_segments WHERE job_id = ?", (job_id,))
             conn.executemany(
@@ -1458,7 +1464,7 @@ class ProStore:
                         segment.seq,
                         segment.speaker_id,
                         segment.speaker_label,
-                        segment.text,
+                        "",
                         segment.t_start,
                         segment.t_end,
                     )

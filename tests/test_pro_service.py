@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -291,14 +292,15 @@ class ProServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 403)
 
     def test_meeting_upload_debits_usage_once(self) -> None:
+        private_text = "private hosted service transcript sentinel"
         fake = RelayResult(
-            text="Speaker 1: hello",
+            text=f"Speaker 1: {private_text}",
             segments=[
                 TranscriptSegmentRow(
                     seq=0,
                     speaker_id="0",
                     speaker_label="Speaker 1",
-                    text="hello",
+                    text=private_text,
                     t_start=0.0,
                     t_end=1.0,
                 )
@@ -323,8 +325,13 @@ class ProServiceTests(unittest.TestCase):
         usage = result["usage"]
         self.assertEqual(result["job"]["status"], "ready")
         self.assertEqual(usage["used_seconds"], 62)
+        self.assertIn(private_text, result["text"])
+        self.assertEqual(result["segments"][0]["text"], private_text)
         transcript = self.service.get_meeting_transcript(self.account_id, job["job_id"])
-        self.assertIn("hello", transcript["text"])
+        self.assertNotIn(private_text, transcript["text"])
+        self.assertEqual(transcript["segments"][0]["text"], "")
+        exported = self.service.export_account_cloud_data(self.account_id, self.device_id)
+        self.assertNotIn(private_text, json.dumps(exported))
 
     def test_quota_exhaustion_blocks_new_jobs(self) -> None:
         subscription = self.service.store.get_active_subscription(self.account_id)
