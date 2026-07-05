@@ -171,6 +171,17 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-sortformer"], "parakeet-tdt-0.6b-v2")
         self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "small")
 
+    def test_windows_tray_controls_open_full_dictate_app_before_legacy_panel(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_tray.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('IDM_OPEN_DICTATE = 1002', source)
+        self.assertIn('"Open Dictate"', source)
+        self.assertIn('ui_launcher.open_settings_window', source)
+        self.assertIn('ui_launcher.ensure_server_started(daemon)', source)
+        self.assertIn('[sys.executable, "-m", "dictate", "controls"]', source)
+
     def test_windows_controls_apply_configured_key_command(self) -> None:
         fake_tkinter = types.ModuleType("tkinter")
         fake_tkinter.messagebox = types.SimpleNamespace()

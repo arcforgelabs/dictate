@@ -3,7 +3,7 @@
 // The packaged app is launch-and-go: this shell bundles the frozen Python engine
 // (`dictate-engine`, a PyInstaller sidecar under resources/engine/), starts it as
 // one headless process that both dictates and serves the control API, draws a
-// tray icon (Open Settings / Quit), and shows the Settings window — all without a
+// tray icon (Open Dictate / Quit), and shows the main window — all without a
 // separate Python install. In a dev/pip environment it falls back to the
 // `dictate-engine` / `dictate-ui-server` / `dictate` binaries on PATH.
 
@@ -458,7 +458,7 @@ pub fn run() {
 
             // Tray icon: the always-there surface. Closing the window hides to
             // the tray; Quit stops the engine and exits.
-            let open = MenuItem::with_id(app, "open", "Open Settings", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Dictate", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Dictate", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
             TrayIconBuilder::with_id("main")

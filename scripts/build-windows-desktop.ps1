@@ -22,6 +22,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 Set-StrictMode -Version Latest
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -39,6 +40,26 @@ function Require-Command {
     }
 }
 
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)][string]$Description,
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$ArgumentList
+    )
+    Write-Host $Description
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $FilePath @ArgumentList
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "$Description failed with exit code $exitCode."
+    }
+}
+
 Write-Host "preflight"
 Require-Command $Python
 Require-Command "npm"
@@ -46,11 +67,11 @@ Require-Command "cargo"
 
 Write-Host "building the front-end (ui/ -> dist/)"
 try {
-    npm --prefix ui ci
+    Invoke-Native "installing UI dependencies with npm ci" "npm" @("--prefix", "ui", "ci")
 } catch {
-    npm --prefix ui install
+    Invoke-Native "installing UI dependencies with npm install" "npm" @("--prefix", "ui", "install")
 }
-npm --prefix ui run build
+Invoke-Native "building UI assets" "npm" @("--prefix", "ui", "run", "build")
 
 $BuildVenv = Join-Path $Root "packaging\.build-venv-windows"
 $VenvPython = Join-Path $BuildVenv "Scripts\python.exe"
@@ -60,8 +81,16 @@ if (Test-Path $BuildVenv) {
     Remove-Item -Recurse -Force $BuildVenv
 }
 & $Python -m venv $BuildVenv
-& $VenvPython -m pip install --upgrade pip --quiet
-& $VenvPython -m pip install -e "$Root[windows]" pyinstaller --quiet
+Invoke-Native "upgrading pip" $VenvPython @("-m", "pip", "install", "--upgrade", "pip", "--quiet")
+Invoke-Native "installing Windows build dependencies" $VenvPython @(
+    "-m",
+    "pip",
+    "install",
+    "-e",
+    "$Root[windows]",
+    "pyinstaller",
+    "--quiet"
+)
 
 Write-Host "freezing the Python engine sidecar (PyInstaller, onefile)"
 $env:DICTATE_ONEFILE = "1"
@@ -71,10 +100,18 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
 
 Push-Location $Root
 try {
-    & $VenvPython -m PyInstaller (Join-Path $Root "packaging\dictate-engine.spec") --noconfirm `
-        --distpath (Join-Path $Root "packaging\dist") `
-        --workpath (Join-Path $Root "packaging\build") `
-        --log-level WARN
+    Invoke-Native "freezing Python engine" $VenvPython @(
+        "-m",
+        "PyInstaller",
+        (Join-Path $Root "packaging\dictate-engine.spec"),
+        "--noconfirm",
+        "--distpath",
+        (Join-Path $Root "packaging\dist"),
+        "--workpath",
+        (Join-Path $Root "packaging\build"),
+        "--log-level",
+        "WARN"
+    )
 } finally {
     Pop-Location
 }
@@ -85,7 +122,7 @@ if (-not (Test-Path $Engine)) {
 }
 
 Write-Host "smoke-testing the frozen binary"
-& $Engine --version | Out-Null
+Invoke-Native "smoke-testing frozen engine" $Engine @("--version")
 
 Write-Host "staging the engine into the Tauri bundle resources"
 $StageDir = Join-Path $Root "ui-shell\src-tauri\engine"
@@ -94,8 +131,8 @@ New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
 
 Write-Host "ensuring the Tauri CLI is available"
-npm --prefix ui-shell install
-npm --prefix ui-shell exec -- tauri --version | Out-Null
+Invoke-Native "installing UI shell dependencies" "npm" @("--prefix", "ui-shell", "install")
+Invoke-Native "checking Tauri CLI" "npm" @("--prefix", "ui-shell", "exec", "--", "tauri", "--version")
 
 if ($NoBundle) {
     Write-Host "building Windows desktop executable (no installer bundle)"
@@ -105,9 +142,9 @@ if ($NoBundle) {
 Push-Location (Join-Path $Root "ui-shell")
 try {
     if ($NoBundle) {
-        npm run tauri -- build --no-bundle
+        Invoke-Native "building Tauri executable" "npm" @("run", "tauri", "--", "build", "--no-bundle")
     } else {
-        npm run tauri -- build --bundles $Bundles
+        Invoke-Native "building Tauri packages" "npm" @("run", "tauri", "--", "build", "--bundles", $Bundles)
     }
 } finally {
     Pop-Location

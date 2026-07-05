@@ -46,7 +46,7 @@ LR_LOADFROMFILE = 0x0010
 IDI_APPLICATION = 32512
 
 IDM_ACTIVE = 1001
-IDM_CONTROLS = 1002
+IDM_OPEN_DICTATE = 1002
 IDM_RECENT_HISTORY = 1003
 IDM_QUIT = 1004
 
@@ -343,7 +343,7 @@ class WindowsTrayIcon:
         try:
             active_flags = MF_STRING | (MF_CHECKED if self.daemon.active else MF_UNCHECKED)
             self._user32.AppendMenuW(menu, active_flags, IDM_ACTIVE, "Active")
-            self._user32.AppendMenuW(menu, MF_STRING, IDM_CONTROLS, "Controls")
+            self._user32.AppendMenuW(menu, MF_STRING, IDM_OPEN_DICTATE, "Open Dictate")
             self._user32.AppendMenuW(menu, MF_STRING, IDM_RECENT_HISTORY, "Recent History")
             self._user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
             self._user32.AppendMenuW(menu, MF_STRING, IDM_QUIT, "Quit")
@@ -371,8 +371,11 @@ class WindowsTrayIcon:
                 self.daemon.resume()
             self._modify_icon()
             return
-        if command_id in {IDM_CONTROLS, IDM_RECENT_HISTORY}:
-            _open_controls()
+        if command_id == IDM_OPEN_DICTATE:
+            _open_dictate(self.daemon)
+            return
+        if command_id == IDM_RECENT_HISTORY:
+            _open_dictate(self.daemon)
             return
         if command_id == IDM_QUIT:
             self._quitting = True
@@ -380,7 +383,14 @@ class WindowsTrayIcon:
                 self._user32.DestroyWindow(self._hwnd)
 
 
-def _open_controls() -> None:
+def _open_dictate(daemon: Daemon) -> None:
+    from dictate import ui_launcher
+
+    if ui_launcher.open_settings_window(
+        start_server=lambda: ui_launcher.ensure_server_started(daemon),
+    ):
+        return
+
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen(
         [sys.executable, "-m", "dictate", "controls"],

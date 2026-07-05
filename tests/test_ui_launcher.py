@@ -40,6 +40,25 @@ class FindShellBinaryTests(unittest.TestCase):
             Path.home() / ".local" / "bin" / f"dictate-ui-shell{suffix}",
         )
 
+    def test_windows_managed_source_dev_build_is_a_candidate(self) -> None:
+        with (
+            patch("dictate.ui_launcher.is_windows", return_value=True),
+            patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\sam\AppData\Local"}, clear=True),
+        ):
+            candidates = ui_launcher.shell_binary_candidates()
+
+        self.assertIn(
+            Path(r"C:\Users\sam\AppData\Local")
+            / "Dictate"
+            / "source"
+            / "ui-shell"
+            / "src-tauri"
+            / "target"
+            / "release"
+            / "dictate-ui-shell.exe",
+            candidates,
+        )
+
     def test_build_launch_command(self) -> None:
         binary = Path("/usr/bin/dictate-ui-shell")
         self.assertEqual(ui_launcher.build_launch_command(binary), [str(binary)])

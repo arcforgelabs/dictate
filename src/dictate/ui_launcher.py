@@ -36,28 +36,45 @@ def shell_binary_candidates() -> list[Path]:
     if override:
         candidates.append(Path(override))
 
-    home = Path.home()
     name = _BINARY_NAME + (".exe" if is_windows() else "")
-    candidates.extend(
-        [
-            home / ".local" / "bin" / name,
-        ]
-    )
+    home = _home_dir()
+    if home is not None:
+        candidates.append(home / ".local" / "bin" / name)
+    if is_windows():
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            managed_source = Path(local_app_data) / "Dictate" / "source"
+            candidates.extend(_source_shell_candidates(managed_source, name))
 
     on_path = shutil.which(_BINARY_NAME)
     if on_path:
         candidates.append(Path(on_path))
 
+    repo_root = _repo_root()
     candidates.extend(
         [
             Path("/usr/local/bin") / name,
             Path("/usr/bin") / name,
             # dev build output, relative to the repo root (…/dictate/)
-            _repo_root() / "ui-shell" / "src-tauri" / "target" / "release" / name,
-            _repo_root() / "ui-shell" / "src-tauri" / "target" / "debug" / name,
+            *_source_shell_candidates(repo_root, name),
         ]
     )
     return candidates
+
+
+def _source_shell_candidates(source_root: Path, name: str) -> list[Path]:
+    target = source_root / "ui-shell" / "src-tauri" / "target"
+    return [
+        target / "release" / name,
+        target / "debug" / name,
+    ]
+
+
+def _home_dir() -> Path | None:
+    try:
+        return Path.home()
+    except RuntimeError:
+        return None
 
 
 def _repo_root() -> Path:
