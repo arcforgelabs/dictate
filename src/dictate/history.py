@@ -134,6 +134,16 @@ class HistoryStore:
         self._enqueue_entry(entry)
         return entry
 
+    def enqueue_sync_snapshot(self) -> int:
+        """Queue current local history for first encrypted sync opt-in."""
+        if self._sync_outbox is None:
+            return 0
+        count = 0
+        for entry in self.load(include_archived=True):
+            self._enqueue_entry(entry)
+            count += 1
+        return count
+
     def apply_synced_entry(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
         entry_id = payload.get("id")
         created_at = payload.get("created_at")

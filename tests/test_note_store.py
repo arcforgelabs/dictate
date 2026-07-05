@@ -167,6 +167,49 @@ class NoteStoreTests(unittest.TestCase):
             self.assertEqual(segment.record_id, f"{note_id}:0")
             self.assertEqual(decrypt_record("acct_1", key, segment)["text"], "private note text")
 
+    def test_sync_snapshot_enqueues_existing_local_notes_and_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2", mode="meeting")
+            store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.0,
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="private meeting segment",
+                    speaker_id="speaker_1",
+                    speaker_label="Speaker 1",
+                ),
+            )
+            store.mark_ready(note_id, duration_s=1.0)
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store.attach_sync_outbox(outbox)
+
+            self.assertEqual(store.enqueue_sync_snapshot(), 2)
+
+            raw_outbox = (Path(tmp) / "outbox.jsonl").read_text()
+            self.assertNotIn("private meeting segment", raw_outbox)
+            pending = outbox.pending()
+            self.assertEqual({record.collection for record in pending}, {"note", "segment"})
+            note_record = next(record for record in pending if record.collection == "note")
+            segment_record = next(record for record in pending if record.collection == "segment")
+            self.assertEqual(note_record.record_id, note_id)
+            self.assertFalse(note_record.deleted)
+            self.assertEqual(decrypt_record("acct_1", key, note_record)["mode"], "meeting")
+            self.assertEqual(segment_record.record_id, f"{note_id}:0")
+            segment_payload = decrypt_record("acct_1", key, segment_record)
+            self.assertEqual(segment_payload["text"], "private meeting segment")
+            self.assertEqual(segment_payload["speaker_label"], "Speaker 1")
+
     def test_delete_note_enqueues_tombstone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()

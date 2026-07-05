@@ -727,6 +727,8 @@ class UiBackend:
         outbox = self._sync_outbox()
         if outbox is None:
             return
+        self.history_store.enqueue_sync_snapshot()
+        self.note_store.enqueue_sync_snapshot()
         prefs = self.prefs_store.load()
         for key in sorted(SYNCED_PREF_KEYS):
             if key in prefs:

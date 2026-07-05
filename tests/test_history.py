@@ -141,6 +141,34 @@ class HistoryStoreTests(unittest.TestCase):
             self.assertEqual(pending[0].record_id, entry.id)
             self.assertEqual(decrypt_record("acct_1", key, pending[0])["text"], "private dictated text")
 
+    def test_sync_snapshot_enqueues_existing_local_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            history_path = Path(tmp) / "h.json"
+            store = HistoryStore(path=history_path)
+            entry = store.append("private pre-sync text")
+            store.archive(entry.id)
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store.attach_sync_outbox(outbox)
+
+            self.assertEqual(store.enqueue_sync_snapshot(), 1)
+
+            raw_outbox = (Path(tmp) / "outbox.jsonl").read_text()
+            self.assertNotIn("private pre-sync text", raw_outbox)
+            pending = outbox.pending()
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0].collection, "history")
+            self.assertEqual(pending[0].record_id, entry.id)
+            self.assertFalse(pending[0].deleted)
+            payload = decrypt_record("acct_1", key, pending[0])
+            self.assertEqual(payload["text"], "private pre-sync text")
+            self.assertTrue(payload["archived"])
+
     def test_trimming_history_does_not_enqueue_delete_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()

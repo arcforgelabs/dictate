@@ -670,6 +670,54 @@ class UiBackendStateTests(unittest.TestCase):
                 )
             )
 
+    def test_enable_sync_snapshots_existing_local_history_notes_and_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            pro_client = _FakeProClient()
+            sync_settings = _sync_settings(base)
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=sync_settings,
+            )
+            history_entry = backend.history_store.append("private local history before sync")
+            note_id = backend.note_store.create_note(
+                provider="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                mode="meeting",
+                speaker_labels=True,
+            )
+            backend.note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=2.0,
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="private note segment before sync",
+                    speaker_id="speaker_1",
+                    speaker_label="Speaker 1",
+                ),
+            )
+            backend.note_store.mark_ready(note_id, duration_s=2.0)
+
+            backend.enable_sync()
+
+            key = sync_settings.account_key()
+            self.assertIsNotNone(key)
+            raw_outbox = (base / "sync-outbox.jsonl").read_text() if (base / "sync-outbox.jsonl").exists() else ""
+            self.assertNotIn("private local history before sync", raw_outbox)
+            self.assertNotIn("private note segment before sync", raw_outbox)
+            records = pro_client.drained_sync_records
+            self.assertTrue(any(record.collection == "history" and record.record_id == history_entry.id for record in records))
+            self.assertTrue(any(record.collection == "note" and record.record_id == note_id for record in records))
+            self.assertTrue(any(record.collection == "segment" and record.record_id == f"{note_id}:0" for record in records))
+            payloads = [decrypt_record("acct_test", key, record) for record in records]
+            self.assertTrue(any(payload.get("text") == "private local history before sync" for payload in payloads))
+            self.assertTrue(any(payload.get("text") == "private note segment before sync" for payload in payloads))
+            self.assertTrue(any(payload.get("mode") == "meeting" and payload.get("speaker_labels") is True for payload in payloads))
+
     def test_enable_sync_can_restore_existing_key_from_recovery_key(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             base = Path(d)

@@ -181,6 +181,19 @@ class NoteStore:
             self._enqueue_note(tombstone, deleted=True)
         return True
 
+    def enqueue_sync_snapshot(self) -> int:
+        """Queue current local note metadata and transcript segments for first sync opt-in."""
+        if self._sync_outbox is None:
+            return 0
+        count = 0
+        for record in self.list_notes(limit=10_000, include_archived=True):
+            self._enqueue_note(record)
+            count += 1
+            for segment in self.load_segments(record.note_id):
+                self._enqueue_segment(record.note_id, segment)
+                count += 1
+        return count
+
     def load_segments(self, note_id: str) -> list[NoteSegment]:
         path = self._note_dir(note_id) / "segments.jsonl"
         if not path.is_file():
