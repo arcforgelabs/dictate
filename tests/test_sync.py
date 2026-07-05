@@ -5,10 +5,12 @@ import tempfile
 import unittest
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import patch
 
 from cryptography.exceptions import InvalidTag
 
 from dictate.sync import (
+    EncryptedSyncRecord,
     PlainSyncRecord,
     RecoveryKeyEnvelope,
     SyncSettingsStore,
@@ -106,6 +108,50 @@ class SyncCryptoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "metadata authentication hash"):
             decrypt_record("acct_1", key, tampered)
+
+    def test_sync_record_crypto_known_vector(self) -> None:
+        key = bytes(range(32))
+        nonce = bytes(range(12))
+        record = PlainSyncRecord(
+            collection="history",
+            record_id="hist_vector_1",
+            rev=3,
+            updated_at="2026-07-05T12:34:56+00:00",
+            device_id="device_vector",
+            deleted=False,
+            content_type="application/vnd.dictate.history+json;v=1",
+            payload={
+                "id": "hist_vector_1",
+                "created_at": "2026-07-05T12:34:56+00:00",
+                "updated_at": "2026-07-05T12:34:56+00:00",
+                "rev": 3,
+                "text": "known vector private text",
+                "archived": False,
+            },
+        )
+        expected = EncryptedSyncRecord(
+            collection="history",
+            record_id="hist_vector_1",
+            rev=3,
+            updated_at="2026-07-05T12:34:56+00:00",
+            device_id="device_vector",
+            deleted=False,
+            content_type="application/vnd.dictate.history+json;v=1",
+            ciphertext=(
+                "PCC3aaaNq23oJbWx14gUHub6pVeCHj4IXQO65GlLOpAzIJzKgvEltUSRK9y6vRsM1GxWpmrmmeoPtQY7"
+                "cYfX1NJUrwmnjlAEfyDFHLC+LMQa+KwUVFlgRN+J+7QM0oOvoJY2kcphvn/9aFHAaAVTFswGFs7DsUDi"
+                "Od177/eWCm/PN2SZ1aPpaSrTeJML93z1G8TWYQQjqXm4Zd1B0eLZ1KOnvGg10qZRJ4zOZ0esG5d7gHae"
+            ),
+            nonce="AAECAwQFBgcICQoL",
+            aad_hash="ScqK0xkRsnafomEwGaLc5fotn24Bhh3FEYNKd/LO0p8=",
+            payload_bytes=164,
+        )
+
+        with patch("dictate.sync.os.urandom", return_value=nonce):
+            encrypted = encrypt_record("acct_vector", key, record)
+
+        self.assertEqual(encrypted, expected)
+        self.assertEqual(decrypt_record("acct_vector", key, expected), record.payload)
 
     def test_recovery_envelope_restores_account_key_without_plaintext(self) -> None:
         account_key = generate_account_key()
