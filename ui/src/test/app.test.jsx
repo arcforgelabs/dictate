@@ -97,13 +97,16 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Version 2026.7.4 · unstable")).toBeInTheDocument();
     expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
     expect(screen.getByText("Sync off")).toBeInTheDocument();
+    expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
+    expect(screen.getByText("This encrypts your synced dictations before upload.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "dictate-rk-existing" } });
-    expect(screen.getByText("Restore encrypted sync")).toBeInTheDocument();
+    expect(screen.getByText("Restore sync")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "" } });
 
-    fireEvent.click(screen.getByText("Enable encrypted sync"));
+    fireEvent.click(screen.getByText("Sync my dictations"));
     await waitFor(() => expect(screen.getByText("Encrypted sync on")).toBeInTheDocument());
     expect(screen.getByText("Encrypted sync enabled")).toBeInTheDocument();
+    expect(screen.getByText("Save this key. It restores synced dictations on a new device if your other devices are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("dictate-rk-test")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Windows lab")).toBeInTheDocument());
     expect(screen.getByText("New laptop")).toBeInTheDocument();

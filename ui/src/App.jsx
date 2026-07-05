@@ -423,6 +423,10 @@ function AccountDialog() {
         <div className="account-actions">
           {!sync.enabled ? (
             <div className="account-enable-stack">
+              <div className="account-consent">
+                <strong>Sync my dictations across devices</strong>
+                <span>This encrypts your synced dictations before upload.</span>
+              </div>
               <input
                 className="account-input"
                 value={restoreKey}
@@ -432,7 +436,7 @@ function AccountDialog() {
               />
               <button type="button" className="account-primary" disabled={s.syncBusy || !signedIn} onClick={enableSync}>
                 <Icon name="lock" size={14} />
-                <span>{restoreKey.trim() ? "Restore encrypted sync" : "Enable encrypted sync"}</span>
+                <span>{restoreKey.trim() ? "Restore sync" : "Sync my dictations"}</span>
               </button>
             </div>
           ) : (
@@ -450,6 +454,7 @@ function AccountDialog() {
         {recoveryKey && (
           <div className="account-recovery">
             <span>Recovery key</span>
+            <p>Save this key. It restores synced dictations on a new device if your other devices are unavailable.</p>
             <code>{recoveryKey}</code>
           </div>
         )}
