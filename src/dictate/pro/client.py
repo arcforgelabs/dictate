@@ -8,7 +8,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from dictate.api_keys import (
     save_pro_refresh_token,
 )
 from dictate.platform_paths import user_data_dir
+from dictate.sync import EncryptedSyncRecord, SyncOutbox
 
 DEFAULT_API_URL = "https://console.arcforge.au"
 SESSION_PATH = user_data_dir() / "pro-session.json"
@@ -295,10 +296,48 @@ class ProClient:
         session = self._require_session()
         return self._request("GET", self._dictate_job_path(job_id, suffix="/transcript"), auth=session.access_token)
 
+    def push_sync_records(self, records: list[EncryptedSyncRecord]) -> dict[str, Any]:
+        session = self._require_session()
+        payload = {"device_id": session.device_id, "records": [asdict(record) for record in records]}
+        return self._request("POST", self._sync_path("push"), payload, auth=session.access_token)
+
+    def get_sync_changes(self, *, since: int = 0, limit: int = 500) -> dict[str, Any]:
+        session = self._require_session()
+        path = f"{self._sync_path('changes')}?since={max(0, int(since))}&limit={max(1, int(limit))}"
+        return self._request("GET", path, auth=session.access_token)
+
+    def drain_sync_outbox(self, outbox: SyncOutbox) -> dict[str, Any]:
+        pending = outbox.pending()
+        if not pending:
+            return {"pushed": 0, "remaining": 0, "results": []}
+        response = self.push_sync_records(pending)
+        results = response.get("results")
+        if not isinstance(results, list):
+            return {"pushed": 0, "remaining": len(pending), "results": []}
+        accepted = {
+            (str(item.get("record", {}).get("collection")), str(item.get("record", {}).get("record_id")))
+            for item in results
+            if isinstance(item, dict) and item.get("status") == "accepted" and isinstance(item.get("record"), dict)
+        }
+        remaining = [
+            record
+            for record in pending
+            if (record.collection, record.record_id) not in accepted
+        ]
+        outbox.replace_pending(remaining)
+        return {"pushed": len(pending) - len(remaining), "remaining": len(remaining), "results": results}
+
     def _dictate_job_path(self, job_id: str, *, suffix: str = "") -> str:
         if self._uses_arcforge_gateway():
             return f"/api/dictate/jobs/{job_id}{suffix}"
         return f"/v1/meetings/{job_id}{suffix}"
+
+    def _sync_path(self, action: str) -> str:
+        if action not in {"push", "changes"}:
+            raise ValueError("unknown sync action")
+        if self._uses_arcforge_gateway():
+            return f"/api/dictate/sync/{action}"
+        return f"/v1/sync/{action}"
 
     def _uses_arcforge_gateway(self) -> bool:
         mode = os.environ.get("DICTATE_PRO_API_MODE", "").strip().lower()

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from dictate.pro.auth import AuthDeliveryError
 from dictate.pro.service import ProService, ProServiceError, ProSettings
@@ -125,7 +125,7 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             if path == "/healthz" and method == "GET":
                 self._send_json(200, {"status": "ok", "version": RELEASE_VERSION})
                 return
-            response = self._route(service, method, path)
+            response = self._route(service, method, path, parse_qs(parsed.query))
         except ApiError as exc:
             self._send_json(exc.status, {"error": exc.message})
             return
@@ -138,7 +138,7 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json(response.status, response.body)
 
-    def _route(self, service: ProService, method: str, path: str) -> _Response:
+    def _route(self, service: ProService, method: str, path: str, query: dict[str, list[str]]) -> _Response:
         if path == "/v1/auth/start" and method == "POST":
             body = self._read_json()
             email = str(body.get("email", "")).strip()
@@ -222,6 +222,16 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, service.get_entitlements(account_id))
         if path == "/v1/usage/current" and method == "GET":
             return _Response(200, service.get_current_usage(account_id))
+        if path == "/v1/sync/push" and method == "POST":
+            body = self._read_json()
+            records = body.get("records")
+            if not isinstance(records, list):
+                raise ApiError(400, "records must be a list")
+            return _Response(200, service.push_sync_records(account_id, records))
+        if path == "/v1/sync/changes" and method == "GET":
+            since = _query_int(query, "since", 0)
+            limit = _query_int(query, "limit", 500)
+            return _Response(200, service.get_sync_changes(account_id, since=since, limit=limit))
         if path == "/v1/meetings" and method == "POST":
             body = self._read_json()
             return _Response(
@@ -331,6 +341,16 @@ class ProRequestHandler(BaseHTTPRequestHandler):
 def _audio_suffix(content_type: str) -> str:
     guessed = mimetypes.guess_extension(content_type.split(";", 1)[0].strip() or "audio/wav")
     return guessed or ".wav"
+
+
+def _query_int(query: dict[str, list[str]], key: str, default: int) -> int:
+    values = query.get(key) or []
+    if not values:
+        return default
+    try:
+        return int(values[0])
+    except (TypeError, ValueError):
+        raise ApiError(400, f"{key} must be an integer")
 
 
 def serve(

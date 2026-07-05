@@ -10,6 +10,7 @@ import unittest
 import urllib.error
 import urllib.request
 import wave
+from dataclasses import asdict
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +21,7 @@ from dictate.pro.relay import RelayResult
 from dictate.pro.server import ProRequestHandler, _RateLimiter, _get_rate_limiter
 from dictate.pro.service import ProService, ProSettings
 from dictate.pro.store import TranscriptSegmentRow
+from dictate.sync import PlainSyncRecord, decrypt_record, encrypt_record, generate_account_key
 
 
 def _request(
@@ -68,14 +70,7 @@ class ProServerTests(unittest.TestCase):
         self.thread.start()
         self.service.grant_subscription_for_testing(email="server@example.com")
 
-    def tearDown(self) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
-        self.thread.join(timeout=2)
-        self._tmp.cleanup()
-        os.environ.pop("DICTATE_PRO_DEV_AUTH", None)
-
-    def test_auth_and_meeting_flow(self) -> None:
+    def _sign_in(self) -> str:
         status, start = _request(self.base_url, "POST", "/v1/auth/start", {"email": "server@example.com"})
         self.assertEqual(status, 200)
         status, complete = _request(
@@ -85,7 +80,17 @@ class ProServerTests(unittest.TestCase):
             {"challenge_id": start["challenge_id"], "code": start["dev_code"]},
         )
         self.assertEqual(status, 200)
-        token = complete["access_token"]
+        return str(complete["access_token"])
+
+    def tearDown(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=2)
+        self._tmp.cleanup()
+        os.environ.pop("DICTATE_PRO_DEV_AUTH", None)
+
+    def test_auth_and_meeting_flow(self) -> None:
+        token = self._sign_in()
 
         status, entitlements = _request(self.base_url, "GET", "/v1/entitlements", token=token)
         self.assertEqual(status, 200)
@@ -134,6 +139,101 @@ class ProServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertIn("hi", transcript["text"])
+
+    def test_sync_push_pull_stores_only_encrypted_payload(self) -> None:
+        token = self._sign_in()
+        key = generate_account_key()
+        encrypted = encrypt_record(
+            "acct_local",
+            key,
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id="device_test",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private dictated text"},
+            ),
+        )
+
+        status, pushed = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/push",
+            {"records": [asdict(encrypted)]},
+            token=token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(pushed["results"][0]["status"], "accepted")
+        self.assertNotIn("private dictated text", json.dumps(pushed))
+
+        raw_db = (Path(self._tmp.name) / "pro-control-plane.sqlite3").read_bytes()
+        self.assertNotIn(b"private dictated text", raw_db)
+
+        status, changes = _request(self.base_url, "GET", "/v1/sync/changes?since=0&limit=10", token=token)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(changes["records"]), 1)
+        self.assertNotIn("private dictated text", json.dumps(changes))
+        pulled = changes["records"][0]
+        decrypted = decrypt_record(
+            "acct_local",
+            key,
+            encrypted.__class__(
+                collection=pulled["collection"],
+                record_id=pulled["record_id"],
+                rev=pulled["rev"],
+                updated_at=pulled["updated_at"],
+                device_id=pulled["device_id"],
+                deleted=pulled["deleted"],
+                content_type=pulled["content_type"],
+                ciphertext=pulled["ciphertext"],
+                nonce=pulled["nonce"],
+                aad_hash=pulled["aad_hash"],
+                payload_bytes=pulled["payload_bytes"],
+            ),
+        )
+        self.assertEqual(decrypted["text"], "private dictated text")
+
+    def test_sync_push_uses_metadata_lww(self) -> None:
+        token = self._sign_in()
+        key = generate_account_key()
+        newer = encrypt_record(
+            "acct_local",
+            key,
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=2,
+                updated_at="2026-07-05T12:02:00+00:00",
+                device_id="device_b",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "newer"},
+            ),
+        )
+        older = encrypt_record(
+            "acct_local",
+            key,
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:01:00+00:00",
+                device_id="device_a",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "older"},
+            ),
+        )
+
+        status, first = _request(self.base_url, "POST", "/v1/sync/push", {"records": [asdict(newer)]}, token=token)
+        status, second = _request(self.base_url, "POST", "/v1/sync/push", {"records": [asdict(older)]}, token=token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(first["results"][0]["status"], "accepted")
+        self.assertEqual(second["results"][0]["status"], "superseded")
 
     def test_stripe_webhook_and_healthz_bypass_rate_limiter(self) -> None:
         import dictate.pro.server as server_module

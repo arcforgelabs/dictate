@@ -110,12 +110,13 @@ class ProService:
             return {
                 "active": False,
                 "plan_id": None,
-                "features": {
-                    "hosted_meeting_transcription": False,
-                    "diarization": False,
-                    "streaming_dictation": False,
-                },
-            }
+            "features": {
+                "hosted_meeting_transcription": False,
+                "diarization": False,
+                "streaming_dictation": False,
+                "sync": False,
+            },
+        }
         plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
         return {
             "active": subscription.status in {"active", "trialing", "past_due"},
@@ -131,8 +132,44 @@ class ProService:
                 "provider": plan.provider,
                 "stt_mode": plan.stt_mode,
                 "provider_model": plan.provider_model,
+                "sync": True,
             },
         }
+
+    def push_sync_records(self, account_id: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        if not isinstance(records, list):
+            raise ProServiceError(400, "records must be a list")
+        if len(records) > 500:
+            raise ProServiceError(413, "too many sync records")
+        try:
+            results = self.store.upsert_sync_records(account_id=account_id, records=records)
+        except ValueError as exc:
+            raise ProServiceError(400, str(exc)) from exc
+        return {"results": results}
+
+    def get_sync_changes(self, account_id: str, *, since: int = 0, limit: int = 500) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        rows = self.store.list_sync_changes(account_id=account_id, since=since, limit=limit)
+        records = [
+            {
+                "collection": row.collection,
+                "record_id": row.record_id,
+                "seq": row.seq,
+                "rev": row.rev,
+                "device_id": row.device_id,
+                "updated_at": row.updated_at,
+                "deleted": row.deleted,
+                "content_type": row.content_type,
+                "ciphertext": row.ciphertext,
+                "nonce": row.nonce,
+                "aad_hash": row.aad_hash,
+                "payload_bytes": row.payload_bytes,
+            }
+            for row in rows
+        ]
+        next_seq = records[-1]["seq"] if records else max(0, since)
+        return {"next_seq": next_seq, "has_more": len(records) >= max(1, min(limit, 1000)), "records": records}
 
     def get_current_usage(self, account_id: str) -> dict[str, Any]:
         subscription = self._require_active_subscription(account_id)

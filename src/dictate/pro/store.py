@@ -95,6 +95,23 @@ class TranscriptSegmentRow:
     t_end: float
 
 
+@dataclass(slots=True)
+class SyncRecordRow:
+    account_id: str
+    collection: str
+    record_id: str
+    seq: int
+    rev: int
+    device_id: str
+    updated_at: str
+    deleted: bool
+    content_type: str
+    ciphertext: str
+    nonce: str
+    aad_hash: str
+    payload_bytes: int
+
+
 class ProStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -233,12 +250,143 @@ class ProStore:
                     payload_json TEXT NOT NULL,
                     received_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS sync_records (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL,
+                    collection TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    rev INTEGER NOT NULL,
+                    device_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deleted INTEGER NOT NULL DEFAULT 0,
+                    content_type TEXT NOT NULL,
+                    ciphertext TEXT NOT NULL,
+                    nonce TEXT NOT NULL,
+                    aad_hash TEXT NOT NULL,
+                    payload_bytes INTEGER NOT NULL,
+                    UNIQUE(account_id, collection, record_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sync_records_account_seq
+                    ON sync_records(account_id, seq);
+
+                CREATE INDEX IF NOT EXISTS idx_sync_records_account_device
+                    ON sync_records(account_id, device_id);
                 """
             )
             try:
                 conn.execute("ALTER TABLE subscriptions ADD COLUMN last_event_created INTEGER")
             except sqlite3.OperationalError:
                 pass
+
+    def upsert_sync_records(
+        self,
+        *,
+        account_id: str,
+        records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Upsert opaque encrypted sync records using metadata-only LWW rules."""
+        outcomes: list[dict[str, Any]] = []
+        with self._conn() as conn:
+            for raw in records:
+                incoming = _coerce_sync_record(account_id, raw)
+                existing = conn.execute(
+                    """
+                    SELECT *
+                    FROM sync_records
+                    WHERE account_id = ? AND collection = ? AND record_id = ?
+                    """,
+                    (account_id, incoming["collection"], incoming["record_id"]),
+                ).fetchone()
+                if existing is not None and not _incoming_sync_wins(incoming, dict(existing)):
+                    outcomes.append({"status": "superseded", "record": _sync_record_payload(existing)})
+                    continue
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO sync_records (
+                            account_id, collection, record_id, rev, device_id, updated_at,
+                            deleted, content_type, ciphertext, nonce, aad_hash, payload_bytes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            account_id,
+                            incoming["collection"],
+                            incoming["record_id"],
+                            incoming["rev"],
+                            incoming["device_id"],
+                            incoming["updated_at"],
+                            1 if incoming["deleted"] else 0,
+                            incoming["content_type"],
+                            incoming["ciphertext"],
+                            incoming["nonce"],
+                            incoming["aad_hash"],
+                            incoming["payload_bytes"],
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE sync_records
+                        SET seq = (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_records),
+                            rev = ?,
+                            device_id = ?,
+                            updated_at = ?,
+                            deleted = ?,
+                            content_type = ?,
+                            ciphertext = ?,
+                            nonce = ?,
+                            aad_hash = ?,
+                            payload_bytes = ?
+                        WHERE account_id = ? AND collection = ? AND record_id = ?
+                        """,
+                        (
+                            incoming["rev"],
+                            incoming["device_id"],
+                            incoming["updated_at"],
+                            1 if incoming["deleted"] else 0,
+                            incoming["content_type"],
+                            incoming["ciphertext"],
+                            incoming["nonce"],
+                            incoming["aad_hash"],
+                            incoming["payload_bytes"],
+                            account_id,
+                            incoming["collection"],
+                            incoming["record_id"],
+                        ),
+                    )
+                row = conn.execute(
+                    """
+                    SELECT *
+                    FROM sync_records
+                    WHERE account_id = ? AND collection = ? AND record_id = ?
+                    """,
+                    (account_id, incoming["collection"], incoming["record_id"]),
+                ).fetchone()
+                outcomes.append({"status": "accepted", "record": _sync_record_payload(row)})
+        return outcomes
+
+    def list_sync_changes(
+        self,
+        *,
+        account_id: str,
+        since: int,
+        limit: int,
+    ) -> list[SyncRecordRow]:
+        bounded_limit = min(max(1, int(limit)), 1000)
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM sync_records
+                WHERE account_id = ? AND seq > ?
+                ORDER BY seq ASC
+                LIMIT ?
+                """,
+                (account_id, max(0, int(since)), bounded_limit),
+            ).fetchall()
+            return [_sync_record_row(row) for row in rows]
 
     def get_or_create_account(self, email: str) -> AccountRow:
         normalized = email.strip().lower()
@@ -840,6 +988,88 @@ def _subscription_row(row: sqlite3.Row) -> SubscriptionRow:
         current_period_end=row["current_period_end"],
         cancel_at_period_end=bool(row["cancel_at_period_end"]),
         last_event_created=last_event_created,
+    )
+
+
+def _coerce_sync_record(account_id: str, raw: dict[str, Any]) -> dict[str, Any]:
+    collection = str(raw.get("collection") or "").strip()
+    if collection not in {"history", "note", "segment", "settings", "lexicon"}:
+        raise ValueError("invalid sync collection")
+    record_id = str(raw.get("record_id") or "").strip()
+    device_id = str(raw.get("device_id") or "").strip()
+    updated_at = str(raw.get("updated_at") or "").strip()
+    content_type = str(raw.get("content_type") or "").strip()
+    ciphertext = str(raw.get("ciphertext") or "").strip()
+    nonce = str(raw.get("nonce") or "").strip()
+    aad_hash = str(raw.get("aad_hash") or "").strip()
+    if not all((account_id, record_id, device_id, updated_at, content_type, ciphertext, nonce, aad_hash)):
+        raise ValueError("sync record missing required fields")
+    rev = int(raw.get("rev") or 1)
+    payload_bytes = int(raw.get("payload_bytes") or 0)
+    if rev < 1 or payload_bytes < 0:
+        raise ValueError("invalid sync record revision or payload size")
+    return {
+        "account_id": account_id,
+        "collection": collection,
+        "record_id": record_id,
+        "rev": rev,
+        "device_id": device_id,
+        "updated_at": updated_at,
+        "deleted": bool(raw.get("deleted", False)),
+        "content_type": content_type,
+        "ciphertext": ciphertext,
+        "nonce": nonce,
+        "aad_hash": aad_hash,
+        "payload_bytes": payload_bytes,
+    }
+
+
+def _incoming_sync_wins(incoming: dict[str, Any], existing: dict[str, Any]) -> bool:
+    existing_tuple = (
+        int(existing["rev"]),
+        str(existing["updated_at"]),
+        str(existing["device_id"]),
+    )
+    incoming_tuple = (
+        int(incoming["rev"]),
+        str(incoming["updated_at"]),
+        str(incoming["device_id"]),
+    )
+    return incoming_tuple >= existing_tuple
+
+
+def _sync_record_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    return {
+        "collection": row["collection"],
+        "record_id": row["record_id"],
+        "seq": int(row["seq"]),
+        "rev": int(row["rev"]),
+        "device_id": row["device_id"],
+        "updated_at": row["updated_at"],
+        "deleted": bool(row["deleted"]),
+        "content_type": row["content_type"],
+        "ciphertext": row["ciphertext"],
+        "nonce": row["nonce"],
+        "aad_hash": row["aad_hash"],
+        "payload_bytes": int(row["payload_bytes"]),
+    }
+
+
+def _sync_record_row(row: sqlite3.Row) -> SyncRecordRow:
+    return SyncRecordRow(
+        account_id=row["account_id"],
+        collection=row["collection"],
+        record_id=row["record_id"],
+        seq=int(row["seq"]),
+        rev=int(row["rev"]),
+        device_id=row["device_id"],
+        updated_at=row["updated_at"],
+        deleted=bool(row["deleted"]),
+        content_type=row["content_type"],
+        ciphertext=row["ciphertext"],
+        nonce=row["nonce"],
+        aad_hash=row["aad_hash"],
+        payload_bytes=int(row["payload_bytes"]),
     )
 
 

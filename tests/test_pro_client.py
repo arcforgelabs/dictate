@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dictate.pro.client import ProClient, ProClientError, ProSession
+from dictate.sync import PlainSyncRecord, encrypt_record, generate_account_key
 
 
 def _unsigned_jwt(subject: str) -> str:
@@ -118,6 +119,40 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[1]["path"], "/v1/meetings/job_1")
         self.assertEqual(client.calls[2]["path"], "/v1/meetings/job_1/transcript")
 
+    def test_local_api_url_uses_v1_sync_routes(self) -> None:
+        client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
+        session = ProSession(
+            account_id="acct_test",
+            device_id="dev_test",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        record = encrypt_record(
+            "acct_test",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id="dev_test",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+
+        with patch.object(client, "load_session", return_value=session):
+            client.push_sync_records([record])
+            client.get_sync_changes(since=7, limit=50)
+
+        self.assertEqual(client.calls[0]["path"], "/v1/sync/push")
+        self.assertEqual(client.calls[0]["payload"]["device_id"], "dev_test")
+        self.assertEqual(client.calls[0]["payload"]["records"][0]["record_id"], "hist_1")
+        self.assertEqual(client.calls[1]["path"], "/v1/sync/changes?since=7&limit=50")
+
     def test_arc_forge_sign_in_uses_shared_account_login_code_routes(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
         client.responses = [
@@ -182,6 +217,80 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[2]["payload"], {"upload_id": "upload_1", "byte_size": 3})
         self.assertEqual(client.calls[3]["path"], "/api/dictate/jobs/job_1")
         self.assertEqual(client.calls[4]["path"], "/api/dictate/jobs/job_1/transcript")
+
+    def test_arc_forge_gateway_routes_sync_under_api_dictate(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        record = encrypt_record(
+            "arc_account_1",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_1",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id="device_1",
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+
+        with patch.object(client, "load_session", return_value=session):
+            client.push_sync_records([record])
+            client.get_sync_changes(since=3, limit=10)
+
+        self.assertEqual(client.calls[0]["path"], "/api/dictate/sync/push")
+        self.assertEqual(client.calls[0]["auth"], "access")
+        self.assertEqual(client.calls[1]["path"], "/api/dictate/sync/changes?since=3&limit=10")
+
+    def test_drain_sync_outbox_removes_accepted_records(self) -> None:
+        from dictate.sync import SyncOutbox
+
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        outbox = SyncOutbox(
+            path=Path(self._tmp.name) / "outbox.jsonl",
+            account_id="arc_account_1",
+            account_key=generate_account_key(),
+            device_id="device_1",
+        )
+        outbox.enqueue(
+            collection="history",
+            record_id="hist_1",
+            content_type="application/vnd.dictate.history+json;v=1",
+            payload={"text": "private"},
+        )
+        client.responses = [
+            {
+                "results": [
+                    {
+                        "status": "accepted",
+                        "record": {"collection": "history", "record_id": "hist_1"},
+                    }
+                ]
+            }
+        ]
+
+        with patch.object(client, "load_session", return_value=session):
+            result = client.drain_sync_outbox(outbox)
+
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual(outbox.pending(), [])
 
     def test_arc_forge_gateway_falls_back_to_raw_upload_when_signed_upload_disabled(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
