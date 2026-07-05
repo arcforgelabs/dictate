@@ -245,6 +245,10 @@ function AccountDialog() {
   const [devices, setDevices] = useState([]);
   const [recoveryKey, setRecoveryKey] = useState(null);
   const [restoreKey, setRestoreKey] = useState("");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInCode, setSignInCode] = useState("");
+  const [signInChallenge, setSignInChallenge] = useState("");
+  const [deviceLabel, setDeviceLabel] = useState("Desktop");
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncLabel = sync.enabled
     ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
@@ -285,6 +289,73 @@ function AccountDialog() {
       });
     return () => { cancelled = true; };
   }, [signedIn]);
+
+  const refreshAccountState = () => {
+    if (!ipc.isLive()) return Promise.resolve(null);
+    return ipc.getState().then((st) => {
+      if (st?.dictatePro) s.setDictatePro(st.dictatePro);
+      if (st?.sync) s.setSyncState(st.sync);
+      if (Array.isArray(st?.history)) s.setHistory(mapHistoryPayload(st.history));
+      return st;
+    });
+  };
+
+  const requestSignIn = () => {
+    const email = signInEmail.trim();
+    if (!email) {
+      s.toast("Enter your Dictate Pro email", { bad: true });
+      return;
+    }
+    if (!ipc.isLive()) {
+      s.toast("Sign in from the installed app", { bad: true });
+      return;
+    }
+    s.setSyncBusy(true);
+    ipc.startProSignIn(email)
+      .then((r) => {
+        setSignInChallenge(r?.challenge_id || r?.challengeId || email);
+        s.toast("Sign-in code sent");
+      })
+      .catch((e) => s.toast(e.message || "Could not request sign-in code", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const completeSignIn = () => {
+    const challengeId = signInChallenge.trim();
+    const code = signInCode.trim();
+    if (!challengeId || !code) {
+      s.toast("Enter the sign-in code", { bad: true });
+      return;
+    }
+    s.setSyncBusy(true);
+    ipc.completeProSignIn({ challengeId, code, deviceLabel: deviceLabel.trim() || "Desktop" })
+      .then((r) => {
+        if (r?.dictatePro) s.setDictatePro(r.dictatePro);
+        else s.setDictatePro({ signedIn: true, account: { email: signInEmail.trim() } });
+        setSignInCode("");
+        setSignInChallenge("");
+        s.toast("Signed in to Dictate Pro");
+        return refreshAccountState();
+      })
+      .catch((e) => s.toast(e.message || "Could not sign in", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const signOut = () => {
+    if (!ipc.isLive()) return;
+    if (!window.confirm("Sign out of Dictate Pro on this device? Local dictations stay here.")) return;
+    s.setSyncBusy(true);
+    ipc.signOutPro()
+      .then((r) => {
+        s.setDictatePro({ signedIn: false, account: null });
+        if (r?.sync) s.setSyncState(r.sync);
+        else s.setSyncState({ enabled: false, accountId: null, deviceId: sync.deviceId || null, keyAvailable: sync.keyAvailable || false, lastSeq: sync.lastSeq || 0 });
+        setDevices([]);
+        s.toast("Signed out");
+      })
+      .catch((e) => s.toast(e.message || "Could not sign out", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
 
   const enableSync = () => {
     if (!ipc.isLive()) {
@@ -431,7 +502,49 @@ function AccountDialog() {
         </div>
 
         <div className="account-actions">
-          {!sync.enabled ? (
+          {!signedIn ? (
+            <div className="account-enable-stack">
+              <div className="account-consent">
+                <strong>Sign in to Dictate Pro</strong>
+                <span>Sign in before enabling encrypted sync or hosted Pro models.</span>
+              </div>
+              <input
+                className="account-input"
+                value={signInEmail}
+                onChange={(e) => setSignInEmail(e.target.value)}
+                placeholder="Email"
+                aria-label="Dictate Pro email"
+                type="email"
+              />
+              <button type="button" className="account-primary" disabled={s.syncBusy} onClick={requestSignIn}>
+                <Icon name="key" size={14} />
+                <span>Send sign-in code</span>
+              </button>
+              {signInChallenge && (
+                <>
+                  <input
+                    className="account-input"
+                    value={signInCode}
+                    onChange={(e) => setSignInCode(e.target.value)}
+                    placeholder="Code"
+                    aria-label="Sign-in code"
+                    inputMode="numeric"
+                  />
+                  <input
+                    className="account-input"
+                    value={deviceLabel}
+                    onChange={(e) => setDeviceLabel(e.target.value)}
+                    placeholder="Device name"
+                    aria-label="Device name"
+                  />
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={completeSignIn}>
+                    <Icon name="check" size={14} />
+                    <span>Verify and sign in</span>
+                  </button>
+                </>
+              )}
+            </div>
+          ) : !sync.enabled ? (
             <div className="account-enable-stack">
               <div className="account-consent">
                 <strong>Sync my dictations across devices</strong>
@@ -516,6 +629,11 @@ function AccountDialog() {
           <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={exportLocalData}>
             Export local data
           </button>
+          {signedIn && (
+            <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={signOut}>
+              Sign out
+            </button>
+          )}
         </div>
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}

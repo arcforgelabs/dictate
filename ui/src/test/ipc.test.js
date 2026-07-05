@@ -177,6 +177,56 @@ describe("ipc bridge", () => {
     );
   });
 
+  it("signs into Dictate Pro through authenticated backend routes", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ email: "person@example.test", challenge_id: "challenge_1" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ signedIn: true, device_id: "dev_1" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ signedIn: false }),
+      });
+
+    await expect(ipc.startProSignIn("person@example.test")).resolves.toEqual({
+      email: "person@example.test",
+      challenge_id: "challenge_1",
+    });
+    await expect(
+      ipc.completeProSignIn({ challengeId: "challenge_1", code: "123456", deviceLabel: "Laptop" }),
+    ).resolves.toEqual({ signedIn: true, device_id: "dev_1" });
+    await expect(ipc.signOutPro()).resolves.toEqual({ signedIn: false });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:1/api/pro/auth/start",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "person@example.test" }),
+      }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:1/api/pro/auth/complete",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_id: "challenge_1", code: "123456", deviceLabel: "Laptop" }),
+      }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:1/api/pro/sign-out",
+      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
+    );
+  });
+
   it("starts and stops meetings through authenticated backend routes", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     vi.spyOn(globalThis, "fetch")

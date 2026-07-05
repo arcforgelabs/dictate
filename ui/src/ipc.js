@@ -162,6 +162,19 @@ export const ipc = {
   async startUpdate() {
     return call("POST", "/api/update");
   },
+  async startProSignIn(email) {
+    return call("POST", "/api/pro/auth/start", { email });
+  },
+  async completeProSignIn({ challengeId, code, deviceLabel = "Desktop" }) {
+    return call("POST", "/api/pro/auth/complete", {
+      challenge_id: challengeId,
+      code,
+      deviceLabel,
+    });
+  },
+  async signOutPro() {
+    return call("POST", "/api/pro/sign-out");
+  },
   async enableProSync(recoveryKey = "") {
     return call("POST", "/api/pro/sync/enable", recoveryKey ? { recoveryKey } : {});
   },

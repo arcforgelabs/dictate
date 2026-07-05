@@ -140,6 +140,81 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
+  it("signs into Dictate Pro from the account dialog", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    let signedIn = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: signedIn
+              ? { signedIn: true, account: { email: "samuel@example.test" } }
+              : { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/pro/auth/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ email: "samuel@example.test", challenge_id: "challenge_1" }) };
+      }
+      if (path === "/api/pro/auth/complete" && opts.method === "POST") {
+        signedIn = true;
+        return {
+          ok: true,
+          json: async () => ({
+            signedIn: true,
+            account_id: "acct_1",
+            device_id: "dev_1",
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByText("Sign in to Dictate Pro")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Dictate Pro email"), { target: { value: "samuel@example.test" } });
+    fireEvent.click(screen.getByText("Send sign-in code"));
+    await waitFor(() => expect(screen.getByText("Sign-in code sent")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Sign-in code"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("Device name"), { target: { value: "Windows lab" } });
+    fireEvent.click(screen.getByText("Verify and sign in"));
+
+    await waitFor(() => expect(screen.getByText("Signed in to Dictate Pro")).toBeInTheDocument());
+    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/pro/auth/start",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "samuel@example.test" }),
+      }),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/pro/auth/complete",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ challenge_id: "challenge_1", code: "123456", deviceLabel: "Windows lab" }),
+      }),
+    );
+  });
+
   it("shows an offline sync status when the last sync could not reach the service", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
