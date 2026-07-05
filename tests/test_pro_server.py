@@ -242,6 +242,34 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(first["results"][0]["status"], "accepted")
         self.assertEqual(second["results"][0]["status"], "superseded")
 
+    def test_key_envelopes_round_trip_without_plaintext_key(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+        payload = {"version": 1, "ciphertext": "opaque-wrapped-account-key"}
+
+        status, saved = _request(
+            self.base_url,
+            "POST",
+            "/v1/sync/key-envelopes",
+            {"envelope_kind": "recovery", "envelope": payload},
+            token=token,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["device_id"], device_id)
+        self.assertEqual(saved["envelope"], payload)
+
+        status, listed = _request(
+            self.base_url,
+            "GET",
+            "/v1/sync/key-envelopes?kind=recovery",
+            token=token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(listed["envelopes"][0]["envelope"], payload)
+        self.assertNotIn("account data key", json.dumps(listed).lower())
+
     def test_device_revoke_blocks_future_sync(self) -> None:
         session = self._sign_in_session()
         token = str(session["access_token"])

@@ -211,6 +211,32 @@ class ProStoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_sync_changes(account_id=account.account_id, since=0, limit=10), [])
         self.assertFalse(self.store.device_is_active(account_id=account.account_id, device_id=device_id))
 
+    def test_key_envelopes_are_exported_and_deleted_with_cloud_data(self) -> None:
+        account = self.store.get_or_create_account("envelope@example.com")
+        device_id = self.store.register_device(
+            account_id=account.account_id,
+            device_id="device_1",
+            label="Desktop",
+        )
+
+        row = self.store.save_key_envelope(
+            account_id=account.account_id,
+            device_id=device_id,
+            envelope_kind="recovery",
+            envelope={"version": 1, "ciphertext": "opaque"},
+        )
+
+        self.assertEqual(row.device_id, device_id)
+        envelopes = self.store.list_key_envelopes(account_id=account.account_id)
+        self.assertEqual(len(envelopes), 1)
+        exported = self.store.export_account_cloud_data(account.account_id)
+        self.assertEqual(exported["key_envelopes"][0]["envelope"]["ciphertext"], "opaque")
+
+        counts = self.store.delete_account_cloud_data(account.account_id)
+
+        self.assertEqual(counts["key_envelopes"], 1)
+        self.assertEqual(self.store.list_key_envelopes(account_id=account.account_id), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -123,6 +123,16 @@ class DeviceRow:
     last_seen_at: str
 
 
+@dataclass(slots=True)
+class KeyEnvelopeRow:
+    account_id: str
+    device_id: str
+    envelope_kind: str
+    envelope_json: str
+    created_at: str
+    updated_at: str
+
+
 class ProStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -286,6 +296,19 @@ class ProStore:
 
                 CREATE INDEX IF NOT EXISTS idx_sync_records_account_device
                     ON sync_records(account_id, device_id);
+
+                CREATE TABLE IF NOT EXISTS key_envelopes (
+                    account_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    envelope_kind TEXT NOT NULL,
+                    envelope_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (account_id, device_id, envelope_kind)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_key_envelopes_account
+                    ON key_envelopes(account_id);
                 """
             )
             try:
@@ -416,6 +439,73 @@ class ProStore:
             ).fetchall()
             return [_sync_record_row(row) for row in rows]
 
+    def save_key_envelope(
+        self,
+        *,
+        account_id: str,
+        device_id: str,
+        envelope_kind: str,
+        envelope: dict[str, Any],
+    ) -> KeyEnvelopeRow:
+        kind = envelope_kind.strip()
+        device = device_id.strip()
+        if not device:
+            raise ValueError("device_id is required")
+        if kind not in {"recovery", "device"}:
+            raise ValueError("unsupported key envelope kind")
+        envelope_json = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+        now = iso()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO key_envelopes (
+                    account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id, device_id, envelope_kind) DO UPDATE SET
+                    envelope_json = excluded.envelope_json,
+                    updated_at = excluded.updated_at
+                """,
+                (account_id, device, kind, envelope_json, now, now),
+            )
+            row = conn.execute(
+                """
+                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                FROM key_envelopes
+                WHERE account_id = ? AND device_id = ? AND envelope_kind = ?
+                """,
+                (account_id, device, kind),
+            ).fetchone()
+            return _key_envelope_row(row)
+
+    def list_key_envelopes(
+        self,
+        *,
+        account_id: str,
+        envelope_kind: str | None = None,
+    ) -> list[KeyEnvelopeRow]:
+        with self._conn() as conn:
+            if envelope_kind:
+                rows = conn.execute(
+                    """
+                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                    FROM key_envelopes
+                    WHERE account_id = ? AND envelope_kind = ?
+                    ORDER BY updated_at ASC
+                    """,
+                    (account_id, envelope_kind.strip()),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                    FROM key_envelopes
+                    WHERE account_id = ?
+                    ORDER BY updated_at ASC
+                    """,
+                    (account_id,),
+                ).fetchall()
+            return [_key_envelope_row(row) for row in rows]
+
     def export_account_cloud_data(self, account_id: str) -> dict[str, Any]:
         """Return account-scoped cloud data without decrypting sync payloads."""
         with self._conn() as conn:
@@ -443,6 +533,15 @@ class ProStore:
                 """,
                 (account_id,),
             ).fetchall()
+            key_envelopes = conn.execute(
+                """
+                SELECT account_id, device_id, envelope_kind, envelope_json, created_at, updated_at
+                FROM key_envelopes
+                WHERE account_id = ?
+                ORDER BY updated_at ASC
+                """,
+                (account_id,),
+            ).fetchall()
             meetings = conn.execute(
                 """
                 SELECT *
@@ -467,6 +566,7 @@ class ProStore:
             return {
                 "account": dict(account),
                 "devices": [dict(row) for row in devices],
+                "key_envelopes": [_key_envelope_payload(row) for row in key_envelopes],
                 "sync_records": [_sync_record_payload(row) for row in sync_records],
                 "meeting_jobs": [dict(row) for row in meetings],
                 "transcript_segments": transcripts,
@@ -490,7 +590,7 @@ class ProStore:
                 counts["transcript_segments"] = cur.rowcount
             else:
                 counts["transcript_segments"] = 0
-            for table in ("sync_records", "meeting_jobs", "usage_events", "usage_periods"):
+            for table in ("key_envelopes", "sync_records", "meeting_jobs", "usage_events", "usage_periods"):
                 cur = conn.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
                 counts[table] = cur.rowcount
             cur = conn.execute(
@@ -1247,6 +1347,29 @@ def _device_row(row: sqlite3.Row) -> DeviceRow:
         trusted_at=row["trusted_at"],
         revoked_at=row["revoked_at"],
         last_seen_at=row["last_seen_at"],
+    )
+
+
+def _key_envelope_payload(row: sqlite3.Row | KeyEnvelopeRow) -> dict[str, Any]:
+    envelope_json = row.envelope_json if isinstance(row, KeyEnvelopeRow) else row["envelope_json"]
+    return {
+        "account_id": row.account_id if isinstance(row, KeyEnvelopeRow) else row["account_id"],
+        "device_id": row.device_id if isinstance(row, KeyEnvelopeRow) else row["device_id"],
+        "envelope_kind": row.envelope_kind if isinstance(row, KeyEnvelopeRow) else row["envelope_kind"],
+        "envelope": json.loads(envelope_json),
+        "created_at": row.created_at if isinstance(row, KeyEnvelopeRow) else row["created_at"],
+        "updated_at": row.updated_at if isinstance(row, KeyEnvelopeRow) else row["updated_at"],
+    }
+
+
+def _key_envelope_row(row: sqlite3.Row) -> KeyEnvelopeRow:
+    return KeyEnvelopeRow(
+        account_id=row["account_id"],
+        device_id=row["device_id"],
+        envelope_kind=row["envelope_kind"],
+        envelope_json=row["envelope_json"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

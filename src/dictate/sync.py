@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
+import secrets
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
@@ -13,7 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from dictate.platform_paths import user_data_dir
 from dictate import api_keys as api_keys_mod
@@ -21,6 +25,8 @@ from dictate import api_keys as api_keys_mod
 SYNC_DEVICE_PATH = user_data_dir() / "sync-device.json"
 SYNC_OUTBOX_PATH = user_data_dir() / "sync-outbox.jsonl"
 SYNC_STATE_PATH = user_data_dir() / "sync-state.json"
+RECOVERY_KEY_PREFIX = "dictate-rk-"
+RECOVERY_KEY_ITERATIONS = 390_000
 
 SyncCollection = Literal["history", "note", "segment", "settings", "lexicon"]
 
@@ -67,6 +73,17 @@ class EncryptedSyncRecord:
     payload_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveryKeyEnvelope:
+    version: int
+    kdf: str
+    iterations: int
+    salt: str
+    nonce: str
+    ciphertext: str
+    aad_hash: str
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -104,6 +121,71 @@ def decode_key(value: str) -> bytes:
     if len(key) != 32:
         raise ValueError("sync account key must be 32 bytes")
     return key
+
+
+def generate_recovery_key() -> str:
+    """Generate a user-held recovery key for restoring encrypted sync on new devices."""
+    return RECOVERY_KEY_PREFIX + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
+
+
+def create_recovery_envelope(
+    *,
+    account_id: str,
+    account_key: bytes,
+    recovery_key: str,
+) -> RecoveryKeyEnvelope:
+    """Wrap the account data key using a recovery key the server never sees."""
+    _validate_key(account_key)
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    aad = _recovery_aad(account_id)
+    wrapping_key = _derive_recovery_wrapping_key(recovery_key, salt, RECOVERY_KEY_ITERATIONS)
+    ciphertext = AESGCM(wrapping_key).encrypt(nonce, account_key, aad)
+    return RecoveryKeyEnvelope(
+        version=1,
+        kdf="pbkdf2-sha256",
+        iterations=RECOVERY_KEY_ITERATIONS,
+        salt=base64.b64encode(salt).decode("ascii"),
+        nonce=base64.b64encode(nonce).decode("ascii"),
+        ciphertext=base64.b64encode(ciphertext).decode("ascii"),
+        aad_hash=base64.b64encode(hashlib.sha256(aad).digest()).decode("ascii"),
+    )
+
+
+def recover_account_key(
+    *,
+    account_id: str,
+    recovery_key: str,
+    envelope: RecoveryKeyEnvelope,
+) -> bytes:
+    """Recover an account data key from a user-held recovery key and opaque envelope."""
+    aad = _recovery_aad(account_id)
+    expected_hash = base64.b64encode(hashlib.sha256(aad).digest()).decode("ascii")
+    if envelope.version != 1:
+        raise ValueError("unsupported sync recovery envelope version")
+    if envelope.kdf != "pbkdf2-sha256":
+        raise ValueError("unsupported sync recovery envelope kdf")
+    if envelope.aad_hash != expected_hash:
+        raise ValueError("sync recovery envelope metadata authentication hash mismatch")
+    salt = base64.b64decode(envelope.salt.encode("ascii"), validate=True)
+    nonce = base64.b64decode(envelope.nonce.encode("ascii"), validate=True)
+    ciphertext = base64.b64decode(envelope.ciphertext.encode("ascii"), validate=True)
+    wrapping_key = _derive_recovery_wrapping_key(recovery_key, salt, envelope.iterations)
+    account_key = AESGCM(wrapping_key).decrypt(nonce, ciphertext, aad)
+    _validate_key(account_key)
+    return account_key
+
+
+def recovery_envelope_from_dict(raw: dict[str, Any]) -> RecoveryKeyEnvelope:
+    return RecoveryKeyEnvelope(
+        version=int(raw["version"]),
+        kdf=str(raw["kdf"]),
+        iterations=int(raw["iterations"]),
+        salt=str(raw["salt"]),
+        nonce=str(raw["nonce"]),
+        ciphertext=str(raw["ciphertext"]),
+        aad_hash=str(raw["aad_hash"]),
+    )
 
 
 def encrypt_record(account_id: str, account_key: bytes, record: PlainSyncRecord) -> EncryptedSyncRecord:
@@ -377,6 +459,34 @@ def _aad(account_id: str, record: PlainSyncRecord) -> bytes:
         record.content_type,
     )
     return "\x1f".join(parts).encode("utf-8")
+
+
+def _recovery_aad(account_id: str) -> bytes:
+    account = account_id.strip()
+    if not account:
+        raise ValueError("account_id is required for sync recovery envelopes")
+    return f"dictate-sync-recovery:v1:{account}".encode("utf-8")
+
+
+def _derive_recovery_wrapping_key(recovery_key: str, salt: bytes, iterations: int) -> bytes:
+    if not recovery_key.startswith(RECOVERY_KEY_PREFIX):
+        raise ValueError("invalid sync recovery key format")
+    if iterations < 100_000:
+        raise ValueError("sync recovery key kdf iterations are too low")
+    token = recovery_key.removeprefix(RECOVERY_KEY_PREFIX)
+    padding = "=" * (-len(token) % 4)
+    try:
+        material = base64.urlsafe_b64decode((token + padding).encode("ascii"))
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("invalid sync recovery key format") from exc
+    if len(material) != 32:
+        raise ValueError("invalid sync recovery key length")
+    return PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=int(iterations),
+    ).derive(material)
 
 
 def _validate_key(key: bytes) -> None:

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -306,6 +307,22 @@ class ProClient:
         path = f"{self._sync_path('changes')}?since={max(0, int(since))}&limit={max(1, int(limit))}"
         return self._request("GET", path, auth=session.access_token)
 
+    def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, Any]) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request(
+            "POST",
+            self._sync_path("key-envelopes"),
+            {"device_id": session.device_id, "envelope_kind": envelope_kind, "envelope": envelope},
+            auth=session.access_token,
+        )
+
+    def list_key_envelopes(self, *, envelope_kind: str | None = None) -> dict[str, Any]:
+        session = self._require_session()
+        path = self._sync_path("key-envelopes")
+        if envelope_kind:
+            path = f"{path}?kind={urllib.parse.quote(envelope_kind.strip())}"
+        return self._request("GET", path, auth=session.access_token)
+
     def list_devices(self) -> dict[str, Any]:
         session = self._require_session()
         return self._request("GET", self._account_path("devices"), auth=session.access_token)
@@ -352,7 +369,7 @@ class ProClient:
         return f"/v1/meetings/{job_id}{suffix}"
 
     def _sync_path(self, action: str) -> str:
-        if action not in {"push", "changes"}:
+        if action not in {"push", "changes", "key-envelopes"}:
             raise ValueError("unknown sync action")
         if self._uses_arcforge_gateway():
             return f"/api/dictate/sync/{action}"

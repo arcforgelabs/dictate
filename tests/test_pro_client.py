@@ -147,11 +147,16 @@ class ProClientTests(unittest.TestCase):
         with patch.object(client, "load_session", return_value=session):
             client.push_sync_records([record])
             client.get_sync_changes(since=7, limit=50)
+            client.save_key_envelope(envelope_kind="recovery", envelope={"ciphertext": "opaque"})
+            client.list_key_envelopes(envelope_kind="recovery")
 
         self.assertEqual(client.calls[0]["path"], "/v1/sync/push")
         self.assertEqual(client.calls[0]["payload"]["device_id"], "dev_test")
         self.assertEqual(client.calls[0]["payload"]["records"][0]["record_id"], "hist_1")
         self.assertEqual(client.calls[1]["path"], "/v1/sync/changes?since=7&limit=50")
+        self.assertEqual(client.calls[2]["path"], "/v1/sync/key-envelopes")
+        self.assertEqual(client.calls[2]["payload"]["envelope_kind"], "recovery")
+        self.assertEqual(client.calls[3]["path"], "/v1/sync/key-envelopes?kind=recovery")
 
     def test_local_api_url_uses_v1_account_device_routes(self) -> None:
         client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
@@ -271,10 +276,14 @@ class ProClientTests(unittest.TestCase):
         with patch.object(client, "load_session", return_value=session):
             client.push_sync_records([record])
             client.get_sync_changes(since=3, limit=10)
+            client.save_key_envelope(envelope_kind="recovery", envelope={"ciphertext": "opaque"})
+            client.list_key_envelopes(envelope_kind="recovery")
 
         self.assertEqual(client.calls[0]["path"], "/api/dictate/sync/push")
         self.assertEqual(client.calls[0]["auth"], "access")
         self.assertEqual(client.calls[1]["path"], "/api/dictate/sync/changes?since=3&limit=10")
+        self.assertEqual(client.calls[2]["path"], "/api/dictate/sync/key-envelopes")
+        self.assertEqual(client.calls[3]["path"], "/api/dictate/sync/key-envelopes?kind=recovery")
 
     def test_arc_forge_gateway_routes_account_device_actions_under_api_dictate(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)

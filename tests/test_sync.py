@@ -10,14 +10,19 @@ from cryptography.exceptions import InvalidTag
 
 from dictate.sync import (
     PlainSyncRecord,
+    RecoveryKeyEnvelope,
     SyncSettingsStore,
     SyncOutbox,
+    create_recovery_envelope,
     decrypt_record,
     encode_key,
     decode_key,
     encrypt_record,
     generate_account_key,
+    generate_recovery_key,
     load_or_create_device,
+    recover_account_key,
+    recovery_envelope_from_dict,
 )
 
 
@@ -88,6 +93,69 @@ class SyncCryptoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "metadata authentication hash"):
             decrypt_record("acct_1", key, tampered)
+
+    def test_recovery_envelope_restores_account_key_without_plaintext(self) -> None:
+        account_key = generate_account_key()
+        recovery_key = generate_recovery_key()
+
+        envelope = create_recovery_envelope(
+            account_id="acct_1",
+            account_key=account_key,
+            recovery_key=recovery_key,
+        )
+
+        serialized = json.dumps(asdict(envelope))
+        self.assertNotIn(encode_key(account_key), serialized)
+        restored = recover_account_key(
+            account_id="acct_1",
+            recovery_key=recovery_key,
+            envelope=recovery_envelope_from_dict(asdict(envelope)),
+        )
+        self.assertEqual(restored, account_key)
+
+    def test_recovery_envelope_rejects_wrong_key(self) -> None:
+        envelope = create_recovery_envelope(
+            account_id="acct_1",
+            account_key=generate_account_key(),
+            recovery_key=generate_recovery_key(),
+        )
+
+        with self.assertRaises(InvalidTag):
+            recover_account_key(
+                account_id="acct_1",
+                recovery_key=generate_recovery_key(),
+                envelope=envelope,
+            )
+
+    def test_recovery_envelope_rejects_tampered_account(self) -> None:
+        envelope = create_recovery_envelope(
+            account_id="acct_1",
+            account_key=generate_account_key(),
+            recovery_key=generate_recovery_key(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "metadata authentication hash"):
+            recover_account_key(
+                account_id="acct_2",
+                recovery_key=generate_recovery_key(),
+                envelope=envelope,
+            )
+
+    def test_recovery_envelope_rejects_weak_kdf_metadata(self) -> None:
+        envelope = RecoveryKeyEnvelope(
+            **{**asdict(create_recovery_envelope(
+                account_id="acct_1",
+                account_key=generate_account_key(),
+                recovery_key=generate_recovery_key(),
+            )), "iterations": 10}
+        )
+
+        with self.assertRaisesRegex(ValueError, "iterations"):
+            recover_account_key(
+                account_id="acct_1",
+                recovery_key=generate_recovery_key(),
+                envelope=envelope,
+            )
 
 
 class SyncOutboxTests(unittest.TestCase):

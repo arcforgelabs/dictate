@@ -241,6 +241,23 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             since = _query_int(query, "since", 0)
             limit = _query_int(query, "limit", 500)
             return _Response(200, service.get_sync_changes(account_id, device_id, since=since, limit=limit))
+        if path == "/v1/sync/key-envelopes" and method == "GET":
+            kind = query.get("kind", [""])[0].strip() or None
+            return _Response(200, service.list_key_envelopes(account_id, device_id, envelope_kind=kind))
+        if path == "/v1/sync/key-envelopes" and method == "POST":
+            body = self._read_json()
+            envelope = body.get("envelope")
+            if not isinstance(envelope, dict):
+                raise ApiError(400, "envelope must be a JSON object")
+            return _Response(
+                200,
+                service.save_key_envelope(
+                    account_id,
+                    device_id,
+                    envelope_kind=str(body.get("envelope_kind") or body.get("kind") or ""),
+                    envelope=envelope,
+                ),
+            )
         if path == "/v1/meetings" and method == "POST":
             body = self._read_json()
             return _Response(

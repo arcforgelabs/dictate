@@ -103,6 +103,30 @@ class ProServiceTests(unittest.TestCase):
         self.assertGreaterEqual(deleted["deleted"]["sync_records"], 1)
         self.assertEqual(self.service.store.list_sync_changes(account_id=self.account_id, since=0, limit=10), [])
 
+    def test_key_envelope_requires_active_device_and_exports(self) -> None:
+        saved = self.service.save_key_envelope(
+            self.account_id,
+            self.device_id,
+            envelope_kind="recovery",
+            envelope={"version": 1, "ciphertext": "opaque"},
+        )
+
+        self.assertEqual(saved["device_id"], self.device_id)
+        listed = self.service.list_key_envelopes(self.account_id, self.device_id, envelope_kind="recovery")
+        self.assertEqual(listed["envelopes"][0]["envelope"]["ciphertext"], "opaque")
+        exported = self.service.export_account_cloud_data(self.account_id)
+        self.assertEqual(exported["key_envelopes"][0]["envelope_kind"], "recovery")
+
+        self.service.revoke_device(self.account_id, self.device_id)
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.save_key_envelope(
+                self.account_id,
+                self.device_id,
+                envelope_kind="recovery",
+                envelope={"version": 1, "ciphertext": "opaque"},
+            )
+        self.assertEqual(ctx.exception.status, 403)
+
     def test_meeting_upload_debits_usage_once(self) -> None:
         fake = RelayResult(
             text="Speaker 1: hello",

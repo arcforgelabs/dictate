@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
@@ -175,6 +176,58 @@ class ProService:
         ]
         next_seq = records[-1]["seq"] if records else max(0, since)
         return {"next_seq": next_seq, "has_more": len(records) >= max(1, min(limit, 1000)), "records": records}
+
+    def save_key_envelope(
+        self,
+        account_id: str,
+        device_id: str | None,
+        *,
+        envelope_kind: str,
+        envelope: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
+        if not isinstance(envelope, dict) or not envelope:
+            raise ProServiceError(400, "envelope must be a JSON object")
+        try:
+            row = self.store.save_key_envelope(
+                account_id=account_id,
+                device_id=str(device_id),
+                envelope_kind=envelope_kind,
+                envelope=envelope,
+            )
+        except ValueError as exc:
+            raise ProServiceError(400, str(exc)) from exc
+        return {
+            "account_id": row.account_id,
+            "device_id": row.device_id,
+            "envelope_kind": row.envelope_kind,
+            "envelope": json.loads(row.envelope_json),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def list_key_envelopes(
+        self,
+        account_id: str,
+        device_id: str | None,
+        *,
+        envelope_kind: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_active_device(account_id, device_id)
+        envelopes = [
+            {
+                "account_id": row.account_id,
+                "device_id": row.device_id,
+                "envelope_kind": row.envelope_kind,
+                "envelope": json.loads(row.envelope_json),
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in self.store.list_key_envelopes(account_id=account_id, envelope_kind=envelope_kind)
+        ]
+        return {"envelopes": envelopes}
 
     def list_devices(self, account_id: str) -> dict[str, Any]:
         self._require_active_subscription(account_id)
