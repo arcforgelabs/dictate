@@ -225,6 +225,18 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, service.get_current_usage(account_id))
         if path == "/v1/devices" and method == "GET":
             return _Response(200, service.list_devices(account_id))
+        if path == "/v1/devices/register" and method == "POST":
+            body = self._read_json()
+            return _Response(
+                200,
+                service.register_device(
+                    account_id,
+                    device_id,
+                    device_id=str(body.get("device_id") or "").strip() or None,
+                    device_label=str(body.get("device_label") or "Desktop"),
+                    device_public_key=str(body.get("device_public_key") or "").strip(),
+                ),
+            )
         device_match = re.fullmatch(r"/v1/devices/([^/]+)/revoke", path)
         if device_match and method == "POST":
             return _Response(200, service.revoke_device(account_id, device_id, device_match.group(1)))

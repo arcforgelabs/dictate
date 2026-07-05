@@ -174,6 +174,7 @@ class ProClientTests(unittest.TestCase):
 
         with patch.object(client, "load_session", return_value=session):
             client.list_devices()
+            client.register_device(device_label="Desktop", device_public_key="public_key_1")
             client.revoke_device("dev_other")
             client.approve_device("dev_other", envelope={"algorithm": "test"})
             client.approve_current_device_with_recovery()
@@ -182,14 +183,16 @@ class ProClientTests(unittest.TestCase):
 
         self.assertEqual([call["path"] for call in client.calls], [
             "/v1/devices",
+            "/v1/devices/register",
             "/v1/devices/dev_other/revoke",
             "/v1/devices/dev_other/approve",
             "/v1/devices/current/approve-with-recovery",
             "/v1/account/export",
             "/v1/account/cloud-data",
         ])
-        self.assertEqual([call["method"] for call in client.calls], ["GET", "POST", "POST", "POST", "GET", "DELETE"])
-        self.assertEqual(client.calls[2]["payload"], {"envelope": {"algorithm": "test"}})
+        self.assertEqual([call["method"] for call in client.calls], ["GET", "POST", "POST", "POST", "POST", "GET", "DELETE"])
+        self.assertEqual(client.calls[1]["payload"]["device_public_key"], "public_key_1")
+        self.assertEqual(client.calls[3]["payload"], {"envelope": {"algorithm": "test"}})
 
     def test_local_sign_in_sends_device_public_key(self) -> None:
         client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)

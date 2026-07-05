@@ -253,6 +253,36 @@ class ProService:
             ]
         }
 
+    def register_device(
+        self,
+        account_id: str,
+        current_device_id: str | None,
+        *,
+        device_id: str | None,
+        device_label: str,
+        device_public_key: str,
+    ) -> dict[str, Any]:
+        self._require_active_subscription(account_id)
+        self._require_known_device(account_id, current_device_id)
+        target = (device_id or current_device_id or "").strip()
+        current = (current_device_id or "").strip()
+        if not target:
+            raise ProServiceError(400, "device_id is required")
+        if target != current:
+            raise ProServiceError(403, "cannot register a different device from this session")
+        public_key = device_public_key.strip()
+        if not public_key:
+            raise ProServiceError(400, "device_public_key is required")
+        label = device_label.strip() or "Desktop"
+        registered = self.store.register_device(
+            account_id=account_id,
+            device_id=target,
+            label=label,
+            public_key=public_key,
+        )
+        device = self.store.get_device(account_id=account_id, device_id=registered)
+        return {"device": self._device_payload(device)}
+
     def revoke_device(self, account_id: str, current_device_id: str | None, device_id: str) -> dict[str, Any]:
         if not device_id.strip():
             raise ProServiceError(400, "device_id is required")

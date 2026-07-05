@@ -258,6 +258,45 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(changes["records"], [])
 
+    def test_device_registration_endpoint_updates_current_device_public_key(self) -> None:
+        session = self._sign_in_session(device_id="device_registered", device_public_key="old_public_key")
+
+        status, registered = _request(
+            self.base_url,
+            "POST",
+            "/v1/devices/register",
+            {
+                "device_id": "device_registered",
+                "device_label": "Renamed Desktop",
+                "device_public_key": "new_public_key",
+            },
+            token=session["access_token"],
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(registered["device"]["device_id"], "device_registered")
+        self.assertEqual(registered["device"]["label"], "Renamed Desktop")
+        self.assertEqual(registered["device"]["public_key"], "new_public_key")
+        self.assertIsNotNone(registered["device"]["server_signature"])
+
+    def test_device_registration_endpoint_rejects_different_device_id(self) -> None:
+        session = self._sign_in_session(device_id="device_registered", device_public_key="old_public_key")
+
+        status, blocked = _request(
+            self.base_url,
+            "POST",
+            "/v1/devices/register",
+            {
+                "device_id": "device_other",
+                "device_label": "Other Desktop",
+                "device_public_key": "new_public_key",
+            },
+            token=session["access_token"],
+        )
+
+        self.assertEqual(status, 403)
+        self.assertIn("different device", blocked["error"])
+
     def test_recovery_approval_trusts_current_pending_device(self) -> None:
         trusted = self._sign_in_session(device_id="device_trusted", device_public_key="trusted_public_key")
         status, saved = _request(
