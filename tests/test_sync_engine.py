@@ -35,6 +35,29 @@ class _FakeProClient:
         return {"last_seq": last_seq}
 
 
+class _FailingProClient(_FakeProClient):
+    def __init__(self, *, fail_push: bool = False, fail_pull: bool = False, fail_cursor: bool = False) -> None:
+        super().__init__()
+        self.fail_push = fail_push
+        self.fail_pull = fail_pull
+        self.fail_cursor = fail_cursor
+
+    def drain_sync_outbox(self, outbox):  # noqa: ANN001
+        if self.fail_push:
+            raise RuntimeError("offline")
+        return super().drain_sync_outbox(outbox)
+
+    def get_sync_changes(self, *, since: int = 0, limit: int = 500):
+        if self.fail_pull:
+            raise RuntimeError("offline")
+        return super().get_sync_changes(since=since, limit=limit)
+
+    def update_sync_cursor(self, *, last_seq: int):
+        if self.fail_cursor:
+            raise RuntimeError("offline")
+        return super().update_sync_cursor(last_seq=last_seq)
+
+
 class SyncEngineTests(unittest.TestCase):
     def _settings(self, tmp: str, account_id: str, key: bytes) -> SyncSettingsStore:
         saved: dict[str, str] = {}
@@ -308,6 +331,51 @@ class SyncEngineTests(unittest.TestCase):
             self.assertTrue(client.drained)
             self.assertEqual(result.pushed, 1)
             self.assertEqual(outbox.pending(), [])
+
+    def test_offline_push_keeps_outbox_and_returns_sync_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            settings = self._settings(tmp, "acct_1", key)
+            outbox = settings.outbox()
+            assert outbox is not None
+            outbox.enqueue(
+                collection="history",
+                record_id="hist_1",
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"id": "hist_1", "text": "queued offline"},
+            )
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=_FailingProClient(fail_push=True),
+                history_store=HistoryStore(Path(tmp) / "history.json"),
+                note_store=NoteStore(Path(tmp) / "notes"),
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.pushed, 0)
+            self.assertEqual(result.remaining, 1)
+            self.assertEqual(result.last_seq, 0)
+            self.assertIn("sync push failed", result.error or "")
+            self.assertEqual([record.record_id for record in outbox.pending()], ["hist_1"])
+
+    def test_offline_pull_returns_error_without_advancing_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            settings = self._settings(tmp, "acct_1", key)
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=_FailingProClient(fail_pull=True),
+                history_store=HistoryStore(Path(tmp) / "history.json"),
+                note_store=NoteStore(Path(tmp) / "notes"),
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.pushed, 0)
+            self.assertEqual(result.last_seq, 0)
+            self.assertIn("sync pull failed", result.error or "")
+            self.assertEqual(settings.load().last_seq, 0)
 
     def test_first_sync_keeps_local_and_remote_history_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

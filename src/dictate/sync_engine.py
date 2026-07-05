@@ -73,8 +73,25 @@ class SyncEngine:
         self.history_store.attach_sync_outbox(outbox)
         self.note_store.attach_sync_outbox(outbox)
 
-        pushed = self.pro_client.drain_sync_outbox(outbox)
-        changes = self.pro_client.get_sync_changes(since=state.last_seq, limit=limit)
+        try:
+            pushed = self.pro_client.drain_sync_outbox(outbox)
+        except Exception as exc:  # noqa: BLE001
+            return SyncRunResult(
+                enabled=True,
+                remaining=len(outbox.pending()),
+                last_seq=state.last_seq,
+                error=f"sync push failed: {exc}",
+            )
+        try:
+            changes = self.pro_client.get_sync_changes(since=state.last_seq, limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            return SyncRunResult(
+                enabled=True,
+                pushed=int(pushed.get("pushed", 0)),
+                remaining=int(pushed.get("remaining", 0)),
+                last_seq=state.last_seq,
+                error=f"sync pull failed: {exc}",
+            )
         records = changes.get("records") if isinstance(changes, dict) else []
         if not isinstance(records, list):
             return SyncRunResult(
@@ -109,7 +126,18 @@ class SyncEngine:
                 max_seq = max(max_seq, seq)
         self.settings.set_cursor(max_seq)
         if max_seq > state.last_seq:
-            self.pro_client.update_sync_cursor(last_seq=max_seq)
+            try:
+                self.pro_client.update_sync_cursor(last_seq=max_seq)
+            except Exception as exc:  # noqa: BLE001
+                return SyncRunResult(
+                    enabled=True,
+                    pushed=int(pushed.get("pushed", 0)),
+                    remaining=int(pushed.get("remaining", 0)),
+                    pulled=len(records),
+                    applied=applied,
+                    last_seq=max_seq,
+                    error=f"sync cursor update failed: {exc}",
+                )
         return SyncRunResult(
             enabled=True,
             pushed=int(pushed.get("pushed", 0)),
