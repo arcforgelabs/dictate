@@ -848,11 +848,65 @@ class UiBackendStateTests(unittest.TestCase):
             )
             backend.enable_sync()
             backend.history_store.append("keep local")
+            note_id = backend.note_store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
+            backend.note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.0,
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="keep local note",
+                ),
+            )
+            backend.note_store.mark_ready(note_id, duration_s=1.0)
 
             backend.sign_out_pro()
 
             self.assertFalse(backend.get_state()["sync"]["enabled"])
-            self.assertEqual(backend.get_history()[0]["text"], "keep local")
+            texts = [item["text"] for item in backend.get_history()]
+            self.assertIn("keep local", texts)
+            self.assertIn("keep local note", texts)
+
+    def test_export_local_data_includes_history_and_notes_without_cloud_or_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            history_entry = backend.history_store.append("local export history")
+            note_id = backend.note_store.create_note(
+                provider="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                mode="meeting",
+                speaker_labels=True,
+            )
+            backend.note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=1.0,
+                    t_end=2.5,
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="local export meeting segment",
+                    speaker_id="speaker_1",
+                    speaker_label="Speaker 1",
+                ),
+            )
+            backend.note_store.mark_ready(note_id, duration_s=2.5)
+
+            exported = backend.export_local_data()
+
+            self.assertEqual(exported["schema"], "dictate.local-export.v1")
+            self.assertEqual(exported["history"][0]["id"], history_entry.id)
+            self.assertEqual(exported["history"][0]["text"], "local export history")
+            self.assertEqual(exported["notes"][0]["id"], note_id)
+            self.assertEqual(exported["notes"][0]["text"], "Speaker 1: local export meeting segment")
+            self.assertEqual(exported["notes"][0]["segments"][0]["speakerLabel"], "Speaker 1")
+            raw = json.dumps(exported)
+            self.assertNotIn("access", raw)
+            self.assertNotIn("refresh", raw)
+            self.assertNotIn("apiKey", raw)
+            self.assertNotIn("sync_records", raw)
 
 
 class UiBackendShortcutPrefsTests(unittest.TestCase):

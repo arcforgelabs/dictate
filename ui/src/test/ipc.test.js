@@ -232,6 +232,10 @@ describe("ipc bridge", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({ schema: "dictate.local-export.v1" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({ account: {} }),
       })
       .mockResolvedValueOnce({
@@ -245,6 +249,7 @@ describe("ipc bridge", () => {
     await expect(ipc.listProDevices()).resolves.toEqual({ devices: [] });
     await expect(ipc.revokeProDevice("dev_2")).resolves.toEqual({ revoked: true });
     await expect(ipc.approveProDevice("dev_3")).resolves.toEqual({ approved: true });
+    await expect(ipc.exportLocalData()).resolves.toEqual({ schema: "dictate.local-export.v1" });
     await expect(ipc.exportProCloudData()).resolves.toEqual({ account: {} });
     await expect(ipc.deleteProCloudData()).resolves.toEqual({ deleted: {} });
 
@@ -296,11 +301,16 @@ describe("ipc bridge", () => {
     );
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       7,
-      "http://127.0.0.1:1/api/pro/cloud/export",
+      "http://127.0.0.1:1/api/local/export",
       expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
     );
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       8,
+      "http://127.0.0.1:1/api/pro/cloud/export",
+      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      9,
       "http://127.0.0.1:1/api/pro/cloud/delete",
       expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer t" } }),
     );

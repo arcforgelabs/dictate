@@ -878,6 +878,26 @@ class UiBackend:
             seen_text.add(text_key)
         return out
 
+    def export_local_data(self) -> dict[str, Any]:
+        """Return an explicit local-only export without synced/cloud state or secrets."""
+        history = [asdict(entry) for entry in self.history_store.load(include_archived=True)]
+        notes: list[dict[str, Any]] = []
+        if self.note_store is not None:
+            for note in self.note_store.list_notes(limit=10_000, include_archived=True):
+                payload = self.note_payload(self.note_store, note.note_id)
+                if payload is None:
+                    continue
+                payload["archived"] = note.archived
+                payload["rev"] = note.rev
+                payload["updatedAt"] = note.updated_at
+                notes.append(payload)
+        return {
+            "schema": "dictate.local-export.v1",
+            "exportedAt": self.now().isoformat(),
+            "history": history,
+            "notes": notes,
+        }
+
     def _history_label(self, created_at: str) -> str:
         try:
             when = datetime.fromisoformat(created_at)
@@ -1617,6 +1637,8 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.remove_hotword((body or {}).get("word", "")))
         if path == "/api/history" and method == "GET":
             return _Response(200, {"history": backend.get_history()})
+        if path == "/api/local/export" and method == "GET":
+            return _Response(200, backend.export_local_data())
         if path == "/api/history" and method == "DELETE":
             return _Response(200, backend.clear_history())
         if path == "/api/history/archive" and method == "POST":

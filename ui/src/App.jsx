@@ -363,6 +363,16 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
+  const exportLocalData = () => {
+    if (!ipc.isLive()) return;
+    s.setSyncBusy(true);
+    ipc.exportLocalData()
+      .then((data) => ipc.saveTextFile("dictate-local-export.json", JSON.stringify(data, null, 2)))
+      .then(() => s.toast("Local export saved"))
+      .catch((e) => s.toast(e.message || "Could not export local data", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
   const exportCloudData = () => {
     if (!ipc.isLive()) return;
     s.setSyncBusy(true);
@@ -502,6 +512,11 @@ function AccountDialog() {
             </div>
           </>
         )}
+        <div className="account-actions account-actions--split">
+          <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={exportLocalData}>
+            Export local data
+          </button>
+        </div>
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
       </div>

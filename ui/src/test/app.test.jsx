@@ -44,6 +44,8 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("opens account status behind the Dictate mark and enables encrypted sync", async () => {
     const sources = [];
+    const invoke = vi.fn().mockResolvedValue(true);
+    window.__TAURI__ = { core: { invoke } };
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
@@ -86,6 +88,16 @@ describe("Quiet Console app (mock mode)", () => {
           }),
         };
       }
+      if (path === "/api/local/export") {
+        return {
+          ok: true,
+          json: async () => ({
+            schema: "dictate.local-export.v1",
+            history: [{ id: "h1", text: "private local history" }],
+            notes: [],
+          }),
+        };
+      }
       return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
     });
 
@@ -112,9 +124,19 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("New laptop")).toBeInTheDocument();
     expect(screen.getByText("Action needed")).toBeInTheDocument();
     expect(screen.getByText("Approve")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Export local data"));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
+      defaultName: "dictate-local-export.json",
+      content: expect.stringContaining("private local history"),
+    })));
+    expect(screen.getByText("Local export saved")).toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://127.0.0.1:1/api/pro/sync/enable",
       expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/local/export",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 

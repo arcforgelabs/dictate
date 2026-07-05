@@ -117,6 +117,9 @@ export const ipc = {
   async unarchiveHistoryItem(id) {
     return call("POST", "/api/history/unarchive", { id });
   },
+  async exportLocalData() {
+    return call("GET", "/api/local/export");
+  },
   async startNoteRecording() {
     return call("POST", "/api/notes/start");
   },
