@@ -394,7 +394,7 @@ fi
 
 DICTATE_BIN="$INSTALL_DIR/venv/bin/dictate"
 if [ -n "$PACKAGE_VERSION" ]; then
-  "$DICTATE_BIN" set-installed-package-version "$PACKAGE_VERSION" >/dev/null 2>&1 || true
+  "$DICTATE_BIN" config set-installed-package-version "$PACKAGE_VERSION" >/dev/null 2>&1 || true
 fi
 
 run_logged_check() {
