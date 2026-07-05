@@ -6,7 +6,7 @@ import json
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -48,6 +48,7 @@ class NoteStore:
 
     def __init__(self, root: Path = NOTES_ROOT) -> None:
         self._root = root
+        self._last_note_timestamp: datetime | None = None
 
     def create_note(
         self,
@@ -59,7 +60,7 @@ class NoteStore:
         mode: str = "note",
     ) -> str:
         note_id = f"note_{uuid.uuid4().hex}"
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = self._next_timestamp().isoformat()
         record = NoteRecord(
             note_id=note_id,
             mode=mode,
@@ -228,6 +229,13 @@ class NoteStore:
 
     def _note_dir(self, note_id: str) -> Path:
         return self._root / note_id
+
+    def _next_timestamp(self) -> datetime:
+        now = datetime.now(timezone.utc)
+        if self._last_note_timestamp is not None and now <= self._last_note_timestamp:
+            now = self._last_note_timestamp + timedelta(microseconds=1)
+        self._last_note_timestamp = now
+        return now
 
 
 def _optional_str(value: object) -> str | None:
