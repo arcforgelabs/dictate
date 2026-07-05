@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -77,7 +76,11 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn("Assert-MsixPackage", script)
         self.assertIn("unpack", script)
         self.assertIn("ArcForgeLabs.ArcForgeDictate", script)
-        self.assertRegex(script, re.compile(r"build --no-bundle"))
+        self.assertIn("building shared Windows desktop payload", script)
+        self.assertIn("build-windows-desktop.ps1", script)
+        self.assertIn('-Bundles "no-bundle"', script)
+        self.assertIn(r"target\release\dictate-ui-shell.exe", script)
+        self.assertIn(r"target\release\engine\dictate-engine.exe", script)
 
     def test_windows_msi_uses_installer_safe_version(self) -> None:
         config = json.loads((ROOT / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(
