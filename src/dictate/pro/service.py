@@ -345,7 +345,9 @@ class ProService:
             period_end=subscription.current_period_end,
             included_seconds=plan.included_batch_meeting_seconds,
         )
-        return self._usage_payload(usage)
+        payload = self._usage_payload(usage)
+        payload["sync"] = self.store.get_sync_storage_usage(account_id)
+        return payload
 
     def create_meeting_job(
         self,

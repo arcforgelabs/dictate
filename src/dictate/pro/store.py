@@ -464,6 +464,66 @@ class ProStore:
             ).fetchall()
             return [_sync_record_row(row) for row in rows]
 
+    def get_sync_storage_usage(self, account_id: str) -> dict[str, int]:
+        """Return account-scoped sync counters without reading plaintext content."""
+        with self._conn() as conn:
+            sync_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS record_count,
+                    COALESCE(SUM(payload_bytes), 0) AS payload_bytes,
+                    COALESCE(SUM(LENGTH(ciphertext)), 0) AS ciphertext_bytes,
+                    COALESCE(SUM(LENGTH(nonce)), 0) AS nonce_bytes,
+                    COALESCE(SUM(LENGTH(aad_hash)), 0) AS aad_hash_bytes
+                FROM sync_records
+                WHERE account_id = ?
+                """,
+                (account_id,),
+            ).fetchone()
+            envelope_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS key_envelope_count,
+                    COALESCE(SUM(LENGTH(envelope_json)), 0) AS key_envelope_bytes
+                FROM key_envelopes
+                WHERE account_id = ?
+                """,
+                (account_id,),
+            ).fetchone()
+            device_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS device_count,
+                    COALESCE(SUM(CASE WHEN trusted_at IS NOT NULL AND revoked_at IS NULL THEN 1 ELSE 0 END), 0)
+                        AS trusted_device_count,
+                    COALESCE(SUM(CASE WHEN trusted_at IS NULL AND revoked_at IS NULL THEN 1 ELSE 0 END), 0)
+                        AS pending_device_count,
+                    COALESCE(SUM(CASE WHEN revoked_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+                        AS revoked_device_count
+                FROM devices
+                WHERE account_id = ?
+                """,
+                (account_id,),
+            ).fetchone()
+        ciphertext_bytes = int(sync_row["ciphertext_bytes"])
+        nonce_bytes = int(sync_row["nonce_bytes"])
+        aad_hash_bytes = int(sync_row["aad_hash_bytes"])
+        key_envelope_bytes = int(envelope_row["key_envelope_bytes"])
+        return {
+            "record_count": int(sync_row["record_count"]),
+            "payload_bytes": int(sync_row["payload_bytes"]),
+            "ciphertext_bytes": ciphertext_bytes,
+            "nonce_bytes": nonce_bytes,
+            "aad_hash_bytes": aad_hash_bytes,
+            "key_envelope_count": int(envelope_row["key_envelope_count"]),
+            "key_envelope_bytes": key_envelope_bytes,
+            "device_count": int(device_row["device_count"]),
+            "trusted_device_count": int(device_row["trusted_device_count"]),
+            "pending_device_count": int(device_row["pending_device_count"]),
+            "revoked_device_count": int(device_row["revoked_device_count"]),
+            "stored_bytes": ciphertext_bytes + nonce_bytes + aad_hash_bytes + key_envelope_bytes,
+        }
+
     def set_sync_cursor(self, *, account_id: str, device_id: str, last_seq: int) -> SyncCursorRow:
         device = device_id.strip()
         if not device:

@@ -147,6 +147,7 @@ class ProServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(upload["job"]["status"], "ready")
         self.assertEqual(upload["usage"]["used_seconds"], 5)
+        self.assertIn("sync", upload["usage"])
 
         status, transcript = _request(
             self.base_url,
@@ -340,6 +341,37 @@ class ProServerTests(unittest.TestCase):
         self.assertNotIn("plaintext should not", json.dumps(exported))
         raw_db = (Path(self._tmp.name) / "pro-control-plane.sqlite3").read_bytes()
         self.assertNotIn(b"plaintext should not", raw_db)
+
+    def test_sync_push_does_not_log_accidental_plaintext_fields(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+        encrypted = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_plaintext_log",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "encrypted private text"},
+            ),
+        )
+        raw = {
+            **asdict(encrypted),
+            "payload": {"text": "plaintext should not be logged"},
+            "text": "plaintext should not be logged",
+        }
+
+        with self.assertLogs("dictate.pro.server", level="INFO") as logs:
+            status, pushed = _request(self.base_url, "POST", "/v1/sync/push", {"records": [raw]}, token=token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("plaintext should not be logged", json.dumps(pushed))
+        self.assertNotIn("plaintext should not be logged", "\n".join(logs.output))
 
     def test_sync_push_rejects_oversized_payloads(self) -> None:
         session = self._sign_in_session()

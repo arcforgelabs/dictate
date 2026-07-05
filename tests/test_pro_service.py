@@ -46,6 +46,8 @@ class ProServiceTests(unittest.TestCase):
         self.assertEqual(entitlements["plan_id"], "dictate_pro_monthly")
         self.assertEqual(usage["included_seconds"], 90_000)
         self.assertEqual(usage["used_seconds"], 0)
+        self.assertEqual(usage["sync"]["record_count"], 0)
+        self.assertEqual(usage["sync"]["trusted_device_count"], 1)
 
     def test_device_revocation_blocks_sync(self) -> None:
         devices = self.service.list_devices(self.account_id)["devices"]
@@ -173,6 +175,38 @@ class ProServiceTests(unittest.TestCase):
         with self.assertRaises(ProServiceError) as ctx:
             self.service.push_sync_records(self.account_id, self.device_id, [raw])
         self.assertEqual(ctx.exception.status, 413)
+
+    def test_usage_includes_sync_storage_counters(self) -> None:
+        key = generate_account_key()
+        record = encrypt_record(
+            "acct_local",
+            key,
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_usage",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=self.device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private storage counter text"},
+            ),
+        )
+        self.service.push_sync_records(self.account_id, self.device_id, [asdict(record)])
+        self.service.save_key_envelope(
+            self.account_id,
+            self.device_id,
+            envelope_kind="recovery",
+            envelope={"version": 1, "ciphertext": "opaque"},
+        )
+
+        sync_usage = self.service.get_current_usage(self.account_id)["sync"]
+
+        self.assertEqual(sync_usage["record_count"], 1)
+        self.assertEqual(sync_usage["payload_bytes"], record.payload_bytes)
+        self.assertGreaterEqual(sync_usage["ciphertext_bytes"], len(record.ciphertext))
+        self.assertEqual(sync_usage["key_envelope_count"], 1)
+        self.assertGreater(sync_usage["stored_bytes"], 0)
 
     def test_export_and_delete_cloud_data(self) -> None:
         record = encrypt_record(
