@@ -614,6 +614,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
         self.assertIn("Linux user install sync smoke", workflow)
         self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
+        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         # The package job gates on the core suites plus platform install smokes.
         self.assertIn("needs: [tests, windows-user-smoke, linux-user-sync-smoke, npm, ui]", workflow)
         self.assertIn("windows-user-smoke", workflow)
@@ -642,6 +643,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
         self.assertIn("Linux user install sync smoke", workflow)
         self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
+        self.assertIn("scripts\\cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
             "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle]",
             workflow,
@@ -664,6 +666,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("Linux user install sync smoke", workflow)
         self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
+        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
             "needs: [validate-release-ref, tests, windows-user-smoke, linux-user-sync-smoke]",
             workflow,

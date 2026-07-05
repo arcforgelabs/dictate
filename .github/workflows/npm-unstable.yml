@@ -61,6 +61,10 @@ jobs:
         if: runner.os == 'Linux'
         run: python scripts/cloud_sync_privacy_audit.py
 
+      - name: Run cloud sync volume smoke on Linux
+        if: runner.os == 'Linux'
+        run: python scripts/cloud_sync_volume_smoke.py
+
       - name: Compile Python sources on Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -95,6 +99,13 @@ jobs:
           .venv\Scripts\python.exe -m unittest discover -s tests -p "test_sync_engine.py"
           .venv\Scripts\python.exe -m unittest discover -s tests -p "test_pro_server.py"
           .venv\Scripts\python.exe -m unittest discover -s tests -p "test_ui_server.py"
+
+      - name: Run cloud sync volume smoke on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: .venv\Scripts\python.exe scripts\cloud_sync_volume_smoke.py
 
       - name: Show version on Linux
         if: runner.os == 'Linux'

@@ -117,6 +117,8 @@ def _audit_release_gates(root: Path) -> list[Finding]:
         text = _read(path)
         if "scripts/cloud_sync_privacy_audit.py" not in text:
             findings.append(Finding(path, 1, "workflow must run cloud sync privacy audit"))
+        if "scripts/cloud_sync_volume_smoke.py" not in text:
+            findings.append(Finding(path, 1, "workflow must run cloud sync volume smoke"))
     return findings
 
 
