@@ -36,6 +36,16 @@ class FakeOnceStt:
         self.released = True
 
 
+class FakeHotwordStt:
+    backend_name = "fake"
+    model_name = "fake-model"
+    capabilities = SttCapabilities(
+        supports_hotwords=True,
+        supports_prompt_bias=True,
+        supports_language_hint=True,
+    )
+
+
 class MainSttSelectionTests(unittest.TestCase):
     def test_saved_selection_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
@@ -448,6 +458,25 @@ class MainSttSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(lexicon_mode, "hybrid")
+
+    def test_resolve_hotwords_redacts_terms_in_routine_output(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            hotwords = main_module._resolve_hotwords(
+                FakeHotwordStt(),
+                config=Config(hotwords=["PrivateProject", "PatientSurname"]),
+                cli_hotwords="SecretClient",
+                lexicon_mode="hybrid",
+            )
+
+        self.assertEqual(hotwords, "PrivateProject PatientSurname SecretClient")
+        output = stderr.getvalue()
+        self.assertIn("Hotwords (native decode): 3 configured terms", output)
+        self.assertIn("Hotwords (prompt bias): 3 configured terms", output)
+        self.assertIn("Hotwords (post correction): 3 configured terms", output)
+        self.assertNotIn("PrivateProject", output)
+        self.assertNotIn("PatientSurname", output)
+        self.assertNotIn("SecretClient", output)
 
     def test_cli_lexicon_mode_overrides_saved_mode(self) -> None:
         parser = main_module.build_parser()

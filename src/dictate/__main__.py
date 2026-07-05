@@ -678,12 +678,13 @@ def _resolve_hotwords(
             file=sys.stderr,
         )
         return None
+    hotword_summary = _hotword_count_summary(words)
     if lexicon_mode in {"native", "hybrid"} and stt.capabilities.supports_hotwords:
-        print(f"Hotwords (native decode): {hotwords_str}", file=sys.stderr)
+        print(f"Hotwords (native decode): {hotword_summary}", file=sys.stderr)
     if lexicon_mode in {"prompt", "hybrid"} and stt.capabilities.supports_prompt_bias:
-        print(f"Hotwords (prompt bias): {hotwords_str}", file=sys.stderr)
+        print(f"Hotwords (prompt bias): {hotword_summary}", file=sys.stderr)
     if lexicon_mode in {"post", "hybrid"}:
-        print(f"Hotwords (post correction): {hotwords_str}", file=sys.stderr)
+        print(f"Hotwords (post correction): {hotword_summary}", file=sys.stderr)
     if lexicon_mode in {"prompt", "hybrid"} and not stt.capabilities.supports_prompt_bias:
         print(
             (
@@ -693,6 +694,12 @@ def _resolve_hotwords(
             file=sys.stderr,
         )
     return hotwords_str
+
+
+def _hotword_count_summary(words: list[str] | tuple[str, ...]) -> str:
+    count = len(words)
+    suffix = "" if count == 1 else "s"
+    return f"{count} configured term{suffix}"
 
 
 def _parse_csv_words(value: str) -> list[str]:
@@ -1054,7 +1061,7 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"meeting_model: {meeting_backend}/{meeting_model}")
         print(f"shortcut: {cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO}")
         hw = cfg.hotwords
-        print(f"hotwords: {len(hw)}" + (f" ({', '.join(hw)})" if hw else ""))
+        print(f"hotwords: {_hotword_count_summary(hw)}")
         print(f"theme: {prefs.get('theme')}")
         print(f"tray-only: {'on' if prefs.get('trayOnly') else 'off'}")
         print(f"overlay: {'on' if prefs.get('overlay') else 'off'}")

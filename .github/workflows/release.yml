@@ -92,6 +92,10 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m compileall src tests scripts
 
+      - name: Run cloud sync privacy audit on Linux
+        if: runner.os == 'Linux'
+        run: python scripts/cloud_sync_privacy_audit.py
+
       - name: Compile Python sources on Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -178,6 +182,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[x11]"
           python -m compileall src tests scripts
+          python scripts/cloud_sync_privacy_audit.py
           python -m unittest discover -s tests
 
       - name: Build distribution artifacts

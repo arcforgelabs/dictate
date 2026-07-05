@@ -113,7 +113,12 @@ Before publishing:
 5. Confirm Microsoft Store draft contents in Partner Center before publish.
 6. Confirm website/legal notices match the release surface.
 7. Confirm no support logs, screenshots, or artifacts contain real API keys,
-   tokens, customer transcript text, private file paths, or payment details.
+   tokens, customer transcript text, synced lexicon terms, private file paths,
+   or payment details.
+8. Run `python scripts/cloud_sync_privacy_audit.py` on the release commit. It
+   checks the current cloud-sync privacy surfaces: routine runtime logs,
+   Dictate Pro server/client logging, crash reports, analytics dependencies,
+   release gates, and support-review documentation.
 
 ## Emergency Rotation
 

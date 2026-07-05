@@ -139,6 +139,23 @@ class ConfigShowTests(unittest.TestCase):
         self.assertIn("update_channel: stable", out)
         self.assertIn("not-set", out)
 
+    def test_show_redacts_hotword_values(self) -> None:
+        from dictate.config import Config
+
+        cfg = Config(
+            stt_backend="faster-whisper",
+            hotwords=["PrivateProject", "PatientSurname"],
+        )
+        with patch("dictate.__main__.load_config", return_value=cfg):
+            with patch("dictate.api_keys.has_stored_api_key", return_value=False):
+                with patch("dictate.api_keys.secret_store_available", return_value=True):
+                    code, out, _ = _run_config(["show"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("hotwords: 2 configured terms", out)
+        self.assertNotIn("PrivateProject", out)
+        self.assertNotIn("PatientSurname", out)
+
     def test_show_online_provider_with_key(self) -> None:
         from dictate.config import Config
 
