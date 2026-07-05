@@ -148,6 +148,12 @@ scripts/build-windows-msix-store.ps1
   verifying
   `dictate 2026.7.4`, and confirming default `dictate doctor --quick
   --type-backend pynput` reports Parakeet v2.
+- Linux user encrypted-sync smoke: `scripts/linux-user-sync-smoke.sh` runs
+  through `install.sh` in an isolated `$HOME`, starts the installed UI control
+  server with a fake Pro gateway, opts into encrypted sync, verifies an offline
+  outbox drains after the gateway returns, and asserts plaintext dictated text
+  is absent from cloud sync records. CI runs this as the
+  `Linux user install sync smoke` job.
 - Current lifecycle smoke evidence: `scripts/windows-vm-smoke.sh --vm
   win11-dev --mode lifecycle --timeout 2400 --keep-guest-workdir` passed on
   2026-07-05 after the same fresh-config install path, update, default Parakeet
