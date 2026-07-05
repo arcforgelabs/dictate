@@ -33,6 +33,8 @@ from queue import Empty, Queue
 from typing import Any, Callable
 from urllib.parse import urlparse, parse_qs
 
+from cryptography.exceptions import InvalidTag
+
 from dictate import api_keys as api_keys_mod
 from dictate import config as config_mod
 from dictate import startup as startup_mod
@@ -56,7 +58,13 @@ from dictate.stt.factory import (
     resolve_model_name,
 )
 from dictate.pro.client import ProClient, ProClientError
-from dictate.sync import SyncSettingsStore, create_recovery_envelope, generate_recovery_key
+from dictate.sync import (
+    SyncSettingsStore,
+    create_recovery_envelope,
+    generate_recovery_key,
+    recover_account_key,
+    recovery_envelope_from_dict,
+)
 from dictate.sync_engine import SyncEngine
 from dictate.version import RELEASE_VERSION
 
@@ -179,6 +187,18 @@ def _optional_positive_float(value: Any) -> float | None:
     if parsed <= 0:
         raise ApiError(400, "audioDurationSeconds must be a positive number")
     return parsed
+
+
+def _first_recovery_envelope(envelopes: Any) -> dict[str, Any] | None:
+    if not isinstance(envelopes, list):
+        return None
+    for item in envelopes:
+        if not isinstance(item, dict):
+            continue
+        envelope = item.get("envelope")
+        if isinstance(envelope, dict):
+            return envelope
+    return None
 
 
 def _dedupe_text(text: str) -> str:
@@ -461,27 +481,47 @@ class UiBackend:
             "lastResult": last_result,
         }
 
-    def enable_sync(self) -> dict[str, Any]:
+    def enable_sync(self, *, recovery_key: str | None = None) -> dict[str, Any]:
         client = self._require_pro_client()
         session = client.refresh_if_needed()
         if session is None:
             raise ApiError(401, "Sign in to Dictate Pro before enabling sync.")
         settings = self._require_sync_settings()
-        state, account_key = settings.enable(session.account_id, device_id=session.device_id)
-        recovery_key = generate_recovery_key()
-        recovery_envelope = create_recovery_envelope(
-            account_id=session.account_id,
-            account_key=account_key,
-            recovery_key=recovery_key,
-        )
-        client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
+        recovery = recovery_key.strip() if isinstance(recovery_key, str) and recovery_key.strip() else None
+        returned_recovery_key = None
+        if recovery:
+            envelopes = client.list_key_envelopes(envelope_kind="recovery").get("envelopes", [])
+            envelope_payload = _first_recovery_envelope(envelopes)
+            if envelope_payload is None:
+                raise ApiError(409, "No recovery key is set up for this Dictate Pro account.")
+            try:
+                account_key = recover_account_key(
+                    account_id=session.account_id,
+                    recovery_key=recovery,
+                    envelope=recovery_envelope_from_dict(envelope_payload),
+                )
+            except (InvalidTag, ValueError) as exc:
+                raise ApiError(400, "Recovery key could not unlock Dictate Pro sync for this account.") from exc
+            state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)
+        else:
+            state, account_key = settings.enable(session.account_id, device_id=session.device_id)
+            returned_recovery_key = generate_recovery_key()
+            recovery_envelope = create_recovery_envelope(
+                account_id=session.account_id,
+                account_key=account_key,
+                recovery_key=returned_recovery_key,
+            )
+            client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
         engine = self._sync_engine()
         engine.attach_outbox()
         self._enqueue_sync_snapshot()
         result = engine.run_once().as_dict()
         if self.broker is not None:
             self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
-        return {"sync": self._sync_state(last_result=result), "recoveryKey": recovery_key, "deviceId": state.device_id}
+        payload = {"sync": self._sync_state(last_result=result), "deviceId": state.device_id}
+        if returned_recovery_key:
+            payload["recoveryKey"] = returned_recovery_key
+        return payload
 
     def disable_sync(self, *, clear_key: bool = False) -> dict[str, Any]:
         settings = self._require_sync_settings()
@@ -1531,7 +1571,8 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/pro/sign-out" and method == "POST":
             return _Response(200, backend.sign_out_pro())
         if path == "/api/pro/sync/enable" and method == "POST":
-            return _Response(200, backend.enable_sync())
+            body = self._read_json() or {}
+            return _Response(200, backend.enable_sync(recovery_key=str(body.get("recoveryKey") or "")))
         if path == "/api/pro/sync/disable" and method == "POST":
             body = self._read_json() or {}
             return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))

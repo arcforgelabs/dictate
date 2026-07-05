@@ -159,8 +159,8 @@ export const ipc = {
   async startUpdate() {
     return call("POST", "/api/update");
   },
-  async enableProSync() {
-    return call("POST", "/api/pro/sync/enable");
+  async enableProSync(recoveryKey = "") {
+    return call("POST", "/api/pro/sync/enable", recoveryKey ? { recoveryKey } : {});
   },
   async disableProSync(clearKey = false) {
     return call("POST", "/api/pro/sync/disable", { clearKey });

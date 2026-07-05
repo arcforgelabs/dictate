@@ -96,6 +96,9 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Version 2026.7.4 · unstable")).toBeInTheDocument();
     expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
     expect(screen.getByText("Sync off")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "dictate-rk-existing" } });
+    expect(screen.getByText("Restore encrypted sync")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "" } });
 
     fireEvent.click(screen.getByText("Enable encrypted sync"));
     await waitFor(() => expect(screen.getByText("Encrypted sync on")).toBeInTheDocument());

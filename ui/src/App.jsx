@@ -244,6 +244,7 @@ function AccountDialog() {
   const signedIn = !!pro.signedIn;
   const [devices, setDevices] = useState([]);
   const [recoveryKey, setRecoveryKey] = useState(null);
+  const [restoreKey, setRestoreKey] = useState("");
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncLabel = sync.enabled
     ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
@@ -276,10 +277,11 @@ function AccountDialog() {
       return;
     }
     s.setSyncBusy(true);
-    ipc.enableProSync()
+    ipc.enableProSync(restoreKey.trim())
       .then((r) => {
         if (r?.sync) s.setSyncState(r.sync);
         if (r?.recoveryKey) setRecoveryKey(r.recoveryKey);
+        setRestoreKey("");
         s.toast("Encrypted sync enabled");
       })
       .catch((e) => s.toast(e.message || "Could not enable sync", { bad: true }))
@@ -393,10 +395,19 @@ function AccountDialog() {
 
         <div className="account-actions">
           {!sync.enabled ? (
-            <button type="button" className="account-primary" disabled={s.syncBusy || !signedIn} onClick={enableSync}>
-              <Icon name="lock" size={14} />
-              <span>Enable encrypted sync</span>
-            </button>
+            <div className="account-enable-stack">
+              <input
+                className="account-input"
+                value={restoreKey}
+                onChange={(e) => setRestoreKey(e.target.value)}
+                placeholder="Recovery key"
+                aria-label="Recovery key"
+              />
+              <button type="button" className="account-primary" disabled={s.syncBusy || !signedIn} onClick={enableSync}>
+                <Icon name="lock" size={14} />
+                <span>{restoreKey.trim() ? "Restore encrypted sync" : "Enable encrypted sync"}</span>
+              </button>
+            </div>
           ) : (
             <>
               <button type="button" className="account-primary" disabled={s.syncBusy || !sync.keyAvailable} onClick={runSync}>

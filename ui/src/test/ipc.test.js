@@ -246,7 +246,11 @@ describe("ipc bridge", () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:1/api/pro/sync/enable",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
     );
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       2,
@@ -285,6 +289,25 @@ describe("ipc bridge", () => {
       7,
       "http://127.0.0.1:1/api/pro/cloud/delete",
       expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer t" } }),
+    );
+  });
+
+  it("passes a recovery key when restoring encrypted sync", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ sync: { enabled: true } }),
+    });
+
+    await expect(ipc.enableProSync("dictate-rk-test")).resolves.toEqual({ sync: { enabled: true } });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/pro/sync/enable",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+        body: JSON.stringify({ recoveryKey: "dictate-rk-test" }),
+      }),
     );
   });
 });

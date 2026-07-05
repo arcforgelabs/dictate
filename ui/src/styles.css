@@ -553,6 +553,9 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .account-row strong{min-width:0;text-align:right;color:var(--fg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .account-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
 .account-actions--split{justify-content:space-between;}
+.account-enable-stack{width:100%;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
+.account-input{height:31px;min-width:0;flex:1;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--fg);padding:0 11px;font-size:12px;outline:none;}
+.account-input:focus{border-color:var(--live);}
 .account-primary,.account-secondary,.account-danger{height:31px;padding:0 13px;border-radius:var(--r-pill);font-size:12px;font-weight:650;
   transition:var(--t-fast);display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;}
 .account-primary{border:1px solid var(--live);background:var(--live-bg);color:var(--live-text);}

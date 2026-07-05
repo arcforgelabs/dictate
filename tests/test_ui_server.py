@@ -225,6 +225,13 @@ class _FakeProClient:
         self.saved_key_envelopes.append({"envelope_kind": envelope_kind, "envelope": envelope})
         return {"envelope_kind": envelope_kind, "envelope": envelope}
 
+    def list_key_envelopes(self, *, envelope_kind: str | None = None) -> dict[str, object]:
+        envelopes = [
+            item for item in self.saved_key_envelopes
+            if envelope_kind is None or item["envelope_kind"] == envelope_kind
+        ]
+        return {"envelopes": envelopes}
+
     def list_devices(self) -> dict[str, object]:
         return {
             "devices": [
@@ -588,6 +595,36 @@ class UiBackendStateTests(unittest.TestCase):
                     for payload in payloads
                 )
             )
+
+    def test_enable_sync_can_restore_existing_key_from_recovery_key(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            sync_settings = _sync_settings(base)
+            pro_client = _FakeProClient()
+            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
+            created = backend.enable_sync()
+            original_key = sync_settings.account_key()
+            assert original_key is not None
+            recovery_key = created["recoveryKey"]
+            sync_settings.disable(clear_key=True)
+
+            restored = backend.enable_sync(recovery_key=recovery_key)
+
+            self.assertTrue(restored["sync"]["enabled"])
+            self.assertNotIn("recoveryKey", restored)
+            self.assertEqual(sync_settings.account_key(), original_key)
+
+    def test_enable_sync_rejects_wrong_recovery_key(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            sync_settings = _sync_settings(base)
+            pro_client = _FakeProClient()
+            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
+            backend.enable_sync()
+            sync_settings.disable(clear_key=True)
+
+            with self.assertRaisesRegex(ApiError, "Recovery key could not unlock"):
+                backend.enable_sync(recovery_key="dictate-rk-wrong")
 
     def test_run_sync_drains_outbox_and_returns_history(self) -> None:
         with tempfile.TemporaryDirectory() as d:
