@@ -46,7 +46,25 @@ export function BreathCradle({
 }) {
   const wrapRef = useRef(null), btnRef = useRef(null), haloRef = useRef(null);
   const S = useRef({ amp: 0, armed: true, last: 0, raf: 0 });
+  const lastProximityPulse = useRef(0);
   const [near, setNear] = useState(false);
+  const [coarse, setCoarse] = useState(false);
+
+  const proximityPulse = () => {
+    if (reduced) return;
+    const now = performance.now();
+    if (now - lastProximityPulse.current < 300) return;
+    lastProximityPulse.current = now;
+    spawnRing(wrapRef.current, now, 0.45);
+  };
+
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: none), (pointer: coarse)");
+    const update = () => setCoarse(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     const wrap = wrapRef.current, btn = btnRef.current, halo = haloRef.current;
@@ -92,25 +110,30 @@ export function BreathCradle({
     return () => { mounted = false; cancelAnimationFrame(st.raf); };
   }, [active, reduced]);
 
+  const engaged = near || coarse;
+  const showRecordHint = !session && engaged;
+  const showPauseHint = active && engaged;
+  const showResumeHint = paused && engaged;
+
   const handleClick = () => {
     if (!session) onStart && onStart();
     else if (paused) onResume && onResume();
     else onPause && onPause();
   };
 
-  const showStopHint = active && near;
-  const showResumeHint = paused && near;
   const wrapClass = "recwrap"
     + (session ? " session" : "")
     + (active ? " live" : "")
     + (paused ? " paused" : "")
-    + (showStopHint ? " stop-hint" : "")
+    + (showRecordHint ? " record-hint" : "")
+    + (showPauseHint ? " pause-hint" : "")
     + (showResumeHint ? " resume-hint" : "");
 
   const btnClass = "recbtn"
     + (active ? " rec" : "")
     + (paused ? " paused" : "")
-    + (showStopHint ? " stop-hint" : "")
+    + (showRecordHint ? " record-hint" : "")
+    + (showPauseHint ? " pause-hint" : "")
     + (showResumeHint ? " resume-hint" : "");
 
   const label = !session
@@ -119,20 +142,27 @@ export function BreathCradle({
       ? "Resume recording"
       : activeLabel;
 
-  const icon = showStopHint
-    ? <Icon name="square" size={34} />
-    : showResumeHint
-      ? <Icon name="play" size={38} />
-      : paused
-        ? <Icon name="pause" size={38} />
-        : <Mark size={42} />;
+  const icon = showRecordHint
+    ? <Icon name="record" size={34} />
+    : showPauseHint
+      ? <Icon name="pause" size={38} />
+      : showResumeHint
+        ? <Icon name="play" size={38} />
+        : paused
+          ? <Icon name="pause" size={38} />
+          : <Mark size={42} />;
 
   return (
     <div
-      className={wrapClass}
-      ref={wrapRef}
-      onMouseEnter={() => setNear(true)}
-      onMouseLeave={() => setNear(false)}
+      className={"recwrap-zone" + (engaged ? " near" : "")}
+      onPointerEnter={() => {
+        setNear(true);
+        proximityPulse();
+      }}
+      onPointerLeave={() => setNear(false)}
+      onFocus={(e) => {
+        if (e.currentTarget.matches?.(":focus-visible")) proximityPulse();
+      }}
       onClick={handleClick}
       role="button"
       tabIndex={0}
@@ -141,14 +171,16 @@ export function BreathCradle({
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); }
       }}
     >
-      <div className="cradle-halo" ref={haloRef} aria-hidden="true" />
-      <div
-        className={btnClass}
-        ref={btnRef}
-        aria-hidden="true"
-        style={active && !showStopHint ? { background: "var(--live-bg)", borderColor: "var(--live)", color: "var(--live)" } : undefined}
-      >
-        <span className="rb-ico">{icon}</span>
+      <div className={wrapClass} ref={wrapRef}>
+        <div className="cradle-halo" ref={haloRef} aria-hidden="true" />
+        <div
+          className={btnClass}
+          ref={btnRef}
+          aria-hidden="true"
+          style={active && !showPauseHint ? { background: "var(--live-bg)", borderColor: "var(--live)", color: "var(--live)" } : undefined}
+        >
+          <span className="rb-ico">{icon}</span>
+        </div>
       </div>
     </div>
   );
@@ -160,23 +192,24 @@ export function BreathCradle({
    mic picks up speech and recede to a faint baseline in silence, so the strip
    literally shows whether audio is being heard.
 
-   Source of truth: the real microphone (Web Audio AnalyserNode) when the
-   browser grants access — so it reacts to your actual voice in the dev loop.
-   If the mic is unavailable or denied, it falls back to the same synthetic
-   speech `envelope` the cradle breathes on, so it's never dead. ──────────── */
+   Source of truth: live mic levels streamed from the Dictate engine over SSE
+   (`audio-level` events). Mock/dev mode may use getUserMedia or a synthetic
+   envelope so the strip is never dead in the browser preview. ──────────── */
 const WAVE_BAR_W = 3;            // bar width (css px)
 const WAVE_GAP = 3;             // gap between bars (css px)
 const WAVE_SLOT = WAVE_BAR_W + WAVE_GAP;
 const WAVE_STEP_MS = 60;        // time between new samples → scroll speed
 
-export function WaveTimeline({ active = true, reduced = false, label = "Listening for speech" }) {
+export function WaveTimeline({ active = true, reduced = false, level = null, live = false, label = "Listening for speech" }) {
   const canvasRef = useRef(null);
   const stateRef = useRef({ samples: [], raf: 0, lastStep: 0, level: 0 });
+  const levelRef = useRef(level);
+  levelRef.current = level;
   const audioRef = useRef({ ctx: null, analyser: null, stream: null, data: null, ready: false });
 
-  // Open the real microphone while active; tear it down on stop/unmount.
+  // Open the browser microphone only in mock/dev mode; live app levels come from the engine.
   useEffect(() => {
-    if (!active || reduced) return;
+    if (!active || reduced || live) return;
     let cancelled = false;
     const a = audioRef.current;
     (async () => {
@@ -203,7 +236,7 @@ export function WaveTimeline({ active = true, reduced = false, label = "Listenin
       if (a.ctx) a.ctx.close().catch(() => {});
       a.ctx = a.analyser = a.stream = a.data = null;
     };
-  }, [active, reduced]);
+  }, [active, reduced, live]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -235,6 +268,8 @@ export function WaveTimeline({ active = true, reduced = false, label = "Listenin
     }
 
     const sampleLevel = (t) => {
+      const ext = levelRef.current;
+      if (typeof ext === "number") return Math.min(1, Math.max(0, ext));
       const a = audioRef.current;
       if (a.ready && a.analyser && a.data) {
         a.analyser.getByteTimeDomainData(a.data);
@@ -243,7 +278,8 @@ export function WaveTimeline({ active = true, reduced = false, label = "Listenin
         const rms = Math.sqrt(sum / a.data.length);
         return Math.min(1, rms * 3.4); // typical speech RMS is small → boost into 0..1
       }
-      return envelope(t); // synthetic speech fallback
+      if (!live) return envelope(t); // mock/dev only — never fake activity in the live app
+      return 0;
     };
 
     // Static reduced-motion view: a calm, fixed baseline of faint ticks.
@@ -305,7 +341,7 @@ export function WaveTimeline({ active = true, reduced = false, label = "Listenin
       cancelAnimationFrame(st.raf);
       ro && ro.disconnect();
     };
-  }, [active, reduced]);
+  }, [active, reduced, live]);
 
   return (
     <div className="wave-timeline" role="img" aria-label={label}>

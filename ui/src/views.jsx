@@ -16,7 +16,7 @@ export function NotebookToggle() {
 
   const closeExpanded = () => {
     s.setNoteView(null);
-    s.setView(s.expandedFrom === "history" ? "history" : "home");
+    s.setView("home");
   };
 
   if (inExpanded) {
@@ -37,7 +37,7 @@ export function NotebookToggle() {
     <button
       type="button"
       className={"view-toggle" + (active ? " on" : "")}
-      aria-label="Dictations"
+      aria-label={active ? "Back to capture" : "Dictations"}
       aria-pressed={active}
       title={active ? "Back to capture" : "Dictations"}
       onClick={() => {
@@ -45,18 +45,19 @@ export function NotebookToggle() {
         s.setView(active ? "home" : "history");
       }}
     >
-      <Icon name="notebook" size={17} />
+      <Icon name={active ? "x" : "notebook"} size={17} />
     </button>
   );
 }
 
 /** Shared top bar — same row geometry as `.notes-search` on the dictations view. */
-export function HomeBar({ left, right }) {
+export function HomeBar({ left, right, meeting }) {
   return (
     <div className="notes-search home-bar">
       {left}
       <span className="notes-search-grow" aria-hidden="true" />
       {right}
+      {meeting}
       <NotebookToggle />
     </div>
   );
@@ -195,6 +196,11 @@ function HistoryView() {
     }
   };
 
+  const archiveNote = (note) => {
+    if (!note?.id) return;
+    s.archiveNote(note);
+  };
+
   const empty = all.length === 0;
 
   return (
@@ -232,7 +238,7 @@ function HistoryView() {
         ) : (
           filtered.map((note) => (
             <div
-              className="note-row"
+              className={"note-row" + (s.leavingNoteIds?.includes(note.id) ? " note-row-leave" : "")}
               key={note.id}
               role="button"
               tabIndex={0}
@@ -245,20 +251,29 @@ function HistoryView() {
                   <span>{formatHistoryTime(note.createdAt)}</span>
                 </div>
               </div>
-              <button
-                className="ibtn nr-action"
-                title="Copy note"
-                onClick={(e) => { e.stopPropagation(); copyNote(note); }}
-              >
-                <Icon name="copy" size={16} />
-              </button>
-              <button
-                className="ibtn nr-action"
-                title="Export as Markdown"
-                onClick={(e) => { e.stopPropagation(); exportNote(note); }}
-              >
-                <Icon name="download" size={16} />
-              </button>
+              <div className="nr-actions">
+                <button
+                  className="ibtn nr-action"
+                  title="Archive note"
+                  onClick={(e) => { e.stopPropagation(); archiveNote(note); }}
+                >
+                  <Icon name="archive" size={16} />
+                </button>
+                <button
+                  className="ibtn nr-action"
+                  title="Copy note"
+                  onClick={(e) => { e.stopPropagation(); copyNote(note); }}
+                >
+                  <Icon name="copy" size={16} />
+                </button>
+                <button
+                  className="ibtn nr-action"
+                  title="Export as Markdown"
+                  onClick={(e) => { e.stopPropagation(); exportNote(note); }}
+                >
+                  <Icon name="download" size={16} />
+                </button>
+              </div>
             </div>
           ))
         )}

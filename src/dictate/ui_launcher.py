@@ -313,19 +313,31 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
         paused: bool = False,
         pause_reason: str | None = None,
         mode: str | None = None,
+        discarded: bool = False,
     ) -> None:
         if prev_note_recording is not None:
             try:
-                prev_note_recording(active, paused=paused, pause_reason=pause_reason, mode=mode)
+                prev_note_recording(
+                    active,
+                    paused=paused,
+                    pause_reason=pause_reason,
+                    mode=mode,
+                    discarded=discarded,
+                )
             except TypeError:
                 try:
-                    prev_note_recording(active, paused=paused, pause_reason=pause_reason)
+                    prev_note_recording(active, paused=paused, pause_reason=pause_reason, mode=mode)
                 except TypeError:
                     try:
-                        prev_note_recording(active, paused=paused)
+                        prev_note_recording(active, paused=paused, pause_reason=pause_reason)
                     except TypeError:
                         try:
-                            prev_note_recording(active)
+                            prev_note_recording(active, paused=paused)
+                        except TypeError:
+                            try:
+                                prev_note_recording(active)
+                            except Exception:  # noqa: BLE001
+                                logger.exception("prior note recording callback failed")
                         except Exception:  # noqa: BLE001
                             logger.exception("prior note recording callback failed")
                     except Exception:  # noqa: BLE001
@@ -339,6 +351,8 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
             payload["pauseReason"] = pause_reason
         if mode:
             payload["mode"] = mode
+        if discarded:
+            payload["discarded"] = True
         broker.publish("note-recording", **payload)
 
     daemon.note_recording_callback = on_note_recording
@@ -372,3 +386,15 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
         broker.publish("history-changed")
 
     daemon.history_callback = on_history
+
+    prev_audio_level = getattr(daemon, "audio_level_callback", None)
+
+    def on_audio_level(level: float) -> None:
+        if prev_audio_level is not None:
+            try:
+                prev_audio_level(level)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior audio level callback failed")
+        broker.publish("audio-level", level=float(level))
+
+    daemon.audio_level_callback = on_audio_level

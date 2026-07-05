@@ -15,9 +15,9 @@ describe("Local engine toggle (English/Multilingual)", () => {
     render(<App />);
     const en = screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed");
     const multi = screen.getByRole("button", { name: "Multilingual" }).getAttribute("aria-pressed");
-    // Mutually exclusive; the default fresh/mock state is faster-whisper → Multilingual.
+    // Mutually exclusive; the default fresh/mock state is Parakeet English.
     expect([en, multi].filter((v) => v === "true")).toHaveLength(1);
-    expect(multi).toBe("true");
+    expect(en).toBe("true");
   });
 
   it("clicking English switches selection to the English engine", () => {

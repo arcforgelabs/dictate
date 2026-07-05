@@ -49,4 +49,40 @@ describe("primitives", () => {
     fireEvent.mouseLeave(wrap);
     expect(wrap).not.toHaveClass("show");
   });
+
+  it("Tooltip hides after click even when the trigger keeps focus", () => {
+    const { container } = render(
+      <div className="win" style={{ width: 400, height: 300 }}>
+        <Tooltip label="Private mode">
+          <button type="button">Toggle</button>
+        </Tooltip>
+      </div>
+    );
+    const wrap = container.querySelector(".tip-wrap");
+    const btn = screen.getByRole("button", { name: "Toggle" });
+    fireEvent.mouseEnter(wrap);
+    expect(wrap).toHaveClass("show");
+    fireEvent.pointerDown(btn);
+    expect(wrap).not.toHaveClass("show");
+    btn.focus();
+    fireEvent.mouseLeave(wrap);
+    expect(wrap).not.toHaveClass("show");
+  });
+
+  it("Tooltip hides when the label changes", () => {
+    const { container, rerender } = render(
+      <Tooltip label="Private mode">
+        <button type="button">Toggle</button>
+      </Tooltip>
+    );
+    const wrap = container.querySelector(".tip-wrap");
+    fireEvent.mouseEnter(wrap);
+    expect(wrap).toHaveClass("show");
+    rerender(
+      <Tooltip label="Cloud mode">
+        <button type="button">Toggle</button>
+      </Tooltip>
+    );
+    expect(wrap).not.toHaveClass("show");
+  });
 });

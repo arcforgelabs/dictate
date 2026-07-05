@@ -137,6 +137,18 @@ class _FakeNoteDaemon:
         self.note_recording_paused = False
         return True
 
+    def cancel_note_recording(self) -> bool:
+        self.calls.append("discard")
+        self.note_recording_active = False
+        self.note_recording_paused = False
+        return True
+
+    def cancel_meeting_recording(self) -> bool:
+        self.calls.append("discard-meeting")
+        self.note_recording_active = False
+        self.note_recording_paused = False
+        return True
+
     def toggle_note_recording(self) -> bool:
         self.calls.append("toggle")
         if self.note_recording_paused:
@@ -477,6 +489,37 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             backend.clear_history()
             self.assertEqual(backend.get_history(), [])
 
+    def test_archive_history_item_hides_note_without_deleting(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            history_store = HistoryStore(Path(d) / "history.json")
+            note_store = NoteStore(Path(d) / "notes")
+            note_id = note_store.create_note(provider="faster-whisper", model="turbo")
+            note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.0,
+                    provider="faster-whisper",
+                    model="turbo",
+                    text="saved note",
+                ),
+            )
+            note_store.mark_ready(note_id, duration_s=1.0)
+            history_store.append("quick dictation")
+            backend = _backend(d, history_store=history_store, note_store=note_store)
+            self.assertEqual(len(backend.get_history()), 2)
+
+            result = backend.archive_history_item(note_id)
+            self.assertEqual(len(result["history"]), 1)
+            self.assertEqual(result["history"][0]["text"], "quick dictation")
+            self.assertTrue(note_store.load_note(note_id).archived)
+
+            history_id = history_store.load(include_archived=True)[0].id
+            result = backend.archive_history_item(history_id)
+            self.assertEqual(result["history"], [])
+            self.assertTrue(history_store.load(include_archived=True)[0].archived)
+
     def test_note_controls_call_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             daemon = _FakeNoteDaemon()
@@ -494,7 +537,32 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertFalse(resumed["paused"])
             self.assertFalse(backend.stop_note_recording()["recording"])
             self.assertTrue(backend.toggle_note_recording()["recording"])
-            self.assertEqual(daemon.calls, ["start", "pause", "resume", "stop", "toggle"])
+            discarded = backend.discard_note_recording()
+            self.assertFalse(discarded["recording"])
+            self.assertFalse(discarded["paused"])
+            self.assertEqual(
+                daemon.calls,
+                ["start", "pause", "resume", "stop", "toggle", "discard"],
+            )
+
+    def test_meeting_discard_calls_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            daemon = _FakeNoteDaemon()
+            backend = _backend(d, daemon=daemon)
+            config_mod.set_stt_selection(
+                "parakeet-pyannote",
+                "parakeet-tdt-0.6b-v2",
+                path=backend.config_path,
+            )
+            with patch("dictate.ui_server.check_backend_readiness") as check_backend_readiness:
+                check_backend_readiness.return_value.errors = []
+                check_backend_readiness.return_value.warnings = []
+                backend.start_meeting_recording()
+            daemon.note_recording_paused = True
+            discarded = backend.discard_meeting_recording()
+            self.assertFalse(discarded["recording"])
+            self.assertFalse(discarded["paused"])
+            self.assertEqual(daemon.calls, ["set-meeting", "start-meeting", "discard-meeting"])
 
     def test_meeting_controls_call_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -816,6 +884,43 @@ class HttpIntegrationTests(unittest.TestCase):
             body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertTrue(body["recording"])
+
+    def test_note_discard_over_http(self) -> None:
+        daemon = _FakeNoteDaemon()
+        daemon.note_recording_active = True
+        daemon.note_recording_paused = True
+        self.handle.backend.daemon = daemon
+        with self._post("/api/notes/discard") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertFalse(body["recording"])
+        self.assertFalse(body["paused"])
+        self.assertEqual(daemon.calls, ["discard"])
+
+    def test_meeting_discard_over_http(self) -> None:
+        daemon = _FakeNoteDaemon()
+        daemon.note_recording_active = True
+        daemon.note_recording_paused = True
+        daemon.long_recording_mode = "meeting"
+        self.handle.backend.daemon = daemon
+        with self._post("/api/meetings/discard") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertFalse(body["recording"])
+        self.assertEqual(daemon.calls, ["discard-meeting"])
+
+    def test_history_unarchive_over_http(self) -> None:
+        backend = self.handle.backend
+        history_id = backend.history_store.load()[0].id if backend.history_store.load() else None
+        if history_id is None:
+            backend.history_store.append("quick dictation")
+            history_id = backend.history_store.load()[0].id
+        backend.archive_history_item(history_id)
+        with self._post("/api/history/unarchive", {"id": history_id}) as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        ids = [item["id"] for item in body["history"]]
+        self.assertIn(history_id, ids)
 
     def test_create_pro_meeting_over_http_passes_audio_duration(self) -> None:
         pro_client = _FakeProClient()

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from dictate.platform_paths import user_data_dir
+from dictate.sync import SyncOutbox
 
 NOTES_ROOT = user_data_dir() / "notes"
 NoteStatus = Literal["recording", "processing", "ready", "failed", "interrupted"]
@@ -27,8 +29,11 @@ class NoteRecord:
     duration_s: float | None
     status: NoteStatus
     speaker_labels: bool
+    archived: bool = False
     recording_id: int | None = None
     error: str | None = None
+    rev: int = 1
+    updated_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -46,9 +51,10 @@ class NoteSegment:
 class NoteStore:
     """Append-only segment log plus atomic note metadata."""
 
-    def __init__(self, root: Path = NOTES_ROOT) -> None:
+    def __init__(self, root: Path = NOTES_ROOT, sync_outbox: SyncOutbox | None = None) -> None:
         self._root = root
         self._last_note_timestamp: datetime | None = None
+        self._sync_outbox = sync_outbox
 
     def create_note(
         self,
@@ -85,6 +91,7 @@ class NoteStore:
         line = json.dumps(asdict(segment), ensure_ascii=False)
         with (note_dir / "segments.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+        self._enqueue_segment(note_id, segment)
 
     def load_note(self, note_id: str) -> NoteRecord | None:
         path = self._note_dir(note_id) / "note.json"
@@ -106,11 +113,14 @@ class NoteStore:
             duration_s=raw.get("duration_s"),
             status=raw.get("status", "recording"),
             speaker_labels=bool(raw.get("speaker_labels", False)),
+            archived=bool(raw.get("archived", False)),
             recording_id=raw.get("recording_id"),
             error=raw.get("error"),
+            rev=_positive_int(raw.get("rev"), 1),
+            updated_at=_optional_str(raw.get("updated_at")),
         )
 
-    def list_notes(self, *, limit: int = 50) -> list[NoteRecord]:
+    def list_notes(self, *, limit: int = 50, include_archived: bool = False) -> list[NoteRecord]:
         if not self._root.is_dir():
             return []
         notes: list[NoteRecord] = []
@@ -118,10 +128,55 @@ class NoteStore:
             if not note_dir.is_dir():
                 continue
             note = self.load_note(note_dir.name)
-            if note is not None:
-                notes.append(note)
+            if note is None:
+                continue
+            if note.archived and not include_archived:
+                continue
+            notes.append(note)
         notes.sort(key=_note_sort_key, reverse=True)
         return notes[: max(0, limit)]
+
+    def archive_note(self, note_id: str) -> bool:
+        record = self.load_note(note_id)
+        if record is None:
+            return False
+        if not record.archived:
+            self._update_note(note_id, archived=True)
+        return True
+
+    def unarchive_note(self, note_id: str) -> bool:
+        record = self.load_note(note_id)
+        if record is None:
+            return False
+        if record.archived:
+            self._update_note(note_id, archived=False)
+        return True
+
+    def delete_note(self, note_id: str) -> bool:
+        note_dir = self._note_dir(note_id)
+        if not note_dir.is_dir():
+            return False
+        record = self.load_note(note_id)
+        shutil.rmtree(note_dir)
+        if record is not None:
+            tombstone = NoteRecord(
+                note_id=record.note_id,
+                mode=record.mode,
+                provider=record.provider,
+                model=record.model,
+                started_at=record.started_at,
+                ended_at=record.ended_at,
+                duration_s=record.duration_s,
+                status=record.status,
+                speaker_labels=record.speaker_labels,
+                archived=record.archived,
+                recording_id=record.recording_id,
+                error=record.error,
+                rev=record.rev + 1,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self._enqueue_note(tombstone, deleted=True)
+        return True
 
     def load_segments(self, note_id: str) -> list[NoteSegment]:
         path = self._note_dir(note_id) / "segments.jsonl"
@@ -201,6 +256,8 @@ class NoteStore:
             return
         data = asdict(record)
         data.update(changes)
+        data["rev"] = record.rev + 1
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._write_note(NoteRecord(**data))
 
     def _write_note(self, record: NoteRecord) -> None:
@@ -226,6 +283,7 @@ class NoteStore:
             except Exception:  # noqa: BLE001
                 pass
             raise
+        self._enqueue_note(record)
 
     def _note_dir(self, note_id: str) -> Path:
         return self._root / note_id
@@ -237,9 +295,41 @@ class NoteStore:
         self._last_note_timestamp = now
         return now
 
+    def _enqueue_note(self, record: NoteRecord, *, deleted: bool = False) -> None:
+        if self._sync_outbox is None:
+            return
+        self._sync_outbox.enqueue(
+            collection="note",
+            record_id=record.note_id,
+            rev=record.rev,
+            updated_at=record.updated_at or record.ended_at or record.started_at,
+            deleted=deleted,
+            content_type="application/vnd.dictate.note+json;v=1",
+            payload=asdict(record),
+        )
+
+    def _enqueue_segment(self, note_id: str, segment: NoteSegment) -> None:
+        if self._sync_outbox is None:
+            return
+        self._sync_outbox.enqueue(
+            collection="segment",
+            record_id=f"{note_id}:{segment.seq}",
+            rev=1,
+            content_type="application/vnd.dictate.segment+json;v=1",
+            payload={"note_id": note_id, **asdict(segment)},
+        )
+
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _note_sort_key(note: NoteRecord) -> str:

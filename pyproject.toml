@@ -9,6 +9,7 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "numpy>=1.26.0",
     "PyYAML>=6.0.0",
+    "cryptography>=42.0.0",
     "sounddevice>=0.5.0",
     # AGC + noise suppression (WebRTC APM) on the capture stream. Linux-only wheels;
     # the code degrades to raw capture where it is unavailable.

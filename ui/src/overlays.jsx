@@ -15,8 +15,10 @@ export function ListeningHUD() {
   }, [s.recording]);
   const mm = String(Math.floor(t / 60)).padStart(1, "0");
   const ss = String(Math.floor(t % 60)).padStart(2, "0");
+  // Push-to-talk only — note capture already shows Recording + WaveTimeline in the cradle stack.
+  const show = s.recording && s.overlay && !s.noteRecording;
   return (
-    <div className={"hud" + (s.recording && s.overlay ? " show" : "")}>
+    <div className={"hud" + (show ? " show" : "")}>
       <div className="hud-pill">
         <span className="reckdot" />
         <Wave active={s.recording} bars={16} h={22} />
@@ -104,21 +106,42 @@ export function Toasts() {
       .catch(() => s.toast("Could not copy", { bad: true }));
   };
 
+  const openToastLink = (href) => {
+    if (typeof window !== "undefined" && href) {
+      window.open(href, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const onToastClick = (t, e) => {
+    if (!t.href || e.target.closest(".toast-act")) return;
+    openToastLink(t.href);
+  };
+
   return (
     <div className="toasts">{s.toasts.map((t) => {
       const iconName = t.icon || (t.bad ? "x" : "check");
       const icColor = t.tone === "amber" ? "var(--amber)" : t.bad ? "var(--danger)" : undefined;
       return (
-        <div className={"toast" + (t.tone ? " " + t.tone : "")} key={t.id}>
+        <div
+          className={"toast" + (t.tone ? " " + t.tone : "") + (t.href ? " toast-link" : "")}
+          key={t.id}
+          onClick={t.href ? (e) => onToastClick(t, e) : undefined}
+        >
           <span className="ic" style={icColor ? { color: icColor } : null}>
             <Icon name={iconName} size={16} /></span>
           <span>{t.msg}</span>
           {t.copy && (
-            <button className="toast-act" type="button" title="Copy" aria-label="Copy" onClick={() => copyToast(t)}>
+            <button className="toast-act" type="button" title="Copy" aria-label="Copy"
+              onClick={(e) => { e.stopPropagation(); copyToast(t); }}>
               <Icon name="copy" size={15} />
             </button>
           )}
-          {t.undo && <button className="toast-act" type="button" onClick={() => { t.undo(); s.dismiss(t.id); }}>Undo</button>}
+          {t.undo && (
+            <button className="toast-act" type="button"
+              onClick={(e) => { e.stopPropagation(); t.undo(); s.dismiss(t.id); }}>
+              Undo
+            </button>
+          )}
         </div>
       );
     })}</div>

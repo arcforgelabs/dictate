@@ -4,9 +4,9 @@
 // only non-home view is the Notes list. All advanced config lives in the
 // `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon, Mark } from "./icons.jsx";
+import { Icon } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS } from "./store.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -156,6 +156,7 @@ function PrivacyPill() {
         bad: true,
         ms: 12_000,
         copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
+        href: DICTATE_PRO_URL,
       });
       return;
     }
@@ -163,11 +164,11 @@ function PrivacyPill() {
   };
 
   return (
-    <Tooltip label={privateOn ? "Private mode" : "Cloud mode"}>
+    <Tooltip label={privateOn ? "Local" : "Pro"}>
       <div className={"privpill" + (degraded ? " degraded" : "")}>
         <Toggle on={privateOn} onChange={onToggle} />
-        <span className="priv-icon" aria-label={privateOn ? "Private mode" : "Cloud mode"}>
-          <Icon name={privateOn ? "shield" : "cloud"} size={23} />
+        <span className="priv-icon" aria-label={privateOn ? "Local" : "Pro"}>
+          <Icon name={privateOn ? "laptop" : "cloud"} size={23} />
         </span>
       </div>
     </Tooltip>
@@ -208,70 +209,38 @@ function UpdatePill() {
   );
 }
 
-function AppInfoButton() {
-  const s = useStore();
+function DiscardConfirmDialog({ meeting, onCancel, onConfirm }) {
+  const confirmRef = useRef(null);
+  useEffect(() => {
+    const t = setTimeout(() => confirmRef.current?.focus(), 40);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const label = meeting ? "meeting" : "note";
   return (
-    <Tooltip label="Dictate">
-      <button
-        type="button"
-        className="appmark-btn"
-        aria-label="Dictate status"
-        title="Dictate"
-        onClick={() => s.setInfoOpen(true)}
+    <div className="confirm-scrim" onMouseDown={onCancel}>
+      <div
+        className="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="discard-title"
+        aria-describedby="discard-desc"
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        <Mark size={18} />
-      </button>
-    </Tooltip>
-  );
-}
-
-function InfoRow({ label, value }) {
-  if (value === undefined || value === null || value === "") return null;
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <code>{value}</code>
-    </div>
-  );
-}
-
-function AppInfoDialog() {
-  const s = useStore();
-  if (!s.infoOpen) return null;
-  const channel = s.updateChannel || "stable";
-  const packageVersion = s.installedPackageVersion || "";
-  const latest = s.updateStatus?.latestVersion || null;
-  const release = packageVersion && packageVersion !== s.version
-    ? `${s.version} (${packageVersion})`
-    : channel === "unstable" && latest
-      ? `${s.version} (${channel}: ${latest})`
-    : s.version;
-  const model = typeof s.model === "string" ? s.model : "";
-  const backend = model.includes("/") ? model.split("/")[0] : model;
-  const provider = s.providerMode === "online" ? "Cloud" : "Private";
-  const health = s.providerHealthy ? "ok" : (s.providerStatus || "attention");
-  return (
-    <div className="info-scrim" onMouseDown={() => s.setInfoOpen(false)}>
-      <div className="info-dialog" role="dialog" aria-modal="true" aria-label="Dictate status" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="info-head">
-          <span className="info-mark"><Mark size={22} /></span>
-          <div>
-            <div className="info-title">Dictate</div>
-            <div className="info-sub">{release}</div>
-          </div>
-          <button type="button" className="info-close" aria-label="Close" onClick={() => s.setInfoOpen(false)}>
-            <Icon name="x" size={15} />
-          </button>
+        <div id="discard-title" className="confirm-title">Discard {label}?</div>
+        <div id="discard-desc" className="confirm-desc">
+          This recording will be deleted and won&apos;t be saved to your notes.
         </div>
-        <div className="info-grid">
-          <InfoRow label="Channel" value={channel} />
-          <InfoRow label="Build" value={packageVersion} />
-          <InfoRow label="Model" value={model} />
-          <InfoRow label="Backend" value={backend} />
-          <InfoRow label="Meeting" value={s.meetingModel} />
-          <InfoRow label="Device" value={s.device2 || "auto"} />
-          <InfoRow label="Compute" value={s.compute || "int8"} />
-          <InfoRow label="Provider" value={`${provider} · ${health}`} />
+        <div className="confirm-actions">
+          <button type="button" className="confirm-secondary" onClick={onCancel}>Cancel</button>
+          <button ref={confirmRef} type="button" className="confirm-danger" autoFocus onClick={onConfirm}>Confirm</button>
         </div>
       </div>
     </div>
@@ -304,11 +273,25 @@ function GsKeyboard() {
 function CaptureHome() {
   const s = useStore();
   const meeting = s.captureMode === "meeting";
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const gettingStarted = !s.noteRecording && (!s.history || s.history.length === 0);
+  useEffect(() => {
+    if (!s.noteRecording || !s.notePaused) setDiscardOpen(false);
+  }, [s.noteRecording, s.notePaused]);
   return (
     <div className="note-home">
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
-      <HomeBar left={<><AppInfoButton /><PrivacyPill /><LocalEngineToggle /></>} right={<UpdatePill />} />
+      <HomeBar
+        left={<><PrivacyPill /><LocalEngineToggle /></>}
+        right={<UpdatePill />}
+        meeting={!s.noteRecording ? (
+          <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
+            <Icon name="users" size={14} />
+            <span>Meeting</span>
+          </button>
+        ) : null}
+      />
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">
@@ -330,7 +313,7 @@ function CaptureHome() {
                   activeLabel={meeting ? "Finish meeting" : "Pause recording"}
                 />
               </div>
-              <div className="note-feedback">
+              <div className={"note-feedback" + (gettingStarted ? " note-feedback--intro" : "")}>
             {s.noteRecording && !s.notePaused ? (
               <>
                 <div className="note-status live">{meeting ? "Meeting" : "Recording"}</div>
@@ -340,7 +323,7 @@ function CaptureHome() {
                     <span>{s.transcript.text}</span><span className="note-caret" />
                   </div>
                 ) : (
-                  <WaveTimeline active reduced={s.reduced} />
+                  <WaveTimeline active reduced={s.reduced} level={s.audioLevel} live={s.live} />
                 )}
               </>
             ) : s.noteRecording && s.notePaused ? (
@@ -349,22 +332,29 @@ function CaptureHome() {
                   {s.notePauseReason === "silence" ? "Paused — no speech detected" : "Paused"}
                 </div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
-                <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
-                  {meeting ? "Finish meeting" : "Finish note"}
-                </button>
+                <div className="note-finish-row">
+                  <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
+                    <Icon name="square" size={14} />
+                    <span>{meeting ? "Finish meeting" : "Finish note"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="note-discard-btn"
+                    aria-label="Discard recording"
+                    title="Discard"
+                    onClick={() => setDiscardOpen(true)}
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                </div>
               </>
             ) : (
               <>
-                <div className="note-status">Ready to dictate</div>
-                <div className="note-status-sub t-mono">Press the mic and speak.</div>
+                <div className="note-status-sub t-mono">Click to dictate</div>
                 <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
-                <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
-                  <Icon name="notebook" size={14} />
-                  <span>Meeting</span>
-                </button>
                 {/* Getting started: teach the key when there are no notes yet */}
                 {(!s.history || s.history.length === 0) && <GsKeyboard />}
-                {/* Live push-to-talk transcript — hide once history has the same note (CopyLastNote). */}
+                {/* Live push-to-talk transcript — hide once history has the same note. */}
                 {s.transcript?.text && !s.transcript.stale && (s.recording || !s.history?.length) && (
                   <div className="note-preview" aria-live="polite">
                     <span>{s.transcript.text}</span>
@@ -376,9 +366,6 @@ function CaptureHome() {
               </div>
             </div>
           </div>
-          <div className="note-screen-footer">
-            <CopyLastNote />
-          </div>
           {/* Degraded recording strip: amber, visible while recording on local fallback */}
           {s.noteRecording && !s.notePaused && s.providerDegraded && (
             <div className="note-longstrip amber t-mono">
@@ -388,42 +375,17 @@ function CaptureHome() {
           )}
         </div>
       </div>
+      {discardOpen && (
+        <DiscardConfirmDialog
+          meeting={meeting}
+          onCancel={() => setDiscardOpen(false)}
+          onConfirm={() => {
+            setDiscardOpen(false);
+            s.discardNoteRecording();
+          }}
+        />
+      )}
     </div>
-  );
-}
-
-/* ── Copy-last row: quiet chip below the cradle for fast reuse of the last note ── */
-function CopyLastNote() {
-  const s = useStore();
-  if (!s.history || s.history.length === 0) return null;
-  if (s.noteRecording) {
-    const latest = s.history[0];
-    return (
-      <button className="lastcap is-reserved" aria-hidden="true" tabIndex={-1} disabled>
-        <span className="lc-ico"><Icon name="copy" size={15} /></span>
-        <span className="lc-body">
-          <span className="lc-text">{latest.text}</span>
-        </span>
-      </button>
-    );
-  }
-  const latest = s.history[0];
-  const handleCopy = () => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(latest.text)
-        .then(() => s.toast("Copied last note"))
-        .catch(() => s.toast("Could not copy", { bad: true }));
-    } else {
-      s.toast("Clipboard not available", { bad: true });
-    }
-  };
-  return (
-    <button className="lastcap" onClick={handleCopy} title="Copy the last note">
-      <span className="lc-ico"><Icon name="copy" size={15} /></span>
-      <span className="lc-body">
-        <span className="lc-text">{latest.text}</span>
-      </span>
-    </button>
   );
 }
 
@@ -473,6 +435,13 @@ function ExpandedNote() {
     }
   };
 
+  const closeExpanded = () => {
+    s.setNoteView(null);
+    s.setView(s.expandedFrom === "history" ? "history" : "home");
+  };
+
+  const backLabel = s.expandedFrom === "history" ? "Back to dictations" : "Back to capture";
+
   return (
     <div className="note-exp-wrap">
       <div className="notes-search note-exp-top">
@@ -482,7 +451,19 @@ function ExpandedNote() {
         <button className="ibtn" title="Export as Markdown" onClick={handleExport}><Icon name="download" size={16} /></button>
         <NotebookToggle />
       </div>
-      <div className="note-exp-body scroll">
+      <div className="note-exp-body">
+        <button
+          type="button"
+          className="note-exp-back-col"
+          aria-label={backLabel}
+          title={backLabel}
+          onClick={closeExpanded}
+        >
+          <span className="note-exp-back-ico" aria-hidden="true">
+            <Icon name="back" size={18} />
+          </span>
+        </button>
+        <div className="note-exp-scroll scroll">
         {normalizeSegments(note.segments).length > 0 ? (
           <div className="note-segments">
             {normalizeSegments(note.segments).map((segment) => {
@@ -491,15 +472,13 @@ function ExpandedNote() {
               const hasEnd = Number.isFinite(segment.tEnd);
               return (
                 <div className="note-segment" key={segment.seq}>
-                  <div className="note-segment-meta">
-                    {label && <span className="note-segment-speaker">{label}</span>}
-                    {(hasStart || hasEnd) && (
-                      <span className="note-segment-time">
-                        {hasStart ? fmtSecs(segment.tStart) : "--"}
-                        {hasEnd ? `-${fmtSecs(segment.tEnd)}` : ""}
-                      </span>
-                    )}
-                  </div>
+                  {label && <span className="note-segment-speaker">{label}</span>}
+                  {(hasStart || hasEnd) && (
+                    <span className="note-segment-time">
+                      {hasStart ? fmtSecs(segment.tStart) : "--"}
+                      {hasEnd ? `-${fmtSecs(segment.tEnd)}` : ""}
+                    </span>
+                  )}
                   <p className="note-segment-text">{segment.text}</p>
                 </div>
               );
@@ -508,6 +487,7 @@ function ExpandedNote() {
         ) : (
           <p className="note-exp-text">{noteText(note)}</p>
         )}
+        </div>
       </div>
     </div>
   );
@@ -519,7 +499,7 @@ function ExpandedNote() {
 export default function App() {
   // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
   const [view, setView] = useState("home");
-  const [model, setModelState] = useState("faster-whisper/turbo");
+  const [model, setModelState] = useState(PRIVATE_MODEL);
   const [meetingModel, setMeetingModelState] = useState("parakeet-pyannote/parakeet-tdt-0.6b-v2");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
@@ -546,6 +526,7 @@ export default function App() {
   const [captureMode, setCaptureMode] = useState("note");
   const [noteText, setNoteText] = useState("");
   const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
+  const [audioLevel, setAudioLevel] = useState(null);
   const [transcript, setTranscript] = useState({ phase: null, text: "", stale: false });
   const [typing, setTyping] = useState(false);
   const [targetText, setTargetText] = useState("");
@@ -556,7 +537,6 @@ export default function App() {
   const [updateChannel, setUpdateChannel] = useState("stable");
   const [installedPackageVersion, setInstalledPackageVersion] = useState("");
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
-  const [infoOpen, setInfoOpen] = useState(false);
   // Update affordance state machine: idle → available → preparing → ready → installing (→ error).
   // The update prepares in the background so the click is instant once "ready".
   const [updatePhase, setUpdatePhase] = useState("idle");
@@ -623,12 +603,21 @@ export default function App() {
   const terminalTranscriptIdOrderRef = useRef([]);
   // noteViewRef: stale-closure-safe read of noteView inside the SSE handler.
   const noteViewRef = useRef(null); noteViewRef.current = noteView;
+  const discardPendingRef = useRef(false);
   const captureModeRef = useRef("note"); captureModeRef.current = captureMode;
   // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
   const watchdogRef = useRef(null);
   // Flash ring: stable refs so triggerFlash can be useCallback([]) and safe in SSE handler.
   const flashIdRef = useRef(0);
   const flashTimerRef = useRef(null);
+  const ARCHIVE_LEAVE_MS = 220;
+  const ARCHIVE_UNDO_LIMIT = 20;
+  const [leavingNoteIds, setLeavingNoteIds] = useState([]);
+  const leavingNoteIdsRef = useRef(new Set());
+  const archiveUndoRef = useRef([]);
+  const archiveTimersRef = useRef(new Map());
+  const currentNoteRef = useRef(null); currentNoteRef.current = currentNote;
+  const expandedFromRef = useRef("capture"); expandedFromRef.current = expandedFrom;
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
@@ -654,6 +643,7 @@ export default function App() {
       if (ev.type === "recording") {
         setRecording(!!ev.active);
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
+        else setAudioLevel(null);
       }
       else if (ev.type === "note-recording") {
         if (ev.paused) {
@@ -661,11 +651,13 @@ export default function App() {
           setNoteRecording(true);
           setNotePaused(true);
           setNotePauseReason(ev.pauseReason || null);
+          setAudioLevel(null);
         } else if (ev.active) {
           if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteRecording(true);
           setNotePaused(false);
           setNotePauseReason(null);
+          setAudioLevel(null);
           // New recording started — clear any stale watchdog, reset note surface.
           clearWatchdog();
           setNoteView(null);
@@ -674,11 +666,23 @@ export default function App() {
           setNoteRecording(false);
           setNotePaused(false);
           setNotePauseReason(null);
-          // Recording finished — show Transcribing… and arm the safety-net watchdog.
+          setAudioLevel(null);
           if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
-          setNoteView("processing");
-          armWatchdog();
+          if (ev.discarded || discardPendingRef.current) {
+            discardPendingRef.current = false;
+            clearWatchdog();
+            setNoteView(null);
+            setCurrentNote(null);
+            setTranscript({ phase: null, text: "", stale: false });
+          } else {
+            // Recording finished — show Transcribing… and arm the safety-net watchdog.
+            setNoteView("processing");
+            armWatchdog();
+          }
         }
+      }
+      else if (ev.type === "audio-level") {
+        if (typeof ev.level === "number") setAudioLevel(ev.level);
       }
       else if (ev.type === "note") {
         // The backend now sends a `status` field on every terminal note outcome.
@@ -928,6 +932,98 @@ export default function App() {
     if (ipc.isLive()) ipc.clearHistory().catch(() => {});
   };
 
+  const archiveNote = useCallback((note) => {
+    if (!note?.id || leavingNoteIdsRef.current.has(note.id)) return;
+    const index = history.findIndex((n) => n.id === note.id);
+    if (index < 0) return;
+
+    leavingNoteIdsRef.current.add(note.id);
+    setLeavingNoteIds((ids) => (ids.includes(note.id) ? ids : [...ids, note.id]));
+
+    archiveUndoRef.current.push({ note, index });
+    if (archiveUndoRef.current.length > ARCHIVE_UNDO_LIMIT) archiveUndoRef.current.shift();
+
+    const cancelRemoval = () => {
+      const timer = archiveTimersRef.current.get(note.id);
+      if (timer) {
+        clearTimeout(timer);
+        archiveTimersRef.current.delete(note.id);
+      }
+    };
+
+    const restoreArchivedNote = () => {
+      cancelRemoval();
+      leavingNoteIdsRef.current.delete(note.id);
+      setLeavingNoteIds((ids) => ids.filter((id) => id !== note.id));
+      setHistory((h) => {
+        if (h.some((n) => n.id === note.id)) return h;
+        const next = [...h];
+        next.splice(Math.min(index, next.length), 0, note);
+        return next;
+      });
+      archiveUndoRef.current = archiveUndoRef.current.filter((item) => item.note.id !== note.id);
+      if (ipc.isLive()) {
+        ipc.unarchiveHistoryItem(note.id).catch(() => {
+          setHistory((h) => h.filter((n) => n.id !== note.id));
+          toast("Could not restore note", { bad: true });
+        });
+      }
+    };
+
+    toast("Note archived", { undo: restoreArchivedNote });
+
+    const timer = setTimeout(() => {
+      archiveTimersRef.current.delete(note.id);
+      leavingNoteIdsRef.current.delete(note.id);
+      setLeavingNoteIds((ids) => ids.filter((id) => id !== note.id));
+      setHistory((h) => h.filter((n) => n.id !== note.id));
+      if (currentNoteRef.current?.id === note.id) {
+        setNoteView(null);
+        setCurrentNote(null);
+        setView(expandedFromRef.current === "history" ? "history" : "home");
+      }
+    }, ARCHIVE_LEAVE_MS);
+    archiveTimersRef.current.set(note.id, timer);
+
+    if (ipc.isLive()) {
+      ipc.archiveHistoryItem(note.id).catch(() => {
+        cancelRemoval();
+        leavingNoteIdsRef.current.delete(note.id);
+        setLeavingNoteIds((ids) => ids.filter((id) => id !== note.id));
+        archiveUndoRef.current = archiveUndoRef.current.filter((item) => item.note.id !== note.id);
+        toast("Could not archive note", { bad: true });
+      });
+    }
+  }, [history, toast]);
+
+  const undoLastArchive = useCallback(() => {
+    const stack = archiveUndoRef.current;
+    if (!stack.length) return false;
+    const { note, index } = stack[stack.length - 1];
+    archiveUndoRef.current = stack.slice(0, -1);
+
+    const timer = archiveTimersRef.current.get(note.id);
+    if (timer) {
+      clearTimeout(timer);
+      archiveTimersRef.current.delete(note.id);
+    }
+    leavingNoteIdsRef.current.delete(note.id);
+    setLeavingNoteIds((ids) => ids.filter((id) => id !== note.id));
+    setHistory((h) => {
+      if (h.some((n) => n.id === note.id)) return h;
+      const next = [...h];
+      next.splice(Math.min(index, next.length), 0, note);
+      return next;
+    });
+    if (ipc.isLive()) {
+      ipc.unarchiveHistoryItem(note.id).catch(() => {
+        setHistory((h) => h.filter((n) => n.id !== note.id));
+        toast("Could not restore note", { bad: true });
+      });
+    }
+    return true;
+  }, [toast]);
+
   // triggerFlash: one-shot ring pulse on the cradle on every provider switch. Never silent.
   const triggerFlash = useCallback((to) => {
     const id = ++flashIdRef.current;
@@ -1078,11 +1174,50 @@ export default function App() {
       .catch((e) => toast(e.message || "Could not finish recording", { bad: true }));
   };
 
+  const discardNoteRecording = () => {
+    if (!noteRecording) return;
+    const reset = () => {
+      setNoteRecording(false);
+      setNotePaused(false);
+      setNotePauseReason(null);
+      setNoteView(null);
+      setCurrentNote(null);
+      setNoteElapsed(0);
+      setTranscript({ phase: null, text: "", stale: false });
+      clearWatchdog();
+    };
+    if (!ipc.isLive()) {
+      if (!ipc.isMockMode()) {
+        reset();
+        toast("Dictate engine is not connected", { bad: true });
+        return;
+      }
+      reset();
+      return;
+    }
+    discardPendingRef.current = true;
+    const discard = captureMode === "meeting" ? ipc.discardMeetingRecording : ipc.discardNoteRecording;
+    discard()
+      .then((r) => {
+        applyNoteState(r);
+        reset();
+      })
+      .catch((e) => {
+        discardPendingRef.current = false;
+        toast(e.message || "Could not discard recording", { bad: true });
+      });
+  };
+
   const toggleNoteRecording = () => {
     if (!noteRecording) startNoteRecording();
     else if (notePaused) resumeNoteRecording();
     else finishNoteRecording();
   };
+
+  const finishNoteRef = useRef(finishNoteRecording);
+  finishNoteRef.current = finishNoteRecording;
+  const noteRecRef = useRef(false); noteRecRef.current = noteRecording;
+  const notePausedRef = useRef(false); notePausedRef.current = notePaused;
 
   const runDoctor = (cb) => {
     if (ipc.isLive()) { ipc.runDoctor().then(cb).catch(() => cb(mockDoctor())); }
@@ -1209,15 +1344,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!infoOpen) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setInfoOpen(false);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [infoOpen]);
-
   // ---- dictation demo (mock mode only; live mode is driven by SSE) ----
   const typeText = (phrase) => {
     setTyping(true);
@@ -1244,13 +1370,27 @@ export default function App() {
   // ---- global keyboard: ⌘K palette + push-to-talk demo (Right Ctrl) ----
   useEffect(() => {
     const down = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        if (!archiveUndoRef.current.length) return;
+        e.preventDefault();
+        undoLastArchive();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
-      if (capRef.current || live) return;
       if (e.code === "ControlRight" && !e.repeat) {
+        if (live && noteRecRef.current && !notePausedRef.current && actRef.current === "hold") {
+          e.preventDefault();
+          finishNoteRef.current();
+          return;
+        }
+        if (capRef.current || live) return;
         e.preventDefault();
         if (actRef.current === "toggle") { recRef.current ? dictateStop() : dictateStart(); }
         else dictateStart();
+        return;
       }
+      if (capRef.current || live) return;
     };
     const up = (e) => {
       if (capRef.current || live) return;
@@ -1259,7 +1399,7 @@ export default function App() {
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); };
-  }, [live]);
+  }, [live, undoLastArchive]);
 
   // ---- fit-to-viewport scaler (a real 1100×768 Tauri window stays at 1.0) ----
   const winRef = useRef(null);
@@ -1282,23 +1422,24 @@ export default function App() {
   const store = {
     view, setView, model, setModel, keys, addKey, saveKey, shortcut, setShortcut, activation, setActivation,
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
-    history, clearHistory, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
+    history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
     recording, noteRecording, notePaused, notePauseReason, captureMode, noteText,
-    startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
+    startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording,
+    finishNoteRecording, discardNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateChannel, installedPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
     // Update affordance
     updatePhase, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
-    noteElapsed, reduced,
+    noteElapsed, reduced, audioLevel, live,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
     // Provider health — on-device is always available; degraded = fell back from the online provider
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
-    flash, hydrateProviderHealth, infoOpen, setInfoOpen, meetingModel,
+    flash, hydrateProviderHealth, meetingModel,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -1332,7 +1473,6 @@ export default function App() {
 
         <ListeningHUD />
         <CommandPalette />
-        <AppInfoDialog />
         <Toasts />
       </div>
     </StoreCtx.Provider>

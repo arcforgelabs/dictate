@@ -67,6 +67,7 @@ class Daemon:
         transcript_callback: Callable[[dict[str, object]], None] | None = None,
         note_recording_callback: Callable[[bool], None] | None = None,
         note_callback: Callable[[dict[str, object]], None] | None = None,
+        audio_level_callback: Callable[[float], None] | None = None,
         recorder: AudioRecorder | None = None,
         supervisor: ProviderSupervisor | None = None,
         meeting_stt: SpeechToText | None = None,
@@ -82,6 +83,7 @@ class Daemon:
         self.transcript_callback = transcript_callback
         self.note_recording_callback = note_recording_callback
         self.note_callback = note_callback
+        self.audio_level_callback = audio_level_callback
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.supervisor = supervisor
         self.engine = DictationEngine(
@@ -248,13 +250,14 @@ class Daemon:
                         note_chunks=self._is_note_streaming(recording_id),
                         note_chunk_seq_offset=seq_offset,
                         note_time_offset_s=time_offset_s,
-                        on_samples=self._track_note_silence,
+                        on_samples=self._on_recording_samples,
                     )
                 except TypeError:
                     try:
                         self.recorder.start(
                             recording_id=recording_id,
                             on_chunk=self._queue_recording_chunk if self._recording_uses_streaming(recording_id) else None,
+                            on_samples=self._on_recording_samples,
                         )
                     except TypeError:
                         self.recorder.start()
@@ -289,6 +292,53 @@ class Daemon:
             if recording_id is None or self._recording_mode(recording_id) != "meeting":
                 return False
         self._finalize_recording()
+        return True
+
+    def cancel_note_recording(self) -> bool:
+        """Discard an active or paused note recording without saving a note."""
+        return self._cancel_long_recording("note")
+
+    def cancel_meeting_recording(self) -> bool:
+        """Discard an active or paused meeting recording without saving a note."""
+        return self._cancel_long_recording("meeting")
+
+    def _cancel_long_recording(self, expected_mode: RecordingMode) -> bool:
+        with self._recorder_control_lock:
+            with self._recording_lock:
+                recording_id = self._active_recording_id
+                if recording_id is None or self._recording_mode(recording_id) != expected_mode:
+                    return False
+                note_id = self._recording_note_ids.get(recording_id)
+                recorder_running = self.recorder.is_recording
+            if note_id:
+                try:
+                    self.note_store.delete_note(note_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Could not delete discarded note %s: %s", note_id, exc)
+            with self._queue_lock:
+                self._remember_terminal_recording_locked(recording_id)
+            self._purge_queued_chunks_for_recording(recording_id)
+            if recorder_running:
+                try:
+                    self.recorder.stop()
+                except AudioCaptureError as exc:
+                    print(f"\r  Microphone error: {exc}", file=sys.stderr)
+            with self._recording_lock:
+                if self._active_recording_id == recording_id:
+                    self._active_recording_id = None
+                self._note_recording_paused = False
+                self._note_pause_reason = None
+            self._clear_recording_state(recording_id)
+            self._notify_recording(False)
+            self._notify_note_recording(False, paused=False, mode=expected_mode, discarded=True)
+            self._surface_transcript(
+                phase="final",
+                text="",
+                sequence=None,
+                recording_id=recording_id,
+                stale=True,
+                reason="discarded",
+            )
         return True
 
     def _finish_paused_note_recording(self, recording_id: int) -> None:
@@ -561,7 +611,7 @@ class Daemon:
                                 recording_id=self._active_recording_id,
                                 note_chunks=note_streaming,
                                 overlap_stream=dictation_overlap_stream,
-                                on_samples=self._track_note_silence if mode == "note" else None,
+                                on_samples=self._on_recording_samples,
                             )
                         except TypeError:
                             try:
@@ -572,14 +622,14 @@ class Daemon:
                                     on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                     recording_id=self._active_recording_id,
                                     note_chunks=note_streaming,
-                                    on_samples=self._track_note_silence if mode == "note" else None,
+                                    on_samples=self._on_recording_samples,
                                 )
                             except TypeError:
                                 try:
                                     self.recorder.start(
                                         on_chunk=self._queue_recording_chunk if streaming_enabled else None,
                                         recording_id=self._active_recording_id,
-                                        on_samples=self._track_note_silence if mode == "note" else None,
+                                        on_samples=self._on_recording_samples,
                                     )
                                 except TypeError:
                                     self.recorder.start()
@@ -918,6 +968,28 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Status callback failed: {exc}", file=sys.stderr)
 
+    def _on_recording_samples(self, samples: np.ndarray) -> None:
+        self._emit_audio_level(samples)
+        self._track_note_silence(samples)
+
+    def _emit_audio_level(self, samples: np.ndarray) -> None:
+        if self.audio_level_callback is None:
+            return
+        now = time.monotonic()
+        last = getattr(self, "_last_audio_level_emit", 0.0)
+        if now - last < 0.066:
+            return
+        self._last_audio_level_emit = now
+        if samples.size == 0:
+            level = 0.0
+        else:
+            rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+            level = min(1.0, rms * 3.4)
+        try:
+            self.audio_level_callback(level)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Audio level callback failed: {exc}", file=sys.stderr)
+
     def _track_note_silence(self, samples: np.ndarray) -> None:
         if self._note_recording_paused or self._note_auto_pause_pending:
             return
@@ -956,21 +1028,31 @@ class Daemon:
         paused: bool = False,
         pause_reason: str | None = None,
         mode: RecordingMode | None = None,
+        discarded: bool = False,
     ) -> None:
         if self.note_recording_callback is None:
             return
         if mode is None:
             mode = self.long_recording_mode or "note"
         try:
-            self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason, mode=mode)
+            self.note_recording_callback(
+                recording,
+                paused=paused,
+                pause_reason=pause_reason,
+                mode=mode,
+                discarded=discarded,
+            )
         except TypeError:
             try:
-                self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason)
+                self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason, mode=mode)
             except TypeError:
                 try:
-                    self.note_recording_callback(recording, paused=paused)
+                    self.note_recording_callback(recording, paused=paused, pause_reason=pause_reason)
                 except TypeError:
-                    self.note_recording_callback(recording)
+                    try:
+                        self.note_recording_callback(recording, paused=paused)
+                    except TypeError:
+                        self.note_recording_callback(recording)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Note recording callback failed: {exc}", file=sys.stderr)
 
@@ -1093,6 +1175,39 @@ class Daemon:
                 dropped += 1
             except queue.Empty:
                 return dropped
+
+    def _purge_queued_chunks_for_recording(self, recording_id: int) -> None:
+        kept_partials: list[AudioChunk] = []
+        while True:
+            try:
+                chunk = self._partial_audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            if chunk.recording_id != recording_id:
+                kept_partials.append(chunk)
+        for chunk in kept_partials:
+            try:
+                self._partial_audio_queue.put_nowait(chunk)
+            except queue.Full:
+                logger.warning("Could not restore partial chunk for recording %s", chunk.recording_id)
+
+        kept_finals: list[object] = []
+        while True:
+            try:
+                item = self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                kept_finals.append(item)
+                continue
+            if getattr(item, "recording_id", None) != recording_id:
+                kept_finals.append(item)
+        for item in kept_finals:
+            try:
+                self._audio_queue.put_nowait(item)
+            except queue.Full:
+                rid = getattr(item, "recording_id", None)
+                logger.warning("Could not restore final chunk for recording %s", rid)
 
     def _surface_transcript(
         self,

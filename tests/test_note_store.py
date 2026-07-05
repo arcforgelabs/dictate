@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from dictate.note_store import NoteSegment, NoteStore
+from dictate.sync import SyncOutbox, decrypt_record, generate_account_key
 
 
 class NoteStoreTests(unittest.TestCase):
@@ -95,3 +96,92 @@ class NoteStoreTests(unittest.TestCase):
             note = store.load_note(note_id)
             assert note is not None
             self.assertEqual(note.status, "interrupted")
+
+    def test_archive_note_hides_from_list_but_keeps_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            store.mark_ready(note_id, duration_s=1.0)
+
+            self.assertTrue(store.archive_note(note_id))
+            self.assertEqual(store.list_notes(), [])
+            self.assertEqual(store.list_notes(include_archived=True)[0].note_id, note_id)
+
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertTrue(note.archived)
+
+    def test_unarchive_note_restores_visible_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            store.mark_ready(note_id, duration_s=1.0)
+            self.assertTrue(store.archive_note(note_id))
+            self.assertEqual(store.list_notes(), [])
+
+            self.assertTrue(store.unarchive_note(note_id))
+            notes = store.list_notes()
+            self.assertEqual(len(notes), 1)
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertFalse(note.archived)
+
+    def test_delete_note_removes_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            self.assertTrue(store.delete_note(note_id))
+            self.assertIsNone(store.load_note(note_id))
+            self.assertFalse(store.delete_note(note_id))
+
+    def test_note_and_segment_mutations_enqueue_encrypted_sync_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store = NoteStore(root=Path(tmp) / "notes", sync_outbox=outbox)
+
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.0,
+                    provider="faster-whisper",
+                    model="turbo",
+                    text="private note text",
+                ),
+            )
+            store.mark_ready(note_id, duration_s=1.0)
+
+            raw_outbox = (Path(tmp) / "outbox.jsonl").read_text()
+            self.assertNotIn("private note text", raw_outbox)
+            pending = outbox.pending()
+            self.assertGreaterEqual(len(pending), 3)
+            segment = next(record for record in pending if record.collection == "segment")
+            self.assertEqual(segment.record_id, f"{note_id}:0")
+            self.assertEqual(decrypt_record("acct_1", key, segment)["text"], "private note text")
+
+    def test_delete_note_enqueues_tombstone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store = NoteStore(root=Path(tmp) / "notes", sync_outbox=outbox)
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+
+            self.assertTrue(store.delete_note(note_id))
+
+            tombstone = outbox.pending()[-1]
+            self.assertEqual(tombstone.collection, "note")
+            self.assertEqual(tombstone.record_id, note_id)
+            self.assertTrue(tombstone.deleted)

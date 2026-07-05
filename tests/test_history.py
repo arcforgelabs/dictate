@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from dictate.history import HistoryStore, MAX_ENTRIES
+from dictate.sync import SyncOutbox, decrypt_record, generate_account_key
 
 
 class HistoryStoreTests(unittest.TestCase):
@@ -92,6 +93,70 @@ class HistoryStoreTests(unittest.TestCase):
             entries = store.load()
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].text, "good")
+
+    def test_archive_hides_entry_without_deleting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            store.append("keep me")
+            entry_id = store.load()[0].id
+
+            self.assertTrue(store.archive(entry_id))
+            self.assertEqual(store.load(), [])
+            archived = store.load(include_archived=True)
+            self.assertEqual(len(archived), 1)
+            self.assertTrue(archived[0].archived)
+
+    def test_unarchive_restores_visible_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(path=Path(tmp) / "h.json")
+            store.append("keep me")
+            entry_id = store.load()[0].id
+            store.archive(entry_id)
+            self.assertEqual(store.load(), [])
+
+            self.assertTrue(store.unarchive(entry_id))
+            restored = store.load()
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(restored[0].text, "keep me")
+            self.assertFalse(restored[0].archived)
+
+    def test_append_enqueues_encrypted_sync_record_when_outbox_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store = HistoryStore(path=Path(tmp) / "h.json", sync_outbox=outbox)
+
+            entry = store.append("private dictated text")
+
+            raw_outbox = (Path(tmp) / "outbox.jsonl").read_text()
+            self.assertNotIn("private dictated text", raw_outbox)
+            pending = outbox.pending()
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0].collection, "history")
+            self.assertEqual(pending[0].record_id, entry.id)
+            self.assertEqual(decrypt_record("acct_1", key, pending[0])["text"], "private dictated text")
+
+    def test_trimming_history_does_not_enqueue_delete_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            outbox = SyncOutbox(
+                path=Path(tmp) / "outbox.jsonl",
+                account_id="acct_1",
+                account_key=key,
+                device_id="device_test",
+            )
+            store = HistoryStore(path=Path(tmp) / "h.json", sync_outbox=outbox)
+
+            for i in range(MAX_ENTRIES + 2):
+                store.append(f"text-{i}")
+
+            self.assertEqual(len(store.load()), MAX_ENTRIES)
+            self.assertFalse(any(record.deleted for record in outbox.pending()))
 
 
 if __name__ == "__main__":

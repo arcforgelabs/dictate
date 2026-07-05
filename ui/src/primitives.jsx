@@ -34,21 +34,22 @@ export function Toggle({ on, onChange }) {
 export function Tooltip({ label, children }) {
   const [active, setActive] = useState(false);
 
+  useEffect(() => {
+    setActive(false);
+  }, [label]);
+
   const onBlur = (e) => {
     if (!e.currentTarget.contains(e.relatedTarget)) setActive(false);
-  };
-
-  const onMouseLeave = (e) => {
-    if (!e.currentTarget.contains(document.activeElement)) setActive(false);
   };
 
   return (
     <span
       className={"tip-wrap" + (active ? " show" : "")}
       onMouseEnter={() => setActive(true)}
-      onMouseLeave={onMouseLeave}
+      onMouseLeave={() => setActive(false)}
       onFocus={() => setActive(true)}
       onBlur={onBlur}
+      onPointerDown={() => setActive(false)}
     >
       {children}
       <span className="tip" role="tooltip">{label}</span>

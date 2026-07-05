@@ -696,6 +696,36 @@ class UiBackend:
         self.history_store._save([])  # rolling buffer reset
         return {"history": []}
 
+    def archive_history_item(self, item_id: str) -> dict[str, Any]:
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise ApiError(400, "id is required")
+        item_id = item_id.strip()
+        archived = False
+        if self.note_store is not None:
+            archived = self.note_store.archive_note(item_id)
+        if not archived:
+            archived = self.history_store.archive(item_id)
+        if not archived:
+            raise ApiError(404, "note not found")
+        if self.broker is not None:
+            self.broker.publish("history-changed")
+        return {"history": self.get_history()}
+
+    def unarchive_history_item(self, item_id: str) -> dict[str, Any]:
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise ApiError(400, "id is required")
+        item_id = item_id.strip()
+        restored = False
+        if self.note_store is not None:
+            restored = self.note_store.unarchive_note(item_id)
+        if not restored:
+            restored = self.history_store.unarchive(item_id)
+        if not restored:
+            raise ApiError(404, "note not found")
+        if self.broker is not None:
+            self.broker.publish("history-changed")
+        return {"history": self.get_history()}
+
     def start_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         started = bool(daemon.start_note_recording())
@@ -715,6 +745,16 @@ class UiBackend:
     def stop_meeting_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         daemon.stop_meeting_recording()
+        return self._notes_payload()
+
+    def discard_note_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        daemon.cancel_note_recording()
+        return self._notes_payload()
+
+    def discard_meeting_recording(self) -> dict[str, Any]:
+        daemon = self._require_daemon()
+        daemon.cancel_meeting_recording()
         return self._notes_payload()
 
     def pause_note_recording(self) -> dict[str, Any]:
@@ -1260,6 +1300,12 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, {"history": backend.get_history()})
         if path == "/api/history" and method == "DELETE":
             return _Response(200, backend.clear_history())
+        if path == "/api/history/archive" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.archive_history_item((body or {}).get("id", "")))
+        if path == "/api/history/unarchive" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.unarchive_history_item((body or {}).get("id", "")))
         if path == "/api/notes/start" and method == "POST":
             return _Response(200, backend.start_note_recording())
         if path == "/api/notes/stop" and method == "POST":
@@ -1268,6 +1314,10 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.start_meeting_recording())
         if path == "/api/meetings/stop" and method == "POST":
             return _Response(200, backend.stop_meeting_recording())
+        if path == "/api/notes/discard" and method == "POST":
+            return _Response(200, backend.discard_note_recording())
+        if path == "/api/meetings/discard" and method == "POST":
+            return _Response(200, backend.discard_meeting_recording())
         if path == "/api/notes/pause" and method == "POST":
             return _Response(200, backend.pause_note_recording())
         if path == "/api/notes/resume" and method == "POST":

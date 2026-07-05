@@ -111,6 +111,12 @@ export const ipc = {
   async clearHistory() {
     return call("DELETE", "/api/history");
   },
+  async archiveHistoryItem(id) {
+    return call("POST", "/api/history/archive", { id });
+  },
+  async unarchiveHistoryItem(id) {
+    return call("POST", "/api/history/unarchive", { id });
+  },
   async startNoteRecording() {
     return call("POST", "/api/notes/start");
   },
@@ -122,6 +128,12 @@ export const ipc = {
   },
   async stopMeetingRecording() {
     return call("POST", "/api/meetings/stop");
+  },
+  async discardNoteRecording() {
+    return call("POST", "/api/notes/discard");
+  },
+  async discardMeetingRecording() {
+    return call("POST", "/api/meetings/discard");
   },
   async pauseNoteRecording() {
     return call("POST", "/api/notes/pause");
