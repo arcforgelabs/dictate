@@ -18,6 +18,7 @@ import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ONEFILE = os.environ.get("DICTATE_ONEFILE") == "1"
+WINDOWED = os.name == "nt"
 
 datas, binaries, hiddenimports = [], [], []
 
@@ -95,7 +96,7 @@ if ONEFILE:
         strip=False,
         upx=False,
         runtime_tmpdir=None,
-        console=True,
+        console=not WINDOWED,
     )
 else:
     # onedir: dist/dictate-engine/dictate-engine + _internal/
@@ -109,7 +110,7 @@ else:
         bootloader_ignore_signals=False,
         strip=False,
         upx=False,
-        console=True,
+        console=not WINDOWED,
     )
     coll = COLLECT(
         exe,
