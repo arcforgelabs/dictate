@@ -87,6 +87,27 @@ class ProServiceTests(unittest.TestCase):
             self.service.push_sync_records(self.account_id, self.device_id, [asdict(record)])
         self.assertEqual(ctx.exception.status, 403)
 
+    def test_sync_rejects_oversized_payload_metadata(self) -> None:
+        record = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_oversized",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=self.device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+        raw = {**asdict(record), "payload_bytes": 6 * 1024 * 1024}
+
+        with self.assertRaises(ProServiceError) as ctx:
+            self.service.push_sync_records(self.account_id, self.device_id, [raw])
+        self.assertEqual(ctx.exception.status, 413)
+
     def test_export_and_delete_cloud_data(self) -> None:
         record = encrypt_record(
             "acct_local",

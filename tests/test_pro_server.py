@@ -205,6 +205,65 @@ class ProServerTests(unittest.TestCase):
         )
         self.assertEqual(decrypted["text"], "private dictated text")
 
+    def test_sync_push_drops_accidental_plaintext_fields(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+        encrypted = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_plaintext_bug",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "encrypted private text"},
+            ),
+        )
+        raw = {
+            **asdict(encrypted),
+            "payload": {"text": "plaintext should not be stored"},
+            "text": "plaintext should not be echoed",
+        }
+
+        status, pushed = _request(self.base_url, "POST", "/v1/sync/push", {"records": [raw]}, token=token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("plaintext should not", json.dumps(pushed))
+        status, exported = _request(self.base_url, "GET", "/v1/account/export", token=token)
+        self.assertEqual(status, 200)
+        self.assertNotIn("plaintext should not", json.dumps(exported))
+        raw_db = (Path(self._tmp.name) / "pro-control-plane.sqlite3").read_bytes()
+        self.assertNotIn(b"plaintext should not", raw_db)
+
+    def test_sync_push_rejects_oversized_payloads(self) -> None:
+        session = self._sign_in_session()
+        token = str(session["access_token"])
+        device_id = str(session["device_id"])
+        encrypted = encrypt_record(
+            "acct_local",
+            generate_account_key(),
+            PlainSyncRecord(
+                collection="history",
+                record_id="hist_oversized",
+                rev=1,
+                updated_at="2026-07-05T12:00:00+00:00",
+                device_id=device_id,
+                deleted=False,
+                content_type="application/vnd.dictate.history+json;v=1",
+                payload={"text": "private"},
+            ),
+        )
+        raw = {**asdict(encrypted), "payload_bytes": 6 * 1024 * 1024}
+
+        status, body = _request(self.base_url, "POST", "/v1/sync/push", {"records": [raw]}, token=token)
+
+        self.assertEqual(status, 413)
+        self.assertIn("too large", body["error"])
+
     def test_sync_push_uses_metadata_lww(self) -> None:
         session = self._sign_in_session()
         token = str(session["access_token"])

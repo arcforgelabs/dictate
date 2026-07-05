@@ -15,6 +15,7 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 DEFAULT_PERIOD_GRACE_SECONDS = 259_200  # 3 days
+MAX_SYNC_PAYLOAD_BYTES = 5 * 1024 * 1024
 
 from dictate.pro.auth import ProAuth
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS, plan_for_id, usage_level
@@ -147,6 +148,12 @@ class ProService:
         for record in records:
             if isinstance(record, dict) and str(record.get("device_id") or "") != str(device_id or ""):
                 raise ProServiceError(403, "sync record device mismatch")
+            try:
+                payload_bytes = int(record.get("payload_bytes") or 0) if isinstance(record, dict) else 0
+            except (TypeError, ValueError) as exc:
+                raise ProServiceError(400, "invalid sync payload size") from exc
+            if payload_bytes > MAX_SYNC_PAYLOAD_BYTES:
+                raise ProServiceError(413, "sync payload too large")
         try:
             results = self.store.upsert_sync_records(account_id=account_id, records=records)
         except ValueError as exc:
