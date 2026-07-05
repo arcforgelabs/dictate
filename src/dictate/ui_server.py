@@ -19,6 +19,7 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import secrets
@@ -75,6 +76,7 @@ DEFAULT_PREFS: dict[str, Any] = {
 }
 _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
+_SYNCED_PREF_KEYS = frozenset({"theme", "sound", "ambient"})
 
 # Provider display metadata. Backend ids / models are grounded in stt.factory;
 # only the human-facing bits (brand glyph, key shape, blurb) live here.
@@ -468,6 +470,7 @@ class UiBackend:
         settings.enable(session.account_id)
         engine = self._sync_engine()
         engine.attach_outbox()
+        self._enqueue_sync_snapshot()
         result = engine.run_once().as_dict()
         if self.broker is not None:
             self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
@@ -528,6 +531,75 @@ class UiBackend:
             pro_client=self._require_pro_client(),
             history_store=self.history_store,
             note_store=self.note_store,
+            config_path=self.config_path,
+            prefs_store=self.prefs_store,
+        )
+
+    def _sync_outbox(self):
+        if self.sync_settings is None:
+            return None
+        return self._safe(self.sync_settings.outbox, None)
+
+    def _enqueue_sync_snapshot(self) -> None:
+        outbox = self._sync_outbox()
+        if outbox is None:
+            return
+        prefs = self.prefs_store.load()
+        for key in sorted(_SYNCED_PREF_KEYS):
+            if key in prefs:
+                self._enqueue_synced_pref(key, prefs[key])
+        cfg = config_mod.load_config(self.config_path)
+        for term in cfg.hotwords:
+            self._enqueue_synced_hotword(term, deleted=False)
+        for wrong, right in cfg.lexicon_replacements.items():
+            self._enqueue_synced_replacement(wrong, right, deleted=False)
+
+    def _enqueue_synced_pref(self, key: str, value: Any) -> None:
+        if key not in _SYNCED_PREF_KEYS:
+            return
+        outbox = self._sync_outbox()
+        if outbox is None:
+            return
+        outbox.enqueue(
+            collection="settings",
+            record_id=f"prefs.{key}",
+            content_type="application/vnd.dictate.setting+json;v=1",
+            payload={"key": key, "value": value, "updated_at": self.now().isoformat()},
+        )
+
+    def _enqueue_synced_hotword(self, term: str, *, deleted: bool) -> None:
+        normalized = " ".join(term.split()).casefold()
+        if not normalized:
+            return
+        outbox = self._sync_outbox()
+        if outbox is None:
+            return
+        outbox.enqueue(
+            collection="lexicon",
+            record_id=f"hotword:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}",
+            content_type="application/vnd.dictate.lexicon+json;v=1",
+            payload={"kind": "hotword", "term": term, "updated_at": self.now().isoformat()},
+            deleted=deleted,
+        )
+
+    def _enqueue_synced_replacement(self, wrong: str, right: str | None, *, deleted: bool) -> None:
+        normalized = " ".join(wrong.split()).casefold()
+        if not normalized:
+            return
+        outbox = self._sync_outbox()
+        if outbox is None:
+            return
+        outbox.enqueue(
+            collection="lexicon",
+            record_id=f"replacement:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}",
+            content_type="application/vnd.dictate.lexicon+json;v=1",
+            payload={
+                "kind": "replacement",
+                "wrong": wrong,
+                "right": right or "",
+                "updated_at": self.now().isoformat(),
+            },
+            deleted=deleted,
         )
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:
@@ -733,7 +805,11 @@ class UiBackend:
             raise ApiError(400, "prefs must be an object")
         if "theme" in prefs and prefs["theme"] not in _VALID_THEMES:
             raise ApiError(400, f"invalid theme: {prefs['theme']!r}")
-        return self.prefs_store.update(prefs)
+        updated = self.prefs_store.update(prefs)
+        for key in _SYNCED_PREF_KEYS:
+            if key in prefs:
+                self._enqueue_synced_pref(key, updated[key])
+        return updated
 
     def _set_startup(self, enabled: Any) -> None:
         try:
@@ -749,12 +825,16 @@ class UiBackend:
             if isinstance(word, str):
                 cleaned.extend(config_mod.parse_hotwords_text(word))
         added = config_mod.add_hotwords(cleaned, path=self.config_path)
+        for term in added:
+            self._enqueue_synced_hotword(term, deleted=False)
         return {"added": added, "hotwords": list(config_mod.load_config(self.config_path).hotwords)}
 
     def remove_hotword(self, word: str) -> dict[str, Any]:
         if not isinstance(word, str) or not word.strip():
             raise ApiError(400, "word is required")
         removed = config_mod.remove_hotwords([word], path=self.config_path)
+        for term in removed:
+            self._enqueue_synced_hotword(term, deleted=True)
         return {
             "removed": removed,
             "hotwords": list(config_mod.load_config(self.config_path).hotwords),

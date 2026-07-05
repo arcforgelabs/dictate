@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteStore
 from dictate.pro.client import ProClient
@@ -41,11 +43,15 @@ class SyncEngine:
         pro_client: ProClient,
         history_store: HistoryStore,
         note_store: NoteStore,
+        config_path: Path = config_mod.CONFIG_PATH,
+        prefs_store: Any | None = None,
     ) -> None:
         self.settings = settings
         self.pro_client = pro_client
         self.history_store = history_store
         self.note_store = note_store
+        self.config_path = config_path
+        self.prefs_store = prefs_store
 
     def attach_outbox(self) -> None:
         outbox = self.settings.outbox()
@@ -105,5 +111,42 @@ class SyncEngine:
             return self.note_store.apply_synced_note(payload, deleted=deleted)
         if collection == "segment":
             return self.note_store.apply_synced_segment(payload, deleted=deleted)
-        # Settings and lexicon are intentionally deferred until config split is complete.
+        if collection == "settings":
+            return self.apply_synced_setting(payload, deleted=deleted)
+        if collection == "lexicon":
+            return self.apply_synced_lexicon(payload, deleted=deleted)
+        return False
+
+    def apply_synced_setting(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
+        if deleted:
+            return False
+        key = payload.get("key")
+        if key not in {"theme", "sound", "ambient"}:
+            return False
+        if self.prefs_store is None:
+            return False
+        self.prefs_store.update({str(key): payload.get("value")})
+        return True
+
+    def apply_synced_lexicon(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
+        kind = payload.get("kind")
+        if kind == "hotword":
+            term = payload.get("term")
+            if not isinstance(term, str) or not term.strip():
+                return False
+            if deleted:
+                return bool(config_mod.remove_hotwords([term], path=self.config_path))
+            config_mod.add_hotwords([term], path=self.config_path)
+            return True
+        if kind == "replacement":
+            wrong = payload.get("wrong")
+            right = payload.get("right")
+            if not isinstance(wrong, str) or not wrong.strip():
+                return False
+            if deleted:
+                return bool(config_mod.remove_lexicon_replacements([wrong], path=self.config_path))
+            if not isinstance(right, str) or not right.strip():
+                return False
+            config_mod.add_lexicon_replacements({wrong: right}, path=self.config_path)
+            return True
         return False

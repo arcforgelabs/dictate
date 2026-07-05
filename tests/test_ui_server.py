@@ -15,7 +15,7 @@ from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
 from dictate.pro.client import ProSession
-from dictate.sync import SyncSettingsStore
+from dictate.sync import SyncSettingsStore, decrypt_record
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
@@ -169,6 +169,7 @@ class _FakeProClient:
         self.create_calls: list[dict[str, object]] = []
         self.sync_drains = 0
         self.sync_pulls: list[dict[str, int]] = []
+        self.drained_sync_records = []
         self.session = ProSession(
             account_id="acct_test",
             device_id="device_test",
@@ -206,6 +207,7 @@ class _FakeProClient:
     def drain_sync_outbox(self, outbox):  # noqa: ANN001
         self.sync_drains += 1
         pending = outbox.pending()
+        self.drained_sync_records.extend(pending)
         outbox.replace_pending([])
         return {"pushed": len(pending), "remaining": 0, "results": []}
 
@@ -518,6 +520,36 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(pro_client.sync_drains, 1)
             self.assertEqual(len(backend.history_store._sync_outbox.pending()), 1)
 
+    def test_enable_sync_snapshots_portable_prefs_and_lexicon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            pro_client = _FakeProClient()
+            sync_settings = _sync_settings(base)
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                sync_settings=sync_settings,
+            )
+            backend.patch_config({"prefs": {"theme": "dark", "sound": True}})
+            config_mod.add_hotwords(["OpenClaw"], path=backend.config_path)
+            config_mod.add_lexicon_replacements({"openc law": "OpenClaw"}, path=backend.config_path)
+
+            backend.enable_sync()
+
+            key = sync_settings.account_key()
+            self.assertIsNotNone(key)
+            payloads = [decrypt_record("acct_test", key, record) for record in pro_client.drained_sync_records]
+            self.assertTrue(any(payload.get("key") == "theme" and payload.get("value") == "dark" for payload in payloads))
+            self.assertTrue(any(payload.get("kind") == "hotword" and payload.get("term") == "OpenClaw" for payload in payloads))
+            self.assertTrue(
+                any(
+                    payload.get("kind") == "replacement"
+                    and payload.get("wrong") == "openc law"
+                    and payload.get("right") == "OpenClaw"
+                    for payload in payloads
+                )
+            )
+
     def test_run_sync_drains_outbox_and_returns_history(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             pro_client = _FakeProClient()
@@ -570,6 +602,22 @@ class UiBackendShortcutPrefsTests(unittest.TestCase):
             self.assertEqual(prefs["theme"], "dark")
             self.assertTrue(prefs["sound"])
 
+    def test_synced_prefs_enqueue_when_sync_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            sync_settings = _sync_settings(Path(d))
+            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
+            backend.enable_sync()
+
+            backend.patch_config({"prefs": {"theme": "dark", "trayOnly": False}})
+
+            outbox = sync_settings.outbox()
+            self.assertIsNotNone(outbox)
+            pending = outbox.pending()
+            self.assertEqual([record.collection for record in pending], ["settings"])
+            payload = decrypt_record("acct_test", sync_settings.account_key(), pending[0])
+            self.assertEqual(payload["key"], "theme")
+            self.assertEqual(payload["value"], "dark")
+
     def test_invalid_theme_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(Exception):
@@ -592,6 +640,25 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertIn("Stalwart", res["hotwords"])  # comma-split parsed
             res = backend.remove_hotword("AcmeWidget")
             self.assertNotIn("AcmeWidget", res["hotwords"])
+
+    def test_hotwords_enqueue_lexicon_records_when_sync_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            sync_settings = _sync_settings(Path(d))
+            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
+            backend.enable_sync()
+
+            backend.add_hotwords(["OpenClaw"])
+            backend.remove_hotword("OpenClaw")
+
+            outbox = sync_settings.outbox()
+            self.assertIsNotNone(outbox)
+            pending = outbox.pending()
+            self.assertEqual([record.collection for record in pending], ["lexicon", "lexicon"])
+            self.assertFalse(pending[0].deleted)
+            self.assertTrue(pending[1].deleted)
+            payload = decrypt_record("acct_test", sync_settings.account_key(), pending[0])
+            self.assertEqual(payload["kind"], "hotword")
+            self.assertEqual(payload["term"], "OpenClaw")
 
     def test_history_label_and_clear(self) -> None:
         with tempfile.TemporaryDirectory() as d:

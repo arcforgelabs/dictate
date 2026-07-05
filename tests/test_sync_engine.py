@@ -5,10 +5,12 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 
+from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
 from dictate.sync import PlainSyncRecord, SyncSettingsStore, encrypt_record, generate_account_key
 from dictate.sync_engine import SyncEngine
+from dictate.ui_server import UiPrefsStore
 
 
 class _FakeProClient:
@@ -188,6 +190,87 @@ class SyncEngineTests(unittest.TestCase):
             self.assertTrue(client.drained)
             self.assertEqual(result.pushed, 1)
             self.assertEqual(outbox.pending(), [])
+
+    def test_pull_applies_portable_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            record = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="settings",
+                    record_id="prefs.theme",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:00+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.setting+json;v=1",
+                    payload={"key": "theme", "value": "dark"},
+                ),
+            )
+            prefs = UiPrefsStore(Path(tmp) / "prefs.json")
+            engine = SyncEngine(
+                settings=self._settings(tmp, account_id, key),
+                pro_client=_FakeProClient([{**asdict(record), "seq": 3}]),
+                history_store=HistoryStore(Path(tmp) / "history.json"),
+                note_store=NoteStore(Path(tmp) / "notes"),
+                config_path=Path(tmp) / "config.yaml",
+                prefs_store=prefs,
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.applied, 1)
+            self.assertEqual(prefs.load()["theme"], "dark")
+
+    def test_pull_applies_lexicon_hotword_and_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            account_id = "acct_1"
+            hotword = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="lexicon",
+                    record_id="hotword_1",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:00+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.lexicon+json;v=1",
+                    payload={"kind": "hotword", "term": "OpenClaw"},
+                ),
+            )
+            replacement = encrypt_record(
+                account_id,
+                key,
+                PlainSyncRecord(
+                    collection="lexicon",
+                    record_id="replacement_1",
+                    rev=1,
+                    updated_at="2026-07-05T12:00:01+00:00",
+                    device_id="device_remote",
+                    deleted=False,
+                    content_type="application/vnd.dictate.lexicon+json;v=1",
+                    payload={"kind": "replacement", "wrong": "openc law", "right": "OpenClaw"},
+                ),
+            )
+            config_path = Path(tmp) / "config.yaml"
+            engine = SyncEngine(
+                settings=self._settings(tmp, account_id, key),
+                pro_client=_FakeProClient([{**asdict(hotword), "seq": 4}, {**asdict(replacement), "seq": 5}]),
+                history_store=HistoryStore(Path(tmp) / "history.json"),
+                note_store=NoteStore(Path(tmp) / "notes"),
+                config_path=config_path,
+            )
+
+            result = engine.run_once()
+
+            self.assertEqual(result.applied, 2)
+            cfg = config_mod.load_config(config_path)
+            self.assertIn("OpenClaw", cfg.hotwords)
+            self.assertEqual(cfg.lexicon_replacements["openc law"], "OpenClaw")
 
 
 if __name__ == "__main__":
