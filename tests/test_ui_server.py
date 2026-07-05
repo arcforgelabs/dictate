@@ -237,6 +237,8 @@ class UiBackendStateTests(unittest.TestCase):
             ):
                 state = _backend(d).get_state()
             self.assertIn("version", state)
+            self.assertEqual(state["updateChannel"], "stable")
+            self.assertIsNone(state["installedPackageVersion"])
             self.assertEqual(state["model"]["backend"], "parakeet")
             self.assertEqual(state["model"]["model"], "parakeet-tdt-0.6b-v2")
             self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")

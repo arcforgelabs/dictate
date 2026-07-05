@@ -385,6 +385,8 @@ class UiBackend:
                 "device": cfg.stt_device or "auto",
                 "compute": cfg.stt_compute_type or "int8",
             },
+            "updateChannel": cfg.update_channel or "stable",
+            "installedPackageVersion": cfg.installed_package_version,
             "providers": self._providers(cfg),
             "prefs": prefs,
             "notes": self._notes_payload(),

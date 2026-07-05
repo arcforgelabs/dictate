@@ -5,6 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PACKAGE_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",/\1/p' "$SCRIPT_DIR/package.json" | head -n 1 || true)"
 INSTALL_DIR="$HOME/.local/share/dictate"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -392,6 +393,9 @@ if [ "$SEED_DEFAULT_CONFIG" -eq 1 ]; then
 fi
 
 DICTATE_BIN="$INSTALL_DIR/venv/bin/dictate"
+if [ -n "$PACKAGE_VERSION" ]; then
+  "$DICTATE_BIN" set-installed-package-version "$PACKAGE_VERSION" >/dev/null 2>&1 || true
+fi
 
 run_logged_check() {
   local label="$1"

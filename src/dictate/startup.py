@@ -159,6 +159,7 @@ def _linux_desktop_entry(*, autostart: bool) -> str:
         "Categories=AudioVideo;Audio;",
         "Keywords=voice;speech;transcription;dictation;asr;whisper;canary;",
         "Terminal=false",
+        "StartupWMClass=dictate-ui-shell",
     ]
     if autostart:
         lines.append("X-GNOME-Autostart-enabled=true")

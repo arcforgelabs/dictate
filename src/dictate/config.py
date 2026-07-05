@@ -34,6 +34,7 @@ class Config:
     xai_api_key_command: str | None = None
     gemini_api_key_command: str | None = None
     update_channel: str | None = None
+    installed_package_version: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
@@ -98,6 +99,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     xai_api_key_command = data.get("xai_api_key_command")
     gemini_api_key_command = data.get("gemini_api_key_command")
     update_channel = data.get("update_channel")
+    installed_package_version = data.get("installed_package_version")
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
@@ -118,6 +120,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         gemini_api_key_command = None
     if not isinstance(update_channel, str):
         update_channel = None
+    if not isinstance(installed_package_version, str):
+        installed_package_version = None
 
     return Config(
         hotwords=hotwords,
@@ -135,6 +139,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         xai_api_key_command=xai_api_key_command,
         gemini_api_key_command=gemini_api_key_command,
         update_channel=update_channel,
+        installed_package_version=installed_package_version,
     )
 
 
@@ -241,6 +246,17 @@ def set_update_channel(channel: str, path: Path = CONFIG_PATH) -> str:
         raise ValueError("update channel must be stable or unstable")
     data = _load_raw(path)
     data["update_channel"] = normalized
+    _save_raw(data, path)
+    return normalized
+
+
+def set_installed_package_version(version: str, path: Path = CONFIG_PATH) -> str:
+    """Persist the exact package version used by the installer/updater."""
+    normalized = version.strip()
+    if not normalized or len(normalized) > 128 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+._-]*", normalized):
+        raise ValueError("installed package version is invalid")
+    data = _load_raw(path)
+    data["installed_package_version"] = normalized
     _save_raw(data, path)
     return normalized
 

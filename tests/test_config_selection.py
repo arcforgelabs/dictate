@@ -11,6 +11,7 @@ from dictate.config import (
     parse_hotwords_text,
     remove_lexicon_replacements,
     set_api_key_command,
+    set_installed_package_version,
     set_push_to_talk_combo,
     set_meeting_stt_selection,
     set_stt_runtime_profile,
@@ -139,6 +140,18 @@ class ConfigSelectionTests(unittest.TestCase):
 
             self.assertEqual(saved, "stable")
             self.assertEqual(load_config(path=config_path).update_channel, "stable")
+
+    def test_set_installed_package_version_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+
+            saved = set_installed_package_version("2026.7.4-unstable.123.1", path=config_path)
+
+            self.assertEqual(saved, "2026.7.4-unstable.123.1")
+            self.assertEqual(
+                load_config(path=config_path).installed_package_version,
+                "2026.7.4-unstable.123.1",
+            )
 
     def test_lexicon_replacements_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

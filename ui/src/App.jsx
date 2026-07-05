@@ -4,7 +4,7 @@
 // only non-home view is the Notes list. All advanced config lives in the
 // `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Icon } from "./icons.jsx";
+import { Icon, Mark } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
 import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
@@ -208,6 +208,76 @@ function UpdatePill() {
   );
 }
 
+function AppInfoButton() {
+  const s = useStore();
+  return (
+    <Tooltip label="Dictate">
+      <button
+        type="button"
+        className="appmark-btn"
+        aria-label="Dictate status"
+        title="Dictate"
+        onClick={() => s.setInfoOpen(true)}
+      >
+        <Mark size={18} />
+      </button>
+    </Tooltip>
+  );
+}
+
+function InfoRow({ label, value }) {
+  if (value === undefined || value === null || value === "") return null;
+  return (
+    <div className="info-row">
+      <span>{label}</span>
+      <code>{value}</code>
+    </div>
+  );
+}
+
+function AppInfoDialog() {
+  const s = useStore();
+  if (!s.infoOpen) return null;
+  const channel = s.updateChannel || "stable";
+  const packageVersion = s.installedPackageVersion || "";
+  const latest = s.updateStatus?.latestVersion || null;
+  const release = packageVersion && packageVersion !== s.version
+    ? `${s.version} (${packageVersion})`
+    : channel === "unstable" && latest
+      ? `${s.version} (${channel}: ${latest})`
+    : s.version;
+  const model = typeof s.model === "string" ? s.model : "";
+  const backend = model.includes("/") ? model.split("/")[0] : model;
+  const provider = s.providerMode === "online" ? "Cloud" : "Private";
+  const health = s.providerHealthy ? "ok" : (s.providerStatus || "attention");
+  return (
+    <div className="info-scrim" onMouseDown={() => s.setInfoOpen(false)}>
+      <div className="info-dialog" role="dialog" aria-modal="true" aria-label="Dictate status" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="info-head">
+          <span className="info-mark"><Mark size={22} /></span>
+          <div>
+            <div className="info-title">Dictate</div>
+            <div className="info-sub">{release}</div>
+          </div>
+          <button type="button" className="info-close" aria-label="Close" onClick={() => s.setInfoOpen(false)}>
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+        <div className="info-grid">
+          <InfoRow label="Channel" value={channel} />
+          <InfoRow label="Build" value={packageVersion} />
+          <InfoRow label="Model" value={model} />
+          <InfoRow label="Backend" value={backend} />
+          <InfoRow label="Meeting" value={s.meetingModel} />
+          <InfoRow label="Device" value={s.device2 || "auto"} />
+          <InfoRow label="Compute" value={s.compute || "int8"} />
+          <InfoRow label="Provider" value={`${provider} · ${health}`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Getting-started keyboard: a quiet, aligned keyboard graphic that points at
    Right Ctrl. Shown on the empty home (no notes yet) to teach the one key. ──── */
 function GsKeyboard() {
@@ -238,7 +308,7 @@ function CaptureHome() {
     <div className="note-home">
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
-      <HomeBar left={<><PrivacyPill /><LocalEngineToggle /></>} right={<UpdatePill />} />
+      <HomeBar left={<><AppInfoButton /><PrivacyPill /><LocalEngineToggle /></>} right={<UpdatePill />} />
       <div className="note-home-inner">
         {/* Cradle + feedback */}
         <div className="note-screen">
@@ -450,12 +520,13 @@ export default function App() {
   // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
   const [view, setView] = useState("home");
   const [model, setModelState] = useState("faster-whisper/turbo");
+  const [meetingModel, setMeetingModelState] = useState("parakeet-pyannote/parakeet-tdt-0.6b-v2");
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
   const [device2, setDevice2State] = useState("auto");
-  const [compute] = useState("int8");
+  const [compute, setComputeState] = useState("int8");
   const [hotwords, setHotwords] = useState([]);
   const [history, setHistory] = useState(() => (ipc.isMockMode() ? DEMO_HISTORY() : []));
   // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
@@ -482,7 +553,10 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
+  const [updateChannel, setUpdateChannel] = useState("stable");
+  const [installedPackageVersion, setInstalledPackageVersion] = useState("");
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
+  const [infoOpen, setInfoOpen] = useState(false);
   // Update affordance state machine: idle → available → preparing → ready → installing (→ error).
   // The update prepares in the background so the click is instant once "ready".
   const [updatePhase, setUpdatePhase] = useState("idle");
@@ -712,6 +786,7 @@ export default function App() {
 
   const hydrate = useCallback((st) => {
     if (st.model && st.model.id) setModelState(st.model.id);
+    if (st.meetingModel && st.meetingModel.id) setMeetingModelState(st.meetingModel.id);
     if (st.shortcut) {
       if (Array.isArray(st.shortcut.display)) setShortcutState(st.shortcut.display);
       if (st.shortcut.activation) setActivationState(st.shortcut.activation);
@@ -739,7 +814,10 @@ export default function App() {
     }
     if (typeof st.startup === "boolean") setStartupState(st.startup);
     if (st.device?.device) setDevice2State(st.device.device);
+    if (st.device?.compute) setComputeState(st.device.compute);
     if (st.version) setVersion(st.version);
+    if (st.updateChannel) setUpdateChannel(st.updateChannel);
+    if (typeof st.installedPackageVersion === "string") setInstalledPackageVersion(st.installedPackageVersion);
     if (st.providerHealth) {
       const ph = st.providerHealth;
       setProviderHealthy(!!ph.healthy);
@@ -1131,6 +1209,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!infoOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setInfoOpen(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [infoOpen]);
+
   // ---- dictation demo (mock mode only; live mode is driven by SSE) ----
   const typeText = (phrase) => {
     setTyping(true);
@@ -1201,7 +1288,7 @@ export default function App() {
     startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording, finishNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
-    runDoctor, version, updateStatus, checkUpdates, startUpdate, platform,
+    runDoctor, version, updateChannel, installedPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
     // Update affordance
     updatePhase, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
@@ -1211,7 +1298,7 @@ export default function App() {
     // Provider health — on-device is always available; degraded = fell back from the online provider
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
-    flash, hydrateProviderHealth,
+    flash, hydrateProviderHealth, infoOpen, setInfoOpen, meetingModel,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -1240,6 +1327,7 @@ export default function App() {
 
         <ListeningHUD />
         <CommandPalette />
+        <AppInfoDialog />
         <Toasts />
       </div>
     </StoreCtx.Provider>

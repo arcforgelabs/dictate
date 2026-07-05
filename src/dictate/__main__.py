@@ -39,6 +39,7 @@ from dictate.config import (
     parse_hotwords_text,
     remove_hotwords,
     remove_lexicon_replacements,
+    set_installed_package_version,
     set_meeting_stt_selection,
     set_stt_backend,
     set_stt_selection,
@@ -887,6 +888,9 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     suc = sub.add_parser("set-update-channel", help="Opt into stable or unstable app updates")
     suc.add_argument("channel", choices=["stable", "unstable"])
 
+    sipv = sub.add_parser("set-installed-package-version", help=argparse.SUPPRESS)
+    sipv.add_argument("version")
+
     # show
     sub.add_parser("show", help="Print current config and key status")
 
@@ -1013,6 +1017,12 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"ok: update_channel={channel}")
         return 0
 
+    # ---- set-installed-package-version ------------------------------------
+    if args.cmd == "set-installed-package-version":
+        version = set_installed_package_version(args.version)
+        print(f"ok: installed_package_version={version}")
+        return 0
+
     # ---- show --------------------------------------------------------------
     if args.cmd == "show":
         cfg = load_config()
@@ -1036,6 +1046,8 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"sound: {'on' if prefs.get('sound') else 'off'}")
         update_channel = cfg.update_channel if cfg.update_channel in {"stable", "unstable"} else "stable"
         print(f"update_channel: {update_channel}")
+        if cfg.installed_package_version:
+            print(f"installed_package_version: {cfg.installed_package_version}")
         try:
             from dictate import startup as startup_mod
 
