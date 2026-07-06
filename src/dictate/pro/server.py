@@ -177,17 +177,14 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _discovery_payload(self) -> dict[str, Any]:
+        # Device-code (RFC 8628) is a later episode -- don't advertise the endpoint/grant
+        # until it's actually implemented, or a discovery-honoring client would 404 on it.
         host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
         base = f"http://{host}"
         return {
             "authorization_endpoint": f"{base}/v1/auth/authorize",
             "token_endpoint": f"{base}/v1/auth/token",
-            "device_authorization_endpoint": f"{base}/v1/auth/device-code",
-            "grant_types_supported": [
-                "authorization_code",
-                "urn:ietf:params:oauth:grant-type:device_code",
-                "refresh_token",
-            ],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
             "code_challenge_methods_supported": ["S256"],
         }
 
@@ -257,12 +254,16 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             client_id = str(body.get("client_id", "")).strip()
             if not code or not code_verifier or not redirect_uri or not client_id:
                 raise ApiError(400, "invalid_request")
+            device_id = str(body.get("device_id") or "").strip() or None
+            device_public_key = str(body.get("device_public_key") or "").strip() or None
             try:
                 session = service.auth.exchange_authorization_code(
                     code=code,
                     code_verifier=code_verifier,
                     redirect_uri=redirect_uri,
                     client_id=client_id,
+                    device_id=device_id,
+                    device_public_key=device_public_key,
                 )
             except ValueError as exc:
                 raise ApiError(400, str(exc)) from exc
@@ -350,6 +351,13 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             )
 
         if path == "/v1/auth/desktop" and method == "GET":
+            if not _dev_auto_approve_enabled():
+                # Advertising this endpoint when /v1/auth/authorize can't actually complete
+                # (no portal on the reference server) would make the client bind a listener,
+                # open a browser, and hang to the 300s timeout instead of falling back to
+                # email code. Mirrors the real gateway, which only advertises once it can
+                # complete authorize.
+                raise ApiError(501, "browser sign-in is not available on this reference server")
             return _Response(200, self._discovery_payload())
 
         if path == "/v1/auth/authorize" and method == "GET":

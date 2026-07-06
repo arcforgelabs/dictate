@@ -171,12 +171,18 @@ class ProAuth:
         redirect_uri: str,
         client_id: str,
         device_id: str | None = None,
+        device_public_key: str | None = None,
     ) -> AuthSession:
         code_hash = _hash_code(code)
         row = self._store.get_auth_code(code_hash)
         if row is None:
             raise ValueError("invalid_grant")
-        if row.get("consumed_at"):
+        # Consume immediately, before any validation. Per the OAuth Security BCP (RFC 9700),
+        # an authorization code is single-use regardless of whether the exchange that
+        # consumes it succeeds -- a code that fails PKCE/client/redirect validation must not
+        # remain valid for a second attempt. consume_auth_code() also catches replay of an
+        # already-consumed code (returns False), which is what maps that case to invalid_grant.
+        if not self._store.consume_auth_code(code_hash):
             raise ValueError("invalid_grant")
         expires_at = datetime.fromisoformat(row["expires_at"])
         if expires_at.tzinfo is None:
@@ -190,11 +196,18 @@ class ProAuth:
         expected_challenge = _b64url_sha256(code_verifier)
         if not hmac.compare_digest(expected_challenge, row["code_challenge"]):
             raise ValueError("invalid_grant")
-        # Consume last, after all other checks pass, so a failed exchange never
-        # burns the code (the caller may legitimately retry with the right verifier).
-        if not self._store.consume_auth_code(code_hash):
+        # Mirror complete_sign_in: register (or update) the device and issue a session the
+        # same way the email-code path does, so the returned session isn't dead on arrival --
+        # resolve_access_token()/refresh_session() both gate on device_is_known().
+        device = self._store.register_device(
+            account_id=row["account_id"],
+            device_id=device_id,
+            label=row.get("device_label") or "Desktop",
+            public_key=device_public_key,
+        )
+        if not self._store.device_is_known(account_id=row["account_id"], device_id=device):
             raise ValueError("invalid_grant")
-        return self._issue_session(row["account_id"], device_id or "dictate-desktop")
+        return self._issue_session(row["account_id"], device)
 
     def refresh_session(self, refresh_token: str) -> AuthSession:
         row = self._store.get_auth_token(_hash_token(refresh_token))

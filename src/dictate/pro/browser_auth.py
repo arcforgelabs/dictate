@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import http.server
 import secrets
 import threading
@@ -99,14 +100,19 @@ class LoopbackListener:
                     self._reply(404, _NOT_FOUND_HTML)
                     return
                 query = parse_qs(parsed.query)
-                error = (query.get("error") or [""])[0]
                 state_value = (query.get("state") or [""])[0]
+                if not hmac.compare_digest(state_value, attempt_state):
+                    # A foreign/mismatched hit (stray local process, drive-by <img> probe, or
+                    # an attacker who doesn't know the real state) must never be terminal --
+                    # otherwise anyone who can reach this loopback port could kill a pending
+                    # sign-in with e.g. GET /callback?error=x. Reply generically and keep
+                    # serving; the real callback (correct state) can still arrive after this.
+                    self._reply(200, _ERROR_HTML)
+                    return
+                error = (query.get("error") or [""])[0]
                 code = (query.get("code") or [""])[0]
                 if error:
                     listener._record_error(error)
-                    self._reply(200, _ERROR_HTML)
-                elif state_value != attempt_state:
-                    listener._record_error("state_mismatch")
                     self._reply(200, _ERROR_HTML)
                 elif not code:
                     listener._record_error("invalid_request")

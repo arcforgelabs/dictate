@@ -110,6 +110,39 @@ class BrowserAuthTests(unittest.TestCase):
         self.assertEqual(session.account_id, account.account_id)
         self.assertEqual(result["account_id"], account.account_id)
 
+        # Regression for a P1 finding: exchange_authorization_code() must register the
+        # device (like complete_sign_in does for email code), or the session is dead on
+        # arrival -- resolve_access_token()/refresh_session() both gate on device_is_known()
+        # and would raise "device revoked" on the very first authenticated call.
+        resolved_account_id, resolved_device_id = self.service.auth.resolve_access_token(session.access_token)
+        self.assertEqual(resolved_account_id, account.account_id)
+        self.assertEqual(resolved_device_id, session.device_id)
+
+        stored = json.loads(self.session_path.read_text(encoding="utf-8"))
+        stored["access_expires_at"] = "2000-01-01T00:00:00+00:00"
+        self.session_path.write_text(json.dumps(stored), encoding="utf-8")
+        refreshed = client.refresh_if_needed()
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(refreshed.account_id, account.account_id)
+
+    def test_device_public_key_is_registered_in_legacy_mode(self) -> None:
+        # Regression for a P2 finding: poll_browser_sign_in() must thread device_public_key
+        # into the authorization_code grant for legacy/reference servers (not call the
+        # gateway-only device-register endpoint, which 404s under /v1).
+        client = self._new_client()
+        start = client.start_browser_sign_in(device_label="Keyed Desktop")
+        location = self._drive_authorize(start["authorize_url"], dev_email="keyed@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+
+        result = client.poll_browser_sign_in(device_public_key="pubkey-loopback-1", device_label="Keyed Desktop")
+        self.assertEqual(result["status"], "complete")
+
+        account = self.service.store.get_account_by_email("keyed@example.com")
+        assert account is not None
+        device = self.service.store.get_device(account_id=account.account_id, device_id=result["device_id"])
+        assert device is not None
+        self.assertEqual(device.public_key, "pubkey-loopback-1")
+
     def test_pkce_mismatch_is_rejected_and_no_session_saved(self) -> None:
         client = self._new_client()
         start = client.start_browser_sign_in(device_label="Test Desktop")
@@ -130,14 +163,17 @@ class BrowserAuthTests(unittest.TestCase):
         # The failed attempt is still cleared (idempotent cleanup), not left dangling.
         self.assertIsNone(client._browser_attempt)
 
-    def test_state_mismatch_errors_without_token_exchange(self) -> None:
+    def test_state_mismatch_is_ignored_without_token_exchange_and_real_callback_still_works(self) -> None:
+        # Regression for a P3 finding: a state-mismatched hit (spliced-in code, or a foreign
+        # local process/drive-by probe) must never be terminal -- otherwise anyone who can
+        # reach the loopback port kills the attempt without knowing the real (secret) state.
+        # The listener should ignore it and keep serving for the real callback.
         client = self._new_client()
-        client.start_browser_sign_in(device_label="Test Desktop")
+        start = client.start_browser_sign_in(device_label="Test Desktop")
         listener = client._browser_listener
         assert listener is not None
         redirect_uri = listener.redirect_uri
 
-        # Simulate a spliced-in callback with the wrong state (session-fixation attempt).
         bad_callback = f"{redirect_uri}?code=whatever-code&state=not-the-real-state"
         with urllib.request.urlopen(bad_callback, timeout=10) as response:  # noqa: S310
             self.assertEqual(response.status, 200)
@@ -152,10 +188,32 @@ class BrowserAuthTests(unittest.TestCase):
         client._request = _spy  # type: ignore[method-assign]
 
         result = client.poll_browser_sign_in()
-        self.assertEqual(result["status"], "error")
-        self.assertIn("state", result["reason"])
+        self.assertEqual(result["status"], "pending")
         self.assertEqual(calls, [])  # no token POST was attempted
+        self.assertIsNotNone(client._browser_attempt)  # attempt survives the foreign hit
         self.assertFalse(client.signed_in())
+
+        # The real callback (correct state) still completes normally afterwards.
+        location = self._drive_authorize(start["authorize_url"], dev_email="state@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+        result = client.poll_browser_sign_in()
+        self.assertEqual(result["status"], "complete")
+        self.assertTrue(client.signed_in())
+
+    def test_error_param_with_wrong_state_does_not_terminate_attempt(self) -> None:
+        # Specifically the P3 DoS scenario: GET /callback?error=x from a process that
+        # doesn't know the real state must not kill a pending sign-in.
+        client = self._new_client()
+        client.start_browser_sign_in(device_label="Test Desktop")
+        listener = client._browser_listener
+        assert listener is not None
+
+        foreign_hit = f"{listener.redirect_uri}?error=access_denied&state=not-the-real-state"
+        with urllib.request.urlopen(foreign_hit, timeout=10) as response:  # noqa: S310
+            self.assertEqual(response.status, 200)
+
+        result = client.poll_browser_sign_in()
+        self.assertEqual(result["status"], "pending")
 
     def test_capability_probe_404_raises_501_for_email_fallback(self) -> None:
         class _NoDesktopClient(ProClient):
@@ -189,6 +247,21 @@ class BrowserAuthTests(unittest.TestCase):
             payload = json.loads(response.read().decode("utf-8"))
         self.assertEqual(payload["code_challenge_methods_supported"], ["S256"])
         self.assertIn("authorization_code", payload["grant_types_supported"])
+        # Device-code (RFC 8628) isn't implemented yet -- don't advertise it (P3 finding).
+        self.assertNotIn("urn:ietf:params:oauth:grant-type:device_code", payload["grant_types_supported"])
+        self.assertNotIn("device_authorization_endpoint", payload)
+
+    def test_desktop_discovery_501s_without_dev_auto_approve(self) -> None:
+        # Regression for a P2 finding: advertising capability the server can't actually
+        # complete (authorize hard-501s without the dev flag) would strand the client
+        # waiting on a browser tab that can never finish, instead of falling back to email.
+        os.environ.pop("DICTATE_PRO_DEV_AUTO_APPROVE", None)
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(f"{self.base_url}/v1/auth/desktop", timeout=10)  # noqa: S310
+            self.assertEqual(ctx.exception.code, 501)
+        finally:
+            os.environ["DICTATE_PRO_DEV_AUTO_APPROVE"] = "1"
 
 
 if __name__ == "__main__":

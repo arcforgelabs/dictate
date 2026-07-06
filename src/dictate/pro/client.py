@@ -248,22 +248,29 @@ class ProClient:
             self.cancel_browser_sign_in()
             return {"status": "error", "reason": outcome.get("reason", "unknown")}
         code = outcome["code"]
+        payload: dict[str, Any] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": attempt.code_verifier,
+            "redirect_uri": attempt.redirect_uri,
+            "client_id": "dictate-desktop",
+        }
+        uses_gateway = self._uses_arcforge_gateway()
+        if not uses_gateway:
+            # Legacy/reference servers register the device as part of the grant itself
+            # (mirrors complete_sign_in's /v1/auth/complete payload) rather than via a
+            # separate gateway-only device-register call.
+            existing_session = self.load_session()
+            if existing_session:
+                payload["device_id"] = existing_session.device_id
+            if device_public_key:
+                payload["device_public_key"] = device_public_key
         try:
-            response = self._request(
-                "POST",
-                self._auth_path("token"),
-                {
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "code_verifier": attempt.code_verifier,
-                    "redirect_uri": attempt.redirect_uri,
-                    "client_id": "dictate-desktop",
-                },
-            )
+            response = self._request("POST", self._auth_path("token"), payload)
         finally:
             self.cancel_browser_sign_in()
         session = self._session_from_token_response(response)
-        if device_public_key:
+        if device_public_key and uses_gateway:
             session = self._register_gateway_device(
                 session,
                 device_label=device_label,
