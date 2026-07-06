@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+from types import SimpleNamespace
 import subprocess
 import tempfile
 import sys
@@ -19,6 +20,7 @@ from dictate.version import RELEASE_VERSION
 
 LATEST_RELEASE_URL = "https://api.github.com/repos/arcforgelabs/dictate/releases/latest"
 LATEST_TAGS_URL = "https://api.github.com/repos/arcforgelabs/dictate/tags?per_page=1"
+NPM_PACKAGE_URL = "https://registry.npmjs.org/@arcforgelabs%2fdictate"
 RELEASES_URL = "https://github.com/arcforgelabs/dictate/releases"
 DOCUMENTATION_URL = "https://github.com/arcforgelabs/dictate#readme"
 TERMS_URL = "https://arcforge.au/terms"
@@ -75,21 +77,69 @@ def parse_calver(value: str | None) -> tuple[int, int, int, int] | None:
     return (int(year), int(month), int(day), int(sequence or 0))
 
 
+def _parse_app_version(value: str | None) -> tuple[tuple[int, int, int, int], tuple[int | str, ...]] | None:
+    if not value:
+        return None
+    text = value.strip()
+    match = re.fullmatch(
+        r"v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(?:(\d+)|([0-9A-Za-z][0-9A-Za-z.-]*)))?",
+        text,
+    )
+    if not match:
+        return None
+    year, month, day, sequence, prerelease = match.groups()
+    base = (int(year), int(month), int(day), int(sequence or 0))
+    parts: list[int | str] = []
+    if prerelease:
+        for part in prerelease.split("."):
+            parts.append(int(part) if part.isdigit() else part.lower())
+    return base, tuple(parts)
+
+
+def _compare_prerelease(left: tuple[int | str, ...], right: tuple[int | str, ...]) -> int:
+    if left == right:
+        return 0
+    # Dictate's opt-in unstable lane intentionally treats same-base prerelease
+    # builds as newer than the stable base package, because users have selected
+    # the moving test channel.
+    if left and not right:
+        return 1
+    if right and not left:
+        return -1
+    for l_part, r_part in zip(left, right):
+        if l_part == r_part:
+            continue
+        if isinstance(l_part, int) and isinstance(r_part, int):
+            return 1 if l_part > r_part else -1
+        if isinstance(l_part, int):
+            return -1
+        if isinstance(r_part, int):
+            return 1
+        return 1 if l_part > r_part else -1
+    return 1 if len(left) > len(right) else -1
+
+
 def is_newer_version(latest: str | None, current: str | None = RELEASE_VERSION) -> bool:
-    latest_tuple = parse_calver(latest)
-    current_tuple = parse_calver(current)
+    latest_tuple = _parse_app_version(latest)
+    current_tuple = _parse_app_version(current)
     if latest_tuple is None or current_tuple is None:
         return False
-    return latest_tuple > current_tuple
+    latest_base, latest_prerelease = latest_tuple
+    current_base, current_prerelease = current_tuple
+    if latest_base != current_base:
+        return latest_base > current_base
+    return _compare_prerelease(latest_prerelease, current_prerelease) > 0
 
 
 def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     context = _update_context()
+    cfg = context["config"]
+    current_version = cfg.installed_package_version or RELEASE_VERSION
     try:
-        latest, url = _fetch_latest_release(timeout=timeout)
-        update_available = is_newer_version(latest)
+        latest, url = _fetch_latest_version(cfg.update_channel, timeout=timeout)
+        update_available = is_newer_version(latest, current_version)
         return UpdateStatus(
-            current_version=RELEASE_VERSION,
+            current_version=current_version,
             latest_version=latest,
             update_available=update_available,
             checked=True,
@@ -105,7 +155,7 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
         )
     except Exception as exc:  # noqa: BLE001
         return UpdateStatus(
-            current_version=RELEASE_VERSION,
+            current_version=current_version,
             checked=False,
             error=str(exc),
             platform=context["platform"],
@@ -358,10 +408,15 @@ def _update_context() -> dict[str, object]:
     platform = _platform_key()
     source_root = _find_source_root()
     install_kind = _install_kind(platform, source_root)
+    try:
+        config = load_config()
+    except Exception:  # noqa: BLE001
+        config = SimpleNamespace(update_channel=None, installed_package_version=None)
     return {
         "platform": platform,
         "install_kind": install_kind,
         "source_root": source_root,
+        "config": config,
     }
 
 
@@ -430,6 +485,10 @@ def _npm_update_channel() -> str:
         configured = load_config().update_channel
     except Exception:  # noqa: BLE001
         configured = None
+    return _resolve_update_channel(configured)
+
+
+def _resolve_update_channel(configured: str | None) -> str:
     channel = _normalize_update_channel(configured)
     if channel:
         return channel
@@ -459,6 +518,26 @@ def _normalize_update_channel(value: str | None) -> str | None:
     if channel in {"stable", "unstable"}:
         return channel
     return None
+
+
+def _fetch_latest_version(configured_channel: str | None, *, timeout: float) -> tuple[str, str | None]:
+    channel = _resolve_update_channel(configured_channel)
+    if channel == "unstable":
+        return _fetch_npm_dist_tag("unstable", timeout=timeout)
+    return _fetch_latest_release(timeout=timeout)
+
+
+def _fetch_npm_dist_tag(tag: str, *, timeout: float) -> tuple[str, str | None]:
+    payload = _fetch_json(NPM_PACKAGE_URL, timeout=timeout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("npm registry returned an invalid package payload")
+    dist_tags = payload.get("dist-tags")
+    if not isinstance(dist_tags, dict):
+        raise RuntimeError("npm registry returned no dist-tags")
+    version = dist_tags.get(tag)
+    if not isinstance(version, str) or not _parse_app_version(version):
+        raise RuntimeError(f"npm dist-tag {tag!r} is not a Dictate app version")
+    return version, f"https://www.npmjs.com/package/{NPM_PACKAGE_NAME}/v/{version}"
 
 
 def _windows_update_command(source_root: Path) -> list[str]:
