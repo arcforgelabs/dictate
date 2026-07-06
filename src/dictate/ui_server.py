@@ -94,6 +94,16 @@ _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
 _VALID_OUTPUT_FORMATS = ("plain", "markdown")
 
+
+def _pro_state_active(pro: dict[str, Any] | None) -> bool:
+    if not isinstance(pro, dict):
+        return False
+    if not bool(pro.get("signedIn")):
+        return False
+    entitlements = pro.get("entitlements")
+    return bool(isinstance(entitlements, dict) and entitlements.get("active"))
+
+
 # Provider display metadata. Backend ids / models are grounded in stt.factory;
 # only the human-facing bits (brand glyph, key shape, blurb) live here.
 PROVIDER_META: dict[str, dict[str, Any]] = {
@@ -470,6 +480,12 @@ class UiBackend:
             backend = "faster-whisper"
         model = self._effective_model(cfg, backend)
         meeting_backend, meeting_model = self._meeting_selection(cfg)
+        pro_state = self._dictate_pro_state()
+        if not _pro_state_active(pro_state) and self.sync_settings is not None:
+            sync_state = self.sync_settings.load()
+            if sync_state.enabled:
+                self.sync_settings.disable(clear_key=False)
+                self._sync_engine().attach_outbox()
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
@@ -497,7 +513,7 @@ class UiBackend:
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
             "micConnected": True,
             "providerHealth": self._compute_provider_health(cfg),
-            "dictatePro": self._dictate_pro_state(),
+            "dictatePro": pro_state,
             "sync": self._sync_state(),
         }
 
@@ -566,6 +582,7 @@ class UiBackend:
         session = client.refresh_if_needed()
         if session is None:
             raise ApiError(401, "Sign in to Dictate Pro before enabling sync.")
+        self._require_active_pro_state("Active Dictate Pro access is required before enabling sync.")
         settings = self._require_sync_settings()
         recovery = recovery_key.strip() if isinstance(recovery_key, str) and recovery_key.strip() else None
         returned_recovery_key = None
@@ -649,6 +666,7 @@ class UiBackend:
         return {"sync": self._sync_state()}
 
     def run_sync(self) -> dict[str, Any]:
+        self._require_active_pro_state("Active Dictate Pro access is required before syncing.")
         result = self._sync_engine().run_once().as_dict()
         if self.broker is not None:
             self.broker.publish("history-changed")
@@ -657,14 +675,17 @@ class UiBackend:
 
     def list_pro_devices(self) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
         return client.list_devices()
 
     def revoke_pro_device(self, device_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
         return client.revoke_device(device_id)
 
     def approve_pro_device(self, device_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
         session = client.refresh_if_needed()
         if session is None:
             raise ApiError(401, "Sign in to Dictate Pro before approving a device.")
@@ -727,10 +748,12 @@ class UiBackend:
 
     def export_pro_cloud_data(self) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required to export cloud data.")
         return client.export_cloud_data()
 
     def delete_pro_cloud_data(self) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required to delete cloud data.")
         result = client.delete_cloud_data()
         if self.sync_settings is not None:
             self.sync_settings.disable(clear_key=False)
@@ -746,6 +769,7 @@ class UiBackend:
         audio_duration_seconds: float | None = None,
     ) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
         return client.create_meeting(
             language=language,
             audio_duration_seconds=audio_duration_seconds,
@@ -753,14 +777,17 @@ class UiBackend:
 
     def upload_pro_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
         return client.upload_meeting_audio(job_id, audio_path)
 
     def get_pro_meeting(self, job_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
         return client.get_meeting(job_id)
 
     def get_pro_meeting_transcript(self, job_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
+        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
         return client.get_transcript(job_id)
 
     def _require_pro_client(self) -> ProClient:
@@ -772,6 +799,10 @@ class UiBackend:
         if self.sync_settings is None:
             raise ApiError(503, "Dictate sync is not configured")
         return self.sync_settings
+
+    def _require_active_pro_state(self, message: str = "Active Dictate Pro access required.") -> None:
+        if not _pro_state_active(self._dictate_pro_state()):
+            raise ApiError(403, message)
 
     def _sync_engine(self) -> SyncEngine:
         return SyncEngine(
@@ -1089,7 +1120,7 @@ class UiBackend:
             raise ApiError(400, "updateChannel must be stable or unstable")
         if normalized == "unstable":
             pro = self._dictate_pro_state()
-            if not bool(pro.get("signedIn")):
+            if not _pro_state_active(pro):
                 raise ApiError(403, "Dictate Pro is required for Beta updates")
         config_mod.set_update_channel(normalized, path=self.config_path)
 

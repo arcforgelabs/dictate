@@ -105,6 +105,7 @@ class ProServerTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self._tmp.cleanup()
         os.environ.pop("DICTATE_PRO_DEV_AUTH", None)
+        os.environ.pop("DICTATE_PRO_ADMIN_TOKEN", None)
 
     def test_auth_and_meeting_flow(self) -> None:
         token = self._sign_in()
@@ -166,6 +167,44 @@ class ProServerTests(unittest.TestCase):
         self.assertNotIn(private_text, json.dumps(exported))
         raw_db = (Path(self._tmp.name) / "pro-control-plane.sqlite3").read_bytes()
         self.assertNotIn(private_text.encode("utf-8"), raw_db)
+
+    def test_admin_grant_access_enables_pro_without_stripe_subscription(self) -> None:
+        os.environ["DICTATE_PRO_ADMIN_TOKEN"] = "admin-test"
+        status, body = _request(
+            self.base_url,
+            "POST",
+            "/v1/admin/grant-access",
+            {
+                "email": "owned@example.com",
+                "source": "internal",
+                "note": "owned account",
+            },
+            token="admin-test",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["email"], "owned@example.com")
+        self.assertTrue(body["entitlements"]["active"])
+        self.assertEqual(body["entitlements"]["source"], "internal")
+
+        status, start = _request(self.base_url, "POST", "/v1/auth/start", {"email": "owned@example.com"})
+        self.assertEqual(status, 200)
+        status, complete = _request(
+            self.base_url,
+            "POST",
+            "/v1/auth/complete",
+            {
+                "challenge_id": start["challenge_id"],
+                "code": start["dev_code"],
+                "device_label": "Desktop",
+                "device_public_key": "public_key_owned",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, entitlements = _request(self.base_url, "GET", "/v1/entitlements", token=complete["access_token"])
+        self.assertEqual(status, 200)
+        self.assertTrue(entitlements["active"])
+        self.assertEqual(entitlements["source"], "internal")
 
     def test_sync_push_pull_stores_only_encrypted_payload(self) -> None:
         session = self._sign_in_session()

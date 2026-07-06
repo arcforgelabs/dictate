@@ -604,6 +604,25 @@ class UiBackendStateTests(unittest.TestCase):
             with self.assertRaisesRegex(ApiError, "Sign in to Dictate Pro"):
                 backend.enable_sync()
 
+    def test_enable_sync_requires_active_pro_entitlement(self) -> None:
+        class _InactiveProClient(_FakeProClient):
+            def get_state(self) -> dict[str, object]:
+                state = super().get_state()
+                state["entitlements"] = {"active": False, "status": "expired"}
+                return state
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(
+                d,
+                pro_client=_InactiveProClient(),
+                sync_settings=_sync_settings(Path(d)),
+            )
+
+            with self.assertRaises(ApiError) as ctx:
+                backend.enable_sync()
+
+            self.assertEqual(ctx.exception.status, 403)
+
     def test_enable_sync_attaches_outbox_and_runs_initial_sync(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             pro_client = _FakeProClient()
@@ -1398,6 +1417,22 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d, pro_client=_SignedOutProClient())
+
+            with self.assertRaises(ApiError) as ctx:
+                backend.patch_config({"updateChannel": "unstable"})
+
+            self.assertEqual(ctx.exception.status, 403)
+            self.assertIsNone(config_mod.load_config(backend.config_path).update_channel)
+
+    def test_patch_config_rejects_beta_update_channel_for_inactive_pro(self) -> None:
+        class _InactiveProClient(_FakeProClient):
+            def get_state(self) -> dict[str, object]:
+                state = super().get_state()
+                state["entitlements"] = {"active": False, "status": "expired"}
+                return state
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, pro_client=_InactiveProClient())
 
             with self.assertRaises(ApiError) as ctx:
                 backend.patch_config({"updateChannel": "unstable"})

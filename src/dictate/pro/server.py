@@ -216,6 +216,34 @@ class ProRequestHandler(BaseHTTPRequestHandler):
                 ),
             )
 
+        if path == "/v1/admin/grant-access" and method == "POST":
+            self._require_admin()
+            body = self._read_json()
+            email = str(body.get("email", "")).strip()
+            if not email:
+                raise ApiError(400, "email is required")
+            expires_at = body.get("expires_at")
+            return _Response(
+                200,
+                service.grant_access(
+                    email=email,
+                    plan_id=str(body.get("plan_id") or "dictate_pro_monthly"),
+                    source=str(body.get("source") or "internal"),
+                    status=str(body.get("status") or "active"),
+                    expires_at=str(expires_at).strip() if expires_at else None,
+                    note=str(body.get("note") or "").strip() or None,
+                ),
+            )
+
+        if path == "/v1/admin/revoke-access" and method == "POST":
+            self._require_admin()
+            body = self._read_json()
+            email = str(body.get("email", "")).strip()
+            if not email:
+                raise ApiError(400, "email is required")
+            plan_id = str(body.get("plan_id") or "").strip() or None
+            return _Response(200, service.revoke_access(email=email, plan_id=plan_id))
+
         account_id, device_id = self._require_account(service)
         if path == "/v1/me" and method == "GET":
             return _Response(200, service.get_me(account_id))

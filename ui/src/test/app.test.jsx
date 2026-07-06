@@ -25,6 +25,12 @@ function finishCapture() {
   fireEvent.click(screen.getByText("Finish note"));
 }
 
+const ACTIVE_PRO = {
+  signedIn: true,
+  account: { email: "samuel@example.test" },
+  entitlements: { active: true, display_name: "Dictate Pro", status: "active" },
+};
+
 describe("Quiet Console app (mock mode)", () => {
   it("renders the capture (mic) home by default", () => {
     render(<App />);
@@ -68,7 +74,7 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             device: { device: "cuda", compute: "float16" },
             history: [],
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
@@ -146,7 +152,7 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
             dictatePro: signedIn
-              ? { signedIn: true, account: { email: "samuel@example.test" } }
+              ? ACTIVE_PRO
               : { signedIn: false, account: null },
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
@@ -163,7 +169,7 @@ describe("Quiet Console app (mock mode)", () => {
             signedIn: true,
             account_id: "acct_1",
             device_id: "dev_1",
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
           }),
         };
       }
@@ -273,7 +279,7 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
@@ -288,7 +294,7 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4-unstable.52.1",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
@@ -327,7 +333,7 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             device: { device: "cuda", compute: "float16" },
             history: [],
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
             sync: {
               enabled: true,
               accountId: "acct_1",
@@ -368,7 +374,7 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             device: { device: "cuda", compute: "float16" },
             history: [],
-            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            dictatePro: ACTIVE_PRO,
             sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: false, lastSeq: 4 },
           }),
         };

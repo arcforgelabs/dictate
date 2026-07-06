@@ -54,6 +54,21 @@ class SubscriptionRow:
 
 
 @dataclass(slots=True)
+class AccessGrantRow:
+    grant_id: str
+    account_id: str
+    plan_id: str
+    status: str
+    source: str
+    starts_at: str
+    expires_at: str | None
+    revoked_at: str | None
+    note: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True)
 class UsagePeriodRow:
     account_id: str
     plan_id: str
@@ -225,6 +240,23 @@ class ProStore:
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_account
                     ON subscriptions(account_id);
 
+                CREATE TABLE IF NOT EXISTS access_grants (
+                    grant_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    starts_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    revoked_at TEXT,
+                    note TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_access_grants_account
+                    ON access_grants(account_id);
+
                 CREATE TABLE IF NOT EXISTS usage_periods (
                     usage_period_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_id TEXT NOT NULL,
@@ -338,6 +370,10 @@ class ProStore:
             )
             try:
                 conn.execute("ALTER TABLE subscriptions ADD COLUMN last_event_created INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE access_grants ADD COLUMN note TEXT")
             except sqlite3.OperationalError:
                 pass
             trusted_at_column_added = False
@@ -1184,6 +1220,110 @@ class ProStore:
                 return None
             return _subscription_row(row)
 
+    def upsert_access_grant(
+        self,
+        *,
+        account_id: str,
+        plan_id: str,
+        status: str,
+        source: str,
+        starts_at: str,
+        expires_at: str | None = None,
+        note: str | None = None,
+        grant_id: str | None = None,
+    ) -> AccessGrantRow:
+        grant = grant_id or f"grant_{uuid.uuid4().hex}"
+        now = iso()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO access_grants (
+                    grant_id, account_id, plan_id, status, source, starts_at, expires_at,
+                    revoked_at, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT(grant_id) DO UPDATE SET
+                    plan_id = excluded.plan_id,
+                    status = excluded.status,
+                    source = excluded.source,
+                    starts_at = excluded.starts_at,
+                    expires_at = excluded.expires_at,
+                    revoked_at = NULL,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (grant, account_id, plan_id, status, source, starts_at, expires_at, note, now, now),
+            )
+            row = conn.execute(
+                """
+                SELECT grant_id, account_id, plan_id, status, source, starts_at, expires_at,
+                       revoked_at, note, created_at, updated_at
+                FROM access_grants
+                WHERE grant_id = ?
+                """,
+                (grant,),
+            ).fetchone()
+            return _access_grant_row(row)
+
+    def get_active_access_grant(self, account_id: str, *, now: str | None = None) -> AccessGrantRow | None:
+        active_statuses = ("active", "trialing")
+        checked_at = now or iso()
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT grant_id, account_id, plan_id, status, source, starts_at, expires_at,
+                       revoked_at, note, created_at, updated_at
+                FROM access_grants
+                WHERE account_id = ?
+                  AND status IN ({})
+                  AND revoked_at IS NULL
+                  AND starts_at <= ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                ORDER BY
+                  CASE WHEN expires_at IS NULL THEN 1 ELSE 0 END DESC,
+                  updated_at DESC
+                LIMIT 1
+                """.format(",".join("?" * len(active_statuses))),
+                (account_id, *active_statuses, checked_at, checked_at),
+            ).fetchone()
+            return _access_grant_row(row) if row else None
+
+    def list_access_grants(self, account_id: str) -> list[AccessGrantRow]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT grant_id, account_id, plan_id, status, source, starts_at, expires_at,
+                       revoked_at, note, created_at, updated_at
+                FROM access_grants
+                WHERE account_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (account_id,),
+            ).fetchall()
+            return [_access_grant_row(row) for row in rows]
+
+    def revoke_access_grants(self, *, account_id: str, plan_id: str | None = None) -> int:
+        now = iso()
+        with self._conn() as conn:
+            if plan_id:
+                cur = conn.execute(
+                    """
+                    UPDATE access_grants
+                    SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
+                    WHERE account_id = ? AND plan_id = ? AND revoked_at IS NULL
+                    """,
+                    (now, now, account_id, plan_id),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE access_grants
+                    SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
+                    WHERE account_id = ? AND revoked_at IS NULL
+                    """,
+                    (now, now, account_id),
+                )
+            return int(cur.rowcount)
+
     def ensure_usage_period(
         self,
         *,
@@ -1531,6 +1671,22 @@ def _subscription_row(row: sqlite3.Row) -> SubscriptionRow:
         current_period_end=row["current_period_end"],
         cancel_at_period_end=bool(row["cancel_at_period_end"]),
         last_event_created=last_event_created,
+    )
+
+
+def _access_grant_row(row: sqlite3.Row) -> AccessGrantRow:
+    return AccessGrantRow(
+        grant_id=row["grant_id"],
+        account_id=row["account_id"],
+        plan_id=row["plan_id"],
+        status=row["status"],
+        source=row["source"],
+        starts_at=row["starts_at"],
+        expires_at=row["expires_at"],
+        revoked_at=row["revoked_at"],
+        note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

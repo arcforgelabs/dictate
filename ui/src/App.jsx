@@ -167,6 +167,7 @@ function PrivacyPill() {
   const online = s.providerMode === "online";
   const degraded = s.providerDegraded;
   const privateOn = !online || degraded;
+  const proActive = !!s.dictatePro?.signedIn && !!s.dictatePro?.entitlements?.active;
 
   const onToggle = (on) => {
     if (on === privateOn) return;
@@ -174,7 +175,7 @@ function PrivacyPill() {
       s.setModel(PRIVATE_MODEL);
       return;
     }
-    if (!s.keys.xai) {
+    if (!s.keys.xai && !proActive) {
       s.toast("Requires Dictate Pro or API key.", {
         bad: true,
         ms: 12_000,
@@ -264,6 +265,8 @@ function AccountDialog() {
   const pro = s.dictatePro || { signedIn: false };
   const model = modelById(s.model);
   const signedIn = !!pro.signedIn;
+  const proActive = signedIn && !!pro.entitlements?.active;
+  const proStatus = pro.entitlements?.status || (signedIn ? "inactive" : "");
   const [devices, setDevices] = useState([]);
   const [recoveryKey, setRecoveryKey] = useState(null);
   const [restoreKey, setRestoreKey] = useState("");
@@ -274,7 +277,7 @@ function AccountDialog() {
   const [deviceLabel, setDeviceLabel] = useState("Desktop");
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
-  const syncLabel = syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError });
+  const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
   const betaSelected = s.updateChannel === "unstable";
   const updateBusy = !!(s.updateStatus?.checking || s.updateStatus?.updating);
   const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
@@ -301,7 +304,7 @@ function AccountDialog() {
   }, [s]);
 
   useEffect(() => {
-    if (!signedIn || !ipc.isLive()) return;
+    if (!proActive || !ipc.isLive()) return;
     let cancelled = false;
     ipc.listProDevices()
       .then((r) => {
@@ -311,7 +314,7 @@ function AccountDialog() {
         if (!cancelled) setDevices([]);
       });
     return () => { cancelled = true; };
-  }, [signedIn]);
+  }, [proActive]);
 
   const refreshAccountState = () => {
     if (!ipc.isLive()) return Promise.resolve(null);
@@ -381,6 +384,10 @@ function AccountDialog() {
   };
 
   const enableSync = () => {
+    if (!proActive) {
+      s.toast("Active Dictate Pro access is required for sync", { bad: true });
+      return;
+    }
     if (!ipc.isLive()) {
       s.toast("Sign in on the installed app to enable sync", { bad: true });
       return;
@@ -398,6 +405,10 @@ function AccountDialog() {
   };
 
   const runSync = () => {
+    if (!proActive) {
+      s.toast("Active Dictate Pro access is required for sync", { bad: true });
+      return;
+    }
     if (!ipc.isLive()) return;
     s.setSyncBusy(true);
     ipc.runProSync()
@@ -483,7 +494,7 @@ function AccountDialog() {
 
   const selectUpdateChannel = (channel) => {
     if (channel === s.updateChannel) return;
-    if (channel === "unstable" && !signedIn) {
+    if (channel === "unstable" && !proActive) {
       s.toast("Dictate Pro is required for Beta updates", { bad: true });
       return;
     }
@@ -539,6 +550,9 @@ function AccountDialog() {
             )}
           </div>
           <div className="account-row"><span>Sync</span><strong>{syncLabel}</strong></div>
+          {signedIn && (
+            <div className="account-row"><span>Plan</span><strong>{proActive ? (pro.entitlements?.display_name || "Dictate Pro") : proStatus}</strong></div>
+          )}
           <div className="account-row"><span>Model</span><strong>{model.name}</strong></div>
           {s.installedPackageVersion && (
             <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
@@ -558,8 +572,8 @@ function AccountDialog() {
                 type="button"
                 className={betaSelected ? "active" : ""}
                 aria-pressed={betaSelected}
-                disabled={!signedIn && !betaSelected}
-                title={!signedIn && !betaSelected ? "Dictate Pro required" : "Beta updates"}
+                disabled={!proActive && !betaSelected}
+                title={!proActive && !betaSelected ? "Dictate Pro required" : "Beta updates"}
                 onClick={() => selectUpdateChannel("unstable")}
               >
                 Beta
@@ -625,6 +639,13 @@ function AccountDialog() {
                 </>
               )}
             </div>
+          ) : !proActive ? (
+            <div className="account-enable-stack">
+              <div className="account-consent">
+                <strong>Dictate Pro access required</strong>
+                <span>This account is signed in, but cloud sync and Beta updates are not active on its plan.</span>
+              </div>
+            </div>
           ) : !sync.enabled ? (
             <div className="account-enable-stack">
               <div className="account-consent">
@@ -638,7 +659,7 @@ function AccountDialog() {
                 placeholder="Recovery key"
                 aria-label="Recovery key"
               />
-              <button type="button" className="account-primary" disabled={s.syncBusy || !signedIn} onClick={enableSync}>
+              <button type="button" className="account-primary" disabled={s.syncBusy || !proActive} onClick={enableSync}>
                 <Icon name="lock" size={14} />
                 <span>{restoreKey.trim() ? "Restore sync" : "Sync my dictations"}</span>
               </button>
@@ -663,7 +684,7 @@ function AccountDialog() {
             <code>{recoveryKey}</code>
           </div>
         )}
-        {signedIn && (
+        {signedIn && proActive && (
           <>
             <div className="account-section-title">Devices</div>
             <div className="account-device-list">
@@ -715,7 +736,8 @@ function AccountDialog() {
           </div>
         )}
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
-        {signedIn && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
+        {signedIn && proActive && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
+        {signedIn && !proActive && <div className="account-note">This account is signed in but does not currently have active Dictate Pro access. Cloud sync is off.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
       </div>
     </div>

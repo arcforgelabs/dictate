@@ -5,10 +5,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS
-from dictate.pro.store import ProStore, SubscriptionRow, TranscriptSegmentRow, iso
+from dictate.pro.store import ProStore, SubscriptionRow, TranscriptSegmentRow, iso, utcnow
 
 
 class ProStoreTests(unittest.TestCase):
@@ -54,6 +55,36 @@ class ProStoreTests(unittest.TestCase):
         updated = self.store.get_usage_period(account.account_id, period_start)
         assert updated is not None
         self.assertEqual(updated.used_seconds, 3600)
+
+    def test_non_expiring_internal_access_grant_is_active(self) -> None:
+        account = self.store.get_or_create_account("internal@example.com")
+        grant = self.store.upsert_access_grant(
+            account_id=account.account_id,
+            plan_id=DICTATE_PRO_PLAN.plan_id,
+            status="active",
+            source="internal",
+            starts_at=iso(),
+            expires_at=None,
+            note="owned account",
+        )
+
+        active = self.store.get_active_access_grant(account.account_id)
+
+        self.assertEqual(active, grant)
+        self.assertIsNone(active.expires_at)
+
+    def test_expired_trial_access_grant_is_not_active(self) -> None:
+        account = self.store.get_or_create_account("trial@example.com")
+        self.store.upsert_access_grant(
+            account_id=account.account_id,
+            plan_id=DICTATE_PRO_PLAN.plan_id,
+            status="trialing",
+            source="trial",
+            starts_at=iso(utcnow() - timedelta(days=2)),
+            expires_at=iso(utcnow() - timedelta(days=1)),
+        )
+
+        self.assertIsNone(self.store.get_active_access_grant(account.account_id))
 
     def test_usage_event_is_idempotent(self) -> None:
         account = self.store.get_or_create_account("meter@example.com")

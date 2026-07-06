@@ -26,7 +26,7 @@ from dictate.pro.relay import (
     billable_seconds_for_duration,
     transcribe_meeting_file,
 )
-from dictate.pro.store import MeetingJobRow, ProStore, SubscriptionRow, iso
+from dictate.pro.store import AccessGrantRow, MeetingJobRow, ProStore, SubscriptionRow, iso
 from dictate.pro.stripe_handler import StripeSettings, StripeWebhookHandler
 
 
@@ -42,6 +42,17 @@ class ProSettings:
     data_dir: Path
     stripe_settings: StripeSettings | None = None
     transcribe: Callable[..., RelayResult] = transcribe_meeting_file
+
+
+@dataclass(slots=True)
+class ActiveEntitlement:
+    account_id: str
+    plan_id: str
+    status: str
+    current_period_start: str
+    current_period_end: str
+    source: str
+    access_expires_at: str | None = None
 
 
 class ProService:
@@ -96,20 +107,69 @@ class ProService:
             "usage_period": self._usage_payload(usage),
         }
 
+    def grant_access(
+        self,
+        *,
+        email: str,
+        plan_id: str = DICTATE_PRO_PLAN.plan_id,
+        source: str = "internal",
+        status: str = "active",
+        expires_at: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        account = self.store.get_or_create_account(email)
+        plan = plan_for_id(plan_id)
+        if plan is None:
+            raise ProServiceError(400, "unknown Dictate Pro plan")
+        starts_at = iso()
+        grant = self.store.upsert_access_grant(
+            account_id=account.account_id,
+            plan_id=plan.plan_id,
+            status=status,
+            source=source,
+            starts_at=starts_at,
+            expires_at=expires_at,
+            note=note,
+        )
+        entitlement = self._entitlement_from_grant(grant)
+        usage = self.store.ensure_usage_period(
+            account_id=account.account_id,
+            plan_id=plan.plan_id,
+            period_start=entitlement.current_period_start,
+            period_end=entitlement.current_period_end,
+            included_seconds=plan.included_batch_meeting_seconds,
+        )
+        return {
+            "account_id": account.account_id,
+            "email": account.email,
+            "grant": self._access_grant_payload(grant),
+            "entitlements": self.get_entitlements(account.account_id),
+            "usage_period": self._usage_payload(usage),
+        }
+
+    def revoke_access(self, *, email: str, plan_id: str | None = None) -> dict[str, Any]:
+        account = self.store.get_account_by_email(email)
+        if account is None:
+            raise ProServiceError(404, "account not found")
+        revoked = self.store.revoke_access_grants(account_id=account.account_id, plan_id=plan_id)
+        return {"account_id": account.account_id, "email": account.email, "revoked": revoked}
+
     def get_me(self, account_id: str) -> dict[str, Any]:
         account = self.store.get_account(account_id)
         if account is None:
             raise ProServiceError(404, "account not found")
         subscription = self.store.get_active_subscription(account_id)
+        grants = self.store.list_access_grants(account_id)
         return {
             "account_id": account.account_id,
             "email": account.email,
             "subscription": self._subscription_payload(subscription),
+            "access_grants": [self._access_grant_payload(grant) for grant in grants],
         }
 
     def get_entitlements(self, account_id: str) -> dict[str, Any]:
-        subscription = self.store.get_active_subscription(account_id)
-        if subscription is None:
+        entitlement = self._active_entitlement(account_id)
+        if entitlement is None:
             return {
                 "active": False,
                 "plan_id": None,
@@ -120,14 +180,16 @@ class ProService:
                 "sync": False,
             },
         }
-        plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
+        plan = plan_for_id(entitlement.plan_id) or DICTATE_PRO_PLAN
         return {
-            "active": subscription.status in {"active", "trialing", "past_due"},
+            "active": entitlement.status in {"active", "trialing", "past_due"},
             "plan_id": plan.plan_id,
             "display_name": plan.display_name,
-            "status": subscription.status,
-            "period_start": subscription.current_period_start,
-            "period_end": subscription.current_period_end,
+            "status": entitlement.status,
+            "source": entitlement.source,
+            "period_start": entitlement.current_period_start,
+            "period_end": entitlement.current_period_end,
+            "access_expires_at": entitlement.access_expires_at,
             "features": {
                 "hosted_meeting_transcription": True,
                 "diarization": plan.diarization,
@@ -140,7 +202,7 @@ class ProService:
         }
 
     def push_sync_records(self, account_id: str, device_id: str | None, records: list[dict[str, Any]]) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         if not isinstance(records, list):
             raise ProServiceError(400, "records must be a list")
@@ -162,7 +224,7 @@ class ProService:
         return {"results": results}
 
     def get_sync_changes(self, account_id: str, device_id: str | None, *, since: int = 0, limit: int = 500) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         rows = self.store.list_sync_changes(account_id=account_id, since=since, limit=limit)
         records = [
@@ -186,7 +248,7 @@ class ProService:
         return {"next_seq": next_seq, "has_more": len(records) >= max(1, min(limit, 1000)), "records": records}
 
     def update_sync_cursor(self, account_id: str, device_id: str | None, *, last_seq: int) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         try:
             row = self.store.set_sync_cursor(
@@ -211,7 +273,7 @@ class ProService:
         envelope_kind: str,
         envelope: dict[str, Any],
     ) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         if not isinstance(envelope, dict) or not envelope:
             raise ProServiceError(400, "envelope must be a JSON object")
@@ -233,7 +295,7 @@ class ProService:
         *,
         envelope_kind: str | None = None,
     ) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         if envelope_kind == "recovery":
             self._require_known_device(account_id, device_id)
         else:
@@ -245,7 +307,7 @@ class ProService:
         return {"envelopes": envelopes}
 
     def list_devices(self, account_id: str) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         return {
             "devices": [
                 self._device_payload(device)
@@ -262,7 +324,7 @@ class ProService:
         device_label: str,
         device_public_key: str,
     ) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_known_device(account_id, current_device_id)
         target = (device_id or current_device_id or "").strip()
         current = (current_device_id or "").strip()
@@ -286,7 +348,7 @@ class ProService:
     def revoke_device(self, account_id: str, current_device_id: str | None, device_id: str) -> dict[str, Any]:
         if not device_id.strip():
             raise ProServiceError(400, "device_id is required")
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, current_device_id)
         if not self.store.revoke_device(account_id=account_id, device_id=device_id.strip()):
             raise ProServiceError(404, "device not found")
@@ -300,7 +362,7 @@ class ProService:
         *,
         envelope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, approving_device_id)
         target = target_device_id.strip()
         if not target:
@@ -323,7 +385,7 @@ class ProService:
         return {"approved": True, "device": self._device_payload(device)}
 
     def approve_current_device_with_recovery(self, account_id: str, device_id: str | None) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_known_device(account_id, device_id)
         if not self.store.approve_device(account_id=account_id, device_id=str(device_id)):
             raise ProServiceError(404, "device not found")
@@ -331,7 +393,7 @@ class ProService:
         return {"approved": True, "device": self._device_payload(device), "method": "recovery"}
 
     def export_account_cloud_data(self, account_id: str, device_id: str | None) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         data = self.store.export_account_cloud_data(account_id)
         if not data:
@@ -339,18 +401,18 @@ class ProService:
         return data
 
     def delete_account_cloud_data(self, account_id: str, device_id: str | None) -> dict[str, Any]:
-        self._require_active_subscription(account_id)
+        self._require_active_entitlement(account_id)
         self._require_active_device(account_id, device_id)
         return {"deleted": self.store.delete_account_cloud_data(account_id)}
 
     def get_current_usage(self, account_id: str) -> dict[str, Any]:
-        subscription = self._require_active_subscription(account_id)
-        plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
+        entitlement = self._require_active_entitlement(account_id)
+        plan = plan_for_id(entitlement.plan_id) or DICTATE_PRO_PLAN
         usage = self.store.ensure_usage_period(
             account_id=account_id,
             plan_id=plan.plan_id,
-            period_start=subscription.current_period_start,
-            period_end=subscription.current_period_end,
+            period_start=entitlement.current_period_start,
+            period_end=entitlement.current_period_end,
             included_seconds=plan.included_batch_meeting_seconds,
         )
         payload = self._usage_payload(usage)
@@ -365,13 +427,13 @@ class ProService:
         language: str | None = None,
         mode: str = "batch_meeting",
     ) -> dict[str, Any]:
-        subscription = self._require_active_subscription(account_id)
-        plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
+        entitlement = self._require_active_entitlement(account_id)
+        plan = plan_for_id(entitlement.plan_id) or DICTATE_PRO_PLAN
         usage = self.store.ensure_usage_period(
             account_id=account_id,
             plan_id=plan.plan_id,
-            period_start=subscription.current_period_start,
-            period_end=subscription.current_period_end,
+            period_start=entitlement.current_period_start,
+            period_end=entitlement.current_period_end,
             included_seconds=plan.included_batch_meeting_seconds,
         )
         if usage.used_seconds >= USAGE_THRESHOLDS.hard_stop_seconds:
@@ -385,8 +447,8 @@ class ProService:
             provider_model=plan.provider_model,
             language=language,
             requested_diarization=plan.diarization,
-            billing_period_start=subscription.current_period_start,
-            billing_period_end=subscription.current_period_end,
+            billing_period_start=entitlement.current_period_start,
+            billing_period_end=entitlement.current_period_end,
         )
         return self._meeting_payload(job)
 
@@ -402,13 +464,13 @@ class ProService:
         if job.status not in {"queued", "failed"}:
             raise ProServiceError(409, f"meeting job is not accepting audio in status {job.status}")
 
-        subscription = self._require_active_subscription(account_id)
-        plan = plan_for_id(subscription.plan_id) or DICTATE_PRO_PLAN
+        entitlement = self._require_active_entitlement(account_id)
+        plan = plan_for_id(entitlement.plan_id) or DICTATE_PRO_PLAN
         self.store.ensure_usage_period(
             account_id=account_id,
             plan_id=plan.plan_id,
-            period_start=subscription.current_period_start,
-            period_end=subscription.current_period_end,
+            period_start=entitlement.current_period_start,
+            period_end=entitlement.current_period_end,
             included_seconds=plan.included_batch_meeting_seconds,
         )
 
@@ -420,8 +482,8 @@ class ProService:
         usage = self.store.ensure_usage_period(
             account_id=account_id,
             plan_id=plan.plan_id,
-            period_start=subscription.current_period_start,
-            period_end=subscription.current_period_end,
+            period_start=entitlement.current_period_start,
+            period_end=entitlement.current_period_end,
             included_seconds=plan.included_batch_meeting_seconds,
         )
         if usage.used_seconds >= USAGE_THRESHOLDS.hard_stop_seconds:
@@ -434,7 +496,7 @@ class ProService:
             estimated_seconds = billable_seconds_for_duration(probed_duration)
             if not self.store.reserve_usage_seconds(
                 account_id=account_id,
-                period_start=subscription.current_period_start,
+                period_start=entitlement.current_period_start,
                 seconds=estimated_seconds,
                 hard_stop_seconds=USAGE_THRESHOLDS.hard_stop_seconds,
             ):
@@ -459,7 +521,7 @@ class ProService:
             if reserved_seconds:
                 self.store.release_usage_seconds(
                     account_id=account_id,
-                    period_start=subscription.current_period_start,
+                    period_start=entitlement.current_period_start,
                     seconds=reserved_seconds,
                 )
             self.store.update_meeting_job(
@@ -480,7 +542,7 @@ class ProService:
             if usage_delta != 0:
                 self.store.adjust_usage_seconds(
                     account_id=account_id,
-                    period_start=subscription.current_period_start,
+                    period_start=entitlement.current_period_start,
                     seconds=usage_delta,
                 )
                 usage_delta_applied = usage_delta
@@ -490,7 +552,7 @@ class ProService:
                 account_id=account_id,
                 job_id=job_id,
                 billable_seconds=result.billable_seconds,
-                period_start=subscription.current_period_start,
+                period_start=entitlement.current_period_start,
             )
             self.store.save_transcript_segments(job_id, result.segments)
             self.store.update_meeting_job(
@@ -508,7 +570,7 @@ class ProService:
             if net_charged:
                 self.store.release_usage_seconds(
                     account_id=account_id,
-                    period_start=subscription.current_period_start,
+                    period_start=entitlement.current_period_start,
                     seconds=net_charged,
                 )
             self.store.update_meeting_job(
@@ -579,6 +641,55 @@ class ProService:
             raise ProServiceError(403, "Dictate Pro subscription period has expired.")
         return subscription
 
+    def _active_entitlement(self, account_id: str) -> ActiveEntitlement | None:
+        subscription = self.store.get_active_subscription(account_id)
+        if subscription is not None and subscription.status in {"active", "trialing", "past_due"}:
+            if not self._subscription_period_expired(subscription):
+                return ActiveEntitlement(
+                    account_id=subscription.account_id,
+                    plan_id=subscription.plan_id,
+                    status=subscription.status,
+                    current_period_start=subscription.current_period_start,
+                    current_period_end=subscription.current_period_end,
+                    source="stripe",
+                    access_expires_at=subscription.current_period_end,
+                )
+        grant = self.store.get_active_access_grant(account_id)
+        if grant is None:
+            return None
+        return self._entitlement_from_grant(grant)
+
+    def _entitlement_from_grant(self, grant: AccessGrantRow) -> ActiveEntitlement:
+        period_start, period_end = _current_grant_usage_period(grant)
+        return ActiveEntitlement(
+            account_id=grant.account_id,
+            plan_id=grant.plan_id,
+            status=grant.status,
+            current_period_start=period_start,
+            current_period_end=period_end,
+            source=grant.source,
+            access_expires_at=grant.expires_at,
+        )
+
+    def _require_active_entitlement(self, account_id: str) -> ActiveEntitlement:
+        subscription = self.store.get_active_subscription(account_id)
+        if subscription is not None and subscription.status in {"active", "trialing", "past_due"}:
+            if self._subscription_period_expired(subscription):
+                raise ProServiceError(403, "Dictate Pro subscription period has expired.")
+            return ActiveEntitlement(
+                account_id=subscription.account_id,
+                plan_id=subscription.plan_id,
+                status=subscription.status,
+                current_period_start=subscription.current_period_start,
+                current_period_end=subscription.current_period_end,
+                source="stripe",
+                access_expires_at=subscription.current_period_end,
+            )
+        entitlement = self._active_entitlement(account_id)
+        if entitlement is None:
+            raise ProServiceError(403, "Active Dictate Pro access required.")
+        return entitlement
+
     def _require_active_device(self, account_id: str, device_id: str | None) -> None:
         if not self.store.device_is_active(account_id=account_id, device_id=device_id):
             raise ProServiceError(403, "device is not trusted for sync")
@@ -621,6 +732,20 @@ class ProService:
             "current_period_start": subscription.current_period_start,
             "current_period_end": subscription.current_period_end,
             "cancel_at_period_end": subscription.cancel_at_period_end,
+        }
+
+    def _access_grant_payload(self, grant: AccessGrantRow) -> dict[str, Any]:
+        return {
+            "grant_id": grant.grant_id,
+            "plan_id": grant.plan_id,
+            "status": grant.status,
+            "source": grant.source,
+            "starts_at": grant.starts_at,
+            "expires_at": grant.expires_at,
+            "revoked_at": grant.revoked_at,
+            "note": grant.note,
+            "created_at": grant.created_at,
+            "updated_at": grant.updated_at,
         }
 
     def _usage_payload(self, usage) -> dict[str, Any]:
@@ -711,3 +836,23 @@ class ProService:
             "started_at": job.started_at,
             "completed_at": job.completed_at,
         }
+
+
+def _current_grant_usage_period(grant: AccessGrantRow) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        next_month = start.replace(year=start.year + 1, month=1)
+    else:
+        next_month = start.replace(month=start.month + 1)
+    end = next_month
+    if grant.expires_at:
+        try:
+            expires_at = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            expires_at = None
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            end = min(end, expires_at)
+    return iso(start), iso(end)
