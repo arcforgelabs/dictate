@@ -25,18 +25,20 @@ class _TeeStderr:
         self.secondary = secondary
 
     def write(self, data: str) -> int:
-        self.primary.write(data)
+        if self.primary is not None:
+            self.primary.write(data)
         self.secondary.write(data)
         # Keep startup diagnostics on disk even if the process is terminated abruptly.
         self.secondary.flush()
         return len(data)
 
     def flush(self) -> None:
-        self.primary.flush()
+        if self.primary is not None:
+            self.primary.flush()
         self.secondary.flush()
 
     def isatty(self) -> bool:
-        return bool(getattr(self.primary, "isatty", lambda: False)())
+        return bool(self.primary is not None and getattr(self.primary, "isatty", lambda: False)())
 
 
 def run_with_startup_logging(main_fn: Callable[[], int]) -> int:
@@ -94,7 +96,8 @@ def _run_main(main_fn: Callable[[], int]) -> int:
     except SystemExit as exc:
         return _normalize_system_exit_code(exc.code)
     except Exception:  # noqa: BLE001
-        traceback.print_exc(file=sys.stderr)
+        if sys.stderr is not None:
+            traceback.print_exc(file=sys.stderr)
         return 1
 
 
