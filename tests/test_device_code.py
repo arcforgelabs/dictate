@@ -9,6 +9,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -159,6 +160,29 @@ class DeviceCodeTests(unittest.TestCase):
         self.assertEqual(client._browser_attempt.interval, 10)  # bumped by 5 per RFC 8628 §3.5
         self.assertIsNotNone(client._browser_attempt)  # attempt survives slow_down
 
+    def test_local_deadline_expires_pending_attempt_without_contacting_server(self) -> None:
+        # P3 regression: the 429/5xx -> "pending" mapping has no TTL bound of its own, so a
+        # persistently unreachable server would otherwise make poll_browser_sign_in()
+        # return "pending" forever. The client must enforce its own deadline (the device
+        # code's 900s TTL) independent of ever hearing back from the server.
+        client = self._new_client()
+        client.start_browser_sign_in(prefer="device_code", device_label="Test Desktop")
+        client._browser_attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+        calls: list[tuple] = []
+        original_request = client._request
+
+        def _spy(*args, **kwargs):
+            calls.append((args, kwargs))
+            return original_request(*args, **kwargs)
+
+        client._request = _spy  # type: ignore[method-assign]
+
+        result = client.poll_browser_sign_in()
+        self.assertEqual(result, {"status": "error", "reason": "expired_token"})
+        self.assertEqual(calls, [])  # no token POST was attempted
+        self.assertIsNone(client._browser_attempt)  # cleared on terminal error
+
     def test_expired_device_code_returns_error_status(self) -> None:
         # Seed an already-expired device_code directly (per the round's guidance) rather
         # than waiting out the real 900s TTL.
@@ -184,7 +208,11 @@ class DeviceCodeTests(unittest.TestCase):
         # P2 regression: the opportunistic purge must be reachable purely via issuance
         # (unauthenticated, ungated, attacker-controlled), since on a server with no
         # DICTATE_PRO_DEV_AUTO_APPROVE nothing can ever be approved/consumed -- the
-        # consume_device_code purge path would never run at all.
+        # consume_device_code purge path would never run at all. Unset the flag here so
+        # this test matches that exact locked-down threat model rather than relying on
+        # setUp's default (create_device_code itself was never gated by the flag either
+        # way, so the proven code path is identical -- this just makes the scenario exact).
+        os.environ.pop("DICTATE_PRO_DEV_AUTO_APPROVE", None)
         expired_hashes = []
         for _ in range(3):
             payload = self.service.auth.create_device_code(client_id="dictate-desktop")

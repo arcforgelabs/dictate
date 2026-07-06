@@ -357,6 +357,14 @@ class ProClient:
         device_public_key: str | None,
         device_label: str,
     ) -> dict[str, Any]:
+        if datetime.now(timezone.utc) > attempt.expires_at:
+            # Local deadline, independent of the server: the 429/5xx -> "pending" mapping
+            # has no TTL bound on its own, so a persistently unreachable server would
+            # otherwise make poll_browser_sign_in() return "pending" forever. Bound it to
+            # the 900s device-code TTL so the caller's poll loop (Episode 3's UI) always
+            # terminates.
+            self.cancel_browser_sign_in()
+            return {"status": "error", "reason": "expired_token"}
         interval = attempt.interval or 5
         now = time.monotonic()
         if attempt.last_poll is not None and (now - attempt.last_poll) < interval:
