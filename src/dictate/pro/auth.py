@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,8 @@ REFRESH_TOKEN_TTL = timedelta(days=30)
 CHALLENGE_TTL = timedelta(minutes=10)
 MAX_CHALLENGE_ATTEMPTS = 5
 AUTHORIZATION_CODE_TTL = timedelta(seconds=120)
+# RFC 7636 §4.1: code_verifier = 43*128unreserved; unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+_CODE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9\-._~]{43,128}$")
 
 
 @dataclass(slots=True)
@@ -202,6 +205,12 @@ class ProAuth:
         if not _compare_str(row["client_id"], client_id):
             raise ValueError("invalid_grant")
         if not _compare_str(row["redirect_uri"], redirect_uri):
+            raise ValueError("invalid_grant")
+        if not _CODE_VERIFIER_RE.match(code_verifier):
+            # RFC 7636 §4.1: code_verifier must be 43-128 chars of [A-Za-z0-9-._~]. No
+            # exploit today (the challenge only ever binds the requester's own verifier),
+            # but the reference contract should enforce the spec before arc-forge-console
+            # copies it.
             raise ValueError("invalid_grant")
         expected_challenge = _b64url_sha256(code_verifier)
         if not _compare_str(expected_challenge, row["code_challenge"]):

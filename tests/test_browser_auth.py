@@ -236,6 +236,58 @@ class BrowserAuthTests(unittest.TestCase):
 
         client.cancel_browser_sign_in()
 
+    def test_authorization_code_is_single_use_replay_returns_400_invalid_grant(self) -> None:
+        # Pins RFC 9700 single-use behavior directly (previously only covered transitively
+        # via the store's consume_auth_code plumbing): exchange a valid code once (succeeds),
+        # then replay the exact same code -- it must be rejected, not silently re-issue a
+        # second session.
+        client = self._new_client()
+        start = client.start_browser_sign_in(device_label="Test Desktop")
+        location = self._drive_authorize(start["authorize_url"], dev_email="replay@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+        attempt, code = self._get_pending_code(client)
+
+        token_payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": attempt.code_verifier,
+            "redirect_uri": attempt.redirect_uri,
+            "client_id": "dictate-desktop",
+        }
+        status, body = self._post_json("/v1/auth/token", token_payload)
+        self.assertEqual(status, 200)
+        self.assertIn("access_token", body)
+
+        status, body = self._post_json("/v1/auth/token", token_payload)
+        self.assertEqual(status, 400)
+        self.assertIn("invalid_grant", body["error"])
+
+        client.cancel_browser_sign_in()
+
+    def test_code_verifier_outside_rfc7636_bounds_yields_400_invalid_grant(self) -> None:
+        # Regression for enforcing RFC 7636 §4.1 code_verifier bounds (43-128 chars of
+        # [A-Za-z0-9-._~]) server-side, ahead of arc-forge-console copying this contract.
+        client = self._new_client()
+        start = client.start_browser_sign_in(device_label="Test Desktop")
+        location = self._drive_authorize(start["authorize_url"], dev_email="verifier-bounds@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+        attempt, code = self._get_pending_code(client)
+
+        status, body = self._post_json(
+            "/v1/auth/token",
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "code_verifier": "too-short",  # well under the 43-char RFC 7636 minimum
+                "redirect_uri": attempt.redirect_uri,
+                "client_id": "dictate-desktop",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("invalid_grant", body["error"])
+
+        client.cancel_browser_sign_in()
+
     def test_pkce_mismatch_is_rejected_and_no_session_saved(self) -> None:
         client = self._new_client()
         start = client.start_browser_sign_in(device_label="Test Desktop")
