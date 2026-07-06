@@ -1195,6 +1195,17 @@ class ProStore:
         interval: int,
     ) -> None:
         with self._conn() as conn:
+            # Opportunistic cleanup at issuance time, not just on the approved/consumed
+            # path: issuance is deliberately ungated and unauthenticated (matches real RFC
+            # 8628 semantics -- a pending code that can never be approved is still valid
+            # protocol behavior), so on a server with no DICTATE_PRO_DEV_AUTO_APPROVE (no
+            # portal, no way to ever approve/consume anything) this is the ONLY reachable
+            # sweep point. Without it, unauthenticated POSTs could grow this table
+            # unbounded.
+            conn.execute(
+                "DELETE FROM device_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (iso(),),
+            )
             conn.execute(
                 """
                 INSERT INTO device_codes (

@@ -50,6 +50,22 @@ def _authorize_error_page(message: str) -> str:
     )
 
 
+def _device_verification_page() -> str:
+    # Stand-in only: RFC 8628 requires verification_uri to be a real retrievable page, but
+    # this reference server has no interactive device-approval portal (the real one ships
+    # with the console episode) -- point the user at the dev-only headless hook instead.
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Dictate device sign-in</title></head>"
+        "<body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem;\">"
+        "<h1>Enter your code</h1>"
+        "<p>This reference server has no interactive device-approval portal.</p>"
+        "<p>Approve the pending code via the dev-only "
+        "<code>POST /v1/auth/device/approve</code> hook "
+        f"(requires {_DEV_AUTO_APPROVE_ENV}=1 for local development/testing only).</p>"
+        "</body></html>"
+    )
+
+
 class _RateLimiter:
     def __init__(self, rpm: int) -> None:
         self._rpm = rpm
@@ -384,6 +400,12 @@ class ProRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/v1/auth/token" and method == "POST":
             return self._handle_token_grant(service)
+
+        if path == "/v1/auth/device" and method == "GET":
+            # RFC 8628 requires verification_uri to be a real, retrievable page (not a 404)
+            # even though this reference server has no interactive approval UI yet.
+            self._send_html(200, _device_verification_page())
+            return None
 
         if path == "/v1/auth/device-code" and method == "POST":
             body = self._read_json()

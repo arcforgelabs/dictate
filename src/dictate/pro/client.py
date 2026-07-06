@@ -389,6 +389,12 @@ class ProClient:
             if reason in {"expired_token", "access_denied"}:
                 self.cancel_browser_sign_in()
                 return {"status": "error", "reason": reason}
+            if exc.status == 429 or exc.status >= 500:
+                # Transient/transport-level hiccup (rate limit, momentary 5xx, or the
+                # "service unreachable" 503 _request synthesizes for a URLError) -- don't
+                # fail the whole sign-in attempt over one blip. Keep the attempt alive and
+                # let the caller's poll loop naturally retry on its own cadence.
+                return {"status": "pending"}
             raise
         session = self._session_from_token_response(response)
         if device_public_key and uses_gateway:

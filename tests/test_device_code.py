@@ -37,19 +37,30 @@ def _post_json(base_url: str, path: str, payload: dict) -> tuple[int, dict]:
 
 class DeviceCodeTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Every swap below is registered via addCleanup *immediately* after it's made, so
+        # restoration is unconditional -- it still runs even if a later line in setUp
+        # raises (e.g. the HTTP server failing to bind), rather than only in tearDown
+        # (which unittest skips entirely if setUp doesn't complete).
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
         os.environ["DICTATE_PRO_DEV_AUTH"] = "1"
+        self.addCleanup(os.environ.pop, "DICTATE_PRO_DEV_AUTH", None)
         os.environ["DICTATE_PRO_DEV_AUTO_APPROVE"] = "1"
+        self.addCleanup(os.environ.pop, "DICTATE_PRO_DEV_AUTO_APPROVE", None)
         # Test environment has no OS keyring; allow the plaintext session fallback.
         os.environ["DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS"] = "1"
+        self.addCleanup(os.environ.pop, "DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS", None)
+
         # The server-side rate limiter is a module-level singleton shared across every
         # ThreadingHTTPServer instance in the process, including other test files' servers
         # running in the same pytest session. Device-code flows make several extra requests
         # per test (issue, poll x N, approve); swap in a generous limiter for this class so
         # it doesn't eat into (or get tripped by) other files' budget, and restore whatever
         # was there afterward so we don't mask a real rate-limit regression elsewhere.
-        self._original_rate_limiter = server_module._rate_limiter
+        self.addCleanup(setattr, server_module, "_rate_limiter", server_module._rate_limiter)
         server_module._rate_limiter = _RateLimiter(rpm=100_000)
+
         settings = ProSettings(data_dir=Path(self._tmp.name))
         self.service = ProService(settings)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), ProRequestHandler)
@@ -58,17 +69,13 @@ class DeviceCodeTests(unittest.TestCase):
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
+        self.addCleanup(self._shutdown_httpd)
         self.session_path = Path(self._tmp.name) / "pro-session.json"
 
-    def tearDown(self) -> None:
+    def _shutdown_httpd(self) -> None:
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=2)
-        self._tmp.cleanup()
-        server_module._rate_limiter = self._original_rate_limiter
-        os.environ.pop("DICTATE_PRO_DEV_AUTH", None)
-        os.environ.pop("DICTATE_PRO_DEV_AUTO_APPROVE", None)
-        os.environ.pop("DICTATE_PRO_ALLOW_PLAINTEXT_TOKENS", None)
 
     def _new_client(self) -> ProClient:
         return ProClient(base_url=self.base_url, session_path=self.session_path)
@@ -169,6 +176,43 @@ class DeviceCodeTests(unittest.TestCase):
             self.service.auth.poll_device_code(device_code=payload["device_code"], client_id="dictate-desktop")
         self.assertEqual(str(ctx.exception), "expired_token")
 
+        # P2 regression: poll_device_code discards the row immediately on expiry rather
+        # than waiting for a future issuance's sweep to catch it.
+        self.assertIsNone(self.service.store.get_device_code(device_code_hash))
+
+    def test_device_code_issuance_purges_expired_rows(self) -> None:
+        # P2 regression: the opportunistic purge must be reachable purely via issuance
+        # (unauthenticated, ungated, attacker-controlled), since on a server with no
+        # DICTATE_PRO_DEV_AUTO_APPROVE nothing can ever be approved/consumed -- the
+        # consume_device_code purge path would never run at all.
+        expired_hashes = []
+        for _ in range(3):
+            payload = self.service.auth.create_device_code(client_id="dictate-desktop")
+            expired_hashes.append(auth_module._hash_code(payload["device_code"]))
+        live_payload = self.service.auth.create_device_code(client_id="dictate-desktop")
+        live_hash = auth_module._hash_code(live_payload["device_code"])
+
+        with self.service.store._conn() as conn:  # noqa: SLF001
+            conn.executemany(
+                "UPDATE device_codes SET expires_at = '2000-01-01T00:00:00+00:00' WHERE device_code_hash = ?",
+                [(h,) for h in expired_hashes],
+            )
+            count_before = conn.execute("SELECT COUNT(*) FROM device_codes").fetchone()[0]
+        self.assertEqual(count_before, 4)
+
+        # A fresh issuance must sweep the 3 now-expired rows before inserting its own --
+        # this is the ONLY reachable purge point when nothing can ever be approved.
+        newest_payload = self.service.auth.create_device_code(client_id="dictate-desktop")
+        newest_hash = auth_module._hash_code(newest_payload["device_code"])
+
+        with self.service.store._conn() as conn:  # noqa: SLF001
+            remaining = {row[0] for row in conn.execute("SELECT device_code_hash FROM device_codes").fetchall()}
+        for expired_hash in expired_hashes:
+            self.assertNotIn(expired_hash, remaining)
+        self.assertIn(live_hash, remaining)
+        self.assertIn(newest_hash, remaining)
+        self.assertEqual(len(remaining), 2)
+
     def test_access_denied_returns_error_status_via_http(self) -> None:
         client = self._new_client()
         start = client.start_browser_sign_in(prefer="device_code", device_label="Test Desktop")
@@ -209,6 +253,15 @@ class DeviceCodeTests(unittest.TestCase):
             self.assertEqual(status, 501)
         finally:
             os.environ["DICTATE_PRO_DEV_AUTO_APPROVE"] = "1"
+
+    def test_verification_uri_is_a_real_page_not_a_404(self) -> None:
+        # P3 regression: RFC 8628 requires verification_uri to be retrievable.
+        client = self._new_client()
+        start = client.start_browser_sign_in(prefer="device_code", device_label="Test Desktop")
+        with urllib.request.urlopen(start["verification_uri"], timeout=10) as response:  # noqa: S310
+            self.assertEqual(response.status, 200)
+            html = response.read().decode("utf-8")
+        self.assertIn("Enter your code", html)
 
     # --- Criterion 5: prefer ladder ---
 

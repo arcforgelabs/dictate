@@ -303,6 +303,11 @@ class ProAuth:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if utcnow() > expires_at:
+            # Opportunistic cleanup: discard the row now rather than waiting for the next
+            # issuance's sweep to catch it (reuses consume_device_code purely for its
+            # DELETE side effect; the return value is irrelevant -- this code was never
+            # going to be exchanged for a session).
+            self._store.consume_device_code(device_code_hash)
             raise ValueError("expired_token")
         now = utcnow()
         last_polled_raw = row.get("last_polled_at")
@@ -311,7 +316,13 @@ class ProAuth:
             last_polled = datetime.fromisoformat(last_polled_raw)
             if last_polled.tzinfo is None:
                 last_polled = last_polled.replace(tzinfo=timezone.utc)
-            if (now - last_polled).total_seconds() < interval:
+            # 1s grace: the client self-throttles on its own monotonic clock at SEND time,
+            # while this compares wall-clock at RECEIVE time -- network latency jitter
+            # between polls can otherwise make an honestly-paced client look "too fast" by
+            # a fraction of a second, and since the interval only ratchets up (never decays),
+            # a single spurious slow_down would permanently punish that client with an
+            # ever-longer interval.
+            if (now - last_polled).total_seconds() < interval - 1:
                 # Client polled faster than the last-assigned interval: per RFC 8628 §3.5,
                 # tell it to slow down and increase the interval by 5s for next time.
                 self._store.touch_device_code_poll(device_code_hash, last_polled_at=iso(now), interval=interval + 5)
