@@ -52,8 +52,6 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("opens account status behind the Dictate mark and enables encrypted sync", async () => {
     const sources = [];
-    const invoke = vi.fn().mockResolvedValue(true);
-    window.__TAURI__ = { core: { invoke } };
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
@@ -96,16 +94,6 @@ describe("Quiet Console app (mock mode)", () => {
           }),
         };
       }
-      if (path === "/api/local/export") {
-        return {
-          ok: true,
-          json: async () => ({
-            schema: "dictate.local-export.v1",
-            history: [{ id: "h1", text: "private local history" }],
-            notes: [],
-          }),
-        };
-      }
       return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
     });
 
@@ -116,7 +104,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByRole("dialog", { name: "Dictate" })).toBeInTheDocument();
     expect(screen.getByText("Version 2026.7.4 · unstable")).toBeInTheDocument();
     expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
-    expect(screen.getByText("Sync off")).toBeInTheDocument();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
     expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
     expect(screen.getByText("This encrypts your synced dictations before upload.")).toBeInTheDocument();
     expect(screen.getByText("Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.")).toBeInTheDocument();
@@ -125,7 +113,7 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "" } });
 
     fireEvent.click(screen.getByText("Sync my dictations"));
-    await waitFor(() => expect(screen.getByText("Encrypted sync on")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Connected")).toBeInTheDocument());
     expect(screen.getByText("Encrypted sync enabled")).toBeInTheDocument();
     expect(screen.getByText("Save this key. It restores synced dictations on a new device if your other devices are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("dictate-rk-test")).toBeInTheDocument();
@@ -133,19 +121,9 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("New laptop")).toBeInTheDocument();
     expect(screen.getByText("Action needed")).toBeInTheDocument();
     expect(screen.getByText("Approve")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Export local data"));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
-      defaultName: "dictate-local-export.json",
-      content: expect.stringContaining("private local history"),
-    })));
-    expect(screen.getByText("Local export saved")).toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://127.0.0.1:1/api/pro/sync/enable",
       expect.objectContaining({ method: "POST" }),
-    );
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://127.0.0.1:1/api/local/export",
-      expect.objectContaining({ method: "GET" }),
     );
   });
 
@@ -197,8 +175,9 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
-    expect(screen.getByText("Sign in to Dictate Pro")).toBeInTheDocument();
-    expect(screen.getByText("Sign-in checks your plan and devices. It does not upload local dictations.")).toBeInTheDocument();
+    expect(screen.getByText("Not signed in")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     fireEvent.change(screen.getByLabelText("Dictate Pro email"), { target: { value: "samuel@example.test" } });
     fireEvent.click(screen.getByText("Send sign-in code"));
     await waitFor(() => expect(screen.getByText("Sign-in code sent")).toBeInTheDocument());
@@ -223,6 +202,111 @@ describe("Quiet Console app (mock mode)", () => {
         body: JSON.stringify({ challenge_id: "challenge_1", code: "123456", deviceLabel: "Windows lab" }),
       }),
     );
+  });
+
+  it("shows update controls and gates Beta behind Dictate Pro", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            installedPackageVersion: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        return {
+          ok: true,
+          json: async () => ({
+            currentVersion: "2026.7.4",
+            latestVersion: "2026.7.4",
+            updateAvailable: false,
+            checked: true,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Beta" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+    await waitFor(() => expect(screen.getByText("You're on the latest version")).toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/update-status",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("lets Dictate Pro users switch to Beta updates", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            installedPackageVersion: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/config" && opts.method === "PATCH") {
+        expect(opts.body).toBe(JSON.stringify({ updateChannel: "unstable" }));
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            installedPackageVersion: "2026.7.4-unstable.52.1",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: true, account: { email: "samuel@example.test" } },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+
+    await waitFor(() => expect(screen.getByText("Beta updates selected")).toBeInTheDocument());
+    expect(screen.getByText("2026.7.4-unstable.52.1")).toBeInTheDocument();
   });
 
   it("shows an offline sync status when the last sync could not reach the service", async () => {
@@ -263,8 +347,7 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
-    expect(screen.getByText("Encrypted sync on")).toBeInTheDocument();
-    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
   });
 
   it("shows action needed when encrypted sync is enabled but the local key is missing", async () => {
@@ -298,7 +381,7 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
-    expect(screen.getByText("Sync key unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText("Action needed")).toBeInTheDocument();
     expect(screen.getByText("The encryption key is missing from this device.")).toBeInTheDocument();
   });

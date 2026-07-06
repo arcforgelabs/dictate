@@ -250,6 +250,14 @@ function AccountButton() {
   );
 }
 
+function syncStatusLabel({ signedIn, sync, syncBusy, syncError }) {
+  if (!signedIn && !sync.accountId) return "Offline";
+  if (!sync.enabled) return "Offline";
+  if (!sync.keyAvailable || syncError) return "Not connected";
+  if (syncBusy) return "Updating";
+  return "Connected";
+}
+
 function AccountDialog() {
   const s = useStore();
   const sync = s.syncState || { enabled: false, keyAvailable: false, lastSeq: 0 };
@@ -262,12 +270,13 @@ function AccountDialog() {
   const [signInEmail, setSignInEmail] = useState("");
   const [signInCode, setSignInCode] = useState("");
   const [signInChallenge, setSignInChallenge] = useState("");
+  const [signInOpen, setSignInOpen] = useState(false);
   const [deviceLabel, setDeviceLabel] = useState("Desktop");
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
-  const syncLabel = sync.enabled
-    ? (sync.keyAvailable ? "Encrypted sync on" : "Sync key unavailable")
-    : "Sync off";
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
+  const syncLabel = syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError });
+  const betaSelected = s.updateChannel === "unstable";
+  const updateBusy = !!(s.updateStatus?.checking || s.updateStatus?.updating);
   const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
   const syncedLabel = !sync.enabled
     ? "Off"
@@ -448,16 +457,6 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
-  const exportLocalData = () => {
-    if (!ipc.isLive()) return;
-    s.setSyncBusy(true);
-    ipc.exportLocalData()
-      .then((data) => ipc.saveTextFile("dictate-local-export.json", JSON.stringify(data, null, 2)))
-      .then(() => s.toast("Local export saved"))
-      .catch((e) => s.toast(e.message || "Could not export local data", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
   const exportCloudData = () => {
     if (!ipc.isLive()) return;
     s.setSyncBusy(true);
@@ -482,6 +481,27 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
+  const selectUpdateChannel = (channel) => {
+    if (channel === s.updateChannel) return;
+    if (channel === "unstable" && !signedIn) {
+      s.toast("Dictate Pro is required for Beta updates", { bad: true });
+      return;
+    }
+    if (!ipc.isLive()) {
+      s.setUpdateChannel(channel);
+      s.toast(channel === "unstable" ? "Beta updates selected" : "Normal updates selected");
+      return;
+    }
+    ipc.setUpdateChannel(channel)
+      .then((st) => {
+        if (st?.updateChannel) s.setUpdateChannel(st.updateChannel);
+        if (typeof st?.installedPackageVersion === "string") s.setInstalledPackageVersion(st.installedPackageVersion);
+        s.toast(channel === "unstable" ? "Beta updates selected" : "Normal updates selected");
+        s.checkUpdates();
+      })
+      .catch((e) => s.toast(e.message || "Could not change update channel", { bad: true }));
+  };
+
   return (
     <div className="account-scrim" onMouseDown={() => s.setAccountOpen(false)}>
       <div
@@ -503,25 +523,71 @@ function AccountDialog() {
         </div>
 
         <div className="account-grid">
-          <div className="account-row"><span>Account</span><strong>{accountLabel}</strong></div>
+          <div className="account-row">
+            <span>Account</span>
+            {signedIn ? (
+              <strong>{accountLabel}</strong>
+            ) : (
+              <div className="account-row-end">
+                <strong>Not signed in</strong>
+                {!signInOpen && (
+                  <button type="button" className="account-signin" disabled={s.syncBusy} onClick={() => setSignInOpen(true)}>
+                    Sign in
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <div className="account-row"><span>Sync</span><strong>{syncLabel}</strong></div>
           <div className="account-row"><span>Model</span><strong>{model.name}</strong></div>
-          <div className="account-row"><span>Runtime</span><strong>{s.device2 || "auto"} · {s.compute || "int8"}</strong></div>
           {s.installedPackageVersion && (
             <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
+          <div className="account-row">
+            <span>Updates</span>
+            <div className="account-channel" role="group" aria-label="Update channel">
+              <button
+                type="button"
+                className={!betaSelected ? "active" : ""}
+                aria-pressed={!betaSelected}
+                onClick={() => selectUpdateChannel("stable")}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                className={betaSelected ? "active" : ""}
+                aria-pressed={betaSelected}
+                disabled={!signedIn && !betaSelected}
+                title={!signedIn && !betaSelected ? "Dictate Pro required" : "Beta updates"}
+                onClick={() => selectUpdateChannel("unstable")}
+              >
+                Beta
+              </button>
+            </div>
+          </div>
           {sync.enabled && (
             <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
           )}
         </div>
 
+        <div className="account-actions account-actions--split">
+          <button type="button" className="account-secondary" disabled={updateBusy} onClick={s.checkUpdates}>
+            <Icon name="refresh" size={14} />
+            <span>{s.updateStatus?.checking ? "Checking" : "Check for update"}</span>
+          </button>
+          {s.updateStatus?.updateAvailable && (
+            <button type="button" className="account-primary" disabled={updateBusy} onClick={s.startUpdate}>
+              <Icon name="download" size={14} />
+              <span>{s.updateStatus?.updating ? "Updating" : "Update"}</span>
+            </button>
+          )}
+        </div>
+
+        {(signedIn || signInOpen) && (
         <div className="account-actions">
           {!signedIn ? (
             <div className="account-enable-stack">
-              <div className="account-consent">
-                <strong>Sign in to Dictate Pro</strong>
-                <span>Sign-in checks your plan and devices. It does not upload local dictations.</span>
-              </div>
               <input
                 className="account-input"
                 value={signInEmail}
@@ -529,6 +595,7 @@ function AccountDialog() {
                 placeholder="Email"
                 aria-label="Dictate Pro email"
                 type="email"
+                autoFocus
               />
               <button type="button" className="account-primary" disabled={s.syncBusy} onClick={requestSignIn}>
                 <Icon name="key" size={14} />
@@ -588,6 +655,7 @@ function AccountDialog() {
             </>
           )}
         </div>
+        )}
         {recoveryKey && (
           <div className="account-recovery">
             <span>Recovery key</span>
@@ -639,16 +707,13 @@ function AccountDialog() {
             </div>
           </>
         )}
-        <div className="account-actions account-actions--split">
-          <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={exportLocalData}>
-            Export local data
-          </button>
-          {signedIn && (
+        {signedIn && (
+          <div className="account-actions account-actions--split">
             <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={signOut}>
               Sign out
             </button>
-          )}
-        </div>
+          </div>
+        )}
         {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
         {signedIn && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
@@ -1879,7 +1944,7 @@ export default function App() {
     finishNoteRecording, discardNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
-    runDoctor, version, updateChannel, installedPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
+    runDoctor, version, updateChannel, setUpdateChannel, installedPackageVersion, setInstalledPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
     // Update affordance
     updatePhase, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions

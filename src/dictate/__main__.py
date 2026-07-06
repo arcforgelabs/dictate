@@ -10,6 +10,7 @@ Usage:
     dictate controls          Open Windows-friendly configuration/history controls
     dictate doctor ...        Diagnose environment/runtime setup
     dictate pro ...           Manage Dictate Pro sign-in and encrypted sync
+    dictate export-local ...  Export local dictations and notes to JSON
     dictate prepare-model ... Prepare/download a model before activation
     dictate --stt-backend faster-whisper
     dictate --type-backend wtype  Force typing backend for daemon mode
@@ -225,6 +226,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _handle_config_commands(cli_args[1:])
     if cli_args and cli_args[0] == "pro":
         return _handle_pro_commands(cli_args[1:])
+    if cli_args and cli_args[0] == "export-local":
+        return _handle_export_local_command(cli_args[1:])
 
     parser = build_parser()
     args = parser.parse_args(cli_args)
@@ -346,6 +349,38 @@ def _handle_stop_command(argv: Sequence[str]) -> int:
     if not quiet:
         print(message, file=sys.stderr)
     return 0 if stopped else 1
+
+
+def _handle_export_local_command(argv: Sequence[str]) -> int:
+    """`dictate export-local` — export local history and notes without cloud state or secrets."""
+    import argparse as _ap
+    import json
+    from pathlib import Path as _Path
+
+    from dictate.ui_server import UiBackend
+
+    parser = _ap.ArgumentParser(
+        prog="dictate export-local",
+        description="Export local dictations and notes to JSON",
+        add_help=True,
+    )
+    parser.add_argument("--output", "-o", help="Write JSON export to this file instead of stdout")
+    args = parser.parse_args(list(argv))
+    backend = UiBackend()
+    try:
+        payload = backend.export_local_data()
+        rendered = json.dumps(payload, indent=2, sort_keys=True)
+        if args.output:
+            output = _Path(args.output).expanduser()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered + "\n", encoding="utf-8")
+            print(f"ok: local export written to {output}")
+        else:
+            print(rendered)
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _handle_pro_commands(argv: Sequence[str]) -> int:  # noqa: C901

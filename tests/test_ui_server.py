@@ -1373,6 +1373,46 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertEqual(flow["progress"], 0)
             self.assertEqual(flow["actions"], ["open_release"])
 
+    def test_patch_config_sets_stable_update_channel_without_pro(self) -> None:
+        class _SignedOutProClient(_FakeProClient):
+            def get_state(self) -> dict[str, object]:
+                state = super().get_state()
+                state["signedIn"] = False
+                state["account"] = None
+                return state
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, pro_client=_SignedOutProClient())
+            state = backend.patch_config({"updateChannel": "stable"})
+
+            self.assertEqual(state["updateChannel"], "stable")
+            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "stable")
+
+    def test_patch_config_rejects_beta_update_channel_without_pro(self) -> None:
+        class _SignedOutProClient(_FakeProClient):
+            def get_state(self) -> dict[str, object]:
+                state = super().get_state()
+                state["signedIn"] = False
+                state["account"] = None
+                return state
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, pro_client=_SignedOutProClient())
+
+            with self.assertRaises(ApiError) as ctx:
+                backend.patch_config({"updateChannel": "unstable"})
+
+            self.assertEqual(ctx.exception.status, 403)
+            self.assertIsNone(config_mod.load_config(backend.config_path).update_channel)
+
+    def test_patch_config_sets_beta_update_channel_for_pro(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, pro_client=_FakeProClient())
+            state = backend.patch_config({"updateChannel": "unstable"})
+
+            self.assertEqual(state["updateChannel"], "unstable")
+            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
+
 
 @unittest.skipIf(
     sys.platform == "win32",

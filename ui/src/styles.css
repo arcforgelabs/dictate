@@ -553,6 +553,18 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   font-size:12.5px;color:var(--muted);}
 .account-row+ .account-row{border-top:1px solid var(--hairline);}
 .account-row strong{min-width:0;text-align:right;color:var(--fg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.account-row-end{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
+.account-row-end strong{flex:0 1 auto;}
+.account-signin{height:26px;padding:0 11px;border-radius:var(--r-pill);border:1px solid var(--live);background:var(--live-bg);
+  color:var(--live-text);font-size:11.5px;font-weight:650;white-space:nowrap;transition:var(--t-fast);}
+.account-signin:hover:not(:disabled){background:var(--live);color:#fff;}
+.account-signin:disabled{opacity:.48;cursor:default;}
+.account-channel{height:28px;display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--r-pill);background:var(--surface-2);}
+.account-channel button{height:22px;padding:0 10px;border:0;border-radius:var(--r-pill);background:transparent;color:var(--muted);
+  font-size:11.5px;font-weight:650;white-space:nowrap;cursor:pointer;transition:var(--t-fast);}
+.account-channel button.active{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px color-mix(in srgb,var(--shadow-color) 15%,transparent);}
+.account-channel button:hover:not(:disabled){color:var(--fg);}
+.account-channel button:disabled{opacity:.42;cursor:default;}
 .account-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
 .account-actions--split{justify-content:space-between;}
 .account-enable-stack{width:100%;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}

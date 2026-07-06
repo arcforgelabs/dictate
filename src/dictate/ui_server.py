@@ -1006,6 +1006,8 @@ class UiBackend:
             self._set_prefs(payload["prefs"])
         if "startup" in payload:
             self._set_startup(payload["startup"])
+        if "updateChannel" in payload:
+            self._set_update_channel(payload["updateChannel"])
         return self.get_state()
 
     def _set_model(self, model: Any) -> None:
@@ -1076,6 +1078,20 @@ class UiBackend:
             self.set_startup_enabled(bool(enabled))
         except Exception as exc:  # noqa: BLE001
             raise ApiError(500, f"could not change startup: {exc}") from exc
+
+    def _set_update_channel(self, channel: Any) -> None:
+        if not isinstance(channel, str):
+            raise ApiError(400, "updateChannel must be stable or unstable")
+        normalized = channel.strip().lower()
+        if normalized == "latest":
+            normalized = "stable"
+        if normalized not in {"stable", "unstable"}:
+            raise ApiError(400, "updateChannel must be stable or unstable")
+        if normalized == "unstable":
+            pro = self._dictate_pro_state()
+            if not bool(pro.get("signedIn")):
+                raise ApiError(403, "Dictate Pro is required for Beta updates")
+        config_mod.set_update_channel(normalized, path=self.config_path)
 
     def add_hotwords(self, words: list[str]) -> dict[str, Any]:
         if not isinstance(words, list):

@@ -162,6 +162,9 @@ export const ipc = {
   async startUpdate() {
     return call("POST", "/api/update");
   },
+  async setUpdateChannel(updateChannel) {
+    return call("PATCH", "/api/config", { updateChannel });
+  },
   async startProSignIn(email) {
     return call("POST", "/api/pro/auth/start", { email });
   },
