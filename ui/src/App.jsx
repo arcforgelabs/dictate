@@ -358,12 +358,22 @@ function AccountDialog() {
   const clearBrowserPoll = () => {
     if (browserPollRef.current) { clearInterval(browserPollRef.current); browserPollRef.current = null; }
   };
-  // Cleared on unmount (closing the dialog) in addition to the explicit clears below.
-  useEffect(() => clearBrowserPoll, []);
+  // Guards setState/setInterval in async callbacks that can resolve after this dialog
+  // instance has already unmounted (e.g. /browser/start is still in flight when the user
+  // closes the dialog) — without it, that late resolution would both leak an interval
+  // no cleanup ever clears and call setState on an unmounted component.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      clearBrowserPoll();
+    };
+  }, []);
 
   const pollBrowserSignIn = () => {
     ipc.getBrowserSignInStatus()
       .then((r) => {
+        if (!mountedRef.current) return;
         if (r?.status === "pending") return;
         clearBrowserPoll();
         if (r?.status === "complete") {
@@ -382,6 +392,7 @@ function AccountDialog() {
         setBrowserSignIn({ status: "error", error: message });
       })
       .catch(() => {
+        if (!mountedRef.current) return;
         clearBrowserPoll();
         setBrowserSignIn({ status: "error", error: "Couldn't reach the sign-in service." });
       });
@@ -392,10 +403,17 @@ function AccountDialog() {
       s.toast("Sign in from the installed app", { bad: true });
       return;
     }
-    setEmailOpen(false);
+    resetEmailFallback();
     clearBrowserPoll();
     ipc.startBrowserSignIn(flow)
       .then((r) => {
+        if (!mountedRef.current) {
+          // The dialog closed while the request was in flight — best-effort tell the
+          // server to give up the pending attempt instead of orphaning it, and never
+          // touch state on an unmounted component.
+          ipc.cancelBrowserSignIn().catch(() => {});
+          return;
+        }
         if (!r || r.flow === "email") {
           // No apology — this is the normal floor, not an error state.
           setBrowserSignIn({ status: "idle" });
@@ -413,6 +431,7 @@ function AccountDialog() {
         browserPollRef.current = setInterval(pollBrowserSignIn, 1000);
       })
       .catch((e) => {
+        if (!mountedRef.current) return;
         setBrowserSignIn({ status: "error", error: e.message || "Couldn't reach the sign-in service." });
       });
   };
@@ -427,14 +446,36 @@ function AccountDialog() {
     if (browserSignIn.authorizeUrl) window.open(browserSignIn.authorizeUrl, "_blank", "noopener,noreferrer");
   };
 
+  // Belt-and-braces: the gateway's verification_uri is already scheme-clamped
+  // server-side (ProClient._start_device_code / _clamp_verification_uri), but this is
+  // the last line of defense before window.open — never pass through anything other
+  // than https, or http on a loopback host (the local reference server).
+  const isSafeVerificationUri = (url) => {
+    if (!url) return false;
+    if (/^https:/i.test(url)) return true;
+    return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|\?|$)/i.test(url);
+  };
+
   const openVerificationPortal = () => {
     const url = browserSignIn.verificationUriComplete || browserSignIn.verificationUri;
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    if (isSafeVerificationUri(url)) window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const startEmailFallback = () => {
     cancelBrowserSignIn();
     setEmailOpen(true);
+  };
+
+  // Fully resets the email-code form's state (not just visibility): used whenever the
+  // form is abandoned (Cancel, or switching to browser sign-in instead) so reopening it
+  // later always starts a fresh challenge rather than resuming a stale code-entry step
+  // against an old (possibly expired) challenge_id with no way to change the address.
+  const resetEmailFallback = () => {
+    setEmailOpen(false);
+    setEmailStep("idle");
+    setEmailAddress("");
+    setEmailCode("");
+    setEmailChallengeId("");
   };
 
   const sendEmailCode = () => {
@@ -458,10 +499,7 @@ function AccountDialog() {
     ipc.completeProSignIn({ challengeId: emailChallengeId, code })
       .then((r) => {
         if (r?.dictatePro) s.setDictatePro(r.dictatePro);
-        setEmailOpen(false);
-        setEmailStep("idle");
-        setEmailAddress("");
-        setEmailCode("");
+        resetEmailFallback();
         s.toast("Signed in");
       })
       .catch((e) => s.toast(e.message || "Could not verify the code", { bad: true }))
@@ -780,8 +818,20 @@ function AccountDialog() {
                       </button>
                     </>
                   )}
-                  <button type="button" className="account-secondary" disabled={s.syncBusy || emailBusy} onClick={() => setEmailOpen(false)}>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy || emailBusy} onClick={resetEmailFallback}>
                     Cancel
+                  </button>
+                </>
+              ) : !s.browserSigninEnabled ? (
+                // Flag off: don't promise a browser this build won't open — the primary
+                // action goes straight to the email-code floor with honest copy.
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in to your account</strong>
+                    <span>We'll email you a code to sign in this device.</span>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
+                    Sign in
                   </button>
                 </>
               ) : (
@@ -1255,6 +1305,7 @@ export default function App() {
   const [providerReason, setProviderReason] = useState(null);
   const [providerActive, setProviderActive] = useState(null);
   const [dictatePro, setDictatePro] = useState({ signedIn: false });
+  const [browserSigninEnabled, setBrowserSigninEnabled] = useState(false);
   const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
   const [syncBusy, setSyncBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -1534,6 +1585,7 @@ export default function App() {
       if (ph.active) setProviderActive(ph.active);
     }
     if (st.dictatePro) setDictatePro(st.dictatePro);
+    if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
     if (st.sync) setSyncState(st.sync);
   }, []);
 
@@ -2196,7 +2248,7 @@ export default function App() {
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
-    dictatePro, setDictatePro, syncState, setSyncState, syncBusy, setSyncBusy,
+    dictatePro, setDictatePro, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
     accountOpen, setAccountOpen, setHistory,
   };
 

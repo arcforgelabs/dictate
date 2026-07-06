@@ -536,6 +536,9 @@ class UiBackend:
             "providerHealth": self._compute_provider_health(cfg),
             "dictatePro": pro_state,
             "sync": self._sync_state(),
+            # Lets the UI show honest idle-state copy ("browser" vs. "email code") instead
+            # of promising a browser it won't open when the flag is off.
+            "browserSigninEnabled": bool(self._safe(self.browser_signin_enabled, False)),
         }
 
     def _dictate_pro_state(self) -> dict[str, Any]:
@@ -583,12 +586,17 @@ class UiBackend:
         an apology.
         """
         if not self.browser_signin_enabled():
+            self._pending_browser_device_key = None
             return {"flow": "email"}
         client = self._require_pro_client()
         try:
             result = client.start_browser_sign_in(device_label=device_label, prefer=flow)
         except ProClientError as exc:
             if exc.status in {404, 405, 501}:
+                # No attempt is pending on this branch -- keep the "pending key iff
+                # pending attempt" invariant so poll/cancel never persist a stray key
+                # left over from an earlier attempt.
+                self._pending_browser_device_key = None
                 return {"flow": "email"}
             raise ApiError(exc.status, exc.message) from exc
         # Generated up front (like complete_pro_sign_in), persisted once poll reports

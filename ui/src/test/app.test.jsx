@@ -154,6 +154,9 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
             dictatePro: { signedIn: false, account: null },
+            // These tests exercise the browser sign-in flow itself; the one test that
+            // covers the disabled state builds its own /api/state mock with this false.
+            browserSigninEnabled: true,
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
@@ -271,6 +274,123 @@ describe("Quiet Console app (mock mode)", () => {
       "noopener,noreferrer",
     );
   }, 10_000);
+
+  it("never opens a non-https/non-loopback verification_uri (belt-and-braces)", async () => {
+    // The Python client already clamps this server-side (ProClient._clamp_verification_uri);
+    // this is the last-line-of-defense guard in openVerificationPortal itself.
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            flow: "device_code",
+            user_code: "ABCD-EFGH",
+            verification_uri: "javascript:alert(1)",
+            verification_uri_complete: "javascript:alert(1)",
+            expires_in: 900,
+            interval: 5,
+          }),
+        };
+      }
+      if (path === "/api/pro/auth/browser/status") {
+        return { ok: true, json: async () => ({ status: "pending" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Open portal"));
+    expect(open).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("cancels the pending attempt instead of leaking a poll if the dialog closes mid-request", async () => {
+    let resolveStart;
+    const startPromise = new Promise((resolve) => { resolveStart = resolve; });
+    let cancelCalls = 0;
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return startPromise.then(() => ({
+          ok: true,
+          json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }),
+        }));
+      }
+      if (path === "/api/pro/auth/browser/cancel" && opts.method === "POST") {
+        cancelCalls += 1;
+        return { ok: true, json: async () => ({ status: "cancelled" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    // Close the dialog (unmounts AccountDialog) while /browser/start is still in flight.
+    fireEvent.click(screen.getByLabelText("Close"));
+    resolveStart();
+
+    await waitFor(() => expect(cancelCalls).toBe(1));
+  }, 10_000);
+
+  it("resets the email form on Cancel instead of resuming a stale code-entry step", async () => {
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ challenge_id: "ch_1", account_id: "acct_1" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Email me a code instead"));
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "samuel@example.test" } });
+    fireEvent.click(screen.getByText("Send code"));
+    await waitFor(() => expect(screen.getByLabelText("Sign-in code")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(screen.queryByText("Sign in with an email code")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Email me a code instead"));
+    expect(screen.getByLabelText("Email address")).toHaveValue("");
+    expect(screen.queryByLabelText("Sign-in code")).not.toBeInTheDocument();
+  });
+
+  it("shows honest email-only copy when browser sign-in is disabled", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            browserSigninEnabled: false,
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    await openSignInBlock(sources);
+
+    expect(screen.getByText("We'll email you a code to sign in this device.")).toBeInTheDocument();
+    expect(screen.queryByText("Opens your browser to connect this device to your account.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Email me a code instead")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Sign in"));
+    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
+  });
 
   it("shows an inline error with Try again / Email me a code after a failed poll", async () => {
     const { sources } = renderSignedOutAccountPanel((path, opts) => {

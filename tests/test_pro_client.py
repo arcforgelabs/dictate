@@ -511,5 +511,82 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
 
+class DeviceCodeVerificationUriClampTests(unittest.TestCase):
+    """P2 regression: verification_uri(_complete) come verbatim from the gateway's
+    device-code response -- unlike authorize_url (client-constructed), a compromised or
+    MITM'd gateway could return a javascript:/file:/off-origin-http URI. _start_device_code
+    must clamp both fields to https, or http on a loopback host, before they ever reach a
+    caller that might window.open()/webbrowser.open() them.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.session_path = Path(self._tmp.name) / "pro-session.json"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _start(self, *, verification_uri: str, verification_uri_complete: str) -> dict[str, object]:
+        client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
+        client.responses = [
+            {
+                "device_code": "dc_1",
+                "user_code": "ABCD-EFGH",
+                "expires_in": 900,
+                "interval": 5,
+                "verification_uri": verification_uri,
+                "verification_uri_complete": verification_uri_complete,
+            }
+        ]
+        return client._start_device_code("Desktop")  # noqa: SLF001
+
+    def test_javascript_scheme_is_blanked(self) -> None:
+        result = self._start(
+            verification_uri="javascript:alert(1)",
+            verification_uri_complete="javascript:alert(1)//ABCD-EFGH",
+        )
+        self.assertEqual(result["verification_uri"], "")
+        self.assertEqual(result["verification_uri_complete"], "")
+
+    def test_file_scheme_is_blanked(self) -> None:
+        result = self._start(
+            verification_uri="file:///etc/passwd",
+            verification_uri_complete="file:///etc/passwd",
+        )
+        self.assertEqual(result["verification_uri"], "")
+        self.assertEqual(result["verification_uri_complete"], "")
+
+    def test_off_origin_http_is_blanked(self) -> None:
+        result = self._start(
+            verification_uri="http://evil.example.com/device",
+            verification_uri_complete="http://evil.example.com/device?user_code=ABCD-EFGH",
+        )
+        self.assertEqual(result["verification_uri"], "")
+        self.assertEqual(result["verification_uri_complete"], "")
+
+    def test_https_uri_passes_through(self) -> None:
+        result = self._start(
+            verification_uri="https://console.arcforge.au/deck/link",
+            verification_uri_complete="https://console.arcforge.au/deck/link?user_code=ABCD-EFGH",
+        )
+        self.assertEqual(result["verification_uri"], "https://console.arcforge.au/deck/link")
+        self.assertEqual(
+            result["verification_uri_complete"],
+            "https://console.arcforge.au/deck/link?user_code=ABCD-EFGH",
+        )
+
+    def test_loopback_http_passes_through(self) -> None:
+        # The local reference server itself replies over http://127.0.0.1:<port>/...
+        result = self._start(
+            verification_uri="http://127.0.0.1:18765/v1/auth/device",
+            verification_uri_complete="http://127.0.0.1:18765/v1/auth/device?user_code=ABCD-EFGH",
+        )
+        self.assertEqual(result["verification_uri"], "http://127.0.0.1:18765/v1/auth/device")
+        self.assertEqual(
+            result["verification_uri_complete"],
+            "http://127.0.0.1:18765/v1/auth/device?user_code=ABCD-EFGH",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

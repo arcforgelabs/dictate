@@ -36,6 +36,33 @@ SESSION_PATH = user_data_dir() / "pro-session.json"
 
 logger = logging.getLogger(__name__)
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _clamp_verification_uri(uri: str) -> str:
+    """Only allow https, or http on a loopback host (dev/reference server).
+
+    verification_uri(_complete) come verbatim from the gateway's device-code
+    response -- unlike authorize_url (client-constructed, see _start_loopback),
+    these are attacker-controlled if the gateway is compromised or MITM'd. A
+    javascript:/file:/custom-scheme value here would otherwise reach
+    webbrowser.open()/window.open() unfiltered. Blanking degrades gracefully:
+    the user still has the user_code to enter manually.
+    """
+    if not uri:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(uri)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
+        return uri
+    if scheme == "http" and (parsed.hostname or "").lower() in _LOOPBACK_HOSTS:
+        return uri
+    logger.warning("Discarding unsafe verification_uri scheme from gateway: %r", uri)
+    return ""
+
 
 @dataclass(slots=True)
 class ProSession:
@@ -274,8 +301,8 @@ class ProClient:
         user_code = str(response["user_code"])
         interval = int(response.get("interval") or 5)
         expires_in = int(response.get("expires_in") or 900)
-        verification_uri = str(response.get("verification_uri") or "")
-        verification_uri_complete = str(response.get("verification_uri_complete") or "")
+        verification_uri = _clamp_verification_uri(str(response.get("verification_uri") or ""))
+        verification_uri_complete = _clamp_verification_uri(str(response.get("verification_uri_complete") or ""))
         self._browser_attempt = BrowserAuthAttempt(
             flow="device_code",
             state="",
