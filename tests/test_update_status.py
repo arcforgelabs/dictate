@@ -166,6 +166,7 @@ class UpdateStatusTests(unittest.TestCase):
 
         self.assertEqual(flow.mode, "command")
         self.assertTrue(flow.started)
+        self.assertNotIn("restart", flow.actions or [])
         self.assertEqual(calls, [(["bash", str(root / "update.sh")], str(root))])
 
     def _linux_package(self):  # noqa: ANN202
@@ -204,6 +205,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(flow.mode, "command")
         self.assertTrue(flow.started)
         self.assertEqual(flow.install_kind, "linux-user")
+        self.assertNotIn("restart", flow.actions or [])
         self.assertEqual(
             calls,
             [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@latest", "update", "--user"]],
@@ -365,6 +367,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(flow.platform, "windows")
         self.assertEqual(flow.install_kind, "windows-source")
+        self.assertNotIn("restart", flow.actions or [])
         self.assertEqual(calls[0][0][-1], str(root / "update-windows.ps1"))
         self.assertEqual(calls[0][1], str(root))
 

@@ -198,10 +198,10 @@ def start_update_flow() -> UpdateFlow:
                 phase="working",
                 step="update",
                 progress=0,
-                actions=["restart"],
+                actions=["check"],
                 commands={"update": " ".join(command)},
                 missing_deps=[],
-                message="Started the Linux source updater.",
+                message="Started the Linux source updater. Reopen Dictate after it finishes.",
             )
     if context["install_kind"] == "windows-source":
         source_root = context["source_root"]
@@ -216,10 +216,10 @@ def start_update_flow() -> UpdateFlow:
                 phase="working",
                 step="update",
                 progress=0,
-                actions=["restart"],
+                actions=["check"],
                 commands={"update": " ".join(command)},
                 missing_deps=[],
-                message="Started the Windows source updater.",
+                message="Started the Windows source updater. Reopen Dictate after it finishes.",
             )
 
     return UpdateFlow(
@@ -258,10 +258,10 @@ def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
         phase="working",
         step="update",
         progress=0,
-        actions=["restart"],
+        actions=["check"],
         commands={"update": " ".join(command)},
         missing_deps=[],
-        message="Started the Linux user updater.",
+        message="Started the Linux user updater. Reopen Dictate after it finishes.",
     )
 
 
