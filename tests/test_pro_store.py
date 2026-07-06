@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from dictate.pro.plans import DICTATE_PRO_PLAN, USAGE_THRESHOLDS
-from dictate.pro.store import ProStore, SubscriptionRow, iso
+from dictate.pro.store import ProStore, SubscriptionRow, TranscriptSegmentRow, iso
 
 
 class ProStoreTests(unittest.TestCase):
@@ -231,6 +231,47 @@ class ProStoreTests(unittest.TestCase):
         self.assertEqual(counts["sync_records"], 1)
         self.assertEqual(self.store.list_sync_changes(account_id=account.account_id, since=0, limit=10), [])
         self.assertFalse(self.store.device_is_active(account_id=account.account_id, device_id=device_id))
+
+    def test_hosted_transcript_text_is_not_persisted_in_cloud_export(self) -> None:
+        account = self.store.get_or_create_account("hosted-private@example.com")
+        device_id = self.store.register_device(
+            account_id=account.account_id,
+            device_id="device_1",
+            label="Desktop",
+        )
+        job = self.store.create_meeting_job(
+            account_id=account.account_id,
+            device_id=device_id,
+            plan_id=DICTATE_PRO_PLAN.plan_id,
+            mode="batch_meeting",
+            provider="cohere",
+            provider_model="command-a-transcribe",
+            language="en",
+            requested_diarization=True,
+            billing_period_start=iso(),
+            billing_period_end=iso(),
+        )
+
+        self.store.save_transcript_segments(
+            job.job_id,
+            [
+                TranscriptSegmentRow(
+                    seq=0,
+                    speaker_id="speaker_1",
+                    speaker_label="Speaker 1",
+                    text="private hosted transcript sentinel",
+                    t_start=0.0,
+                    t_end=1.2,
+                )
+            ],
+        )
+
+        exported = self.store.export_account_cloud_data(account.account_id)
+        exported_json = str(exported)
+
+        self.assertNotIn("private hosted transcript sentinel", exported_json)
+        self.assertEqual(exported["transcript_segments"][job.job_id][0]["text"], "")
+        self.assertEqual(exported["transcript_segments"][job.job_id][0]["speaker_label"], "Speaker 1")
 
     def test_key_envelopes_are_exported_and_deleted_with_cloud_data(self) -> None:
         account = self.store.get_or_create_account("envelope@example.com")
