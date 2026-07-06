@@ -111,6 +111,49 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.install_kind, "linux-user")
         self.assertIn("update", status.actions or [])
 
+    def test_source_checkout_defaults_to_unstable_update_channel(self) -> None:
+        root = Path("/tmp/dictate-source")
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
+            return _FakeResponse({"dist-tags": {"unstable": "2026.7.4-unstable.52.1"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=root),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
+        ):
+            status = check_update_status()
+
+        self.assertTrue(status.checked)
+        self.assertEqual(status.latest_version, "2026.7.4-unstable.52.1")
+        self.assertTrue(status.update_available)
+        self.assertEqual(status.install_kind, "linux-source")
+
+    def test_linux_user_install_wins_over_checkout_cwd(self) -> None:
+        root = Path("/tmp/dictate-source")
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
+            return _FakeResponse({"dist-tags": {"unstable": "2026.7.4-unstable.52.1"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=root),
+            patch("dictate.update_status._is_linux_user_install", return_value=True),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable", installed_package_version="2026.7.4"),
+            ),
+        ):
+            status = check_update_status()
+
+        self.assertEqual(status.install_kind, "linux-user")
+        self.assertEqual(status.commands, {"update": "npx -y @arcforgelabs/dictate@unstable update --user"})
+
     def test_check_update_status_falls_back_to_tags(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             if str(request.full_url).endswith("/releases/latest"):
@@ -161,8 +204,9 @@ class UpdateStatusTests(unittest.TestCase):
             (root / "src" / "dictate").mkdir(parents=True)
             with patch("dictate.update_status.sys.platform", "linux"):
                 with patch("dictate.update_status._candidate_source_roots", return_value=[root]):
-                    with patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen):
-                        flow = start_update_flow()
+                    with patch("dictate.update_status._is_linux_user_install", return_value=False):
+                        with patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen):
+                            flow = start_update_flow()
 
         self.assertEqual(flow.mode, "command")
         self.assertTrue(flow.started)
@@ -187,7 +231,7 @@ class UpdateStatusTests(unittest.TestCase):
     def test_linux_user_update_runs_npm_bootstrap_without_pkexec(self) -> None:
         calls = []
 
-        def fake_popen(command):  # noqa: ANN001
+        def fake_popen(command, **kwargs):  # noqa: ANN001, ARG001
             calls.append(command)
             return object()
 
@@ -214,7 +258,7 @@ class UpdateStatusTests(unittest.TestCase):
     def test_linux_user_update_can_target_unstable_npm_channel(self) -> None:
         calls = []
 
-        def fake_popen(command):  # noqa: ANN001
+        def fake_popen(command, **kwargs):  # noqa: ANN001, ARG001
             calls.append(command)
             return object()
 
@@ -236,6 +280,35 @@ class UpdateStatusTests(unittest.TestCase):
             [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@unstable", "update", "--user"]],
         )
 
+    def test_linux_user_update_finds_npx_from_nvm_when_desktop_path_is_minimal(self) -> None:
+        calls = []
+
+        def fake_popen(command, env):  # noqa: ANN001
+            calls.append((command, env))
+            return object()
+
+        plat, roots, user = self._linux_user()
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            npx = home / ".nvm" / "versions" / "node" / "v25.8.1" / "bin" / "npx"
+            npx.parent.mkdir(parents=True)
+            npx.write_text("#!/bin/sh\n")
+            npx.chmod(0o755)
+            with (
+                plat,
+                roots,
+                user,
+                patch("dictate.update_status.Path.home", return_value=home),
+                patch("dictate.update_status.shutil.which", return_value=None),
+                patch("dictate.update_status.load_config", return_value=Config(update_channel="unstable")),
+                patch("dictate.update_status.subprocess.Popen", side_effect=fake_popen),
+            ):
+                flow = start_update_flow()
+
+        self.assertTrue(flow.started)
+        self.assertEqual(calls[0][0], [str(npx), "-y", "@arcforgelabs/dictate@unstable", "update", "--user"])
+        self.assertTrue(calls[0][1]["PATH"].startswith(str(npx.parent)))
+
     def test_invalid_update_channel_falls_back_to_latest(self) -> None:
         plat, roots, user = self._linux_user()
         with (
@@ -256,7 +329,7 @@ class UpdateStatusTests(unittest.TestCase):
     def test_saved_unstable_update_channel_wins_for_linux_user_update(self) -> None:
         calls = []
 
-        def fake_popen(command):  # noqa: ANN001
+        def fake_popen(command, **kwargs):  # noqa: ANN001, ARG001
             calls.append(command)
             return object()
 
@@ -283,8 +356,15 @@ class UpdateStatusTests(unittest.TestCase):
 
     def test_linux_user_update_requires_npx(self) -> None:
         plat, roots, user = self._linux_user()
-        with plat, roots, user, patch("dictate.update_status.shutil.which", return_value=None):
-            flow = start_update_flow()
+        with tempfile.TemporaryDirectory() as d:
+            with (
+                plat,
+                roots,
+                user,
+                patch("dictate.update_status.Path.home", return_value=Path(d)),
+                patch("dictate.update_status.shutil.which", return_value=None),
+            ):
+                flow = start_update_flow()
 
         self.assertEqual(flow.mode, "error")
         self.assertEqual(flow.error_code, "missing_deps")

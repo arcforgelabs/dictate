@@ -136,7 +136,7 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     cfg = context["config"]
     current_version = cfg.installed_package_version or RELEASE_VERSION
     try:
-        latest, url = _fetch_latest_version(cfg.update_channel, timeout=timeout)
+        latest, url = _fetch_latest_version(_update_channel_for_context(context), timeout=timeout)
         update_available = is_newer_version(latest, current_version)
         return UpdateStatus(
             current_version=current_version,
@@ -245,11 +245,11 @@ NPM_PACKAGE_NAME = "@arcforgelabs/dictate"
 
 def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
     """Start the no-sudo per-user updater."""
-    npx = shutil.which("npx")
+    npx = _find_npx()
     if not npx:
         return _missing_deps_flow(context, ["npx"])
     command = [npx, "-y", _npm_package_spec(), "update", "--user"]
-    subprocess.Popen(command)  # noqa: S603
+    subprocess.Popen(command, env=_subprocess_env_for_tool(npx))  # noqa: S603
     return UpdateFlow(
         mode="command",
         started=True,
@@ -263,6 +263,36 @@ def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
         missing_deps=[],
         message="Started the Linux user updater. Reopen Dictate after it finishes.",
     )
+
+
+def _find_npx() -> str | None:
+    found = shutil.which("npx")
+    if found:
+        return found
+    home = Path.home()
+    candidates: list[Path] = [
+        home / ".local" / "bin" / "npx",
+        home / ".npm-global" / "bin" / "npx",
+        home / ".volta" / "bin" / "npx",
+        home / ".fnm" / "aliases" / "default" / "bin" / "npx",
+        Path("/usr/local/bin/npx"),
+        Path("/usr/bin/npx"),
+    ]
+    candidates.extend(home.glob(".nvm/versions/node/*/bin/npx"))
+    existing = [path for path in candidates if path.is_file() and os.access(path, os.X_OK)]
+    if not existing:
+        return None
+    existing.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return str(existing[0])
+
+
+def _subprocess_env_for_tool(tool_path: str) -> dict[str, str]:
+    env = dict(os.environ)
+    tool_dir = str(Path(tool_path).parent)
+    current_path = env.get("PATH", "")
+    if tool_dir and tool_dir not in current_path.split(os.pathsep):
+        env["PATH"] = tool_dir + (os.pathsep + current_path if current_path else "")
+    return env
 
 
 def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
@@ -421,12 +451,14 @@ def _update_context() -> dict[str, object]:
 
 
 def _install_kind(platform: str, source_root: Path | None) -> str:
-    if source_root is not None:
-        return f"{platform}-source" if platform in {"linux", "windows"} else "source"
     if platform == "linux":
         if _is_linux_user_install():
             return "linux-user"
+        if source_root is not None:
+            return "linux-source"
         return "linux-package"
+    if source_root is not None:
+        return f"{platform}-source" if platform in {"windows"} else "source"
     if platform == "windows":
         return "windows-package"
     if platform == "mac":
@@ -486,6 +518,17 @@ def _npm_update_channel() -> str:
     except Exception:  # noqa: BLE001
         configured = None
     return _resolve_update_channel(configured)
+
+
+def _update_channel_for_context(context: dict[str, object]) -> str:
+    configured = getattr(context.get("config"), "update_channel", None)
+    channel = _normalize_update_channel(configured)
+    if channel:
+        return channel
+    install_kind = str(context.get("install_kind") or "")
+    if install_kind.endswith("-source"):
+        return "unstable"
+    return _resolve_update_channel(None)
 
 
 def _resolve_update_channel(configured: str | None) -> str:

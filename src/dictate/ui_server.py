@@ -1118,10 +1118,6 @@ class UiBackend:
             normalized = "stable"
         if normalized not in {"stable", "unstable"}:
             raise ApiError(400, "updateChannel must be stable or unstable")
-        if normalized == "unstable":
-            pro = self._dictate_pro_state()
-            if not _pro_state_active(pro):
-                raise ApiError(403, "Dictate Pro is required for Beta updates")
         config_mod.set_update_channel(normalized, path=self.config_path)
 
     def add_hotwords(self, words: list[str]) -> dict[str, Any]:

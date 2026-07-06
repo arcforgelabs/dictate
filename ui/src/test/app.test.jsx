@@ -4,6 +4,7 @@ import App from "../App.jsx";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   delete window.__DICTATE__;
   delete window.__TAURI__;
   delete window.EventSource;
@@ -133,14 +134,15 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
-  it("signs into Dictate Pro from the account dialog", async () => {
+  it("opens the account portal without treating it as desktop sign-in", async () => {
     const sources = [];
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
       close() {}
     };
-    let signedIn = false;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
       const path = String(url).replace("http://127.0.0.1:1", "");
       if (path === "/api/state") {
@@ -151,25 +153,8 @@ describe("Quiet Console app (mock mode)", () => {
             updateChannel: "unstable",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: signedIn
-              ? ACTIVE_PRO
-              : { signedIn: false, account: null },
+            dictatePro: { signedIn: false, account: null },
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/auth/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ email: "samuel@example.test", challenge_id: "challenge_1" }) };
-      }
-      if (path === "/api/pro/auth/complete" && opts.method === "POST") {
-        signedIn = true;
-        return {
-          ok: true,
-          json: async () => ({
-            signedIn: true,
-            account_id: "acct_1",
-            device_id: "dev_1",
-            dictatePro: ACTIVE_PRO,
           }),
         };
       }
@@ -182,35 +167,24 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
     expect(screen.getByText("Not signed in")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    fireEvent.change(screen.getByLabelText("Dictate Pro email"), { target: { value: "samuel@example.test" } });
-    fireEvent.click(screen.getByText("Send sign-in code"));
-    await waitFor(() => expect(screen.getByText("Sign-in code sent")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Sign-in code"), { target: { value: "123456" } });
-    fireEvent.change(screen.getByLabelText("Device name"), { target: { value: "Windows lab" } });
-    fireEvent.click(screen.getByText("Verify and sign in"));
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Account" }));
+    expect(screen.getByText("Browser sign-in unavailable")).toBeInTheDocument();
+    expect(screen.getByText("The account portal does not currently return a Dictate desktop session.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Account portal"));
 
-    await waitFor(() => expect(screen.getByText("Signed in to Dictate Pro")).toBeInTheDocument());
-    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
-    expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://127.0.0.1:1/api/pro/auth/start",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ email: "samuel@example.test" }),
-      }),
+    expect(open).toHaveBeenCalledWith(
+      "https://console.arcforge.au/deck/account",
+      "_blank",
+      "noopener,noreferrer",
     );
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://127.0.0.1:1/api/pro/auth/complete",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ challenge_id: "challenge_1", code: "123456", deviceLabel: "Windows lab" }),
-      }),
-    );
+    expect(screen.getByText("Opened account portal")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Refresh"));
+    await waitFor(() => expect(screen.getByText("Account refreshed")).toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:1/api/state", expect.objectContaining({ method: "GET" }));
   });
 
-  it("shows update controls and gates Beta behind Dictate Pro", async () => {
+  it("shows update controls and lets local users choose Beta", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -252,13 +226,78 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
 
     expect(screen.getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Beta" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Beta" })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
     await waitFor(() => expect(screen.getByText("You're on the latest version")).toBeInTheDocument());
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://127.0.0.1:1/api/update-status",
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("turns command-style updates into a same-position restart action", async () => {
+    const sources = [];
+    const invoke = vi.fn().mockResolvedValue(null);
+    let updateStarted = false;
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "unstable",
+            installedPackageVersion: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        return {
+          ok: true,
+          json: async () => ({
+            currentVersion: updateStarted ? "2026.7.4-unstable.53.1" : "2026.7.4",
+            latestVersion: "2026.7.4-unstable.53.1",
+            updateAvailable: !updateStarted,
+            checked: true,
+          }),
+        };
+      }
+      if (path === "/api/update" && opts.method === "POST") {
+        updateStarted = true;
+        return {
+          ok: true,
+          json: async () => ({
+            mode: "command",
+            started: true,
+            message: "Started the Linux user updater.",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    const updateButton = await screen.findByRole("button", { name: /Update available/i });
+    fireEvent.click(updateButton);
+    expect(await screen.findByRole("button", { name: /Updating/i })).toBe(updateButton);
+    expect(screen.queryByRole("button", { name: /Restart Dictate/i })).not.toBeInTheDocument();
+
+    const restartButton = await screen.findByRole("button", { name: /Restart Dictate/i }, { timeout: 4000 });
+    expect(restartButton).toBe(updateButton);
+    fireEvent.click(restartButton);
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
   });
 
   it("lets Dictate Pro users switch to Beta updates", async () => {

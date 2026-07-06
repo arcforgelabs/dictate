@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL, DICTATE_ACCOUNT_URL } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -207,12 +207,31 @@ const UPDATE_LABEL = {
   preparing: "Preparing update…",
   ready: "Update & restart",
   installing: "Updating…",
+  restart: "Restart Dictate",
   error: "Update failed",
 };
 function UpdatePill() {
   const s = useStore();
-  if (!s.updateVisible) return null;
+  if (!s.updateVisible) {
+    return (
+      <Tooltip label="Check for updates">
+        <button
+          type="button"
+          className="upd-check"
+          onClick={s.checkUpdates}
+          disabled={!!s.updateStatus?.checking}
+          aria-label="Check for updates"
+          title="Check for updates"
+        >
+          <Icon name="refresh" size={15} />
+        </button>
+      </Tooltip>
+    );
+  }
   const phase = s.updatePhase;
+  const label = phase === "installing" && Number.isFinite(s.updateProgress)
+    ? `Updating ${Math.max(1, Math.min(99, Math.round(s.updateProgress)))}%`
+    : (UPDATE_LABEL[phase] || "Update available");
   return (
     <div className={"updpill phase-" + phase}>
       {/* Revealed to the LEFT on proximity so the primary button never moves. */}
@@ -224,10 +243,10 @@ function UpdatePill() {
         className="upd-main"
         onClick={s.runUpdate}
         disabled={phase === "installing"}
-        title={phase === "ready" ? "Install the update and restart" : "Update Dictate"}
+        title={phase === "restart" ? "Restart Dictate" : phase === "ready" ? "Install the update and restart" : "Update Dictate"}
       >
         <span className="upd-dot" aria-hidden="true" />
-        <span className="upd-label">{UPDATE_LABEL[phase] || "Update available"}</span>
+        <span className="upd-label">{label}</span>
       </button>
     </div>
   );
@@ -270,11 +289,7 @@ function AccountDialog() {
   const [devices, setDevices] = useState([]);
   const [recoveryKey, setRecoveryKey] = useState(null);
   const [restoreKey, setRestoreKey] = useState("");
-  const [signInEmail, setSignInEmail] = useState("");
-  const [signInCode, setSignInCode] = useState("");
-  const [signInChallenge, setSignInChallenge] = useState("");
   const [signInOpen, setSignInOpen] = useState(false);
-  const [deviceLabel, setDeviceLabel] = useState("Desktop");
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
   const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
@@ -326,44 +341,20 @@ function AccountDialog() {
     });
   };
 
-  const requestSignIn = () => {
-    const email = signInEmail.trim();
-    if (!email) {
-      s.toast("Enter your Dictate Pro email", { bad: true });
-      return;
-    }
-    if (!ipc.isLive()) {
-      s.toast("Sign in from the installed app", { bad: true });
-      return;
-    }
-    s.setSyncBusy(true);
-    ipc.startProSignIn(email)
-      .then((r) => {
-        setSignInChallenge(r?.challenge_id || r?.challengeId || email);
-        s.toast("Sign-in code sent");
-      })
-      .catch((e) => s.toast(e.message || "Could not request sign-in code", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
+  const openAccount = () => {
+    window.open(DICTATE_ACCOUNT_URL, "_blank", "noopener,noreferrer");
+    s.toast("Opened account portal");
   };
 
-  const completeSignIn = () => {
-    const challengeId = signInChallenge.trim();
-    const code = signInCode.trim();
-    if (!challengeId || !code) {
-      s.toast("Enter the sign-in code", { bad: true });
+  const refreshProState = () => {
+    if (!ipc.isLive()) {
+      s.toast("Refresh from the installed app", { bad: true });
       return;
     }
     s.setSyncBusy(true);
-    ipc.completeProSignIn({ challengeId, code, deviceLabel: deviceLabel.trim() || "Desktop" })
-      .then((r) => {
-        if (r?.dictatePro) s.setDictatePro(r.dictatePro);
-        else s.setDictatePro({ signedIn: true, account: { email: signInEmail.trim() } });
-        setSignInCode("");
-        setSignInChallenge("");
-        s.toast("Signed in to Dictate Pro");
-        return refreshAccountState();
-      })
-      .catch((e) => s.toast(e.message || "Could not sign in", { bad: true }))
+    refreshAccountState()
+      .then(() => s.toast("Account refreshed"))
+      .catch((e) => s.toast(e.message || "Could not refresh account", { bad: true }))
       .finally(() => s.setSyncBusy(false));
   };
 
@@ -494,10 +485,6 @@ function AccountDialog() {
 
   const selectUpdateChannel = (channel) => {
     if (channel === s.updateChannel) return;
-    if (channel === "unstable" && !proActive) {
-      s.toast("Dictate Pro is required for Beta updates", { bad: true });
-      return;
-    }
     if (!ipc.isLive()) {
       s.setUpdateChannel(channel);
       s.toast(channel === "unstable" ? "Beta updates selected" : "Normal updates selected");
@@ -543,7 +530,7 @@ function AccountDialog() {
                 <strong>Not signed in</strong>
                 {!signInOpen && (
                   <button type="button" className="account-signin" disabled={s.syncBusy} onClick={() => setSignInOpen(true)}>
-                    Sign in
+                    Account
                   </button>
                 )}
               </div>
@@ -572,8 +559,7 @@ function AccountDialog() {
                 type="button"
                 className={betaSelected ? "active" : ""}
                 aria-pressed={betaSelected}
-                disabled={!proActive && !betaSelected}
-                title={!proActive && !betaSelected ? "Dictate Pro required" : "Beta updates"}
+                title="Beta updates"
                 onClick={() => selectUpdateChannel("unstable")}
               >
                 Beta
@@ -602,42 +588,18 @@ function AccountDialog() {
         <div className="account-actions">
           {!signedIn ? (
             <div className="account-enable-stack">
-              <input
-                className="account-input"
-                value={signInEmail}
-                onChange={(e) => setSignInEmail(e.target.value)}
-                placeholder="Email"
-                aria-label="Dictate Pro email"
-                type="email"
-                autoFocus
-              />
-              <button type="button" className="account-primary" disabled={s.syncBusy} onClick={requestSignIn}>
+              <div className="account-consent">
+                <strong>Browser sign-in unavailable</strong>
+                <span>The account portal does not currently return a Dictate desktop session.</span>
+              </div>
+              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccount}>
                 <Icon name="key" size={14} />
-                <span>Send sign-in code</span>
+                <span>Account portal</span>
               </button>
-              {signInChallenge && (
-                <>
-                  <input
-                    className="account-input"
-                    value={signInCode}
-                    onChange={(e) => setSignInCode(e.target.value)}
-                    placeholder="Code"
-                    aria-label="Sign-in code"
-                    inputMode="numeric"
-                  />
-                  <input
-                    className="account-input"
-                    value={deviceLabel}
-                    onChange={(e) => setDeviceLabel(e.target.value)}
-                    placeholder="Device name"
-                    aria-label="Device name"
-                  />
-                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={completeSignIn}>
-                    <Icon name="check" size={14} />
-                    <span>Verify and sign in</span>
-                  </button>
-                </>
-              )}
+              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={refreshProState}>
+                <Icon name="refresh" size={14} />
+                <span>Refresh</span>
+              </button>
             </div>
           ) : !proActive ? (
             <div className="account-enable-stack">
@@ -735,7 +697,7 @@ function AccountDialog() {
             </button>
           </div>
         )}
-        {!signedIn && <div className="account-note">Dictate Pro sign-in is required before cloud sync can be enabled.</div>}
+        {!signedIn && <div className="account-note">Cloud sync needs a signed-in desktop session.</div>}
         {signedIn && proActive && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
         {signedIn && !proActive && <div className="account-note">This account is signed in but does not currently have active Dictate Pro access. Cloud sync is off.</div>}
         {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
@@ -1075,6 +1037,7 @@ export default function App() {
   // Update affordance state machine: idle → available → preparing → ready → installing (→ error).
   // The update prepares in the background so the click is instant once "ready".
   const [updatePhase, setUpdatePhase] = useState("idle");
+  const [updateProgress, setUpdateProgress] = useState(null);
   // Skip persists across launches (suppress until a newer version); Dismiss is session-only.
   const [skippedVersion, setSkippedVersion] = useState(() => {
     try { return (typeof localStorage !== "undefined" && localStorage.getItem("dictate.skippedVersion")) || null; }
@@ -1801,8 +1764,14 @@ export default function App() {
         if (flow?.mode === "error") {
           const detail = flow.errorDetail || flow.message || "Could not complete the update";
           setUpdateStatus((u) => ({ ...u, error: detail }));
+          setUpdatePhase("error");
           toast(flow?.message || "Could not complete the update", { bad: true });
           return;
+        }
+        if (flow?.mode === "command" && flow?.started) {
+          waitForUpdateReady();
+        } else {
+          setUpdatePhase(flow?.started ? "available" : "idle");
         }
         if (flow?.url) {
           window.open(flow.url, "_blank", "noopener,noreferrer");
@@ -1811,8 +1780,52 @@ export default function App() {
       })
       .catch((e) => {
         setUpdateStatus((u) => ({ ...u, updating: false, error: e.message || "Could not start update" }));
+        setUpdatePhase("error");
         toast("Could not start update", { bad: true });
       });
+  };
+  const waitForUpdateReady = (attempt = 0) => {
+    const maxAttempts = 300;
+    const progress = Math.min(99, 5 + Math.floor((attempt / maxAttempts) * 94));
+    setUpdatePhase("installing");
+    setUpdateProgress(progress);
+    setTimeout(() => {
+      if (!ipc.isLive()) {
+        if (attempt < maxAttempts) waitForUpdateReady(attempt + 1);
+        else {
+          setUpdatePhase("available");
+          setUpdateProgress(null);
+          toast("Update is still running");
+        }
+        return;
+      }
+      ipc.checkUpdates()
+        .then((status) => {
+          const next = { ...(status || {}), updating: false, checking: false };
+          setUpdateStatus(next);
+          if (next.checked && !next.updateAvailable) {
+            setUpdateProgress(100);
+            setUpdatePhase("restart");
+            toast("Update ready — restart Dictate");
+            return;
+          }
+          if (attempt < maxAttempts) {
+            waitForUpdateReady(attempt + 1);
+          } else {
+            setUpdatePhase(next.updateAvailable ? "available" : "restart");
+            setUpdateProgress(next.updateAvailable ? null : 100);
+            toast(next.updateAvailable ? "Update is still running" : "Update ready — restart Dictate");
+          }
+        })
+        .catch(() => {
+          if (attempt < maxAttempts) waitForUpdateReady(attempt + 1);
+          else {
+            setUpdatePhase("available");
+            setUpdateProgress(null);
+            toast("Could not confirm the update finished", { bad: true });
+          }
+        });
+    }, attempt === 0 ? 2500 : 2000);
   };
   const mockDoctor = () => ({
     ok: true,
@@ -1841,15 +1854,22 @@ export default function App() {
     const v = updateStatus.latestVersion;
     if (v) { setSkippedVersion(v); try { localStorage.setItem("dictate.skippedVersion", v); } catch { /* ignore */ } }
     setUpdatePhase("idle");
+    setUpdateProgress(null);
     toast("Skipped this version");
   };
   const dismissUpdate = () => { setUpdateDismissed(true); };
   const runUpdate = () => {
     if (updatePhase === "installing") return;
+    if (updatePhase === "restart") {
+      toast("Restarting Dictate…");
+      ipc.restartApp();
+      return;
+    }
     setUpdatePhase("installing");
+    setUpdateProgress(1);
     if (!ipc.isLive()) {
       // Mock: can't actually restart a browser tab — simulate the install + handoff.
-      setTimeout(() => { toast("Updated — restarting…"); setUpdateDismissed(true); setUpdatePhase("idle"); }, 1600);
+      setTimeout(() => { toast("Updated — restarting…"); setUpdateDismissed(true); setUpdatePhase("idle"); setUpdateProgress(null); }, 1600);
       return;
     }
     startUpdate(); // download (if not prepared) → pkexec install → restart_app
@@ -1951,9 +1971,10 @@ export default function App() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
-  // The pill shows only when an update exists, isn't skipped, and isn't dismissed this session.
+  // The pill shows while an update exists or while a completed update is waiting
+  // for a clean shell+engine restart.
   const updateVisible = updatePhase !== "idle" && !updateDismissed
-    && !!updateStatus.updateAvailable
+    && (!!updateStatus.updateAvailable || updatePhase === "restart")
     && (!skippedVersion || updateStatus.latestVersion !== skippedVersion);
 
   const store = {
@@ -1968,7 +1989,7 @@ export default function App() {
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateChannel, setUpdateChannel, installedPackageVersion, setInstalledPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
     // Update affordance
-    updatePhase, updateVisible, runUpdate, skipUpdate, dismissUpdate,
+    updatePhase, updateProgress, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
     noteElapsed, reduced, audioLevel, live,
     noteView, setNoteView, currentNote, setCurrentNote,

@@ -59,6 +59,7 @@ Expected: key.xai shows "set" and provider shows "online".
 After that, the user can turn off Private mode in Dictate to use cloud transcription.`;
 
 export const DICTATE_PRO_URL = "https://arcforge.au/download/dictate#dictate-pro";
+export const DICTATE_ACCOUNT_URL = "https://console.arcforge.au/deck/account";
 
 export function nowLabel() {
   const d = new Date();

@@ -1407,7 +1407,7 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertEqual(state["updateChannel"], "stable")
             self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "stable")
 
-    def test_patch_config_rejects_beta_update_channel_without_pro(self) -> None:
+    def test_patch_config_sets_beta_update_channel_without_pro(self) -> None:
         class _SignedOutProClient(_FakeProClient):
             def get_state(self) -> dict[str, object]:
                 state = super().get_state()
@@ -1417,14 +1417,12 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d, pro_client=_SignedOutProClient())
+            state = backend.patch_config({"updateChannel": "unstable"})
 
-            with self.assertRaises(ApiError) as ctx:
-                backend.patch_config({"updateChannel": "unstable"})
+            self.assertEqual(state["updateChannel"], "unstable")
+            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
 
-            self.assertEqual(ctx.exception.status, 403)
-            self.assertIsNone(config_mod.load_config(backend.config_path).update_channel)
-
-    def test_patch_config_rejects_beta_update_channel_for_inactive_pro(self) -> None:
+    def test_patch_config_sets_beta_update_channel_for_inactive_pro(self) -> None:
         class _InactiveProClient(_FakeProClient):
             def get_state(self) -> dict[str, object]:
                 state = super().get_state()
@@ -1433,12 +1431,10 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d, pro_client=_InactiveProClient())
+            state = backend.patch_config({"updateChannel": "unstable"})
 
-            with self.assertRaises(ApiError) as ctx:
-                backend.patch_config({"updateChannel": "unstable"})
-
-            self.assertEqual(ctx.exception.status, 403)
-            self.assertIsNone(config_mod.load_config(backend.config_path).update_channel)
+            self.assertEqual(state["updateChannel"], "unstable")
+            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
 
     def test_patch_config_sets_beta_update_channel_for_pro(self) -> None:
         with tempfile.TemporaryDirectory() as d:

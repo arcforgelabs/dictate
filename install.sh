@@ -394,7 +394,13 @@ fi
 
 DICTATE_BIN="$INSTALL_DIR/venv/bin/dictate"
 if [ -n "$PACKAGE_VERSION" ]; then
-  "$DICTATE_BIN" config set-installed-package-version "$PACKAGE_VERSION" >/dev/null 2>&1 || true
+  CURRENT_INSTALLED_VERSION="$("$DICTATE_BIN" config show 2>/dev/null | sed -n 's/^installed_package_version: //p' | head -n 1 || true)"
+  if [[ "$PACKAGE_VERSION" == *"-unstable."* || "$CURRENT_INSTALLED_VERSION" != *"-unstable."* ]]; then
+    "$DICTATE_BIN" config set-installed-package-version "$PACKAGE_VERSION" >/dev/null 2>&1 || true
+  fi
+  if [[ "$PACKAGE_VERSION" == *"-unstable."* ]]; then
+    "$DICTATE_BIN" config set-update-channel unstable >/dev/null 2>&1 || true
+  fi
 fi
 
 run_logged_check() {
