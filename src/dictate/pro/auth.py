@@ -10,6 +10,7 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from dictate.pro.email_delivery import AuthDeliveryError, send_auth_code
 from dictate.pro.store import ProStore, iso, utcnow
@@ -22,6 +23,10 @@ MAX_CHALLENGE_ATTEMPTS = 5
 AUTHORIZATION_CODE_TTL = timedelta(seconds=120)
 # RFC 7636 §4.1: code_verifier = 43*128unreserved; unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
 _CODE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9\-._~]{43,128}$")
+DEVICE_CODE_TTL = timedelta(seconds=900)
+DEVICE_CODE_INTERVAL = 5
+# RFC 8628 §6.1 recommends a confusion-free alphabet for the user-entered code (no 0/O/1/I etc).
+_USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
 
 
 @dataclass(slots=True)
@@ -52,6 +57,15 @@ def _generate_token() -> str:
 
 def _generate_auth_code() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _generate_device_code() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _generate_user_code() -> str:
+    chars = [secrets.choice(_USER_CODE_ALPHABET) for _ in range(8)]
+    return f"{''.join(chars[:4])}-{''.join(chars[4:])}"
 
 
 def _b64url_sha256(value: str) -> str:
@@ -233,6 +247,103 @@ class ProAuth:
         if not self._store.device_is_known(account_id=row["account_id"], device_id=device):
             raise ValueError("invalid_grant")
         return self._issue_session(row["account_id"], device)
+
+    def create_device_code(
+        self,
+        *,
+        client_id: str,
+        scope: str = "dictate",
+        device_label: str = "Desktop",
+    ) -> dict[str, Any]:
+        device_code = _generate_device_code()
+        user_code = _generate_user_code()
+        expires_at = utcnow() + DEVICE_CODE_TTL
+        self._store.save_device_code(
+            device_code_hash=_hash_code(device_code),
+            user_code=user_code,
+            client_id=client_id,
+            scope=scope,
+            device_label=device_label,
+            expires_at=iso(expires_at),
+            interval=DEVICE_CODE_INTERVAL,
+        )
+        return {
+            "device_code": device_code,
+            "user_code": user_code,
+            "expires_in": int(DEVICE_CODE_TTL.total_seconds()),
+            "interval": DEVICE_CODE_INTERVAL,
+        }
+
+    def approve_device_code(self, *, user_code: str, account_id: str) -> bool:
+        """Dev/test-only approval hook (no portal on the reference server this episode)."""
+        return self._store.approve_device_code(user_code=user_code, account_id=account_id)
+
+    def deny_device_code(self, *, user_code: str) -> bool:
+        """Dev/test-only denial hook, mirroring approve_device_code."""
+        return self._store.deny_device_code(user_code=user_code)
+
+    def poll_device_code(
+        self,
+        *,
+        device_code: str,
+        client_id: str,
+        device_id: str | None = None,
+        device_public_key: str | None = None,
+    ) -> AuthSession:
+        """RFC 8628 §3.5 polling. Raises ValueError with one of:
+        "authorization_pending", "slow_down", "expired_token", "access_denied", "invalid_grant".
+        """
+        device_code_hash = _hash_code(device_code)
+        row = self._store.get_device_code(device_code_hash)
+        if row is None:
+            raise ValueError("invalid_grant")
+        if not _compare_str(row["client_id"], client_id):
+            raise ValueError("invalid_grant")
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if utcnow() > expires_at:
+            raise ValueError("expired_token")
+        now = utcnow()
+        last_polled_raw = row.get("last_polled_at")
+        interval = int(row.get("interval") or DEVICE_CODE_INTERVAL)
+        if last_polled_raw:
+            last_polled = datetime.fromisoformat(last_polled_raw)
+            if last_polled.tzinfo is None:
+                last_polled = last_polled.replace(tzinfo=timezone.utc)
+            if (now - last_polled).total_seconds() < interval:
+                # Client polled faster than the last-assigned interval: per RFC 8628 §3.5,
+                # tell it to slow down and increase the interval by 5s for next time.
+                self._store.touch_device_code_poll(device_code_hash, last_polled_at=iso(now), interval=interval + 5)
+                raise ValueError("slow_down")
+        self._store.touch_device_code_poll(device_code_hash, last_polled_at=iso(now), interval=interval)
+        status = row.get("status")
+        if status == "denied":
+            raise ValueError("access_denied")
+        if status == "pending":
+            raise ValueError("authorization_pending")
+        if status != "approved":
+            raise ValueError("invalid_grant")
+        if not self._store.consume_device_code(device_code_hash):
+            raise ValueError("invalid_grant")
+        account_id = row.get("account_id")
+        if not account_id:
+            raise ValueError("invalid_grant")
+        # Mirror exchange_authorization_code / complete_sign_in: register the device and
+        # issue a session the same way every other grant does, so the session isn't dead
+        # on arrival -- resolve_access_token()/refresh_session() both gate on device_is_known().
+        try:
+            device = self._store.register_device(
+                account_id=account_id,
+                device_id=device_id,
+                label=row.get("device_label") or "Desktop",
+                public_key=device_public_key,
+            )
+        except ValueError as exc:
+            raise ValueError("invalid_grant") from exc
+        if not self._store.device_is_known(account_id=account_id, device_id=device):
+            raise ValueError("invalid_grant")
+        return self._issue_session(account_id, device)
 
     def refresh_session(self, refresh_token: str) -> AuthSession:
         row = self._store.get_auth_token(_hash_token(refresh_token))

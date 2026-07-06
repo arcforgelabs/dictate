@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 CALLBACK_PATH = "/callback"
 LISTENER_TIMEOUT_SECONDS = 300.0
+DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 
 _SIGNED_IN_HTML = (
     "<!doctype html><html><head><meta charset=\"utf-8\"><title>Dictate</title></head>"
@@ -62,11 +63,14 @@ class BrowserAuthAttempt:
     redirect_uri: str
     authorize_url: str
     expires_at: datetime
-    # Device-code fields, left unused this episode (RFC 8628 fallback is a later increment).
+    # Device-code (RFC 8628) fields; unused (None) for a "loopback" flow attempt.
     device_code: str | None = None
     user_code: str | None = None
     verification_uri: str | None = None
     interval: int | None = None
+    # Monotonic timestamp of the last actual server poll (device-code only); lets the
+    # client self-throttle to `interval` without hitting the server every call.
+    last_poll: float | None = None
 
 
 class LoopbackListener:

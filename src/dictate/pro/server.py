@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from dictate.pro.auth import AuthDeliveryError
+from dictate.pro.browser_auth import DEVICE_CODE_GRANT_TYPE
 from dictate.pro.service import ProService, ProServiceError, ProSettings
 from dictate.pro.stripe_handler import load_stripe_settings, verify_stripe_signature
 from dictate.version import RELEASE_VERSION
@@ -177,14 +178,13 @@ class ProRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _discovery_payload(self) -> dict[str, Any]:
-        # Device-code (RFC 8628) is a later episode -- don't advertise the endpoint/grant
-        # until it's actually implemented, or a discovery-honoring client would 404 on it.
         host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
         base = f"http://{host}"
         return {
             "authorization_endpoint": f"{base}/v1/auth/authorize",
             "token_endpoint": f"{base}/v1/auth/token",
-            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "device_authorization_endpoint": f"{base}/v1/auth/device-code",
+            "grant_types_supported": ["authorization_code", DEVICE_CODE_GRANT_TYPE, "refresh_token"],
             "code_challenge_methods_supported": ["S256"],
         }
 
@@ -266,6 +266,24 @@ class ProRequestHandler(BaseHTTPRequestHandler):
                     device_public_key=device_public_key,
                 )
             except ValueError as exc:
+                raise ApiError(400, str(exc)) from exc
+        elif grant_type == DEVICE_CODE_GRANT_TYPE:
+            device_code = str(body.get("device_code", "")).strip()
+            client_id = str(body.get("client_id", "")).strip()
+            if not device_code or not client_id:
+                raise ApiError(400, "invalid_request")
+            device_id = str(body.get("device_id") or "").strip() or None
+            device_public_key = str(body.get("device_public_key") or "").strip() or None
+            try:
+                session = service.auth.poll_device_code(
+                    device_code=device_code,
+                    client_id=client_id,
+                    device_id=device_id,
+                    device_public_key=device_public_key,
+                )
+            except ValueError as exc:
+                # RFC 8628 §3.5: authorization_pending / slow_down / expired_token /
+                # access_denied / invalid_grant all ride the same 400 {"error": "..."} shape.
                 raise ApiError(400, str(exc)) from exc
         elif grant_type == "refresh_token":
             refresh_token = str(body.get("refresh_token", "")).strip()
@@ -366,6 +384,35 @@ class ProRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/v1/auth/token" and method == "POST":
             return self._handle_token_grant(service)
+
+        if path == "/v1/auth/device-code" and method == "POST":
+            body = self._read_json()
+            client_id = str(body.get("client_id", "")).strip()
+            if client_id != "dictate-desktop":
+                raise ApiError(400, "invalid_client")
+            scope = str(body.get("scope") or "dictate").strip()
+            device_label = str(body.get("device_label") or "Desktop").strip()
+            payload = service.auth.create_device_code(client_id=client_id, scope=scope, device_label=device_label)
+            host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
+            verification_uri = f"http://{host}/v1/auth/device"
+            payload["verification_uri"] = verification_uri
+            payload["verification_uri_complete"] = f"{verification_uri}?user_code={payload['user_code']}"
+            return _Response(200, payload)
+
+        if path == "/v1/auth/device/approve" and method == "POST":
+            # Dev/test-only headless approval -- the reference server has no portal UI.
+            # Env-gated the same way /v1/auth/authorize's auto-approve is.
+            if not _dev_auto_approve_enabled():
+                raise ApiError(501, "device-code dev approval is not available on this reference server")
+            body = self._read_json()
+            user_code = str(body.get("user_code", "")).strip()
+            dev_email = str(body.get("dev_email", "")).strip()
+            if not user_code or not dev_email:
+                raise ApiError(400, "user_code and dev_email are required")
+            account = service.store.get_or_create_account(dev_email)
+            if not service.auth.approve_device_code(user_code=user_code, account_id=account.account_id):
+                raise ApiError(404, "unknown or already-resolved user_code")
+            return _Response(200, {"approved": True})
 
         if path == "/v1/webhooks/stripe" and method == "POST":
             return self._handle_stripe_webhook(service)

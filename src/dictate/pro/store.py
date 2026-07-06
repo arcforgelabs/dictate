@@ -228,6 +228,21 @@ class ProStore:
                     consumed_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS device_codes (
+                    device_code_hash TEXT PRIMARY KEY,
+                    user_code TEXT NOT NULL UNIQUE,
+                    account_id TEXT,
+                    client_id TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    device_label TEXT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    interval INTEGER NOT NULL,
+                    last_polled_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    consumed_at TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS auth_tokens (
                     token_hash TEXT PRIMARY KEY,
                     account_id TEXT NOT NULL,
@@ -1164,6 +1179,84 @@ class ProStore:
             # 120s TTL), so auth_codes doesn't grow unbounded on a long-running server.
             conn.execute(
                 "DELETE FROM auth_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (now,),
+            )
+            return consumed
+
+    def save_device_code(
+        self,
+        *,
+        device_code_hash: str,
+        user_code: str,
+        client_id: str,
+        scope: str,
+        device_label: str,
+        expires_at: str,
+        interval: int,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO device_codes (
+                    device_code_hash, user_code, account_id, client_id, scope, device_label,
+                    created_at, expires_at, interval, last_polled_at, status, consumed_at
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL)
+                """,
+                (device_code_hash, user_code, client_id, scope, device_label, iso(), expires_at, interval),
+            )
+
+    def get_device_code(self, device_code_hash: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM device_codes WHERE device_code_hash = ?",
+                (device_code_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def approve_device_code(self, *, user_code: str, account_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE device_codes
+                SET account_id = ?, status = 'approved'
+                WHERE user_code = ? AND status = 'pending' AND consumed_at IS NULL
+                """,
+                (account_id, user_code),
+            )
+            return cur.rowcount > 0
+
+    def deny_device_code(self, *, user_code: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE device_codes
+                SET status = 'denied'
+                WHERE user_code = ? AND status = 'pending' AND consumed_at IS NULL
+                """,
+                (user_code,),
+            )
+            return cur.rowcount > 0
+
+    def touch_device_code_poll(self, device_code_hash: str, *, last_polled_at: str, interval: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE device_codes SET last_polled_at = ?, interval = ? WHERE device_code_hash = ?",
+                (last_polled_at, interval, device_code_hash),
+            )
+
+    def consume_device_code(self, device_code_hash: str) -> bool:
+        """Mark a device_code used; returns False if already consumed (replay)."""
+        now = iso()
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE device_codes SET consumed_at = ? WHERE device_code_hash = ? AND consumed_at IS NULL",
+                (now, device_code_hash),
+            )
+            consumed = cur.rowcount > 0
+            # Opportunistic cleanup, same rationale as consume_auth_code: sweep rows that
+            # can never be used again so device_codes doesn't grow unbounded.
+            conn.execute(
+                "DELETE FROM device_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
                 (now,),
             )
             return consumed

@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +23,7 @@ from dictate.api_keys import (
 )
 from dictate.platform_paths import user_data_dir
 from dictate.pro.browser_auth import (
+    DEVICE_CODE_GRANT_TYPE,
     BrowserAuthAttempt,
     LoopbackListener,
     generate_pkce,
@@ -198,17 +200,45 @@ class ProClient:
         return capabilities
 
     def start_browser_sign_in(self, *, device_label: str = "Desktop", prefer: str = "auto") -> dict[str, Any]:
-        # `prefer` is accepted-but-unused this episode: loopback is the only flow implemented.
-        # It's the placeholder for the device-code episode's flow selection ("auto" | "loopback"
-        # | "device_code"), kept in the signature now so callers don't need a signature change later.
+        """Fallback ladder: prefer="loopback"/"device_code" forces that flow (raising 501 if
+        the server doesn't advertise it); prefer="auto" tries loopback first (best UX when
+        binding succeeds), then device-code, then 501 (caller falls back to email).
+        """
         capabilities = self.desktop_auth_capabilities()
         if capabilities is None:
             raise ProClientError(501, "Browser sign-in is unavailable on this Dictate Pro server")
-        # One attempt at a time: starting a new one closes any prior listener.
-        self.cancel_browser_sign_in()
+        self.cancel_browser_sign_in()  # one attempt at a time
+        grants = capabilities.get("grant_types_supported") or []
+        supports_loopback = "authorization_code" in grants
+        supports_device_code = DEVICE_CODE_GRANT_TYPE in grants
+
+        if prefer == "loopback":
+            if not supports_loopback:
+                raise ProClientError(501, "Loopback sign-in is not advertised by this server")
+            return self._start_loopback(device_label)
+        if prefer == "device_code":
+            if not supports_device_code:
+                raise ProClientError(501, "Device-code sign-in is not advertised by this server")
+            return self._start_device_code(device_label)
+
+        # prefer == "auto" (or anything else): loopback -> device_code -> 501.
+        if supports_loopback:
+            try:
+                return self._start_loopback(device_label)
+            except ProClientError:
+                if not supports_device_code:
+                    raise
+        if supports_device_code:
+            return self._start_device_code(device_label)
+        raise ProClientError(501, "Browser sign-in is unavailable on this Dictate Pro server")
+
+    def _start_loopback(self, device_label: str) -> dict[str, Any]:
         code_verifier, code_challenge = generate_pkce()
         state = generate_state()
-        listener = LoopbackListener(state=state)
+        try:
+            listener = LoopbackListener(state=state)
+        except OSError as exc:
+            raise ProClientError(503, f"Could not bind a local loopback listener: {exc}") from exc
         self._browser_listener = listener
         redirect_uri = listener.redirect_uri
         query = urllib.parse.urlencode(
@@ -234,6 +264,39 @@ class ProClient:
         )
         return {"flow": "loopback", "authorize_url": authorize_url, "expires_in": 300}
 
+    def _start_device_code(self, device_label: str) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            self._auth_path("device-code"),
+            {"client_id": "dictate-desktop", "scope": "dictate", "device_label": device_label},
+        )
+        device_code = str(response["device_code"])
+        user_code = str(response["user_code"])
+        interval = int(response.get("interval") or 5)
+        expires_in = int(response.get("expires_in") or 900)
+        verification_uri = str(response.get("verification_uri") or "")
+        verification_uri_complete = str(response.get("verification_uri_complete") or "")
+        self._browser_attempt = BrowserAuthAttempt(
+            flow="device_code",
+            state="",
+            code_verifier="",
+            redirect_uri="",
+            authorize_url="",
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            device_code=device_code,
+            user_code=user_code,
+            verification_uri=verification_uri,
+            interval=interval,
+        )
+        return {
+            "flow": "device_code",
+            "user_code": user_code,
+            "verification_uri": verification_uri,
+            "verification_uri_complete": verification_uri_complete,
+            "expires_in": expires_in,
+            "interval": interval,
+        }
+
     def poll_browser_sign_in(
         self,
         *,
@@ -241,8 +304,13 @@ class ProClient:
         device_label: str = "Desktop",
     ) -> dict[str, Any]:
         attempt = self._browser_attempt
+        if attempt is None:
+            return {"status": "error", "reason": "no_pending_attempt"}
+        if attempt.flow == "device_code":
+            return self._poll_device_code(attempt, device_public_key=device_public_key, device_label=device_label)
+
         listener = self._browser_listener
-        if attempt is None or listener is None:
+        if listener is None:
             return {"status": "error", "reason": "no_pending_attempt"}
         outcome = listener.result()
         if outcome["status"] == "pending":
@@ -280,6 +348,57 @@ class ProClient:
                 device_public_key=device_public_key,
             )
         self.save_session(session)
+        return {"status": "complete", "account_id": session.account_id, "device_id": session.device_id}
+
+    def _poll_device_code(
+        self,
+        attempt: BrowserAuthAttempt,
+        *,
+        device_public_key: str | None,
+        device_label: str,
+    ) -> dict[str, Any]:
+        interval = attempt.interval or 5
+        now = time.monotonic()
+        if attempt.last_poll is not None and (now - attempt.last_poll) < interval:
+            # Self-throttle: don't hit the server faster than the (possibly slow_down-bumped)
+            # interval: the caller polls on its own cadence (e.g. every second) but we only
+            # forward to the server at most once per `interval`.
+            return {"status": "pending"}
+        attempt.last_poll = now
+        payload: dict[str, Any] = {
+            "grant_type": DEVICE_CODE_GRANT_TYPE,
+            "device_code": attempt.device_code,
+            "client_id": "dictate-desktop",
+        }
+        uses_gateway = self._uses_arcforge_gateway()
+        if not uses_gateway:
+            existing_session = self.load_session()
+            if existing_session:
+                payload["device_id"] = existing_session.device_id
+            if device_public_key:
+                payload["device_public_key"] = device_public_key
+        try:
+            response = self._request("POST", self._auth_path("token"), payload)
+        except ProClientError as exc:
+            reason = (exc.message or "").strip()
+            if reason == "authorization_pending":
+                return {"status": "pending"}
+            if reason == "slow_down":
+                attempt.interval = interval + 5
+                return {"status": "pending"}
+            if reason in {"expired_token", "access_denied"}:
+                self.cancel_browser_sign_in()
+                return {"status": "error", "reason": reason}
+            raise
+        session = self._session_from_token_response(response)
+        if device_public_key and uses_gateway:
+            session = self._register_gateway_device(
+                session,
+                device_label=device_label,
+                device_public_key=device_public_key,
+            )
+        self.save_session(session)
+        self.cancel_browser_sign_in()
         return {"status": "complete", "account_id": session.account_id, "device_id": session.device_id}
 
     def cancel_browser_sign_in(self) -> None:

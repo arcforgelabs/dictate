@@ -392,9 +392,10 @@ class BrowserAuthTests(unittest.TestCase):
             payload = json.loads(response.read().decode("utf-8"))
         self.assertEqual(payload["code_challenge_methods_supported"], ["S256"])
         self.assertIn("authorization_code", payload["grant_types_supported"])
-        # Device-code (RFC 8628) isn't implemented yet -- don't advertise it (P3 finding).
-        self.assertNotIn("urn:ietf:params:oauth:grant-type:device_code", payload["grant_types_supported"])
-        self.assertNotIn("device_authorization_endpoint", payload)
+        # Episode 2: device-code (RFC 8628) is now real, so discovery advertises it again
+        # (Episode 1 deliberately omitted it while unimplemented).
+        self.assertIn("urn:ietf:params:oauth:grant-type:device_code", payload["grant_types_supported"])
+        self.assertIn("device_authorization_endpoint", payload)
 
     def test_desktop_discovery_501s_without_dev_auto_approve(self) -> None:
         # Regression for a P2 finding: advertising capability the server can't actually
