@@ -74,6 +74,11 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         ),
         startup_enabled=lambda: True,
         set_startup_enabled=lambda enabled: None,
+        # Structural safety net: UiBackend's real default is webbrowser.open, which would
+        # otherwise launch an actual browser tab any time a test enables browser sign-in
+        # and drives a "loopback" start result. No-op here; tests that need to assert
+        # "did it open" pass their own recorder via **overrides (which wins below).
+        open_browser=lambda url: None,
     )
     kwargs.update(overrides)
     return UiBackend(**kwargs)
