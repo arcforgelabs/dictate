@@ -14,6 +14,10 @@ import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.7.4";
+// Web-only account/billing management (subscription, plan, invoices) -- no in-app
+// equivalent, so signed-in users need a way back to it. A hardcoded https literal, so
+// it's safe to open directly (no scheme-clamp needed the way gateway-supplied URIs do).
+const ACCOUNT_PORTAL_URL = "https://console.arcforge.au/deck/account";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -506,6 +510,11 @@ function AccountDialog() {
       .finally(() => setEmailBusy(false));
   };
 
+  const openAccountPortal = () => {
+    window.open(ACCOUNT_PORTAL_URL, "_blank", "noopener,noreferrer");
+    s.toast("Opened account portal");
+  };
+
   const signOut = () => {
     if (!ipc.isLive()) return;
     if (!window.confirm("Sign out of Dictate Pro on this device? Local dictations stay here.")) return;
@@ -940,6 +949,9 @@ function AccountDialog() {
         )}
         {signedIn && (
           <div className="account-actions account-actions--split">
+            <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccountPortal}>
+              Manage account
+            </button>
             <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={signOut}>
               Sign out
             </button>

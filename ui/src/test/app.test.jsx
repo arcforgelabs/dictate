@@ -134,6 +134,82 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
+  it("offers Manage account only when signed in, and it opens the web portal", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: ACTIVE_PRO,
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+
+    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Manage account"));
+    expect(open).toHaveBeenCalledWith(
+      "https://console.arcforge.au/deck/account",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(screen.getByText("Opened account portal")).toBeInTheDocument();
+  });
+
+  it("does not offer Manage account when signed out", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            browserSigninEnabled: true,
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+    fireEvent.click(screen.getByRole("button", { name: "Account" }));
+
+    expect(screen.getByText("Sign in")).toBeInTheDocument();
+    expect(screen.queryByText("Manage account")).not.toBeInTheDocument();
+  });
+
   // Shared harness for the signed-out account panel: mounts the app, opens the account
   // dialog and reveals the sign-in block, wiring `fetch` through a caller-supplied router
   // keyed on path (+ method for ambiguous paths). Returns the fetch spy for assertions.
