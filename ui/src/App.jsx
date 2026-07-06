@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL, DICTATE_ACCOUNT_URL } from "./store.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -290,6 +290,19 @@ function AccountDialog() {
   const [recoveryKey, setRecoveryKey] = useState(null);
   const [restoreKey, setRestoreKey] = useState("");
   const [signInOpen, setSignInOpen] = useState(false);
+  // Browser sign-in (loopback / device-code): {status: "idle"|"waiting"|"error", flow?, ...}.
+  // Scoped to this dialog instance — polling only matters while it's open, and unmounting
+  // (closing the dialog) clears the interval via the effect below.
+  const [browserSignIn, setBrowserSignIn] = useState({ status: "idle" });
+  const browserPollRef = useRef(null);
+  // Email-code fallback form — shown directly (no "unavailable" apology) whenever browser
+  // sign-in is off/unsupported, or the user picks "Email me a code instead"/"Try again".
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailStep, setEmailStep] = useState("idle"); // "idle" (enter address) | "sent" (enter code)
+  const [emailAddress, setEmailAddress] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailChallengeId, setEmailChallengeId] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
   const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
@@ -341,21 +354,118 @@ function AccountDialog() {
     });
   };
 
-  const openAccount = () => {
-    window.open(DICTATE_ACCOUNT_URL, "_blank", "noopener,noreferrer");
-    s.toast("Opened account portal");
+  // ---- browser sign-in (loopback / device-code), with an always-working email floor ----
+  const clearBrowserPoll = () => {
+    if (browserPollRef.current) { clearInterval(browserPollRef.current); browserPollRef.current = null; }
+  };
+  // Cleared on unmount (closing the dialog) in addition to the explicit clears below.
+  useEffect(() => clearBrowserPoll, []);
+
+  const pollBrowserSignIn = () => {
+    ipc.getBrowserSignInStatus()
+      .then((r) => {
+        if (r?.status === "pending") return;
+        clearBrowserPoll();
+        if (r?.status === "complete") {
+          setBrowserSignIn({ status: "idle" });
+          if (r.dictatePro) s.setDictatePro(r.dictatePro);
+          refreshAccountState().catch(() => {});
+          s.toast("Signed in");
+          return;
+        }
+        const reason = r?.reason;
+        const message = reason === "access_denied"
+          ? "Sign-in was declined."
+          : reason === "expired_token" || reason === "timeout"
+            ? "Sign-in timed out."
+            : "Couldn't reach the sign-in service.";
+        setBrowserSignIn({ status: "error", error: message });
+      })
+      .catch(() => {
+        clearBrowserPoll();
+        setBrowserSignIn({ status: "error", error: "Couldn't reach the sign-in service." });
+      });
   };
 
-  const refreshProState = () => {
+  const startBrowserSignIn = (flow = "auto") => {
     if (!ipc.isLive()) {
-      s.toast("Refresh from the installed app", { bad: true });
+      s.toast("Sign in from the installed app", { bad: true });
       return;
     }
-    s.setSyncBusy(true);
-    refreshAccountState()
-      .then(() => s.toast("Account refreshed"))
-      .catch((e) => s.toast(e.message || "Could not refresh account", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
+    setEmailOpen(false);
+    clearBrowserPoll();
+    ipc.startBrowserSignIn(flow)
+      .then((r) => {
+        if (!r || r.flow === "email") {
+          // No apology — this is the normal floor, not an error state.
+          setBrowserSignIn({ status: "idle" });
+          setEmailOpen(true);
+          return;
+        }
+        setBrowserSignIn({
+          status: "waiting",
+          flow: r.flow,
+          authorizeUrl: r.authorize_url || r.authorizeUrl || null,
+          userCode: r.user_code || r.userCode || null,
+          verificationUri: r.verification_uri || r.verificationUri || null,
+          verificationUriComplete: r.verification_uri_complete || r.verificationUriComplete || null,
+        });
+        browserPollRef.current = setInterval(pollBrowserSignIn, 1000);
+      })
+      .catch((e) => {
+        setBrowserSignIn({ status: "error", error: e.message || "Couldn't reach the sign-in service." });
+      });
+  };
+
+  const cancelBrowserSignIn = () => {
+    clearBrowserPoll();
+    setBrowserSignIn({ status: "idle" });
+    if (ipc.isLive()) ipc.cancelBrowserSignIn().catch(() => {});
+  };
+
+  const reopenAuthorizeUrl = () => {
+    if (browserSignIn.authorizeUrl) window.open(browserSignIn.authorizeUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const openVerificationPortal = () => {
+    const url = browserSignIn.verificationUriComplete || browserSignIn.verificationUri;
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const startEmailFallback = () => {
+    cancelBrowserSignIn();
+    setEmailOpen(true);
+  };
+
+  const sendEmailCode = () => {
+    const email = emailAddress.trim();
+    if (!email || !ipc.isLive()) return;
+    setEmailBusy(true);
+    ipc.startProSignIn(email)
+      .then((r) => {
+        setEmailChallengeId(r?.challenge_id || r?.challengeId || email);
+        setEmailStep("sent");
+        s.toast("Code sent — check your email");
+      })
+      .catch((e) => s.toast(e.message || "Could not send the code", { bad: true }))
+      .finally(() => setEmailBusy(false));
+  };
+
+  const verifyEmailCode = () => {
+    const code = emailCode.trim();
+    if (!code || !ipc.isLive()) return;
+    setEmailBusy(true);
+    ipc.completeProSignIn({ challengeId: emailChallengeId, code })
+      .then((r) => {
+        if (r?.dictatePro) s.setDictatePro(r.dictatePro);
+        setEmailOpen(false);
+        setEmailStep("idle");
+        setEmailAddress("");
+        setEmailCode("");
+        s.toast("Signed in");
+      })
+      .catch((e) => s.toast(e.message || "Could not verify the code", { bad: true }))
+      .finally(() => setEmailBusy(false));
   };
 
   const signOut = () => {
@@ -588,18 +698,106 @@ function AccountDialog() {
         <div className="account-actions">
           {!signedIn ? (
             <div className="account-enable-stack">
-              <div className="account-consent">
-                <strong>Browser sign-in unavailable</strong>
-                <span>The account portal does not currently return a Dictate desktop session.</span>
-              </div>
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccount}>
-                <Icon name="key" size={14} />
-                <span>Account portal</span>
-              </button>
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={refreshProState}>
-                <Icon name="refresh" size={14} />
-                <span>Refresh</span>
-              </button>
+              {browserSignIn.status === "waiting" && browserSignIn.flow === "loopback" ? (
+                <>
+                  <div className="account-consent">
+                    <strong>Waiting for browser…</strong>
+                    <span>Approve the sign-in in the browser tab we just opened.</span>
+                  </div>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={reopenAuthorizeUrl}>
+                    Open sign-in page
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("device_code")}>
+                    Use a code instead
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
+                    Cancel
+                  </button>
+                </>
+              ) : browserSignIn.status === "waiting" && browserSignIn.flow === "device_code" ? (
+                <>
+                  <div className="account-recovery">
+                    <span>Enter this code at your account portal</span>
+                    <code>{browserSignIn.userCode}</code>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={openVerificationPortal}>
+                    Open portal
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
+                    Cancel
+                  </button>
+                </>
+              ) : browserSignIn.status === "error" ? (
+                <>
+                  <div className="account-note bad">{browserSignIn.error}</div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
+                    Try again
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={startEmailFallback}>
+                    Email me a code
+                  </button>
+                </>
+              ) : emailOpen ? (
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in with an email code</strong>
+                    <span>We'll email a code to sign in this device.</span>
+                  </div>
+                  {emailStep === "idle" ? (
+                    <>
+                      <input
+                        className="account-input"
+                        value={emailAddress}
+                        onChange={(e) => setEmailAddress(e.target.value)}
+                        placeholder="Email address"
+                        aria-label="Email address"
+                      />
+                      <button
+                        type="button"
+                        className="account-primary"
+                        disabled={s.syncBusy || emailBusy || !emailAddress.trim()}
+                        onClick={sendEmailCode}
+                      >
+                        Send code
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="account-input"
+                        value={emailCode}
+                        onChange={(e) => setEmailCode(e.target.value)}
+                        placeholder="Code from email"
+                        aria-label="Sign-in code"
+                      />
+                      <button
+                        type="button"
+                        className="account-primary"
+                        disabled={s.syncBusy || emailBusy || !emailCode.trim()}
+                        onClick={verifyEmailCode}
+                      >
+                        Verify code
+                      </button>
+                    </>
+                  )}
+                  <button type="button" className="account-secondary" disabled={s.syncBusy || emailBusy} onClick={() => setEmailOpen(false)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in to your account</strong>
+                    <span>Opens your browser to connect this device to your account.</span>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
+                    Sign in
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
+                    Email me a code instead
+                  </button>
+                </>
+              )}
             </div>
           ) : !proActive ? (
             <div className="account-enable-stack">

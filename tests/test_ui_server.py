@@ -14,7 +14,7 @@ from dictate.api_keys import ApiKeyStatus
 from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
-from dictate.pro.client import ProSession
+from dictate.pro.client import ProClientError, ProSession
 from dictate.sync import SyncSettingsStore, decrypt_record, generate_device_key_pair
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
@@ -278,6 +278,37 @@ class _FakeProClient:
     def delete_cloud_data(self) -> dict[str, object]:
         self.deleted_cloud = True
         return {"deleted": {"sync_records": 0}}
+
+
+class _FakeBrowserProClient(_FakeProClient):
+    """Adds the Episode 1/2 browser sign-in surface (start/poll/cancel) on top of
+    _FakeProClient's existing email-code/sync/device methods."""
+
+    def __init__(self, *, start_result=None, start_raises=None, poll_result=None) -> None:
+        super().__init__()
+        self._start_result = start_result or {
+            "flow": "loopback",
+            "authorize_url": "http://127.0.0.1:9/authorize?state=s",
+            "expires_in": 300,
+        }
+        self._start_raises = start_raises
+        self.poll_result = poll_result or {"status": "pending"}
+        self.start_calls: list[dict[str, object]] = []
+        self.poll_calls: list[dict[str, object]] = []
+        self.cancel_calls = 0
+
+    def start_browser_sign_in(self, *, device_label: str = "Desktop", prefer: str = "auto") -> dict[str, object]:
+        self.start_calls.append({"device_label": device_label, "prefer": prefer})
+        if self._start_raises is not None:
+            raise self._start_raises
+        return self._start_result
+
+    def poll_browser_sign_in(self, *, device_public_key=None, device_label: str = "Desktop") -> dict[str, object]:
+        self.poll_calls.append({"device_public_key": device_public_key, "device_label": device_label})
+        return self.poll_result
+
+    def cancel_browser_sign_in(self) -> None:
+        self.cancel_calls += 1
 
 
 def _sync_settings(base: Path) -> SyncSettingsStore:
@@ -964,6 +995,128 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertNotIn("sync_records", raw)
 
 
+class UiBackendBrowserSignInTests(unittest.TestCase):
+    """Episode 3: start_pro_browser_sign_in / poll_pro_browser_sign_in / cancel_pro_browser_sign_in."""
+
+    def test_flag_off_returns_email_fallback_without_touching_pro_client(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            # browser_signin_enabled defaults to reading DICTATE_PRO_BROWSER_SIGNIN, unset
+            # in the test environment -- exercises the real default, not an override.
+            backend = _backend(d, pro_client=_FakeBrowserProClient())
+            self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
+            self.assertEqual(backend.pro_client.start_calls, [])
+
+    def test_start_happy_path_loopback_opens_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            opened = []
+            pro_client = _FakeBrowserProClient()
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                browser_signin_enabled=lambda: True,
+                open_browser=lambda url: opened.append(url),
+            )
+            result = backend.start_pro_browser_sign_in(flow="auto", device_label="Test Desktop")
+            self.assertEqual(result["flow"], "loopback")
+            self.assertEqual(result["authorize_url"], "http://127.0.0.1:9/authorize?state=s")
+            self.assertEqual(pro_client.start_calls, [{"device_label": "Test Desktop", "prefer": "auto"}])
+            self.assertEqual(opened, ["http://127.0.0.1:9/authorize?state=s"])
+            # A device keypair was generated up front, mirroring complete_pro_sign_in.
+            self.assertIsNotNone(backend._pending_browser_device_key)
+
+    def test_start_device_code_flow_does_not_open_a_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            opened = []
+            pro_client = _FakeBrowserProClient(
+                start_result={
+                    "flow": "device_code",
+                    "user_code": "ABCD-EFGH",
+                    "verification_uri": "http://127.0.0.1:9/device",
+                    "verification_uri_complete": "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
+                    "expires_in": 900,
+                    "interval": 5,
+                }
+            )
+            backend = _backend(
+                d,
+                pro_client=pro_client,
+                browser_signin_enabled=lambda: True,
+                open_browser=lambda url: opened.append(url),
+            )
+            result = backend.start_pro_browser_sign_in(flow="device_code")
+            self.assertEqual(result["flow"], "device_code")
+            self.assertEqual(result["user_code"], "ABCD-EFGH")
+            self.assertEqual(opened, [])
+
+    def test_start_capability_501_returns_email_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient(start_raises=ProClientError(501, "browser sign-in unavailable"))
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
+
+    def test_start_propagates_non_capability_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient(start_raises=ProClientError(503, "unreachable"))
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            with self.assertRaises(ApiError) as ctx:
+                backend.start_pro_browser_sign_in()
+            self.assertEqual(ctx.exception.status, 503)
+
+    def test_poll_pending_leaves_device_key_and_session_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient(poll_result={"status": "pending"})
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            backend.start_pro_browser_sign_in()
+            result = backend.poll_pro_browser_sign_in()
+            self.assertEqual(result, {"status": "pending"})
+            self.assertIsNotNone(backend._pending_browser_device_key)
+
+    def test_poll_complete_persists_device_key_and_returns_dictate_pro_state(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient(
+                poll_result={"status": "complete", "account_id": "acct_x", "device_id": "device_x"}
+            )
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            backend.start_pro_browser_sign_in()
+            pending_key = backend._pending_browser_device_key
+            assert pending_key is not None
+
+            with patch("dictate.ui_server.api_keys_mod.save_sync_device_private_key") as save_mock:
+                result = backend.poll_pro_browser_sign_in()
+
+            save_mock.assert_called_once_with("device_x", pending_key.private_key)
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(result["account_id"], "acct_x")
+            self.assertIn("dictatePro", result)
+            self.assertTrue(result["dictatePro"]["signedIn"])
+            # The device key is single-shot: cleared once persisted.
+            self.assertIsNone(backend._pending_browser_device_key)
+
+    def test_poll_error_clears_pending_device_key(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient(poll_result={"status": "error", "reason": "expired_token"})
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            backend.start_pro_browser_sign_in()
+            result = backend.poll_pro_browser_sign_in()
+            self.assertEqual(result, {"status": "error", "reason": "expired_token"})
+            self.assertIsNone(backend._pending_browser_device_key)
+
+    def test_cancel_happy_path(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeBrowserProClient()
+            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
+            backend.start_pro_browser_sign_in()
+            result = backend.cancel_pro_browser_sign_in()
+            self.assertEqual(result, {"status": "cancelled"})
+            self.assertEqual(pro_client.cancel_calls, 1)
+            self.assertIsNone(backend._pending_browser_device_key)
+
+    def test_cancel_when_disabled_is_a_harmless_no_op(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d, pro_client=_FakeBrowserProClient())
+            self.assertEqual(backend.cancel_pro_browser_sign_in(), {"status": "cancelled"})
+
+
 class UiBackendShortcutPrefsTests(unittest.TestCase):
     def test_set_shortcut_and_activation(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1569,6 +1722,40 @@ class HttpIntegrationTests(unittest.TestCase):
             pro_client.create_calls,
             [{"language": "en", "audio_duration_seconds": 12.5}],
         )
+
+    def test_browser_signin_routes_over_http(self) -> None:
+        opened = []
+        pro_client = _FakeBrowserProClient(
+            poll_result={"status": "complete", "account_id": "acct_x", "device_id": "device_x"}
+        )
+        self.handle.backend.pro_client = pro_client
+        self.handle.backend.browser_signin_enabled = lambda: True
+        self.handle.backend.open_browser = lambda url: opened.append(url)
+
+        with self._post("/api/pro/auth/browser/start", {"flow": "auto"}) as resp:
+            start_body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(start_body["flow"], "loopback")
+        self.assertEqual(opened, [start_body["authorize_url"]])
+
+        with self._get("/api/pro/auth/browser/status") as resp:
+            status_body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(status_body["status"], "complete")
+        self.assertTrue(status_body["dictatePro"]["signedIn"])
+
+        with self._post("/api/pro/auth/browser/cancel") as resp:
+            cancel_body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(cancel_body, {"status": "cancelled"})
+        self.assertEqual(pro_client.cancel_calls, 1)
+
+    def test_browser_signin_start_over_http_falls_back_to_email_when_disabled(self) -> None:
+        self.handle.backend.pro_client = _FakeBrowserProClient()
+        with self._post("/api/pro/auth/browser/start") as resp:
+            body = json.loads(resp.read())
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, {"flow": "email"})
 
     def test_sync_enable_run_disable_over_http(self) -> None:
         base = Path(self._tmp.name)

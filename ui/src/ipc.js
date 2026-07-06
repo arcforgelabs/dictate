@@ -175,6 +175,15 @@ export const ipc = {
       deviceLabel,
     });
   },
+  async startBrowserSignIn(flow = "auto") {
+    return call("POST", "/api/pro/auth/browser/start", { flow });
+  },
+  async getBrowserSignInStatus() {
+    return call("GET", "/api/pro/auth/browser/status");
+  },
+  async cancelBrowserSignIn() {
+    return call("POST", "/api/pro/auth/browser/cancel");
+  },
   async signOutPro() {
     return call("POST", "/api/pro/sign-out");
   },

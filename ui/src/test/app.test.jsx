@@ -134,10 +134,11 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
-  it("opens the account portal without treating it as desktop sign-in", async () => {
+  // Shared harness for the signed-out account panel: mounts the app, opens the account
+  // dialog and reveals the sign-in block, wiring `fetch` through a caller-supplied router
+  // keyed on path (+ method for ambiguous paths). Returns the fetch spy for assertions.
+  function renderSignedOutAccountPanel(routes) {
     const sources = [];
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
@@ -150,7 +151,6 @@ describe("Quiet Console app (mock mode)", () => {
           ok: true,
           json: async () => ({
             version: "2026.7.4",
-            updateChannel: "unstable",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
             dictatePro: { signedIn: false, account: null },
@@ -159,29 +159,177 @@ describe("Quiet Console app (mock mode)", () => {
         };
       }
       if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
+      const route = routes(path, opts);
+      if (route) return route;
       return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
     });
+    return { sources, fetchSpy };
+  }
 
+  async function openSignInBlock(sources) {
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("Dictate account and status"));
-
     expect(screen.getByText("Not signed in")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Account" }));
-    expect(screen.getByText("Browser sign-in unavailable")).toBeInTheDocument();
-    expect(screen.getByText("The account portal does not currently return a Dictate desktop session.")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Account portal"));
+  }
 
+  it("shows a working Sign in affordance instead of the old unavailable apology", async () => {
+    const { sources } = renderSignedOutAccountPanel(() => null);
+    await openSignInBlock(sources);
+
+    expect(screen.queryByText("Browser sign-in unavailable")).not.toBeInTheDocument();
+    expect(screen.getByText("Sign in")).toBeInTheDocument();
+    expect(screen.getByText("Opens your browser to connect this device to your account.")).toBeInTheDocument();
+    expect(screen.getByText("Email me a code instead")).toBeInTheDocument();
+  });
+
+  it("drives the loopback waiting state, reopens the link, and cancels back to idle", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    let cancelCalls = 0;
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize?x=1", expires_in: 300 }) };
+      }
+      if (path === "/api/pro/auth/browser/status") {
+        return { ok: true, json: async () => ({ status: "pending" }) };
+      }
+      if (path === "/api/pro/auth/browser/cancel" && opts.method === "POST") {
+        cancelCalls += 1;
+        return { ok: true, json: async () => ({ status: "cancelled" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("Waiting for browser…")).toBeInTheDocument());
+    expect(screen.getByText("Approve the sign-in in the browser tab we just opened.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Open sign-in page"));
+    expect(open).toHaveBeenCalledWith("http://127.0.0.1:9/authorize?x=1", "_blank", "noopener,noreferrer");
+
+    fireEvent.click(screen.getByText("Cancel"));
+    await waitFor(() => expect(cancelCalls).toBe(1));
+    expect(screen.getByText("Sign in")).toBeInTheDocument();
+  }, 10_000);
+
+  it("completes sign-in once the status poll reports complete", async () => {
+    let statusCalls = 0;
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }) };
+      }
+      if (path === "/api/pro/auth/browser/status") {
+        statusCalls += 1;
+        if (statusCalls < 2) return { ok: true, json: async () => ({ status: "pending" }) };
+        return { ok: true, json: async () => ({ status: "complete", account_id: "acct_1", device_id: "dev_1", dictatePro: ACTIVE_PRO }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("Waiting for browser…")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("samuel@example.test")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
+  }, 10_000);
+
+  it("shows the device-code waiting state with a copyable code and portal link", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            flow: "device_code",
+            user_code: "ABCD-EFGH",
+            verification_uri: "http://127.0.0.1:9/device",
+            verification_uri_complete: "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
+            expires_in: 900,
+            interval: 5,
+          }),
+        };
+      }
+      if (path === "/api/pro/auth/browser/status") {
+        return { ok: true, json: async () => ({ status: "pending" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument());
+    expect(screen.getByText("Enter this code at your account portal")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Open portal"));
     expect(open).toHaveBeenCalledWith(
-      "https://console.arcforge.au/deck/account",
+      "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
       "_blank",
       "noopener,noreferrer",
     );
-    expect(screen.getByText("Opened account portal")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Refresh"));
-    await waitFor(() => expect(screen.getByText("Account refreshed")).toBeInTheDocument());
-    expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:1/api/state", expect.objectContaining({ method: "GET" }));
+  }, 10_000);
+
+  it("shows an inline error with Try again / Email me a code after a failed poll", async () => {
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }) };
+      }
+      if (path === "/api/pro/auth/browser/status") {
+        return { ok: true, json: async () => ({ status: "error", reason: "expired_token" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("Sign-in timed out.")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Try again")).toBeInTheDocument();
+    expect(screen.getByText("Email me a code")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Email me a code"));
+    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
+  }, 10_000);
+
+  it("falls back straight to the email form with no apology when browser sign-in is unavailable", async () => {
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ flow: "email" }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Sign in"));
+    await waitFor(() => expect(screen.getByText("Sign in with an email code")).toBeInTheDocument());
+    expect(screen.queryByText("Browser sign-in unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for browser…")).not.toBeInTheDocument();
+  });
+
+  it("completes sign-in via the email code fallback form", async () => {
+    const { sources } = renderSignedOutAccountPanel((path, opts) => {
+      if (path === "/api/pro/auth/start" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ challenge_id: "ch_1", expires_at: "2026-07-06T00:00:00Z", account_id: "acct_1" }) };
+      }
+      if (path === "/api/pro/auth/complete" && opts.method === "POST") {
+        return { ok: true, json: async () => ({ account_id: "acct_1", device_id: "dev_1", signedIn: true, dictatePro: ACTIVE_PRO }) };
+      }
+      return null;
+    });
+    await openSignInBlock(sources);
+
+    fireEvent.click(screen.getByText("Email me a code instead"));
+    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "samuel@example.test" } });
+    fireEvent.click(screen.getByText("Send code"));
+    await waitFor(() => expect(screen.getByText("Code sent — check your email")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Sign-in code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByText("Verify code"));
+    await waitFor(() => expect(screen.getByText("samuel@example.test")).toBeInTheDocument());
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
   });
 
   it("shows update controls and lets local users choose Beta", async () => {
