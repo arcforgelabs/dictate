@@ -18,6 +18,10 @@
     "dictate-uninstall": "npm/dictate-lifecycle.mjs"
   },
   "files": [
+    "pyproject.toml",
+    "src/**/*.py",
+    "ui/",
+    "ui-shell/",
     "install.ps1",
     "update.ps1",
     "install-windows.ps1",
