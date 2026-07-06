@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from dictate.pro.auth import AuthDeliveryError
 from dictate.pro.service import ProService, ProServiceError, ProSettings
@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_UPLOAD_MAX_BYTES = 524_288_000  # 500 MB
 DEFAULT_PORT = 18765
+
+# Loopback-only redirect URIs per RFC 8252 §7.3 / §8.3: literal 127.0.0.1 or [::1],
+# any port, path exactly "/callback". "localhost" is deliberately rejected (resolver
+# hijack risk).
+_LOOPBACK_REDIRECT_RE = re.compile(r"^http://(127\.0\.0\.1|\[::1\]):(\d{1,5})/callback$")
+_DEV_AUTO_APPROVE_ENV = "DICTATE_PRO_DEV_AUTO_APPROVE"
+
+
+def _dev_auto_approve_enabled() -> bool:
+    return os.environ.get(_DEV_AUTO_APPROVE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _authorize_error_page(message: str) -> str:
+    safe = (
+        message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign-in error</title></head>"
+        "<body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem;\">"
+        f"<h1>Sign-in error</h1><p>{safe}</p></body></html>"
+    )
 
 
 class _RateLimiter:
@@ -136,9 +157,138 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             logger.exception("pro-server route failed")
             self._send_json(500, {"error": str(exc)})
             return
+        if response is None:
+            # The route already wrote a non-JSON response (redirect / HTML error page).
+            return
         self._send_json(response.status, response.body)
 
-    def _route(self, service: ProService, method: str, path: str, query: dict[str, list[str]]) -> _Response:
+    def _send_html(self, status: int, html: str) -> None:
+        data = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _discovery_payload(self) -> dict[str, Any]:
+        host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
+        base = f"http://{host}"
+        return {
+            "authorization_endpoint": f"{base}/v1/auth/authorize",
+            "token_endpoint": f"{base}/v1/auth/token",
+            "device_authorization_endpoint": f"{base}/v1/auth/device-code",
+            "grant_types_supported": [
+                "authorization_code",
+                "urn:ietf:params:oauth:grant-type:device_code",
+                "refresh_token",
+            ],
+            "code_challenge_methods_supported": ["S256"],
+        }
+
+    def _handle_authorize(self, service: ProService, query: dict[str, list[str]]) -> None:
+        def first(name: str) -> str:
+            values = query.get(name) or []
+            return values[0].strip() if values else ""
+
+        client_id = first("client_id")
+        redirect_uri = first("redirect_uri")
+        if client_id != "dictate-desktop" or not _LOOPBACK_REDIRECT_RE.match(redirect_uri):
+            # Never redirect on redirect_uri/client_id validation failure (open-redirect guard).
+            self._send_html(400, _authorize_error_page("Invalid client_id or redirect_uri."))
+            return
+
+        state = first("state")
+        response_type = first("response_type")
+        code_challenge = first("code_challenge")
+        code_challenge_method = first("code_challenge_method")
+        scope = first("scope") or "dictate"
+        device_label = first("device_label") or "Desktop"
+
+        def deny(error: str) -> None:
+            params = {"error": error}
+            if state:
+                params["state"] = state
+            self._send_redirect(f"{redirect_uri}?{urlencode(params)}")
+
+        if response_type != "code" or not state or not code_challenge or code_challenge_method != "S256":
+            deny("invalid_request")
+            return
+
+        if not _dev_auto_approve_enabled():
+            self._send_html(
+                501,
+                _authorize_error_page(
+                    "Interactive sign-in approval is not implemented on the reference server. "
+                    f"Set {_DEV_AUTO_APPROVE_ENV}=1 for local development/testing only."
+                ),
+            )
+            return
+
+        dev_email = first("dev_email")
+        if not dev_email:
+            deny("invalid_request")
+            return
+
+        account = service.store.get_or_create_account(dev_email)
+        code = service.auth.create_authorization_code(
+            account_id=account.account_id,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            scope=scope,
+            device_label=device_label,
+        )
+        self._send_redirect(f"{redirect_uri}?{urlencode({'code': code, 'state': state})}")
+
+    def _handle_token_grant(self, service: ProService) -> _Response:
+        body = self._read_json()
+        grant_type = str(body.get("grant_type", "")).strip()
+        if grant_type == "authorization_code":
+            code = str(body.get("code", "")).strip()
+            code_verifier = str(body.get("code_verifier", "")).strip()
+            redirect_uri = str(body.get("redirect_uri", "")).strip()
+            client_id = str(body.get("client_id", "")).strip()
+            if not code or not code_verifier or not redirect_uri or not client_id:
+                raise ApiError(400, "invalid_request")
+            try:
+                session = service.auth.exchange_authorization_code(
+                    code=code,
+                    code_verifier=code_verifier,
+                    redirect_uri=redirect_uri,
+                    client_id=client_id,
+                )
+            except ValueError as exc:
+                raise ApiError(400, str(exc)) from exc
+        elif grant_type == "refresh_token":
+            refresh_token = str(body.get("refresh_token", "")).strip()
+            if not refresh_token:
+                raise ApiError(400, "invalid_request")
+            try:
+                session = service.auth.refresh_session(refresh_token)
+            except ValueError as exc:
+                raise ApiError(400, str(exc)) from exc
+        else:
+            raise ApiError(400, "unsupported_grant_type")
+        return _Response(
+            200,
+            {
+                "account_id": session.account_id,
+                "device_id": session.device_id,
+                "access_token": session.access_token,
+                "refresh_token": session.refresh_token,
+                "access_expires_at": session.access_expires_at,
+                "refresh_expires_at": session.refresh_expires_at,
+            },
+        )
+
+    def _route(self, service: ProService, method: str, path: str, query: dict[str, list[str]]) -> _Response | None:
         if path == "/v1/auth/start" and method == "POST":
             body = self._read_json()
             email = str(body.get("email", "")).strip()
@@ -198,6 +348,16 @@ class ProRequestHandler(BaseHTTPRequestHandler):
                     "refresh_expires_at": session.refresh_expires_at,
                 },
             )
+
+        if path == "/v1/auth/desktop" and method == "GET":
+            return _Response(200, self._discovery_payload())
+
+        if path == "/v1/auth/authorize" and method == "GET":
+            self._handle_authorize(service, query)
+            return None
+
+        if path == "/v1/auth/token" and method == "POST":
+            return self._handle_token_grant(service)
 
         if path == "/v1/webhooks/stripe" and method == "POST":
             return self._handle_stripe_webhook(service)

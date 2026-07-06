@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
@@ -17,6 +18,7 @@ ACCESS_TOKEN_TTL = timedelta(hours=1)
 REFRESH_TOKEN_TTL = timedelta(days=30)
 CHALLENGE_TTL = timedelta(minutes=10)
 MAX_CHALLENGE_ATTEMPTS = 5
+AUTHORIZATION_CODE_TTL = timedelta(seconds=120)
 
 
 @dataclass(slots=True)
@@ -43,6 +45,15 @@ def _generate_code() -> str:
 
 def _generate_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _generate_auth_code() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _b64url_sha256(value: str) -> str:
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 class ProAuth:
@@ -122,6 +133,68 @@ class ProAuth:
             raise ValueError("device revoked")
         self._store.delete_auth_challenge(challenge_id)
         return self._issue_session(account.account_id, device)
+
+    def create_authorization_code(
+        self,
+        *,
+        account_id: str,
+        client_id: str,
+        redirect_uri: str,
+        code_challenge: str,
+        code_challenge_method: str = "S256",
+        scope: str = "dictate",
+        device_label: str = "Desktop",
+    ) -> str:
+        if code_challenge_method != "S256":
+            raise ValueError("invalid_request")
+        if not code_challenge:
+            raise ValueError("invalid_request")
+        code = _generate_auth_code()
+        expires_at = utcnow() + AUTHORIZATION_CODE_TTL
+        self._store.save_auth_code(
+            code_hash=_hash_code(code),
+            account_id=account_id,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            code_challenge=code_challenge,
+            scope=scope,
+            device_label=device_label,
+            expires_at=iso(expires_at),
+        )
+        return code
+
+    def exchange_authorization_code(
+        self,
+        *,
+        code: str,
+        code_verifier: str,
+        redirect_uri: str,
+        client_id: str,
+        device_id: str | None = None,
+    ) -> AuthSession:
+        code_hash = _hash_code(code)
+        row = self._store.get_auth_code(code_hash)
+        if row is None:
+            raise ValueError("invalid_grant")
+        if row.get("consumed_at"):
+            raise ValueError("invalid_grant")
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if utcnow() > expires_at:
+            raise ValueError("invalid_grant")
+        if not hmac.compare_digest(row["client_id"], client_id):
+            raise ValueError("invalid_grant")
+        if not hmac.compare_digest(row["redirect_uri"], redirect_uri):
+            raise ValueError("invalid_grant")
+        expected_challenge = _b64url_sha256(code_verifier)
+        if not hmac.compare_digest(expected_challenge, row["code_challenge"]):
+            raise ValueError("invalid_grant")
+        # Consume last, after all other checks pass, so a failed exchange never
+        # burns the code (the caller may legitimately retry with the right verifier).
+        if not self._store.consume_auth_code(code_hash):
+            raise ValueError("invalid_grant")
+        return self._issue_session(row["account_id"], device_id or "dictate-desktop")
 
     def refresh_session(self, refresh_token: str) -> AuthSession:
         row = self._store.get_auth_token(_hash_token(refresh_token))

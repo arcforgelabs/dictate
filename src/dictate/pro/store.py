@@ -215,6 +215,19 @@ class ProStore:
                     attempts_remaining INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS auth_codes (
+                    code_hash TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    client_id TEXT NOT NULL,
+                    redirect_uri TEXT NOT NULL,
+                    code_challenge TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    device_label TEXT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS auth_tokens (
                     token_hash TEXT PRIMARY KEY,
                     account_id TEXT NOT NULL,
@@ -1086,6 +1099,56 @@ class ProStore:
     def delete_auth_challenge(self, challenge_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM auth_challenges WHERE challenge_id = ?", (challenge_id,))
+
+    def save_auth_code(
+        self,
+        *,
+        code_hash: str,
+        account_id: str,
+        client_id: str,
+        redirect_uri: str,
+        code_challenge: str,
+        scope: str,
+        device_label: str,
+        expires_at: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO auth_codes
+                (code_hash, account_id, client_id, redirect_uri, code_challenge, scope,
+                 device_label, created_at, expires_at, consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    code_hash,
+                    account_id,
+                    client_id,
+                    redirect_uri,
+                    code_challenge,
+                    scope,
+                    device_label,
+                    iso(),
+                    expires_at,
+                ),
+            )
+
+    def get_auth_code(self, code_hash: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM auth_codes WHERE code_hash = ?",
+                (code_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def consume_auth_code(self, code_hash: str) -> bool:
+        """Mark an authorization code used; returns False if already consumed (replay)."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE auth_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL",
+                (iso(), code_hash),
+            )
+            return cur.rowcount > 0
 
     def save_auth_token(
         self,
