@@ -56,6 +56,16 @@ def _b64url_sha256(value: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
+def _compare_str(a: str, b: str) -> bool:
+    """hmac.compare_digest, tolerant of non-ASCII input.
+
+    hmac.compare_digest(str, str) requires both operands to be ASCII-only and raises
+    TypeError otherwise -- which would surface as an uncaught 500 instead of the intended
+    400 invalid_grant for a malicious/malformed non-ASCII client_id or redirect_uri.
+    """
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
 class ProAuth:
     def __init__(self, store: ProStore, *, dev_expose_code: bool | None = None) -> None:
         self._store = store
@@ -189,22 +199,28 @@ class ProAuth:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if utcnow() > expires_at:
             raise ValueError("invalid_grant")
-        if not hmac.compare_digest(row["client_id"], client_id):
+        if not _compare_str(row["client_id"], client_id):
             raise ValueError("invalid_grant")
-        if not hmac.compare_digest(row["redirect_uri"], redirect_uri):
+        if not _compare_str(row["redirect_uri"], redirect_uri):
             raise ValueError("invalid_grant")
         expected_challenge = _b64url_sha256(code_verifier)
-        if not hmac.compare_digest(expected_challenge, row["code_challenge"]):
+        if not _compare_str(expected_challenge, row["code_challenge"]):
             raise ValueError("invalid_grant")
         # Mirror complete_sign_in: register (or update) the device and issue a session the
         # same way the email-code path does, so the returned session isn't dead on arrival --
         # resolve_access_token()/refresh_session() both gate on device_is_known().
-        device = self._store.register_device(
-            account_id=row["account_id"],
-            device_id=device_id,
-            label=row.get("device_label") or "Desktop",
-            public_key=device_public_key,
-        )
+        try:
+            device = self._store.register_device(
+                account_id=row["account_id"],
+                device_id=device_id,
+                label=row.get("device_label") or "Desktop",
+                public_key=device_public_key,
+            )
+        except ValueError as exc:
+            # device_id supplied by the caller belongs to a different account
+            # (store.register_device rejects the cross-account write). Surface this as
+            # the standard OAuth invalid_grant, same as every other rejection here.
+            raise ValueError("invalid_grant") from exc
         if not self._store.device_is_known(account_id=row["account_id"], device_id=device):
             raise ValueError("invalid_grant")
         return self._issue_session(row["account_id"], device)

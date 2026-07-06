@@ -899,9 +899,18 @@ class ProStore:
         now = iso()
         with self._conn() as conn:
             existing = conn.execute(
-                "SELECT device_id FROM devices WHERE device_id = ?",
+                "SELECT device_id, account_id FROM devices WHERE device_id = ?",
                 (device,),
             ).fetchone()
+            if existing and existing["account_id"] != account_id:
+                # device_id is a global primary key but callers (email code's complete_sign_in,
+                # the authorization_code grant) can supply an arbitrary caller-chosen device_id
+                # in the request body. Without this check, an authenticated caller for account A
+                # could overwrite account B's device row (label/public_key) merely by naming B's
+                # device_id -- device_is_known() would still block the resulting session, but the
+                # tamper against B's row would already have persisted. Reject outright rather than
+                # silently minting a new id, so the caller sees the failure.
+                raise ValueError("device_id belongs to a different account")
             if existing:
                 conn.execute(
                     """
@@ -1143,12 +1152,21 @@ class ProStore:
 
     def consume_auth_code(self, code_hash: str) -> bool:
         """Mark an authorization code used; returns False if already consumed (replay)."""
+        now = iso()
         with self._conn() as conn:
             cur = conn.execute(
                 "UPDATE auth_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL",
-                (iso(), code_hash),
+                (now, code_hash),
             )
-            return cur.rowcount > 0
+            consumed = cur.rowcount > 0
+            # Opportunistic cleanup: every exchange attempt is a convenient, low-cost hook
+            # to sweep codes that can never be used again (already consumed, or past their
+            # 120s TTL), so auth_codes doesn't grow unbounded on a long-running server.
+            conn.execute(
+                "DELETE FROM auth_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (now,),
+            )
+            return consumed
 
     def save_auth_token(
         self,

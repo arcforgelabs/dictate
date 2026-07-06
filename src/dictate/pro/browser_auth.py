@@ -101,7 +101,10 @@ class LoopbackListener:
                     return
                 query = parse_qs(parsed.query)
                 state_value = (query.get("state") or [""])[0]
-                if not hmac.compare_digest(state_value, attempt_state):
+                # Compare bytes, not str: hmac.compare_digest(str, str) requires ASCII-only
+                # operands and raises TypeError otherwise -- a non-ASCII `state` query value
+                # must fail the comparison cleanly, not blow up the request handler.
+                if not hmac.compare_digest(state_value.encode("utf-8"), attempt_state.encode("utf-8")):
                     # A foreign/mismatched hit (stray local process, drive-by <img> probe, or
                     # an attacker who doesn't know the real state) must never be terminal --
                     # otherwise anyone who can reach this loopback port could kill a pending

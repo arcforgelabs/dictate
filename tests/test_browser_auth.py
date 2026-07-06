@@ -63,6 +63,32 @@ class BrowserAuthTests(unittest.TestCase):
     def _new_client(self) -> ProClient:
         return ProClient(base_url=self.base_url, session_path=self.session_path)
 
+    def _post_json(self, path: str, payload: dict) -> tuple[int, dict]:
+        """Raw HTTP POST bypassing ProClient -- lets a test forge fields an honest client
+        would never send (e.g. an attacker-supplied device_id or a non-ASCII client_id)."""
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=body,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+
+    def _get_pending_code(self, client: ProClient) -> tuple:
+        """Drive a real loopback callback and return (attempt, code) without clearing state,
+        so the test can forge its own token-exchange POST instead of calling poll_browser_sign_in."""
+        attempt = client._browser_attempt
+        listener = client._browser_listener
+        assert attempt is not None and listener is not None
+        outcome = listener.result()
+        self.assertEqual(outcome["status"], "code")
+        return attempt, outcome["code"]
+
     def _drive_authorize(self, authorize_url: str, *, dev_email: str) -> str:
         """GET the authorize URL (auto-approve hook resolves dev_email); return the Location.
 
@@ -142,6 +168,73 @@ class BrowserAuthTests(unittest.TestCase):
         device = self.service.store.get_device(account_id=account.account_id, device_id=result["device_id"])
         assert device is not None
         self.assertEqual(device.public_key, "pubkey-loopback-1")
+
+    def test_register_device_rejects_cross_account_device_id_collision(self) -> None:
+        # Regression for a P2 finding (store.register_device, A01 broken access control):
+        # device_id is a global primary key, but a caller completing the authorization_code
+        # grant for account A can supply an arbitrary device_id in the request body. Without
+        # an account-scoped check, that would silently overwrite account B's device row
+        # (label/public_key), even though device_is_known(A, B) still correctly blocks the
+        # resulting session. The exchange must reject outright and leave B's row untouched.
+        victim = self.service.store.get_or_create_account("victim@example.com")
+        victim_device_id = self.service.store.register_device(
+            account_id=victim.account_id,
+            device_id="shared-device-id",
+            label="Victim Laptop",
+            public_key="victim-public-key",
+        )
+        before = self.service.store.get_device(account_id=victim.account_id, device_id=victim_device_id)
+        assert before is not None
+
+        client = self._new_client()
+        start = client.start_browser_sign_in(device_label="Attacker Desktop")
+        location = self._drive_authorize(start["authorize_url"], dev_email="attacker@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+        attempt, code = self._get_pending_code(client)
+
+        status, body = self._post_json(
+            "/v1/auth/token",
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "code_verifier": attempt.code_verifier,
+                "redirect_uri": attempt.redirect_uri,
+                "client_id": "dictate-desktop",
+                "device_id": "shared-device-id",  # attacker-supplied; belongs to the victim
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("invalid_grant", body["error"])
+
+        after = self.service.store.get_device(account_id=victim.account_id, device_id=victim_device_id)
+        self.assertEqual(after, before)  # byte-for-byte untouched: label, public_key, signature
+
+        client.cancel_browser_sign_in()
+
+    def test_non_ascii_client_id_yields_400_invalid_grant_not_500(self) -> None:
+        # Regression for a P3 finding: hmac.compare_digest(str, str) requires ASCII-only
+        # operands and raises TypeError on non-ASCII input, which would otherwise bypass the
+        # ValueError -> ApiError(400, "invalid_grant") mapping and surface as a bare 500.
+        client = self._new_client()
+        start = client.start_browser_sign_in(device_label="Test Desktop")
+        location = self._drive_authorize(start["authorize_url"], dev_email="nonascii@example.com")
+        urllib.request.urlopen(location, timeout=10).read()  # noqa: S310
+        attempt, code = self._get_pending_code(client)
+
+        status, body = self._post_json(
+            "/v1/auth/token",
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "code_verifier": attempt.code_verifier,
+                "redirect_uri": attempt.redirect_uri,
+                "client_id": "dictate-desktopé",  # non-ASCII, must not raise TypeError server-side
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("invalid_grant", body["error"])
+
+        client.cancel_browser_sign_in()
 
     def test_pkce_mismatch_is_rejected_and_no_session_saved(self) -> None:
         client = self._new_client()

@@ -198,6 +198,9 @@ class ProClient:
         return capabilities
 
     def start_browser_sign_in(self, *, device_label: str = "Desktop", prefer: str = "auto") -> dict[str, Any]:
+        # `prefer` is accepted-but-unused this episode: loopback is the only flow implemented.
+        # It's the placeholder for the device-code episode's flow selection ("auto" | "loopback"
+        # | "device_code"), kept in the signature now so callers don't need a signature change later.
         capabilities = self.desktop_auth_capabilities()
         if capabilities is None:
             raise ProClientError(501, "Browser sign-in is unavailable on this Dictate Pro server")
