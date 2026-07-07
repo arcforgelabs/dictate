@@ -35,6 +35,9 @@ class Config:
     gemini_api_key_command: str | None = None
     update_channel: str | None = None
     installed_package_version: str | None = None
+    # Which record categories sync: "meetings" (note+segment only, the default) or
+    # "everything" (also the rolling quick-copy history). See docs/record-categories-spec.md.
+    sync_scope: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
@@ -100,6 +103,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     gemini_api_key_command = data.get("gemini_api_key_command")
     update_channel = data.get("update_channel")
     installed_package_version = data.get("installed_package_version")
+    sync_scope = data.get("sync_scope")
+    if not isinstance(sync_scope, str) or sync_scope not in {"meetings", "everything"}:
+        sync_scope = None
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
@@ -140,6 +146,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         gemini_api_key_command=gemini_api_key_command,
         update_channel=update_channel,
         installed_package_version=installed_package_version,
+        sync_scope=sync_scope,
     )
 
 
@@ -257,6 +264,21 @@ def set_installed_package_version(version: str, path: Path = CONFIG_PATH) -> str
         raise ValueError("installed package version is invalid")
     data = _load_raw(path)
     data["installed_package_version"] = normalized
+    _save_raw(data, path)
+    return normalized
+
+
+def set_sync_scope(scope: str, path: Path = CONFIG_PATH) -> str:
+    """Persist which record categories sync. Returns the normalized scope.
+
+    "meetings" (default) syncs note+segment (durable recordings/notes); "everything"
+    also syncs the rolling quick-copy history. See docs/record-categories-spec.md.
+    """
+    normalized = scope.strip().lower()
+    if normalized not in {"meetings", "everything"}:
+        raise ValueError("sync scope must be meetings or everything")
+    data = _load_raw(path)
+    data["sync_scope"] = normalized
     _save_raw(data, path)
     return normalized
 

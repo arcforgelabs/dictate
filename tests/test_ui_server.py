@@ -793,6 +793,9 @@ class UiBackendStateTests(unittest.TestCase):
             )
             backend.note_store.mark_ready(note_id, duration_s=2.0)
 
+            # This test exercises the full snapshot (history + note + segment), so opt into
+            # "everything" — enable_sync otherwise defaults new sync to meetings-only.
+            config_mod.set_sync_scope("everything", backend.config_path)
             backend.enable_sync()
 
             key = sync_settings.account_key()

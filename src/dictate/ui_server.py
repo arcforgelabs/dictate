@@ -661,7 +661,15 @@ class UiBackend:
             "lastSeq": state.last_seq,
             "keyAvailable": has_key,
             "lastResult": last_result,
+            "scope": config_mod.load_config(self.config_path).sync_scope or "everything",
         }
+
+    def set_sync_scope(self, scope: str) -> dict[str, Any]:
+        """Set which record categories sync ("meetings" | "everything") and re-attach
+        so the history outbox reflects the new scope immediately."""
+        config_mod.set_sync_scope(scope, self.config_path)
+        self._safe(lambda: self._sync_engine().attach_outbox(), None)
+        return self._sync_state()
 
     def enable_sync(self, *, recovery_key: str | None = None) -> dict[str, Any]:
         client = self._require_pro_client()
@@ -732,6 +740,10 @@ class UiBackend:
                 )
                 self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
                 client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
+        # Newly enabled sync defaults to Meetings-only (docs/record-categories-spec.md);
+        # only set when unset so a returning user's explicit choice is preserved.
+        if config_mod.load_config(self.config_path).sync_scope is None:
+            self._safe(lambda: config_mod.set_sync_scope("meetings", self.config_path), None)
         engine = self._sync_engine()
         engine.attach_outbox()
         self._enqueue_sync_snapshot()
@@ -1909,6 +1921,9 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))
         if path == "/api/pro/sync/run" and method == "POST":
             return _Response(200, backend.run_sync())
+        if path == "/api/pro/sync/scope" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.set_sync_scope(str(body.get("scope") or "meetings")))
         if path == "/api/pro/devices" and method == "GET":
             return _Response(200, backend.list_pro_devices())
         if path == "/api/pro/devices/revoke" and method == "POST":

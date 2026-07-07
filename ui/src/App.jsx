@@ -27,6 +27,17 @@ const DEMO_HISTORY = () => {
     { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
     { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
     { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
+    // A meeting (diarized segments) alongside the quick records — demonstrates the
+    // Meetings/Quick category filter (see docs/record-categories-spec.md).
+    {
+      id: "m1",
+      createdAt: now - 3 * 60 * 60 * 1000,
+      text: "Weekly sync",
+      segments: [
+        { seq: 0, speakerLabel: "Speaker 1", tStart: 0, tEnd: 8, text: "Let's kick off with a quick status round before the roadmap." },
+        { seq: 1, speakerLabel: "Speaker 2", tStart: 8, tEnd: 16, text: "Auth is done and deployed to prod; sync is the next piece." },
+      ],
+    },
   ];
 };
 
@@ -569,6 +580,16 @@ function AccountDialog() {
       .finally(() => s.setSyncBusy(false));
   };
 
+  const setSyncScope = (scope) => {
+    if ((sync.scope || "meetings") === scope) return;
+    if (!ipc.isLive()) { s.setSyncState({ ...sync, scope }); return; }
+    s.setSyncBusy(true);
+    ipc.setProSyncScope(scope)
+      .then((r) => { const st = r?.sync || r; if (st) s.setSyncState(st); })
+      .catch((e) => s.toast(e.message || "Could not change sync scope", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
   const disableSync = () => {
     if (!ipc.isLive()) {
       s.setSyncState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
@@ -725,6 +746,33 @@ function AccountDialog() {
           </div>
           {sync.enabled && (
             <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
+          )}
+          {sync.enabled && (
+            <div className="account-row">
+              <span>Sync scope</span>
+              <div className="account-channel" role="group" aria-label="Sync scope">
+                <button
+                  type="button"
+                  className={(sync.scope || "meetings") === "meetings" ? "active" : ""}
+                  aria-pressed={(sync.scope || "meetings") === "meetings"}
+                  disabled={s.syncBusy}
+                  title="Sync meetings only"
+                  onClick={() => setSyncScope("meetings")}
+                >
+                  Meetings
+                </button>
+                <button
+                  type="button"
+                  className={(sync.scope || "meetings") === "everything" ? "active" : ""}
+                  aria-pressed={(sync.scope || "meetings") === "everything"}
+                  disabled={s.syncBusy}
+                  title="Also sync the rolling quick-copy history"
+                  onClick={() => setSyncScope("everything")}
+                >
+                  Everything
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

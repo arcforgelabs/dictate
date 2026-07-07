@@ -1264,6 +1264,26 @@ describe("Notes list (history view)", () => {
     expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
   });
 
+  it("category toggle filters meetings vs quick records", () => {
+    render(<App />);
+    navTo("Notes");
+    // Default "All": both a meeting (diarized) and quick records are visible.
+    expect(screen.getByText(/status round/i)).toBeInTheDocument();   // meeting (has segments)
+    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();      // quick (no segments)
+    // "Meetings": only the meeting.
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+    expect(screen.getByText(/status round/i)).toBeInTheDocument();
+    expect(screen.queryByText(/reviewers/i)).not.toBeInTheDocument();
+    // "Quick": only quick records.
+    fireEvent.click(screen.getByRole("button", { name: "Quick" }));
+    expect(screen.queryByText(/status round/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
+    // Back to "All": both again.
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText(/status round/i)).toBeInTheDocument();
+    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
+  });
+
   it("search filters notes by text", () => {
     render(<App />);
     navTo("Notes");

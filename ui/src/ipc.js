@@ -196,6 +196,9 @@ export const ipc = {
   async runProSync() {
     return call("POST", "/api/pro/sync/run");
   },
+  async setProSyncScope(scope) {
+    return call("POST", "/api/pro/sync/scope", { scope });
+  },
   async listProDevices() {
     return call("GET", "/api/pro/devices");
   },
