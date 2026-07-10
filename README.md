@@ -16,9 +16,19 @@ automation are maintained separately from GitHub releases; see
 
 Windows 11 normal install:
 
-The target public channel is Microsoft Store distribution. GitHub release
-artifacts and the PowerShell bootstrap installer below are developer/source or
-internal validation paths, not the normal public Windows install route.
+The target public channel is Microsoft Store distribution. Tagged GitHub
+releases can also attach a signed Windows `.msi` as a direct-download fallback
+for users who do not want the Store route. Unsigned Windows installers are never
+published as public release assets.
+
+Windows direct download:
+
+1. Open the latest GitHub release.
+2. Download `Dictate_*_x64_en-US.msi` when it is attached.
+3. Run the MSI and open **Dictate** from the Start Menu.
+
+If a release does not yet have an MSI attached, use the developer/source
+bootstrap below or wait for the signed MSI asset to be published.
 
 Windows developer/source install from the hosted bootstrap:
 
