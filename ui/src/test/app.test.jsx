@@ -41,6 +41,38 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("teaches the key on a fresh launch, then swaps to copy-last after capturing", async () => {
+    const { container } = render(<App />);
+    // Fresh session (even with saved notes): the keyboard teaching graphic shows,
+    // and there is no copy-last affordance yet.
+    expect(container.querySelector(".gs-kbd")).toBeInTheDocument();
+    expect(screen.queryByText("Copy last dictation")).not.toBeInTheDocument();
+
+    // Capture a quick note — this begins the session — then return to the home.
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    finishCapture();
+    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByLabelText("Close note"));
+
+    // Teaching graphic is gone; copy-last is now offered for the recent dictation.
+    expect(container.querySelector(".gs-kbd")).not.toBeInTheDocument();
+    expect(screen.getByText("Copy last dictation")).toBeInTheDocument();
+  });
+
+  it("copies the most recent quick dictation from the home", async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<App />);
+    // Begin the session and return to the home so the copy-last affordance appears.
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    finishCapture();
+    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByLabelText("Close note"));
+    fireEvent.click(screen.getByText("Copy last dictation"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0][0]).toBeTruthy();
+  });
+
   it("uses native Windows chrome without the inner mock titlebar", () => {
     window.__DICTATE__ = { platform: "win11" };
     const { container } = render(<App />);

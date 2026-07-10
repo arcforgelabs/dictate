@@ -678,6 +678,12 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .confirm-danger:focus-visible{outline:2px solid var(--danger);outline-offset:2px;}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
+/* Copy-last: quiet pill under the cradle once a dictation exists this session. */
+.note-copylast{margin:9px auto 0;height:28px;padding:0 12px;border-radius:var(--r-pill);
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--surface-2);
+  border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;
+  transition:var(--t-fast);-webkit-app-region:no-drag;cursor:pointer;}
+.note-copylast:hover{color:var(--text);border-color:var(--border-strong,var(--border));}
 .meeting-action{height:30px;padding:0 12px;border-radius:var(--r-pill);
   display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--surface-2);
   border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;

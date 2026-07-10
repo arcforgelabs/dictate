@@ -1079,7 +1079,21 @@ function CaptureHome() {
   const s = useStore();
   const meeting = s.captureMode === "meeting";
   const [discardOpen, setDiscardOpen] = useState(false);
-  const gettingStarted = !s.noteRecording && (!s.history || s.history.length === 0);
+  // Getting-started teaching is per-session, not per-history: it shows on every
+  // fresh launch (even with saved notes) and hides once capture begins this run.
+  const gettingStarted = !s.noteRecording && !s.sessionStarted;
+  // Copy-last: the most recent quick record (a dictation, not a diarized meeting).
+  const isMeeting = (n) => Array.isArray(n?.segments) && n.segments.length > 0;
+  const recentQuick = (s.history || []).find((n) => !isMeeting(n));
+  const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
+  const copyLast = () => {
+    if (!recentQuickText) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(recentQuickText)
+        .then(() => s.toast("Copied last dictation"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
   useEffect(() => {
     if (!s.noteRecording || !s.notePaused) setDiscardOpen(false);
   }, [s.noteRecording, s.notePaused]);
@@ -1156,9 +1170,21 @@ function CaptureHome() {
             ) : (
               <>
                 <div className="note-status-sub t-mono">Click to dictate</div>
-                <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
-                {/* Getting started: teach the key when there are no notes yet */}
-                {(!s.history || s.history.length === 0) && <GsKeyboard />}
+                {/* Getting started (per-session): teach the key on a fresh launch. */}
+                {gettingStarted && (
+                  <>
+                    <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
+                    <GsKeyboard />
+                  </>
+                )}
+                {/* Once capture has begun this session, offer a one-click copy of the
+                    most recent quick dictation (older ones live in the notes list). */}
+                {s.sessionStarted && recentQuickText && (
+                  <button type="button" className="note-copylast t-mono" onClick={copyLast}>
+                    <Icon name="copy" size={13} />
+                    <span>Copy last dictation</span>
+                  </button>
+                )}
                 {/* Live push-to-talk transcript — hide once history has the same note. */}
                 {s.transcript?.text && !s.transcript.stale && (s.recording || !s.history?.length) && (
                   <div className="note-preview" aria-live="polite">
@@ -1326,6 +1352,10 @@ export default function App() {
   const [ambient, setAmbientState] = useState(true);
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
+  // Session-scoped: false on a fresh launch, true once the user has captured
+  // anything this run. Not persisted — resets to false on app close/reopen, so
+  // the getting-started teaching re-shows and the home copy-last hides again.
+  const [sessionStarted, setSessionStarted] = useState(false);
   const [notePaused, setNotePaused] = useState(false);
   const [notePauseReason, setNotePauseReason] = useState(null);
   const [captureMode, setCaptureMode] = useState("note");
@@ -1453,6 +1483,7 @@ export default function App() {
     const unsub = ipc.subscribe((ev) => {
       if (ev.type === "recording") {
         setRecording(!!ev.active);
+        if (ev.active) setSessionStarted(true);
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
         else setAudioLevel(null);
       }
@@ -1466,6 +1497,7 @@ export default function App() {
         } else if (ev.active) {
           if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteRecording(true);
+          setSessionStarted(true);
           setNotePaused(false);
           setNotePauseReason(null);
           setAudioLevel(null);
@@ -1876,6 +1908,7 @@ export default function App() {
       setNotePauseReason(null);
       setCaptureMode("note");
       setNoteRecording(true);
+      setSessionStarted(true);
       setNoteView(null);
       setCurrentNote(null);
       toast("Note recording started");
@@ -1898,6 +1931,7 @@ export default function App() {
       setNotePauseReason(null);
       setCaptureMode("meeting");
       setNoteRecording(true);
+      setSessionStarted(true);
       setNoteView(null);
       setCurrentNote(null);
       toast("Meeting started");
@@ -2225,7 +2259,7 @@ export default function App() {
       }
     }, 16);
   };
-  const dictateStart = () => { if (recRef.current || live) return; setRecording(true); };
+  const dictateStart = () => { if (recRef.current || live) return; setRecording(true); setSessionStarted(true); };
   const dictateStop = () => {
     if (!recRef.current || live) return;
     setRecording(false);
@@ -2292,7 +2326,7 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, notePaused, notePauseReason, captureMode, noteText,
+    recording, noteRecording, sessionStarted, notePaused, notePauseReason, captureMode, noteText,
     startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording,
     finishNoteRecording, discardNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
