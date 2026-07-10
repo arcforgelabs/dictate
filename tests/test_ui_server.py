@@ -1008,11 +1008,12 @@ class UiBackendBrowserSignInTests(unittest.TestCase):
 
     def test_flag_off_returns_email_fallback_without_touching_pro_client(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            # browser_signin_enabled defaults to reading DICTATE_PRO_BROWSER_SIGNIN, unset
-            # in the test environment -- exercises the real default, not an override.
-            backend = _backend(d, pro_client=_FakeBrowserProClient())
-            self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
-            self.assertEqual(backend.pro_client.start_calls, [])
+            # Exercise the real default while keeping the test independent from
+            # the developer shell/CI environment.
+            with patch.dict("os.environ", {"DICTATE_PRO_BROWSER_SIGNIN": ""}):
+                backend = _backend(d, pro_client=_FakeBrowserProClient())
+                self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
+                self.assertEqual(backend.pro_client.start_calls, [])
 
     def test_start_happy_path_loopback_opens_browser(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1760,8 +1761,9 @@ class HttpIntegrationTests(unittest.TestCase):
 
     def test_browser_signin_start_over_http_falls_back_to_email_when_disabled(self) -> None:
         self.handle.backend.pro_client = _FakeBrowserProClient()
-        with self._post("/api/pro/auth/browser/start") as resp:
-            body = json.loads(resp.read())
+        with patch.dict("os.environ", {"DICTATE_PRO_BROWSER_SIGNIN": ""}):
+            with self._post("/api/pro/auth/browser/start") as resp:
+                body = json.loads(resp.read())
         self.assertEqual(resp.status, 200)
         self.assertEqual(body, {"flow": "email"})
 
