@@ -181,6 +181,19 @@ fn bundled_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     None
 }
 
+fn bundled_pyannote_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
+    for base in engine_resource_dirs(app) {
+        let candidate = base
+            .join("engine")
+            .join("models")
+            .join("pyannote-speaker-diarization-community-1");
+        if candidate.join("config.yaml").exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn engine_resource_dirs<R: Runtime, M: Manager<R>>(app: &M) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(exe) = env::current_exe() {
@@ -224,6 +237,9 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         let mut cmd = Command::new(&bin);
         cmd.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
         cmd.env("DICTATE_SHELL_VERSION", shell_version);
+        if let Some(model_path) = bundled_pyannote_model(app) {
+            cmd.env("DICTATE_PYANNOTE_MODEL_PATH", model_path);
+        }
         if let Some(path) = shell_path.as_ref() {
             cmd.env("DICTATE_SHELL_PATH", path);
         }
@@ -283,14 +299,20 @@ fn handshake_version_matches(h: &Handshake, shell_version: &str) -> bool {
 fn kill_pid(pid: u32) {
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status();
         for _ in 0..20 {
             if !process_exists(pid) {
                 return;
             }
             sleep(Duration::from_millis(50));
         }
-        let _ = Command::new("kill").arg("-KILL").arg(pid.to_string()).status();
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(pid.to_string())
+            .status();
     }
     #[cfg(target_os = "windows")]
     {
@@ -356,7 +378,11 @@ fn kill_engine() {
 
 /// JS injected before page load: the bridge object + the shell/platform markers
 /// the stylesheet keys off.
-fn build_init_script(platform: &str, bridge: Option<&Handshake>, native_decorations: bool) -> String {
+fn build_init_script(
+    platform: &str,
+    bridge: Option<&Handshake>,
+    native_decorations: bool,
+) -> String {
     let dictate = match bridge {
         Some(h) => format!(
             "window.__DICTATE__ = {{ baseUrl: {}, token: {}, platform: {} }};",
@@ -439,7 +465,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
-        .invoke_handler(tauri::generate_handler![refresh_bridge, restart_app, save_text_file])
+        .invoke_handler(tauri::generate_handler![
+            refresh_bridge,
+            restart_app,
+            save_text_file
+        ])
         .setup(|app| {
             let platform = detect_platform();
             let bridge = ensure_engine(app);
@@ -595,9 +625,15 @@ mod tests {
             pid: None,
             version: v.map(|s| s.to_string()),
         };
-        assert!(handshake_version_matches(&mk(Some("2026.6.23")), "2026.6.23"));
+        assert!(handshake_version_matches(
+            &mk(Some("2026.6.23")),
+            "2026.6.23"
+        ));
         // A different version is a stale orphan -> not a match.
-        assert!(!handshake_version_matches(&mk(Some("2026.6.20")), "2026.6.23"));
+        assert!(!handshake_version_matches(
+            &mk(Some("2026.6.20")),
+            "2026.6.23"
+        ));
         // A versionless handshake (pre-update engine) -> not a match.
         assert!(!handshake_version_matches(&mk(None), "2026.6.23"));
     }

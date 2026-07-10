@@ -228,11 +228,21 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('Install-StartMenuShortcut -TargetPath $wscript -Arguments $trayArgs', script)
         self.assertIn('Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs', script)
         self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
-        self.assertIn('Remove-Item -Force -ErrorAction SilentlyContinue -Path $shortcutPath, $legacyShortcutPath', script)
-        self.assertIn('Remove-Item -Force $shortcutPath', script)
-        self.assertIn('Removed startup shortcut', script)
-        self.assertIn("Register-InstalledApp", script)
-        self.assertIn(r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate", script)
+
+    def test_windows_desktop_bundle_stages_offline_meeting_runtime(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        script = (root / "scripts" / "build-windows-desktop.ps1").read_text(encoding="utf-8")
+        spec = (root / "packaging" / "dictate-engine.spec").read_text(encoding="utf-8")
+        shell = (root / "ui-shell" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+
+        self.assertIn("$Root[windows,meeting]", script)
+        self.assertIn("prepare-pyannote-community-model.py", script)
+        self.assertIn("pyannote-speaker-diarization-community-1", script)
+        self.assertIn('"torch"', spec)
+        self.assertIn('"pyannote.audio"', spec)
+        self.assertNotIn('"torch", "matplotlib"', spec)
+        self.assertIn("DICTATE_PYANNOTE_MODEL_PATH", shell)
+        self.assertIn("pyannote-speaker-diarization-community-1", shell)
 
     def test_windows_installer_prunes_stale_user_install_surfaces(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(

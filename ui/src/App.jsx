@@ -1332,6 +1332,7 @@ export default function App() {
   const [view, setView] = useState("home");
   const [model, setModelState] = useState(PRIVATE_MODEL);
   const [meetingModel, setMeetingModelState] = useState("parakeet-pyannote/parakeet-tdt-0.6b-v2");
+  const [meetingReadiness, setMeetingReadiness] = useState({ ready: true, reason: null });
   const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
@@ -1636,6 +1637,7 @@ export default function App() {
   const hydrate = useCallback((st) => {
     if (st.model && st.model.id) setModelState(st.model.id);
     if (st.meetingModel && st.meetingModel.id) setMeetingModelState(st.meetingModel.id);
+    if (st.meetingReadiness) setMeetingReadiness(st.meetingReadiness);
     if (st.shortcut) {
       if (Array.isArray(st.shortcut.display)) setShortcutState(st.shortcut.display);
       if (st.shortcut.activation) setActivationState(st.shortcut.activation);
@@ -1921,6 +1923,13 @@ export default function App() {
 
   const startMeetingRecording = () => {
     if (noteRecording) return;
+    if (meetingReadiness && meetingReadiness.ready === false) {
+      toast(`Meeting model is not ready: ${meetingReadiness.reason || "prepare the local Meeting model first"}`, {
+        bad: true,
+        ms: 12_000,
+      });
+      return;
+    }
     if (!ipc.isLive()) {
       if (!ipc.isMockMode()) {
         toast("Dictate engine is not connected", { bad: true });
@@ -2342,6 +2351,7 @@ export default function App() {
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
+    meetingReadiness,
     dictatePro, setDictatePro, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
     accountOpen, setAccountOpen, setHistory,
   };

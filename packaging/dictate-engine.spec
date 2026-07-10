@@ -1,7 +1,9 @@
 # PyInstaller spec for the frozen Dictate engine sidecar.
 #
 # Bundles the Python runtime + STT stack (faster-whisper / ctranslate2 /
-# onnxruntime / av). Models are NOT bundled — they download on first use.
+# onnxruntime / av) plus the local Meeting runtime. General ASR models download
+# on first use; the Windows desktop build stages pyannote Community-1 beside the
+# engine so Meeting mode does not need customer Hugging Face credentials.
 #
 # Two layouts, selected by DICTATE_ONEFILE:
 #   - onedir (default): dist/dictate-engine/dictate-engine  — fast start; used
@@ -52,6 +54,17 @@ for pkg in ("onnx_asr", "onnxruntime"):
     except Exception:
         pass
 
+# Local Meeting backend runtime (pyannote Community-1 + torch). The model files
+# are staged as Tauri resources by scripts/build-windows-desktop.ps1.
+for pkg in ("torch", "torchaudio", "pyannote.audio", "pyannote.core", "pyannote.database", "pyannote.metrics"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
+
 # Our own package + its lazily-imported backends/dialogs.
 hiddenimports += collect_submodules("dictate")
 hiddenimports += [
@@ -72,7 +85,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     # GUI toolkits the headless sidecar never needs — keep the binary lean.
-    excludes=["gi", "tkinter", "torch", "matplotlib", "PyQt5", "PyQt6", "PySide6"],
+    excludes=["gi", "tkinter", "matplotlib", "PyQt5", "PyQt6", "PySide6"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

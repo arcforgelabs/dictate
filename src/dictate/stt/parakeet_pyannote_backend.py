@@ -42,11 +42,44 @@ def pyannote_available() -> bool:
 
 
 def pyannote_token() -> str | None:
-    return (
+    env_token = (
         os.environ.get("DICTATE_HF_TOKEN")
         or os.environ.get("HUGGINGFACE_HUB_TOKEN")
         or os.environ.get("HF_TOKEN")
     )
+    if env_token:
+        return env_token
+    return _huggingface_cached_token()
+
+
+def _huggingface_cached_token() -> str | None:
+    try:
+        from huggingface_hub.utils import get_token
+
+        token = get_token()
+        if token:
+            return token
+    except Exception:  # noqa: BLE001
+        pass
+
+    candidates: list[Path] = []
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        candidates.append(Path(hf_home).expanduser() / "token")
+    candidates.extend(
+        [
+            Path.home() / ".cache" / "huggingface" / "token",
+            Path.home() / ".huggingface" / "token",
+        ]
+    )
+    for path in candidates:
+        try:
+            token = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if token:
+            return token
+    return None
 
 
 def pyannote_model_source() -> str:

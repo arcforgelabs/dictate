@@ -501,6 +501,7 @@ class UiBackend:
             backend = "faster-whisper"
         model = self._effective_model(cfg, backend)
         meeting_backend, meeting_model = self._meeting_selection(cfg)
+        meeting_readiness = self._meeting_readiness(cfg)
         pro_state = self._dictate_pro_state()
         if not _pro_state_active(pro_state) and self.sync_settings is not None:
             sync_state = self.sync_settings.load()
@@ -515,6 +516,7 @@ class UiBackend:
                 "backend": meeting_backend,
                 "model": meeting_model,
             },
+            "meetingReadiness": meeting_readiness,
             "models": self._models(cfg),
             "shortcut": self._shortcut(cfg, prefs),
             "hotwords": list(cfg.hotwords),
@@ -1324,6 +1326,13 @@ class UiBackend:
     def _ensure_meeting_backend_ready(self) -> None:
         cfg = config_mod.load_config(self.config_path)
         backend, model = self._meeting_selection(cfg)
+        readiness_payload = self._meeting_readiness(cfg)
+        if not readiness_payload["ready"]:
+            raise ApiError(409, f"Meeting model is not ready: {readiness_payload['reason']}")
+        self._install_meeting_backend_if_needed(cfg, backend=backend, model=model)
+
+    def _meeting_readiness(self, cfg: config_mod.Config) -> dict[str, Any]:
+        backend, model = self._meeting_selection(cfg)
         readiness = check_backend_readiness(
             backend=backend,
             model=model,
@@ -1331,16 +1340,17 @@ class UiBackend:
         )
         capabilities = BACKEND_REGISTRY[backend].capabilities
         if not capabilities.supports_speaker_attribution:
-            raise ApiError(
-                409,
-                "Meeting needs a speaker-ready local model. Select the Meeting model and prepare it first.",
-            )
-        if readiness.errors:
-            raise ApiError(409, f"Meeting model is not ready: {readiness.errors[0]}")
-        blocking_warning = _meeting_blocking_warning(readiness.warnings)
-        if blocking_warning is not None:
-            raise ApiError(409, f"Meeting model is not ready: {blocking_warning}")
-        self._install_meeting_backend_if_needed(cfg, backend=backend, model=model)
+            reason = "Meeting needs a speaker-ready local model. Select the Meeting model and prepare it first."
+        elif readiness.errors:
+            reason = readiness.errors[0]
+        else:
+            reason = _meeting_blocking_warning(readiness.warnings)
+        return {
+            "ready": reason is None,
+            "reason": reason,
+            "errors": list(readiness.errors),
+            "warnings": list(readiness.warnings),
+        }
 
     def _meeting_selection(self, cfg: config_mod.Config) -> tuple[str, str]:
         backend = cfg.meeting_stt_backend or "parakeet-pyannote"

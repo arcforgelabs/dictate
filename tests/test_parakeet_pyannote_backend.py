@@ -75,6 +75,16 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
         ):
             self.assertEqual(pyannote_token(), "dictate-token")
 
+    def test_token_falls_back_to_huggingface_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = Path(temp_dir) / "token"
+            token_path.write_text("cached-token\n", encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"HF_HOME": temp_dir}, clear=True),
+                patch("dictate.stt.parakeet_pyannote_backend.Path.home", return_value=Path(temp_dir)),
+            ):
+                self.assertEqual(pyannote_token(), "cached-token")
+
     def test_model_source_defaults_to_community_model(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(pyannote_model_source(), PYANNOTE_COMMUNITY_MODEL)
@@ -196,12 +206,14 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
         fake_pyannote = types.ModuleType("pyannote")
         fake_audio = types.ModuleType("pyannote.audio")
         fake_audio.Pipeline = object
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.dict(sys.modules, {"pyannote": fake_pyannote, "pyannote.audio": fake_audio}),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "requires a Hugging Face token"):
-                stt._pyannote_pipeline()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(os.environ, {"HF_HOME": temp_dir}, clear=True),
+                patch("dictate.stt.parakeet_pyannote_backend.Path.home", return_value=Path(temp_dir)),
+                patch.dict(sys.modules, {"pyannote": fake_pyannote, "pyannote.audio": fake_audio}),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "requires a Hugging Face token"):
+                    stt._pyannote_pipeline()
 
     def test_local_model_path_does_not_require_token(self) -> None:
         fake_pipeline = object()

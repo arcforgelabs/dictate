@@ -73,6 +73,7 @@ jobs:
         shell: pwsh
         env:
           DICTATE_BUNDLES: msi
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-msi-release.log"
 
       - name: Sign Windows MSI

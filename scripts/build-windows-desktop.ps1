@@ -87,7 +87,7 @@ Invoke-Native "installing Windows build dependencies" $VenvPython @(
     "pip",
     "install",
     "-e",
-    "$Root[windows]",
+    "$Root[windows,meeting]",
     "pyinstaller",
     "--quiet"
 )
@@ -129,6 +129,14 @@ $StageDir = Join-Path $Root "ui-shell\src-tauri\engine"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $StageDir
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
+
+Write-Host "staging pyannote Community-1 for offline Meeting mode"
+$PyannoteModelDir = Join-Path $StageDir "models\pyannote-speaker-diarization-community-1"
+Invoke-Native "downloading pyannote Community-1 model snapshot" $VenvPython @(
+    (Join-Path $Root "scripts\prepare-pyannote-community-model.py"),
+    "--output",
+    $PyannoteModelDir
+)
 
 Write-Host "ensuring the Tauri CLI is available"
 Invoke-Native "installing UI shell dependencies" "npm" @("--prefix", "ui-shell", "install")
