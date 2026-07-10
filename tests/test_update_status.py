@@ -362,7 +362,7 @@ class UpdateStatusTests(unittest.TestCase):
                 roots,
                 user,
                 patch("dictate.update_status.Path.home", return_value=Path(d)),
-                patch("dictate.update_status.shutil.which", return_value=None),
+                patch("dictate.update_status._find_npx", return_value=None),
             ):
                 flow = start_update_flow()
 

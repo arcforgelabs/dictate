@@ -81,8 +81,13 @@ scripts/build-windows-desktop.ps1
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
   builds the Windows bundle and uploads artifacts + the full log without cutting
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
-- These artifacts are for internal validation and signed direct-download fallback.
-  The target public Windows channel is Microsoft Store distribution, tracked in
+- **Manual (`.github/workflows/windows-msi-release.yml`, `workflow_dispatch`)**
+  builds only the MSI for an existing release tag, signs it, verifies the
+  Authenticode signature, and attaches it to that GitHub release. Trigger:
+  `gh workflow run windows-msi-release.yml -f release_tag=v2026.7.4`.
+- Unsigned Windows artifacts are for internal validation only. Signed MSI assets
+  attached to GitHub releases are the direct-download fallback for users who do
+  not want Microsoft Store distribution. The Store path remains tracked in
   [msstore-automation.md](msstore-automation.md).
 - The Tauri shell looks for `dictate-engine.exe` on Windows and for
   `dictate-engine` elsewhere. It also reads the UI handshake from
@@ -95,6 +100,18 @@ scripts/build-windows-desktop.ps1
   `WINDOWS_SIGNING_PFX_B64` plus `WINDOWS_SIGNING_PFX_PASSWORD`, or a runner-local
   `WINDOWS_SIGNING_CERT_PATH`. Without those credentials, Windows release
   artifacts remain internal workflow artifacts.
+
+To backfill the signed MSI onto an existing release after the signing
+certificate is configured:
+
+```bash
+gh workflow run windows-msi-release.yml \
+  -f release_tag=v2026.7.4 \
+  -f overwrite=false
+```
+
+Use `-f overwrite=true` only when replacing a bad or superseded MSI asset on the
+same immutable release tag.
 
 ## Windows Store MSIX flow
 
