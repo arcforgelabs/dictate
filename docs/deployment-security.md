@@ -65,7 +65,8 @@ Current repository settings:
 5. Unsigned Windows desktop artifacts may be uploaded only as internal workflow
    artifacts. They must not be attached to a public GitHub release.
 6. Signed Windows artifacts may be attached only after `assert-windows-artifacts-signed.ps1`
-   passes.
+   passes. The dedicated `windows-msi-release.yml` backfill workflow may attach a
+   signed MSI to an existing release tag without rerunning the full release.
 7. Microsoft Store `draft` mode uploads a package without committing the
    submission. Microsoft Store `publish` mode submits the current draft for
    certification and must be explicitly approved.

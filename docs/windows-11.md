@@ -19,9 +19,16 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 
 ## Install
 
-The target public channel is Microsoft Store distribution. Until the Store
-listing is ready, Windows installer artifacts from GitHub releases are for
-internal validation only.
+The target public channel is Microsoft Store distribution. Tagged GitHub
+releases can also attach a signed Windows `.msi` as a direct-download fallback
+for users who do not want the Store route. Unsigned Windows installer artifacts
+remain internal validation artifacts only.
+
+Direct MSI download:
+
+1. Open the latest GitHub release.
+2. Download `Dictate_*_x64_en-US.msi` when it is attached.
+3. Run the installer and open **Dictate** from the Start Menu.
 
 Developer/source bootstrap from PowerShell:
 

@@ -1,0 +1,114 @@
+name: Windows MSI release asset (manual)
+
+# Backfill or refresh the signed Windows MSI on an existing GitHub release.
+# This is the direct-download fallback for users who do not want the Microsoft
+# Store path. The job refuses to upload unsigned installers.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing CalVer release tag, for example v2026.7.4"
+        required: true
+      overwrite:
+        description: "Replace an existing MSI asset on that release"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-msi:
+    name: Build, sign, and upload Windows MSI
+    runs-on: windows-latest
+    environment:
+      name: windows-signing
+    env:
+      HAS_WINDOWS_SIGNING_PFX: ${{ secrets.WINDOWS_SIGNING_PFX_B64 != '' }}
+      HAS_WINDOWS_SIGNING_CERT_PATH: ${{ vars.WINDOWS_SIGNING_CERT_PATH != '' }}
+    steps:
+      - name: Check signing configuration
+        shell: pwsh
+        run: |
+          if ($env:HAS_WINDOWS_SIGNING_PFX -ne 'true' -and $env:HAS_WINDOWS_SIGNING_CERT_PATH -ne 'true') {
+            throw "No Windows signing certificate is configured. Set WINDOWS_SIGNING_PFX_B64 or WINDOWS_SIGNING_CERT_PATH in the windows-signing environment."
+          }
+
+      - name: Check release exists
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ("${{ inputs.release_tag }}" -notmatch '^v20\d{2}\.\d{1,2}\.\d{1,2}(-\d+)?$') {
+            throw "release_tag must be a CalVer tag like v2026.7.4 or v2026.7.4-1."
+          }
+          gh release view "${{ inputs.release_tag }}"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Install Windows MSI bundling dependencies
+        shell: pwsh
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Build Windows MSI
+        shell: pwsh
+        env:
+          DICTATE_BUNDLES: msi
+        run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-msi-release.log"
+
+      - name: Sign Windows MSI
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          WINDOWS_SIGNING_CERT_PATH: ${{ vars.WINDOWS_SIGNING_CERT_PATH }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: .\scripts\sign-windows-artifacts.ps1 -BundleRoot "ui-shell\src-tauri\target\release\bundle"
+
+      - name: Upload signed MSI to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $msi = Get-ChildItem "ui-shell\src-tauri\target\release\bundle\msi" -Filter "*.msi" -File
+          if (-not $msi) {
+            throw "No MSI artifact was produced."
+          }
+          if ($msi.Count -ne 1) {
+            $msi | ForEach-Object { Write-Host $_.FullName }
+            throw "Expected exactly one MSI artifact."
+          }
+
+          $args = @("release", "upload", "${{ inputs.release_tag }}", $msi.FullName)
+          if ("${{ inputs.overwrite }}" -eq "true") {
+            $args += "--clobber"
+          }
+          gh @args
+
+      - name: Upload MSI build log
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: windows-msi-release-log
+          path: ${{ runner.temp }}\windows-msi-release.log
+          if-no-files-found: warn
