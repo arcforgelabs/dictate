@@ -57,7 +57,12 @@ class SyncEngine:
 
     def attach_outbox(self) -> None:
         outbox = self.settings.outbox()
-        self.history_store.attach_sync_outbox(outbox)
+        # sync_scope="meetings" syncs note+segment only; the rolling quick-copy history is
+        # detached so its enqueues become no-ops. Unset defaults to "everything" (backward
+        # compatible); enable_sync sets "meetings" for newly enabled sync. See
+        # docs/record-categories-spec.md.
+        scope = config_mod.load_config(self.config_path).sync_scope or "everything"
+        self.history_store.attach_sync_outbox(outbox if scope == "everything" else None)
         self.note_store.attach_sync_outbox(outbox)
 
     def run_once(self, *, limit: int = 500) -> SyncRunResult:

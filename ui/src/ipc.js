@@ -175,6 +175,15 @@ export const ipc = {
       deviceLabel,
     });
   },
+  async startBrowserSignIn(flow = "auto") {
+    return call("POST", "/api/pro/auth/browser/start", { flow });
+  },
+  async getBrowserSignInStatus() {
+    return call("GET", "/api/pro/auth/browser/status");
+  },
+  async cancelBrowserSignIn() {
+    return call("POST", "/api/pro/auth/browser/cancel");
+  },
   async signOutPro() {
     return call("POST", "/api/pro/sign-out");
   },
@@ -186,6 +195,9 @@ export const ipc = {
   },
   async runProSync() {
     return call("POST", "/api/pro/sync/run");
+  },
+  async setProSyncScope(scope) {
+    return call("POST", "/api/pro/sync/scope", { scope });
   },
   async listProDevices() {
     return call("GET", "/api/pro/devices");

@@ -118,6 +118,30 @@ class SyncEngineTests(unittest.TestCase):
             self.assertIsNone(history._sync_outbox)
             self.assertIsNone(notes._sync_outbox)
 
+    def test_sync_scope_meetings_detaches_history_outbox(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key = generate_account_key()
+            cfg = Path(tmp) / "config.yaml"
+            settings = self._settings(tmp, "acct_scope", key)
+            history = HistoryStore(Path(tmp) / "history.json")
+            notes = NoteStore(Path(tmp) / "notes")
+            engine = SyncEngine(
+                settings=settings,
+                pro_client=_FakeProClient(),
+                history_store=history,
+                note_store=notes,
+                config_path=cfg,
+            )
+
+            config_mod.set_sync_scope("meetings", cfg)
+            engine.attach_outbox()
+            self.assertIsNone(history._sync_outbox)      # history not synced under meetings
+            self.assertIsNotNone(notes._sync_outbox)     # note+segment still sync
+
+            config_mod.set_sync_scope("everything", cfg)
+            engine.attach_outbox()
+            self.assertIsNotNone(history._sync_outbox)   # everything re-attaches history
+
     def test_pull_applies_history_and_advances_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             key = generate_account_key()

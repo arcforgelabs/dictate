@@ -153,6 +153,8 @@ function noteMarkdown(note, titleDate) {
 function HistoryView() {
   const s = useStore();
   const [q, setQ] = useState("");
+  // Category filter (Phase 1): all | meetings | quick. View-only; capture is unchanged.
+  const [cat, setCat] = useState("all");
   const [, tick] = useState(0);
 
   // Refresh relative timestamps every 15 s without a full re-render.
@@ -162,11 +164,19 @@ function HistoryView() {
   }, []);
 
   const all = s.history || [];
+  // A record is a MEETING iff it has diarized segments; otherwise a QUICK record.
+  // Derived — no stored `kind` field / migration (see docs/record-categories-spec.md).
+  const isMeeting = (n) => Array.isArray(n?.segments) && n.segments.length > 0;
+  const byCat = useMemo(() => {
+    if (cat === "meetings") return all.filter(isMeeting);
+    if (cat === "quick") return all.filter((n) => !isMeeting(n));
+    return all;
+  }, [all, cat]);
   const filtered = useMemo(() => {
-    if (!q) return all;
+    if (!q) return byCat;
     const sq = q.toLowerCase();
-    return all.filter((n) => noteSearchText(n).includes(sq));
-  }, [q, all]);
+    return byCat.filter((n) => noteSearchText(n).includes(sq));
+  }, [q, byCat]);
 
   // Open a history note in the ExpandedNote read view.
   const openNote = (note) => {
@@ -219,6 +229,19 @@ function HistoryView() {
             <Icon name="x" size={15} />
           </button>
         )}
+        <div className="engine-seg cat-seg" role="group" aria-label="Filter dictations">
+          {[["all", "All"], ["meetings", "Meetings"], ["quick", "Quick"]].map(([c, label]) => (
+            <button
+              key={c}
+              type="button"
+              className={"engine-opt" + (cat === c ? " on" : "")}
+              aria-pressed={cat === c}
+              onClick={() => setCat(c)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <NotebookToggle />
       </div>
 
@@ -232,8 +255,21 @@ function HistoryView() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="notes-blank">
-            <div className="nb-title">No notes match &ldquo;{q}&rdquo;.</div>
-            <div className="nb-sub">Try a different word.</div>
+            {q ? (
+              <>
+                <div className="nb-title">No notes match &ldquo;{q}&rdquo;.</div>
+                <div className="nb-sub">Try a different word.</div>
+              </>
+            ) : (
+              <>
+                <div className="nb-title">{cat === "meetings" ? "No meetings yet." : "No quick records yet."}</div>
+                <div className="nb-sub">
+                  {cat === "meetings"
+                    ? "Meetings you record will appear here."
+                    : "Quick dictations will appear here."}
+                </div>
+              </>
+            )}
           </div>
         ) : (
           filtered.map((note) => (

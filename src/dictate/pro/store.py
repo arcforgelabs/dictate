@@ -215,6 +215,34 @@ class ProStore:
                     attempts_remaining INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS auth_codes (
+                    code_hash TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    client_id TEXT NOT NULL,
+                    redirect_uri TEXT NOT NULL,
+                    code_challenge TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    device_label TEXT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS device_codes (
+                    device_code_hash TEXT PRIMARY KEY,
+                    user_code TEXT NOT NULL UNIQUE,
+                    account_id TEXT,
+                    client_id TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    device_label TEXT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    interval INTEGER NOT NULL,
+                    last_polled_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    consumed_at TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS auth_tokens (
                     token_hash TEXT PRIMARY KEY,
                     account_id TEXT NOT NULL,
@@ -886,9 +914,18 @@ class ProStore:
         now = iso()
         with self._conn() as conn:
             existing = conn.execute(
-                "SELECT device_id FROM devices WHERE device_id = ?",
+                "SELECT device_id, account_id FROM devices WHERE device_id = ?",
                 (device,),
             ).fetchone()
+            if existing and existing["account_id"] != account_id:
+                # device_id is a global primary key but callers (email code's complete_sign_in,
+                # the authorization_code grant) can supply an arbitrary caller-chosen device_id
+                # in the request body. Without this check, an authenticated caller for account A
+                # could overwrite account B's device row (label/public_key) merely by naming B's
+                # device_id -- device_is_known() would still block the resulting session, but the
+                # tamper against B's row would already have persisted. Reject outright rather than
+                # silently minting a new id, so the caller sees the failure.
+                raise ValueError("device_id belongs to a different account")
             if existing:
                 conn.execute(
                     """
@@ -1086,6 +1123,154 @@ class ProStore:
     def delete_auth_challenge(self, challenge_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM auth_challenges WHERE challenge_id = ?", (challenge_id,))
+
+    def save_auth_code(
+        self,
+        *,
+        code_hash: str,
+        account_id: str,
+        client_id: str,
+        redirect_uri: str,
+        code_challenge: str,
+        scope: str,
+        device_label: str,
+        expires_at: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO auth_codes
+                (code_hash, account_id, client_id, redirect_uri, code_challenge, scope,
+                 device_label, created_at, expires_at, consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    code_hash,
+                    account_id,
+                    client_id,
+                    redirect_uri,
+                    code_challenge,
+                    scope,
+                    device_label,
+                    iso(),
+                    expires_at,
+                ),
+            )
+
+    def get_auth_code(self, code_hash: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM auth_codes WHERE code_hash = ?",
+                (code_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def consume_auth_code(self, code_hash: str) -> bool:
+        """Mark an authorization code used; returns False if already consumed (replay)."""
+        now = iso()
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE auth_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL",
+                (now, code_hash),
+            )
+            consumed = cur.rowcount > 0
+            # Opportunistic cleanup: every exchange attempt is a convenient, low-cost hook
+            # to sweep codes that can never be used again (already consumed, or past their
+            # 120s TTL), so auth_codes doesn't grow unbounded on a long-running server.
+            conn.execute(
+                "DELETE FROM auth_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (now,),
+            )
+            return consumed
+
+    def save_device_code(
+        self,
+        *,
+        device_code_hash: str,
+        user_code: str,
+        client_id: str,
+        scope: str,
+        device_label: str,
+        expires_at: str,
+        interval: int,
+    ) -> None:
+        with self._conn() as conn:
+            # Opportunistic cleanup at issuance time, not just on the approved/consumed
+            # path: issuance is deliberately ungated and unauthenticated (matches real RFC
+            # 8628 semantics -- a pending code that can never be approved is still valid
+            # protocol behavior), so on a server with no DICTATE_PRO_DEV_AUTO_APPROVE (no
+            # portal, no way to ever approve/consume anything) this is the ONLY reachable
+            # sweep point. Without it, unauthenticated POSTs could grow this table
+            # unbounded.
+            conn.execute(
+                "DELETE FROM device_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (iso(),),
+            )
+            conn.execute(
+                """
+                INSERT INTO device_codes (
+                    device_code_hash, user_code, account_id, client_id, scope, device_label,
+                    created_at, expires_at, interval, last_polled_at, status, consumed_at
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL)
+                """,
+                (device_code_hash, user_code, client_id, scope, device_label, iso(), expires_at, interval),
+            )
+
+    def get_device_code(self, device_code_hash: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM device_codes WHERE device_code_hash = ?",
+                (device_code_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def approve_device_code(self, *, user_code: str, account_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE device_codes
+                SET account_id = ?, status = 'approved'
+                WHERE user_code = ? AND status = 'pending' AND consumed_at IS NULL
+                """,
+                (account_id, user_code),
+            )
+            return cur.rowcount > 0
+
+    def deny_device_code(self, *, user_code: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE device_codes
+                SET status = 'denied'
+                WHERE user_code = ? AND status = 'pending' AND consumed_at IS NULL
+                """,
+                (user_code,),
+            )
+            return cur.rowcount > 0
+
+    def touch_device_code_poll(self, device_code_hash: str, *, last_polled_at: str, interval: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE device_codes SET last_polled_at = ?, interval = ? WHERE device_code_hash = ?",
+                (last_polled_at, interval, device_code_hash),
+            )
+
+    def consume_device_code(self, device_code_hash: str) -> bool:
+        """Mark a device_code used; returns False if already consumed (replay)."""
+        now = iso()
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE device_codes SET consumed_at = ? WHERE device_code_hash = ? AND consumed_at IS NULL",
+                (now, device_code_hash),
+            )
+            consumed = cur.rowcount > 0
+            # Opportunistic cleanup, same rationale as consume_auth_code: sweep rows that
+            # can never be used again so device_codes doesn't grow unbounded.
+            conn.execute(
+                "DELETE FROM device_codes WHERE consumed_at IS NOT NULL OR expires_at < ?",
+                (now,),
+            )
+            return consumed
 
     def save_auth_token(
         self,

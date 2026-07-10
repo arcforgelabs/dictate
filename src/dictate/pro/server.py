@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from dictate.pro.auth import AuthDeliveryError
+from dictate.pro.browser_auth import DEVICE_CODE_GRANT_TYPE
 from dictate.pro.service import ProService, ProServiceError, ProSettings
 from dictate.pro.stripe_handler import load_stripe_settings, verify_stripe_signature
 from dictate.version import RELEASE_VERSION
@@ -26,6 +27,43 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_UPLOAD_MAX_BYTES = 524_288_000  # 500 MB
 DEFAULT_PORT = 18765
+
+# Loopback-only redirect URIs per RFC 8252 §7.3 / §8.3: literal 127.0.0.1 or [::1],
+# any port, path exactly "/callback". "localhost" is deliberately rejected (resolver
+# hijack risk).
+_LOOPBACK_REDIRECT_RE = re.compile(r"^http://(127\.0\.0\.1|\[::1\]):(\d{1,5})/callback$")
+_DEV_AUTO_APPROVE_ENV = "DICTATE_PRO_DEV_AUTO_APPROVE"
+
+
+def _dev_auto_approve_enabled() -> bool:
+    return os.environ.get(_DEV_AUTO_APPROVE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _authorize_error_page(message: str) -> str:
+    safe = (
+        message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign-in error</title></head>"
+        "<body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem;\">"
+        f"<h1>Sign-in error</h1><p>{safe}</p></body></html>"
+    )
+
+
+def _device_verification_page() -> str:
+    # Stand-in only: RFC 8628 requires verification_uri to be a real retrievable page, but
+    # this reference server has no interactive device-approval portal (the real one ships
+    # with the console episode) -- point the user at the dev-only headless hook instead.
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Dictate device sign-in</title></head>"
+        "<body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem;\">"
+        "<h1>Enter your code</h1>"
+        "<p>This reference server has no interactive device-approval portal.</p>"
+        "<p>Approve the pending code via the dev-only "
+        "<code>POST /v1/auth/device/approve</code> hook "
+        f"(requires {_DEV_AUTO_APPROVE_ENV}=1 for local development/testing only).</p>"
+        "</body></html>"
+    )
 
 
 class _RateLimiter:
@@ -136,9 +174,156 @@ class ProRequestHandler(BaseHTTPRequestHandler):
             logger.exception("pro-server route failed")
             self._send_json(500, {"error": str(exc)})
             return
+        if response is None:
+            # The route already wrote a non-JSON response (redirect / HTML error page).
+            return
         self._send_json(response.status, response.body)
 
-    def _route(self, service: ProService, method: str, path: str, query: dict[str, list[str]]) -> _Response:
+    def _send_html(self, status: int, html: str) -> None:
+        data = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _discovery_payload(self) -> dict[str, Any]:
+        host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
+        base = f"http://{host}"
+        return {
+            "authorization_endpoint": f"{base}/v1/auth/authorize",
+            "token_endpoint": f"{base}/v1/auth/token",
+            "device_authorization_endpoint": f"{base}/v1/auth/device-code",
+            "grant_types_supported": ["authorization_code", DEVICE_CODE_GRANT_TYPE, "refresh_token"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+
+    def _handle_authorize(self, service: ProService, query: dict[str, list[str]]) -> None:
+        def first(name: str) -> str:
+            values = query.get(name) or []
+            return values[0].strip() if values else ""
+
+        client_id = first("client_id")
+        redirect_uri = first("redirect_uri")
+        if client_id != "dictate-desktop" or not _LOOPBACK_REDIRECT_RE.match(redirect_uri):
+            # Never redirect on redirect_uri/client_id validation failure (open-redirect guard).
+            self._send_html(400, _authorize_error_page("Invalid client_id or redirect_uri."))
+            return
+
+        state = first("state")
+        response_type = first("response_type")
+        code_challenge = first("code_challenge")
+        code_challenge_method = first("code_challenge_method")
+        scope = first("scope") or "dictate"
+        device_label = first("device_label") or "Desktop"
+
+        def deny(error: str) -> None:
+            params = {"error": error}
+            if state:
+                params["state"] = state
+            self._send_redirect(f"{redirect_uri}?{urlencode(params)}")
+
+        if response_type != "code" or not state or not code_challenge or code_challenge_method != "S256":
+            deny("invalid_request")
+            return
+
+        if not _dev_auto_approve_enabled():
+            self._send_html(
+                501,
+                _authorize_error_page(
+                    "Interactive sign-in approval is not implemented on the reference server. "
+                    f"Set {_DEV_AUTO_APPROVE_ENV}=1 for local development/testing only."
+                ),
+            )
+            return
+
+        dev_email = first("dev_email")
+        if not dev_email:
+            deny("invalid_request")
+            return
+
+        account = service.store.get_or_create_account(dev_email)
+        code = service.auth.create_authorization_code(
+            account_id=account.account_id,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            scope=scope,
+            device_label=device_label,
+        )
+        self._send_redirect(f"{redirect_uri}?{urlencode({'code': code, 'state': state})}")
+
+    def _handle_token_grant(self, service: ProService) -> _Response:
+        body = self._read_json()
+        grant_type = str(body.get("grant_type", "")).strip()
+        if grant_type == "authorization_code":
+            code = str(body.get("code", "")).strip()
+            code_verifier = str(body.get("code_verifier", "")).strip()
+            redirect_uri = str(body.get("redirect_uri", "")).strip()
+            client_id = str(body.get("client_id", "")).strip()
+            if not code or not code_verifier or not redirect_uri or not client_id:
+                raise ApiError(400, "invalid_request")
+            device_id = str(body.get("device_id") or "").strip() or None
+            device_public_key = str(body.get("device_public_key") or "").strip() or None
+            try:
+                session = service.auth.exchange_authorization_code(
+                    code=code,
+                    code_verifier=code_verifier,
+                    redirect_uri=redirect_uri,
+                    client_id=client_id,
+                    device_id=device_id,
+                    device_public_key=device_public_key,
+                )
+            except ValueError as exc:
+                raise ApiError(400, str(exc)) from exc
+        elif grant_type == DEVICE_CODE_GRANT_TYPE:
+            device_code = str(body.get("device_code", "")).strip()
+            client_id = str(body.get("client_id", "")).strip()
+            if not device_code or not client_id:
+                raise ApiError(400, "invalid_request")
+            device_id = str(body.get("device_id") or "").strip() or None
+            device_public_key = str(body.get("device_public_key") or "").strip() or None
+            try:
+                session = service.auth.poll_device_code(
+                    device_code=device_code,
+                    client_id=client_id,
+                    device_id=device_id,
+                    device_public_key=device_public_key,
+                )
+            except ValueError as exc:
+                # RFC 8628 §3.5: authorization_pending / slow_down / expired_token /
+                # access_denied / invalid_grant all ride the same 400 {"error": "..."} shape.
+                raise ApiError(400, str(exc)) from exc
+        elif grant_type == "refresh_token":
+            refresh_token = str(body.get("refresh_token", "")).strip()
+            if not refresh_token:
+                raise ApiError(400, "invalid_request")
+            try:
+                session = service.auth.refresh_session(refresh_token)
+            except ValueError as exc:
+                raise ApiError(400, str(exc)) from exc
+        else:
+            raise ApiError(400, "unsupported_grant_type")
+        return _Response(
+            200,
+            {
+                "account_id": session.account_id,
+                "device_id": session.device_id,
+                "access_token": session.access_token,
+                "refresh_token": session.refresh_token,
+                "access_expires_at": session.access_expires_at,
+                "refresh_expires_at": session.refresh_expires_at,
+            },
+        )
+
+    def _route(self, service: ProService, method: str, path: str, query: dict[str, list[str]]) -> _Response | None:
         if path == "/v1/auth/start" and method == "POST":
             body = self._read_json()
             email = str(body.get("email", "")).strip()
@@ -198,6 +383,58 @@ class ProRequestHandler(BaseHTTPRequestHandler):
                     "refresh_expires_at": session.refresh_expires_at,
                 },
             )
+
+        if path == "/v1/auth/desktop" and method == "GET":
+            if not _dev_auto_approve_enabled():
+                # Advertising this endpoint when /v1/auth/authorize can't actually complete
+                # (no portal on the reference server) would make the client bind a listener,
+                # open a browser, and hang to the 300s timeout instead of falling back to
+                # email code. Mirrors the real gateway, which only advertises once it can
+                # complete authorize.
+                raise ApiError(501, "browser sign-in is not available on this reference server")
+            return _Response(200, self._discovery_payload())
+
+        if path == "/v1/auth/authorize" and method == "GET":
+            self._handle_authorize(service, query)
+            return None
+
+        if path == "/v1/auth/token" and method == "POST":
+            return self._handle_token_grant(service)
+
+        if path == "/v1/auth/device" and method == "GET":
+            # RFC 8628 requires verification_uri to be a real, retrievable page (not a 404)
+            # even though this reference server has no interactive approval UI yet.
+            self._send_html(200, _device_verification_page())
+            return None
+
+        if path == "/v1/auth/device-code" and method == "POST":
+            body = self._read_json()
+            client_id = str(body.get("client_id", "")).strip()
+            if client_id != "dictate-desktop":
+                raise ApiError(400, "invalid_client")
+            scope = str(body.get("scope") or "dictate").strip()
+            device_label = str(body.get("device_label") or "Desktop").strip()
+            payload = service.auth.create_device_code(client_id=client_id, scope=scope, device_label=device_label)
+            host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
+            verification_uri = f"http://{host}/v1/auth/device"
+            payload["verification_uri"] = verification_uri
+            payload["verification_uri_complete"] = f"{verification_uri}?user_code={payload['user_code']}"
+            return _Response(200, payload)
+
+        if path == "/v1/auth/device/approve" and method == "POST":
+            # Dev/test-only headless approval -- the reference server has no portal UI.
+            # Env-gated the same way /v1/auth/authorize's auto-approve is.
+            if not _dev_auto_approve_enabled():
+                raise ApiError(501, "device-code dev approval is not available on this reference server")
+            body = self._read_json()
+            user_code = str(body.get("user_code", "")).strip()
+            dev_email = str(body.get("dev_email", "")).strip()
+            if not user_code or not dev_email:
+                raise ApiError(400, "user_code and dev_email are required")
+            account = service.store.get_or_create_account(dev_email)
+            if not service.auth.approve_device_code(user_code=user_code, account_id=account.account_id):
+                raise ApiError(404, "unknown or already-resolved user_code")
+            return _Response(200, {"approved": True})
 
         if path == "/v1/webhooks/stripe" and method == "POST":
             return self._handle_stripe_webhook(service)

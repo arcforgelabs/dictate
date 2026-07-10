@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
 import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL, DICTATE_ACCOUNT_URL } from "./store.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
@@ -14,6 +14,10 @@ import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
 const DEFAULT_VERSION = "2026.7.4";
+// Web-only account/billing management (subscription, plan, invoices) -- no in-app
+// equivalent, so signed-in users need a way back to it. A hardcoded https literal, so
+// it's safe to open directly (no scheme-clamp needed the way gateway-supplied URIs do).
+const ACCOUNT_PORTAL_URL = "https://console.arcforge.au/deck/account";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -23,6 +27,17 @@ const DEMO_HISTORY = () => {
     { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
     { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
     { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
+    // A meeting (diarized segments) alongside the quick records — demonstrates the
+    // Meetings/Quick category filter (see docs/record-categories-spec.md).
+    {
+      id: "m1",
+      createdAt: now - 3 * 60 * 60 * 1000,
+      text: "Weekly sync",
+      segments: [
+        { seq: 0, speakerLabel: "Speaker 1", tStart: 0, tEnd: 8, text: "Let's kick off with a quick status round before the roadmap." },
+        { seq: 1, speakerLabel: "Speaker 2", tStart: 8, tEnd: 16, text: "Auth is done and deployed to prod; sync is the next piece." },
+      ],
+    },
   ];
 };
 
@@ -290,6 +305,19 @@ function AccountDialog() {
   const [recoveryKey, setRecoveryKey] = useState(null);
   const [restoreKey, setRestoreKey] = useState("");
   const [signInOpen, setSignInOpen] = useState(false);
+  // Browser sign-in (loopback / device-code): {status: "idle"|"waiting"|"error", flow?, ...}.
+  // Scoped to this dialog instance — polling only matters while it's open, and unmounting
+  // (closing the dialog) clears the interval via the effect below.
+  const [browserSignIn, setBrowserSignIn] = useState({ status: "idle" });
+  const browserPollRef = useRef(null);
+  // Email-code fallback form — shown directly (no "unavailable" apology) whenever browser
+  // sign-in is off/unsupported, or the user picks "Email me a code instead"/"Try again".
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailStep, setEmailStep] = useState("idle"); // "idle" (enter address) | "sent" (enter code)
+  const [emailAddress, setEmailAddress] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailChallengeId, setEmailChallengeId] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
   const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
   const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
@@ -341,21 +369,161 @@ function AccountDialog() {
     });
   };
 
-  const openAccount = () => {
-    window.open(DICTATE_ACCOUNT_URL, "_blank", "noopener,noreferrer");
-    s.toast("Opened account portal");
+  // ---- browser sign-in (loopback / device-code), with an always-working email floor ----
+  const clearBrowserPoll = () => {
+    if (browserPollRef.current) { clearInterval(browserPollRef.current); browserPollRef.current = null; }
+  };
+  // Guards setState/setInterval in async callbacks that can resolve after this dialog
+  // instance has already unmounted (e.g. /browser/start is still in flight when the user
+  // closes the dialog) — without it, that late resolution would both leak an interval
+  // no cleanup ever clears and call setState on an unmounted component.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      clearBrowserPoll();
+    };
+  }, []);
+
+  const pollBrowserSignIn = () => {
+    ipc.getBrowserSignInStatus()
+      .then((r) => {
+        if (!mountedRef.current) return;
+        if (r?.status === "pending") return;
+        clearBrowserPoll();
+        if (r?.status === "complete") {
+          setBrowserSignIn({ status: "idle" });
+          if (r.dictatePro) s.setDictatePro(r.dictatePro);
+          refreshAccountState().catch(() => {});
+          s.toast("Signed in");
+          return;
+        }
+        const reason = r?.reason;
+        const message = reason === "access_denied"
+          ? "Sign-in was declined."
+          : reason === "expired_token" || reason === "timeout"
+            ? "Sign-in timed out."
+            : "Couldn't reach the sign-in service.";
+        setBrowserSignIn({ status: "error", error: message });
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        clearBrowserPoll();
+        setBrowserSignIn({ status: "error", error: "Couldn't reach the sign-in service." });
+      });
   };
 
-  const refreshProState = () => {
+  const startBrowserSignIn = (flow = "auto") => {
     if (!ipc.isLive()) {
-      s.toast("Refresh from the installed app", { bad: true });
+      s.toast("Sign in from the installed app", { bad: true });
       return;
     }
-    s.setSyncBusy(true);
-    refreshAccountState()
-      .then(() => s.toast("Account refreshed"))
-      .catch((e) => s.toast(e.message || "Could not refresh account", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
+    resetEmailFallback();
+    clearBrowserPoll();
+    ipc.startBrowserSignIn(flow)
+      .then((r) => {
+        if (!mountedRef.current) {
+          // The dialog closed while the request was in flight — best-effort tell the
+          // server to give up the pending attempt instead of orphaning it, and never
+          // touch state on an unmounted component.
+          ipc.cancelBrowserSignIn().catch(() => {});
+          return;
+        }
+        if (!r || r.flow === "email") {
+          // No apology — this is the normal floor, not an error state.
+          setBrowserSignIn({ status: "idle" });
+          setEmailOpen(true);
+          return;
+        }
+        setBrowserSignIn({
+          status: "waiting",
+          flow: r.flow,
+          authorizeUrl: r.authorize_url || r.authorizeUrl || null,
+          userCode: r.user_code || r.userCode || null,
+          verificationUri: r.verification_uri || r.verificationUri || null,
+          verificationUriComplete: r.verification_uri_complete || r.verificationUriComplete || null,
+        });
+        browserPollRef.current = setInterval(pollBrowserSignIn, 1000);
+      })
+      .catch((e) => {
+        if (!mountedRef.current) return;
+        setBrowserSignIn({ status: "error", error: e.message || "Couldn't reach the sign-in service." });
+      });
+  };
+
+  const cancelBrowserSignIn = () => {
+    clearBrowserPoll();
+    setBrowserSignIn({ status: "idle" });
+    if (ipc.isLive()) ipc.cancelBrowserSignIn().catch(() => {});
+  };
+
+  const reopenAuthorizeUrl = () => {
+    if (browserSignIn.authorizeUrl) window.open(browserSignIn.authorizeUrl, "_blank", "noopener,noreferrer");
+  };
+
+  // Belt-and-braces: the gateway's verification_uri is already scheme-clamped
+  // server-side (ProClient._start_device_code / _clamp_verification_uri), but this is
+  // the last line of defense before window.open — never pass through anything other
+  // than https, or http on a loopback host (the local reference server).
+  const isSafeVerificationUri = (url) => {
+    if (!url) return false;
+    if (/^https:/i.test(url)) return true;
+    return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|\?|$)/i.test(url);
+  };
+
+  const openVerificationPortal = () => {
+    const url = browserSignIn.verificationUriComplete || browserSignIn.verificationUri;
+    if (isSafeVerificationUri(url)) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const startEmailFallback = () => {
+    cancelBrowserSignIn();
+    setEmailOpen(true);
+  };
+
+  // Fully resets the email-code form's state (not just visibility): used whenever the
+  // form is abandoned (Cancel, or switching to browser sign-in instead) so reopening it
+  // later always starts a fresh challenge rather than resuming a stale code-entry step
+  // against an old (possibly expired) challenge_id with no way to change the address.
+  const resetEmailFallback = () => {
+    setEmailOpen(false);
+    setEmailStep("idle");
+    setEmailAddress("");
+    setEmailCode("");
+    setEmailChallengeId("");
+  };
+
+  const sendEmailCode = () => {
+    const email = emailAddress.trim();
+    if (!email || !ipc.isLive()) return;
+    setEmailBusy(true);
+    ipc.startProSignIn(email)
+      .then((r) => {
+        setEmailChallengeId(r?.challenge_id || r?.challengeId || email);
+        setEmailStep("sent");
+        s.toast("Code sent — check your email");
+      })
+      .catch((e) => s.toast(e.message || "Could not send the code", { bad: true }))
+      .finally(() => setEmailBusy(false));
+  };
+
+  const verifyEmailCode = () => {
+    const code = emailCode.trim();
+    if (!code || !ipc.isLive()) return;
+    setEmailBusy(true);
+    ipc.completeProSignIn({ challengeId: emailChallengeId, code })
+      .then((r) => {
+        if (r?.dictatePro) s.setDictatePro(r.dictatePro);
+        resetEmailFallback();
+        s.toast("Signed in");
+      })
+      .catch((e) => s.toast(e.message || "Could not verify the code", { bad: true }))
+      .finally(() => setEmailBusy(false));
+  };
+
+  const openAccountPortal = () => {
+    window.open(ACCOUNT_PORTAL_URL, "_blank", "noopener,noreferrer");
+    s.toast("Opened account portal");
   };
 
   const signOut = () => {
@@ -409,6 +577,16 @@ function AccountDialog() {
         s.toast("Sync complete");
       })
       .catch((e) => s.toast(e.message || "Could not sync", { bad: true }))
+      .finally(() => s.setSyncBusy(false));
+  };
+
+  const setSyncScope = (scope) => {
+    if ((sync.scope || "meetings") === scope) return;
+    if (!ipc.isLive()) { s.setSyncState({ ...sync, scope }); return; }
+    s.setSyncBusy(true);
+    ipc.setProSyncScope(scope)
+      .then((r) => { const st = r?.sync || r; if (st) s.setSyncState(st); })
+      .catch((e) => s.toast(e.message || "Could not change sync scope", { bad: true }))
       .finally(() => s.setSyncBusy(false));
   };
 
@@ -569,6 +747,33 @@ function AccountDialog() {
           {sync.enabled && (
             <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
           )}
+          {sync.enabled && (
+            <div className="account-row">
+              <span>Sync scope</span>
+              <div className="account-channel" role="group" aria-label="Sync scope">
+                <button
+                  type="button"
+                  className={(sync.scope || "meetings") === "meetings" ? "active" : ""}
+                  aria-pressed={(sync.scope || "meetings") === "meetings"}
+                  disabled={s.syncBusy}
+                  title="Sync meetings only"
+                  onClick={() => setSyncScope("meetings")}
+                >
+                  Meetings
+                </button>
+                <button
+                  type="button"
+                  className={(sync.scope || "meetings") === "everything" ? "active" : ""}
+                  aria-pressed={(sync.scope || "meetings") === "everything"}
+                  disabled={s.syncBusy}
+                  title="Also sync the rolling quick-copy history"
+                  onClick={() => setSyncScope("everything")}
+                >
+                  Everything
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="account-actions account-actions--split">
@@ -588,18 +793,118 @@ function AccountDialog() {
         <div className="account-actions">
           {!signedIn ? (
             <div className="account-enable-stack">
-              <div className="account-consent">
-                <strong>Browser sign-in unavailable</strong>
-                <span>The account portal does not currently return a Dictate desktop session.</span>
-              </div>
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccount}>
-                <Icon name="key" size={14} />
-                <span>Account portal</span>
-              </button>
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={refreshProState}>
-                <Icon name="refresh" size={14} />
-                <span>Refresh</span>
-              </button>
+              {browserSignIn.status === "waiting" && browserSignIn.flow === "loopback" ? (
+                <>
+                  <div className="account-consent">
+                    <strong>Waiting for browser…</strong>
+                    <span>Approve the sign-in in the browser tab we just opened.</span>
+                  </div>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={reopenAuthorizeUrl}>
+                    Open sign-in page
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("device_code")}>
+                    Use a code instead
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
+                    Cancel
+                  </button>
+                </>
+              ) : browserSignIn.status === "waiting" && browserSignIn.flow === "device_code" ? (
+                <>
+                  <div className="account-recovery">
+                    <span>Enter this code at your account portal</span>
+                    <code>{browserSignIn.userCode}</code>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={openVerificationPortal}>
+                    Open portal
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
+                    Cancel
+                  </button>
+                </>
+              ) : browserSignIn.status === "error" ? (
+                <>
+                  <div className="account-note bad">{browserSignIn.error}</div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
+                    Try again
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={startEmailFallback}>
+                    Email me a code
+                  </button>
+                </>
+              ) : emailOpen ? (
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in with an email code</strong>
+                    <span>We'll email a code to sign in this device.</span>
+                  </div>
+                  {emailStep === "idle" ? (
+                    <>
+                      <input
+                        className="account-input"
+                        value={emailAddress}
+                        onChange={(e) => setEmailAddress(e.target.value)}
+                        placeholder="Email address"
+                        aria-label="Email address"
+                      />
+                      <button
+                        type="button"
+                        className="account-primary"
+                        disabled={s.syncBusy || emailBusy || !emailAddress.trim()}
+                        onClick={sendEmailCode}
+                      >
+                        Send code
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="account-input"
+                        value={emailCode}
+                        onChange={(e) => setEmailCode(e.target.value)}
+                        placeholder="Code from email"
+                        aria-label="Sign-in code"
+                      />
+                      <button
+                        type="button"
+                        className="account-primary"
+                        disabled={s.syncBusy || emailBusy || !emailCode.trim()}
+                        onClick={verifyEmailCode}
+                      >
+                        Verify code
+                      </button>
+                    </>
+                  )}
+                  <button type="button" className="account-secondary" disabled={s.syncBusy || emailBusy} onClick={resetEmailFallback}>
+                    Cancel
+                  </button>
+                </>
+              ) : !s.browserSigninEnabled ? (
+                // Flag off: don't promise a browser this build won't open — the primary
+                // action goes straight to the email-code floor with honest copy.
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in to your account</strong>
+                    <span>We'll email you a code to sign in this device.</span>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
+                    Sign in
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="account-consent">
+                    <strong>Sign in to your account</strong>
+                    <span>Opens your browser to connect this device to your account.</span>
+                  </div>
+                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
+                    Sign in
+                  </button>
+                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
+                    Email me a code instead
+                  </button>
+                </>
+              )}
             </div>
           ) : !proActive ? (
             <div className="account-enable-stack">
@@ -692,6 +997,9 @@ function AccountDialog() {
         )}
         {signedIn && (
           <div className="account-actions account-actions--split">
+            <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccountPortal}>
+              Manage account
+            </button>
             <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={signOut}>
               Sign out
             </button>
@@ -771,7 +1079,21 @@ function CaptureHome() {
   const s = useStore();
   const meeting = s.captureMode === "meeting";
   const [discardOpen, setDiscardOpen] = useState(false);
-  const gettingStarted = !s.noteRecording && (!s.history || s.history.length === 0);
+  // Getting-started teaching is per-session, not per-history: it shows on every
+  // fresh launch (even with saved notes) and hides once capture begins this run.
+  const gettingStarted = !s.noteRecording && !s.sessionStarted;
+  // Copy-last: the most recent quick record (a dictation, not a diarized meeting).
+  const isMeeting = (n) => Array.isArray(n?.segments) && n.segments.length > 0;
+  const recentQuick = (s.history || []).find((n) => !isMeeting(n));
+  const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
+  const copyLast = () => {
+    if (!recentQuickText) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(recentQuickText)
+        .then(() => s.toast("Copied last dictation"))
+        .catch(() => s.toast("Could not copy", { bad: true }));
+    }
+  };
   useEffect(() => {
     if (!s.noteRecording || !s.notePaused) setDiscardOpen(false);
   }, [s.noteRecording, s.notePaused]);
@@ -848,9 +1170,21 @@ function CaptureHome() {
             ) : (
               <>
                 <div className="note-status-sub t-mono">Click to dictate</div>
-                <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
-                {/* Getting started: teach the key when there are no notes yet */}
-                {(!s.history || s.history.length === 0) && <GsKeyboard />}
+                {/* Getting started (per-session): teach the key on a fresh launch. */}
+                {gettingStarted && (
+                  <>
+                    <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
+                    <GsKeyboard />
+                  </>
+                )}
+                {/* Once capture has begun this session, offer a one-click copy of the
+                    most recent quick dictation (older ones live in the notes list). */}
+                {s.sessionStarted && recentQuickText && (
+                  <button type="button" className="note-copylast t-mono" onClick={copyLast}>
+                    <Icon name="copy" size={13} />
+                    <span>Copy last dictation</span>
+                  </button>
+                )}
                 {/* Live push-to-talk transcript — hide once history has the same note. */}
                 {s.transcript?.text && !s.transcript.stale && (s.recording || !s.history?.length) && (
                   <div className="note-preview" aria-live="polite">
@@ -1018,6 +1352,10 @@ export default function App() {
   const [ambient, setAmbientState] = useState(true);
   const [recording, setRecording] = useState(false);
   const [noteRecording, setNoteRecording] = useState(false);
+  // Session-scoped: false on a fresh launch, true once the user has captured
+  // anything this run. Not persisted — resets to false on app close/reopen, so
+  // the getting-started teaching re-shows and the home copy-last hides again.
+  const [sessionStarted, setSessionStarted] = useState(false);
   const [notePaused, setNotePaused] = useState(false);
   const [notePauseReason, setNotePauseReason] = useState(null);
   const [captureMode, setCaptureMode] = useState("note");
@@ -1057,6 +1395,7 @@ export default function App() {
   const [providerReason, setProviderReason] = useState(null);
   const [providerActive, setProviderActive] = useState(null);
   const [dictatePro, setDictatePro] = useState({ signedIn: false });
+  const [browserSigninEnabled, setBrowserSigninEnabled] = useState(false);
   const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
   const [syncBusy, setSyncBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -1144,6 +1483,7 @@ export default function App() {
     const unsub = ipc.subscribe((ev) => {
       if (ev.type === "recording") {
         setRecording(!!ev.active);
+        if (ev.active) setSessionStarted(true);
         if (ev.active) setTranscript({ phase: null, text: "", stale: false });
         else setAudioLevel(null);
       }
@@ -1157,6 +1497,7 @@ export default function App() {
         } else if (ev.active) {
           if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
           setNoteRecording(true);
+          setSessionStarted(true);
           setNotePaused(false);
           setNotePauseReason(null);
           setAudioLevel(null);
@@ -1336,6 +1677,7 @@ export default function App() {
       if (ph.active) setProviderActive(ph.active);
     }
     if (st.dictatePro) setDictatePro(st.dictatePro);
+    if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
     if (st.sync) setSyncState(st.sync);
   }, []);
 
@@ -1566,6 +1908,7 @@ export default function App() {
       setNotePauseReason(null);
       setCaptureMode("note");
       setNoteRecording(true);
+      setSessionStarted(true);
       setNoteView(null);
       setCurrentNote(null);
       toast("Note recording started");
@@ -1588,6 +1931,7 @@ export default function App() {
       setNotePauseReason(null);
       setCaptureMode("meeting");
       setNoteRecording(true);
+      setSessionStarted(true);
       setNoteView(null);
       setCurrentNote(null);
       toast("Meeting started");
@@ -1915,7 +2259,7 @@ export default function App() {
       }
     }, 16);
   };
-  const dictateStart = () => { if (recRef.current || live) return; setRecording(true); };
+  const dictateStart = () => { if (recRef.current || live) return; setRecording(true); setSessionStarted(true); };
   const dictateStop = () => {
     if (!recRef.current || live) return;
     setRecording(false);
@@ -1982,7 +2326,7 @@ export default function App() {
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, notePaused, notePauseReason, captureMode, noteText,
+    recording, noteRecording, sessionStarted, notePaused, notePauseReason, captureMode, noteText,
     startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording,
     finishNoteRecording, discardNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
@@ -1998,7 +2342,7 @@ export default function App() {
     providerHealthy, providerStatus, providerMode,
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
-    dictatePro, setDictatePro, syncState, setSyncState, syncBusy, setSyncBusy,
+    dictatePro, setDictatePro, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
     accountOpen, setAccountOpen, setHistory,
   };
 

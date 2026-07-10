@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,12 +22,46 @@ from dictate.api_keys import (
     save_pro_refresh_token,
 )
 from dictate.platform_paths import user_data_dir
+from dictate.pro.browser_auth import (
+    DEVICE_CODE_GRANT_TYPE,
+    BrowserAuthAttempt,
+    LoopbackListener,
+    generate_pkce,
+    generate_state,
+)
 from dictate.sync import EncryptedSyncRecord, SyncOutbox
 
 DEFAULT_API_URL = "https://console.arcforge.au"
 SESSION_PATH = user_data_dir() / "pro-session.json"
 
 logger = logging.getLogger(__name__)
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _clamp_verification_uri(uri: str) -> str:
+    """Only allow https, or http on a loopback host (dev/reference server).
+
+    verification_uri(_complete) come verbatim from the gateway's device-code
+    response -- unlike authorize_url (client-constructed, see _start_loopback),
+    these are attacker-controlled if the gateway is compromised or MITM'd. A
+    javascript:/file:/custom-scheme value here would otherwise reach
+    webbrowser.open()/window.open() unfiltered. Blanking degrades gracefully:
+    the user still has the user_code to enter manually.
+    """
+    if not uri:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(uri)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
+        return uri
+    if scheme == "http" and (parsed.hostname or "").lower() in _LOOPBACK_HOSTS:
+        return uri
+    logger.warning("Discarding unsafe verification_uri scheme from gateway: %r", uri)
+    return ""
 
 
 @dataclass(slots=True)
@@ -49,6 +84,10 @@ class ProClient:
         self.base_url = (base_url or os.environ.get("DICTATE_PRO_API_URL") or DEFAULT_API_URL).rstrip("/")
         self.session_path = session_path
         self._pending_email: str = ""
+        self._desktop_capabilities: dict[str, Any] | None = None
+        self._desktop_capabilities_probed: bool = False
+        self._browser_attempt: BrowserAuthAttempt | None = None
+        self._browser_listener: LoopbackListener | None = None
 
     def load_session(self) -> ProSession | None:
         if not self.session_path.is_file():
@@ -165,6 +204,249 @@ class ProClient:
             )
         self.save_session(session)
         return session
+
+    def desktop_auth_capabilities(self) -> dict[str, Any] | None:
+        """Probe the browser sign-in discovery endpoint; cache the result for the process.
+
+        Governed purely by the capability probe (not a gateway-vs-legacy mode gate): a
+        404/405/501 means "email code only" regardless of whether we're pointed at the
+        Arc Forge gateway or a local/legacy server that simply hasn't shipped it.
+        """
+        if self._desktop_capabilities_probed:
+            return self._desktop_capabilities
+        try:
+            capabilities = self._request("GET", self._auth_path("desktop"))
+        except ProClientError as exc:
+            if exc.status in {404, 405, 501}:
+                self._desktop_capabilities = None
+                self._desktop_capabilities_probed = True
+                return None
+            raise
+        self._desktop_capabilities = capabilities
+        self._desktop_capabilities_probed = True
+        return capabilities
+
+    def start_browser_sign_in(self, *, device_label: str = "Desktop", prefer: str = "auto") -> dict[str, Any]:
+        """Fallback ladder: prefer="loopback"/"device_code" forces that flow (raising 501 if
+        the server doesn't advertise it); prefer="auto" tries loopback first (best UX when
+        binding succeeds), then device-code, then 501 (caller falls back to email).
+        """
+        capabilities = self.desktop_auth_capabilities()
+        if capabilities is None:
+            raise ProClientError(501, "Browser sign-in is unavailable on this Dictate Pro server")
+        self.cancel_browser_sign_in()  # one attempt at a time
+        grants = capabilities.get("grant_types_supported") or []
+        supports_loopback = "authorization_code" in grants
+        supports_device_code = DEVICE_CODE_GRANT_TYPE in grants
+
+        if prefer == "loopback":
+            if not supports_loopback:
+                raise ProClientError(501, "Loopback sign-in is not advertised by this server")
+            return self._start_loopback(device_label)
+        if prefer == "device_code":
+            if not supports_device_code:
+                raise ProClientError(501, "Device-code sign-in is not advertised by this server")
+            return self._start_device_code(device_label)
+
+        # prefer == "auto" (or anything else): loopback -> device_code -> 501.
+        if supports_loopback:
+            try:
+                return self._start_loopback(device_label)
+            except ProClientError:
+                if not supports_device_code:
+                    raise
+        if supports_device_code:
+            return self._start_device_code(device_label)
+        raise ProClientError(501, "Browser sign-in is unavailable on this Dictate Pro server")
+
+    def _start_loopback(self, device_label: str) -> dict[str, Any]:
+        code_verifier, code_challenge = generate_pkce()
+        state = generate_state()
+        try:
+            listener = LoopbackListener(state=state)
+        except OSError as exc:
+            raise ProClientError(503, f"Could not bind a local loopback listener: {exc}") from exc
+        self._browser_listener = listener
+        redirect_uri = listener.redirect_uri
+        query = urllib.parse.urlencode(
+            {
+                "response_type": "code",
+                "client_id": "dictate-desktop",
+                "redirect_uri": redirect_uri,
+                "state": state,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256",
+                "scope": "dictate",
+                "device_label": device_label,
+            }
+        )
+        authorize_url = f"{self.base_url}{self._auth_path('authorize')}?{query}"
+        self._browser_attempt = BrowserAuthAttempt(
+            flow="loopback",
+            state=state,
+            code_verifier=code_verifier,
+            redirect_uri=redirect_uri,
+            authorize_url=authorize_url,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=300),
+        )
+        return {"flow": "loopback", "authorize_url": authorize_url, "expires_in": 300}
+
+    def _start_device_code(self, device_label: str) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            self._auth_path("device-code"),
+            {"client_id": "dictate-desktop", "scope": "dictate", "device_label": device_label},
+        )
+        device_code = str(response["device_code"])
+        user_code = str(response["user_code"])
+        interval = int(response.get("interval") or 5)
+        expires_in = int(response.get("expires_in") or 900)
+        verification_uri = _clamp_verification_uri(str(response.get("verification_uri") or ""))
+        verification_uri_complete = _clamp_verification_uri(str(response.get("verification_uri_complete") or ""))
+        self._browser_attempt = BrowserAuthAttempt(
+            flow="device_code",
+            state="",
+            code_verifier="",
+            redirect_uri="",
+            authorize_url="",
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            device_code=device_code,
+            user_code=user_code,
+            verification_uri=verification_uri,
+            interval=interval,
+        )
+        return {
+            "flow": "device_code",
+            "user_code": user_code,
+            "verification_uri": verification_uri,
+            "verification_uri_complete": verification_uri_complete,
+            "expires_in": expires_in,
+            "interval": interval,
+        }
+
+    def poll_browser_sign_in(
+        self,
+        *,
+        device_public_key: str | None = None,
+        device_label: str = "Desktop",
+    ) -> dict[str, Any]:
+        attempt = self._browser_attempt
+        if attempt is None:
+            return {"status": "error", "reason": "no_pending_attempt"}
+        if attempt.flow == "device_code":
+            return self._poll_device_code(attempt, device_public_key=device_public_key, device_label=device_label)
+
+        listener = self._browser_listener
+        if listener is None:
+            return {"status": "error", "reason": "no_pending_attempt"}
+        outcome = listener.result()
+        if outcome["status"] == "pending":
+            return {"status": "pending"}
+        if outcome["status"] == "error":
+            self.cancel_browser_sign_in()
+            return {"status": "error", "reason": outcome.get("reason", "unknown")}
+        code = outcome["code"]
+        payload: dict[str, Any] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": attempt.code_verifier,
+            "redirect_uri": attempt.redirect_uri,
+            "client_id": "dictate-desktop",
+        }
+        uses_gateway = self._uses_arcforge_gateway()
+        if not uses_gateway:
+            # Legacy/reference servers register the device as part of the grant itself
+            # (mirrors complete_sign_in's /v1/auth/complete payload) rather than via a
+            # separate gateway-only device-register call.
+            existing_session = self.load_session()
+            if existing_session:
+                payload["device_id"] = existing_session.device_id
+            if device_public_key:
+                payload["device_public_key"] = device_public_key
+        try:
+            response = self._request("POST", self._auth_path("token"), payload)
+        finally:
+            self.cancel_browser_sign_in()
+        session = self._session_from_token_response(response)
+        if device_public_key and uses_gateway:
+            session = self._register_gateway_device(
+                session,
+                device_label=device_label,
+                device_public_key=device_public_key,
+            )
+        self.save_session(session)
+        return {"status": "complete", "account_id": session.account_id, "device_id": session.device_id}
+
+    def _poll_device_code(
+        self,
+        attempt: BrowserAuthAttempt,
+        *,
+        device_public_key: str | None,
+        device_label: str,
+    ) -> dict[str, Any]:
+        if datetime.now(timezone.utc) > attempt.expires_at:
+            # Local deadline, independent of the server: the 429/5xx -> "pending" mapping
+            # has no TTL bound on its own, so a persistently unreachable server would
+            # otherwise make poll_browser_sign_in() return "pending" forever. Bound it to
+            # the 900s device-code TTL so the caller's poll loop (Episode 3's UI) always
+            # terminates.
+            self.cancel_browser_sign_in()
+            return {"status": "error", "reason": "expired_token"}
+        interval = attempt.interval or 5
+        now = time.monotonic()
+        if attempt.last_poll is not None and (now - attempt.last_poll) < interval:
+            # Self-throttle: don't hit the server faster than the (possibly slow_down-bumped)
+            # interval: the caller polls on its own cadence (e.g. every second) but we only
+            # forward to the server at most once per `interval`.
+            return {"status": "pending"}
+        attempt.last_poll = now
+        payload: dict[str, Any] = {
+            "grant_type": DEVICE_CODE_GRANT_TYPE,
+            "device_code": attempt.device_code,
+            "client_id": "dictate-desktop",
+        }
+        uses_gateway = self._uses_arcforge_gateway()
+        if not uses_gateway:
+            existing_session = self.load_session()
+            if existing_session:
+                payload["device_id"] = existing_session.device_id
+            if device_public_key:
+                payload["device_public_key"] = device_public_key
+        try:
+            response = self._request("POST", self._auth_path("token"), payload)
+        except ProClientError as exc:
+            reason = (exc.message or "").strip()
+            if reason == "authorization_pending":
+                return {"status": "pending"}
+            if reason == "slow_down":
+                attempt.interval = interval + 5
+                return {"status": "pending"}
+            if reason in {"expired_token", "access_denied"}:
+                self.cancel_browser_sign_in()
+                return {"status": "error", "reason": reason}
+            if exc.status == 429 or exc.status >= 500:
+                # Transient/transport-level hiccup (rate limit, momentary 5xx, or the
+                # "service unreachable" 503 _request synthesizes for a URLError) -- don't
+                # fail the whole sign-in attempt over one blip. Keep the attempt alive and
+                # let the caller's poll loop naturally retry on its own cadence.
+                return {"status": "pending"}
+            raise
+        session = self._session_from_token_response(response)
+        if device_public_key and uses_gateway:
+            session = self._register_gateway_device(
+                session,
+                device_label=device_label,
+                device_public_key=device_public_key,
+            )
+        self.save_session(session)
+        self.cancel_browser_sign_in()
+        return {"status": "complete", "account_id": session.account_id, "device_id": session.device_id}
+
+    def cancel_browser_sign_in(self) -> None:
+        if self._browser_listener is not None:
+            self._browser_listener.close()
+        self._browser_listener = None
+        self._browser_attempt = None
 
     def refresh_if_needed(self) -> ProSession | None:
         session = self.load_session()
@@ -468,6 +750,30 @@ class ProClient:
             refresh_token=session.refresh_token,
             access_expires_at=session.access_expires_at,
             refresh_expires_at=session.refresh_expires_at,
+        )
+
+    def _auth_path(self, name: str) -> str:
+        """Auth endpoint path, switched by the same gateway/legacy rule as everything else.
+
+        Deliberately governed by desktop_auth_capabilities()'s 404/405/501 probe rather
+        than a hard gateway-only gate: this lets the browser flow be exercised against
+        the local /v1 reference server while a real legacy self-host that hasn't shipped
+        the endpoint still falls back to email code (probe -> None -> 501).
+        """
+        if self._uses_arcforge_gateway():
+            return f"/api/account/auth/{name}"
+        return f"/v1/auth/{name}"
+
+    def _session_from_token_response(self, response: dict[str, Any]) -> ProSession:
+        if self._uses_arcforge_gateway():
+            return self._session_from_arcforge_auth_response(response)
+        return ProSession(
+            account_id=str(response["account_id"]),
+            device_id=str(response["device_id"]),
+            access_token=str(response["access_token"]),
+            refresh_token=str(response["refresh_token"]),
+            access_expires_at=str(response["access_expires_at"]),
+            refresh_expires_at=str(response["refresh_expires_at"]),
         )
 
     def _uses_arcforge_gateway(self) -> bool:

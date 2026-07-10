@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import tempfile
 import threading
+import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -102,6 +104,15 @@ def _pro_state_active(pro: dict[str, Any] | None) -> bool:
         return False
     entitlements = pro.get("entitlements")
     return bool(isinstance(entitlements, dict) and entitlements.get("active"))
+
+
+def _browser_signin_enabled_default() -> bool:
+    """Default gate for the browser sign-in affordance: off unless explicitly opted in.
+
+    Kept as an injectable UiBackend field (like startup_enabled/check_update_status)
+    rather than read inline, so tests can flip it without touching the environment.
+    """
+    return os.environ.get("DICTATE_PRO_BROWSER_SIGNIN", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 # Provider display metadata. Backend ids / models are grounded in stt.factory;
@@ -426,6 +437,10 @@ class UiBackend:
     # When present, providerHealth returns richer state; SSE events are emitted
     # as provider-degraded / provider-recovered rather than provider-health.
     _supervisor: ProviderSupervisor | None = field(default=None, repr=False)
+    # Device keypair generated at start_pro_browser_sign_in() time, persisted to the
+    # OS secret store once poll_pro_browser_sign_in() reports "complete" -- mirrors
+    # complete_pro_sign_in's generate-up-front / save-on-complete handling.
+    _pending_browser_device_key: Any | None = field(default=None, repr=False)
 
     # Injectable hooks (default to the real implementations).
     save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
@@ -445,6 +460,12 @@ class UiBackend:
     startup_enabled: Callable[[], bool] = startup_mod.startup_enabled
     set_startup_enabled: Callable[[bool], None] = startup_mod.set_startup_enabled
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    # Browser sign-in (Episodes 1-2's ProClient methods) is opt-in behind an env flag
+    # until the UI ships it broadly; tests override this instead of the environment.
+    browser_signin_enabled: Callable[[], bool] = _browser_signin_enabled_default
+    # webbrowser.open is best-effort (loopback flow only) -- injectable so tests never
+    # actually spawn a system browser.
+    open_browser: Callable[[str], bool] = webbrowser.open
 
     def __post_init__(self) -> None:
         if self.history_store is None:
@@ -515,6 +536,9 @@ class UiBackend:
             "providerHealth": self._compute_provider_health(cfg),
             "dictatePro": pro_state,
             "sync": self._sync_state(),
+            # Lets the UI show honest idle-state copy ("browser" vs. "email code") instead
+            # of promising a browser it won't open when the flag is off.
+            "browserSigninEnabled": bool(self._safe(self.browser_signin_enabled, False)),
         }
 
     def _dictate_pro_state(self) -> dict[str, Any]:
@@ -553,6 +577,68 @@ class UiBackend:
             "dictatePro": client.get_state(),
         }
 
+    def start_pro_browser_sign_in(self, *, flow: str = "auto", device_label: str = "Desktop") -> dict[str, Any]:
+        """Start loopback/device-code sign-in, or signal the UI to fall back to email.
+
+        Gated on browser_signin_enabled(); when off, or when the gateway doesn't
+        advertise browser sign-in (ProClient raises 501), returns {"flow": "email"}
+        rather than an error -- the UI reads that as "use the email-code form", not
+        an apology.
+        """
+        if not self.browser_signin_enabled():
+            self._pending_browser_device_key = None
+            return {"flow": "email"}
+        client = self._require_pro_client()
+        try:
+            result = client.start_browser_sign_in(device_label=device_label, prefer=flow)
+        except ProClientError as exc:
+            if exc.status in {404, 405, 501}:
+                # No attempt is pending on this branch -- keep the "pending key iff
+                # pending attempt" invariant so poll/cancel never persist a stray key
+                # left over from an earlier attempt.
+                self._pending_browser_device_key = None
+                return {"flow": "email"}
+            raise ApiError(exc.status, exc.message) from exc
+        # Generated up front (like complete_pro_sign_in), persisted once poll reports
+        # "complete" -- this is the same device key threaded into the token exchange
+        # via poll_browser_sign_in(device_public_key=...).
+        self._pending_browser_device_key = generate_device_key_pair()
+        if result.get("flow") == "loopback" and result.get("authorize_url"):
+            try:
+                self.open_browser(result["authorize_url"])
+            except Exception as exc:  # noqa: BLE001
+                logger.info("could not open the system browser for sign-in: %s", exc)
+        return result
+
+    def poll_pro_browser_sign_in(self) -> dict[str, Any]:
+        if not self.browser_signin_enabled():
+            return {"status": "error", "reason": "disabled"}
+        client = self._require_pro_client()
+        device_key_pair = self._pending_browser_device_key
+        result = client.poll_browser_sign_in(
+            device_public_key=device_key_pair.public_key if device_key_pair else None,
+        )
+        status = result.get("status")
+        if status == "complete":
+            device_id = str(result.get("device_id") or "")
+            if device_id and device_key_pair is not None:
+                try:
+                    api_keys_mod.save_sync_device_private_key(device_id, device_key_pair.private_key)
+                except (api_keys_mod.ApiKeyStorageError, OSError) as exc:
+                    logger.warning("could not persist Dictate sync device private key: %s", exc)
+            self._pending_browser_device_key = None
+            return {**result, "dictatePro": client.get_state()}
+        if status == "error":
+            self._pending_browser_device_key = None
+        return result
+
+    def cancel_pro_browser_sign_in(self) -> dict[str, Any]:
+        self._pending_browser_device_key = None
+        if not self.browser_signin_enabled():
+            return {"status": "cancelled"}
+        self._require_pro_client().cancel_browser_sign_in()
+        return {"status": "cancelled"}
+
     def sign_out_pro(self) -> dict[str, Any]:
         client = self._require_pro_client()
         client.clear_session()
@@ -575,7 +661,15 @@ class UiBackend:
             "lastSeq": state.last_seq,
             "keyAvailable": has_key,
             "lastResult": last_result,
+            "scope": config_mod.load_config(self.config_path).sync_scope or "everything",
         }
+
+    def set_sync_scope(self, scope: str) -> dict[str, Any]:
+        """Set which record categories sync ("meetings" | "everything") and re-attach
+        so the history outbox reflects the new scope immediately."""
+        config_mod.set_sync_scope(scope, self.config_path)
+        self._safe(lambda: self._sync_engine().attach_outbox(), None)
+        return self._sync_state()
 
     def enable_sync(self, *, recovery_key: str | None = None) -> dict[str, Any]:
         client = self._require_pro_client()
@@ -646,6 +740,10 @@ class UiBackend:
                 )
                 self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
                 client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
+        # Newly enabled sync defaults to Meetings-only (docs/record-categories-spec.md);
+        # only set when unset so a returning user's explicit choice is preserved.
+        if config_mod.load_config(self.config_path).sync_scope is None:
+            self._safe(lambda: config_mod.set_sync_scope("meetings", self.config_path), None)
         engine = self._sync_engine()
         engine.attach_outbox()
         self._enqueue_sync_snapshot()
@@ -1804,6 +1902,15 @@ class UiRequestHandler(BaseHTTPRequestHandler):
                     device_label=str(body.get("deviceLabel") or body.get("device_label") or "Desktop"),
                 ),
             )
+        if path == "/api/pro/auth/browser/start" and method == "POST":
+            body = self._read_json() or {}
+            flow = str(body.get("flow") or "auto").strip() or "auto"
+            device_label = str(body.get("deviceLabel") or body.get("device_label") or "Desktop")
+            return _Response(200, backend.start_pro_browser_sign_in(flow=flow, device_label=device_label))
+        if path == "/api/pro/auth/browser/status" and method == "GET":
+            return _Response(200, backend.poll_pro_browser_sign_in())
+        if path == "/api/pro/auth/browser/cancel" and method == "POST":
+            return _Response(200, backend.cancel_pro_browser_sign_in())
         if path == "/api/pro/sign-out" and method == "POST":
             return _Response(200, backend.sign_out_pro())
         if path == "/api/pro/sync/enable" and method == "POST":
@@ -1814,6 +1921,9 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))
         if path == "/api/pro/sync/run" and method == "POST":
             return _Response(200, backend.run_sync())
+        if path == "/api/pro/sync/scope" and method == "POST":
+            body = self._read_json() or {}
+            return _Response(200, backend.set_sync_scope(str(body.get("scope") or "meetings")))
         if path == "/api/pro/devices" and method == "GET":
             return _Response(200, backend.list_pro_devices())
         if path == "/api/pro/devices/revoke" and method == "POST":
@@ -1888,8 +1998,6 @@ def write_runtime_handshake(
     url: str, token: str, *, pid: int | None = None, path: Path = RUNTIME_HANDSHAKE_PATH
 ) -> Path:
     """Persist the URL+token so the Tauri shell can find and authenticate."""
-    import os
-
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "url": url,
