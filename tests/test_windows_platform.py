@@ -692,10 +692,8 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
-        self.assertIn(
-            "if: inputs.run_tests == 'true' && (inputs.source_ref == '' || inputs.source_ref == github.ref)",
-            workflow,
-        )
+        self.assertIn("Publish durable unstable Windows installers", workflow)
+        self.assertIn("gh release create $tag $artifacts", workflow)
         self.assertIn("desktop-shell", workflow)
         self.assertIn("needs.tests.result == 'success'", workflow)
         self.assertIn("npm publish --access public --tag", workflow)

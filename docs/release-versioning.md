@@ -72,7 +72,7 @@ matrix, the hosted Windows user install smoke test, release metadata validation,
 Python artifact checks, and npm package validation before publishing.
 
 GitHub release publication and Microsoft Store publication are separate lanes.
-Publishing a GitHub release updates the downloadable source/developer artifacts;
+Publishing a GitHub release updates the downloadable source and unsigned direct-install artifacts;
 it does not make an update available through the Microsoft Store. Store updates
 require the Store MSIX workflow in draft mode, Partner Center review, and an
 explicit publish/certification step.
@@ -114,7 +114,9 @@ drafts, or the stable npm `latest` tag. The app version reported by
 without a version bump can report the base CalVer while being delivered through
 the unstable channel.
 
-With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
+Every unstable publish produces a durable GitHub prerelease containing the matching
+unsigned Windows MSI/NSIS installers, because installed direct builds cannot update
+from short-lived Actions artifacts. With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
 matrix, the Windows user install/update/uninstall smoke, the Linux user
 encrypted-sync install smoke, UI build/server smoke, desktop shell compile/Rust
 tests, and npm package dry-run. Store upload/publish remains a separate guarded
@@ -155,8 +157,12 @@ the release branch/default branch, create the normal CalVer tag, run
 Microsoft Store through their own guarded workflows. Never promote by retagging
 an unstable npm package as stable.
 
-Do not present this as the normal public Windows install path. The Windows
-release target is Microsoft Store distribution. Unstable/staging MSI builds may
-be shared with testers who accept the expected Windows untrusted-publisher
-warnings. Do not revisit paid Windows signing until there is an explicit
-revenue-backed decision to maintain a direct-download MSI lane.
+Windows has two supported ecosystems. Direct installs may select stable or unstable
+and update from the corresponding GitHub release/prerelease installer; these builds
+are unsigned and Windows will show the expected untrusted-publisher warning. Microsoft
+Store installs are stable-only and update through the Store. Do not revisit paid
+Windows signing until there is an explicit revenue-backed decision.
+
+Each Windows payload contains `engine/dictate-distribution.json`. Direct bundles mark
+themselves `direct` and include their exact channel package version; Store MSIX bundles
+mark themselves `store`. The app uses this marker rather than guessing from Windows.

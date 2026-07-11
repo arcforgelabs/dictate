@@ -513,6 +513,7 @@ class ProClient:
         *,
         language: str | None = None,
         audio_duration_seconds: float | None = None,
+        mode: str = "batch_meeting",
     ) -> dict[str, Any]:
         session = self._require_session()
         if self._uses_arcforge_gateway():
@@ -522,15 +523,17 @@ class ProClient:
                 "device_id": session.device_id,
                 "audio_duration_seconds": audio_duration_seconds,
             }
+            if mode != "batch_meeting":
+                payload["mode"] = mode
             if language:
                 payload["language"] = language
             return self._request("POST", "/api/dictate/jobs", payload, auth=session.access_token)
-        return self._request(
-            "POST",
-            "/v1/meetings",
-            {"language": language} if language else {},
-            auth=session.access_token,
-        )
+        payload = {}
+        if mode != "batch_meeting":
+            payload["mode"] = mode
+        if language:
+            payload["language"] = language
+        return self._request("POST", "/v1/meetings", payload, auth=session.access_token)
 
     def upload_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
         session = self._require_session()

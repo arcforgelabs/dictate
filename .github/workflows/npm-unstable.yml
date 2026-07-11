@@ -21,7 +21,7 @@ on:
           - "false"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -231,7 +231,6 @@ jobs:
 
   windows-desktop-bundle:
     name: Windows desktop prebuild (.msi + setup .exe)
-    if: inputs.run_tests == 'true' && (inputs.source_ref == '' || inputs.source_ref == github.ref)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -257,7 +256,29 @@ jobs:
         env:
           DICTATE_BUNDLES: "msi,nsis"
           DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
-        run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-desktop-prebuild.log"
+        run: |
+          $base = node -p "require('./package.json').version"
+          $env:DICTATE_PACKAGE_VERSION = "$base-${{ inputs.npm_tag }}.${{ github.run_number }}.${{ github.run_attempt }}"
+          .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-desktop-prebuild.log"
+
+      - name: Publish durable unstable Windows installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $base = node -p "require('./package.json').version"
+          $version = "$base-${{ inputs.npm_tag }}.${{ github.run_number }}.${{ github.run_attempt }}"
+          $tag = "v$version"
+          $sha = git rev-parse HEAD
+          $artifacts = Get-ChildItem "ui-shell\src-tauri\target\release\bundle" -Recurse -File |
+            Where-Object { $_.Extension -in ".msi", ".exe" } |
+            Select-Object -ExpandProperty FullName
+          if (-not $artifacts) { throw "No Windows installers were produced." }
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag $artifacts --clobber
+          } else {
+            gh release create $tag $artifacts --target $sha --prerelease --title "Dictate $version" --notes "Unstable direct-download build. Unsigned Windows installer."
+          }
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5

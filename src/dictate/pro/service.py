@@ -446,7 +446,7 @@ class ProService:
             provider=plan.provider,
             provider_model=plan.provider_model,
             language=language,
-            requested_diarization=plan.diarization,
+            requested_diarization=plan.diarization if mode == "batch_meeting" else False,
             billing_period_start=entitlement.current_period_start,
             billing_period_end=entitlement.current_period_end,
         )

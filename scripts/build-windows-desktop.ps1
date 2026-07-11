@@ -136,6 +136,9 @@ $StageDir = Join-Path $Root "ui-shell\src-tauri\engine"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $StageDir
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
+$PackageVersion = if ($env:DICTATE_PACKAGE_VERSION) { $env:DICTATE_PACKAGE_VERSION } else { "2026.7.4" }
+$Distribution = @{ distribution = "direct"; packageVersion = $PackageVersion } | ConvertTo-Json -Compress
+Set-Content -Path (Join-Path $StageDir "dictate-distribution.json") -Encoding ASCII -Value $Distribution
 
 Write-Host "staging Parakeet v2 int8 for bundled local English ASR"
 $ParakeetModelDir = Join-Path $StageDir "models\parakeet-tdt-0.6b-v2-onnx"

@@ -55,7 +55,7 @@ describe("Language toggle", () => {
     expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("parakeet-tdt-0.6b-v2"))).toBe(true);
   });
 
-  it("shows both gating toasts and stays on English when Pro is active but xAI is missing", async () => {
+  it("allows cloud mode when Pro is active without a personal xAI key", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() {}
@@ -86,9 +86,8 @@ describe("Language toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Multilingual" }));
 
     expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
-    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeTruthy();
-    expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.method) === "PATCH")).toBe(false);
-    expect(screen.getByRole("button", { name: "Multilingual" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.method) === "PATCH")).toBe(true));
+    expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("grok-speech-to-text"))).toBe(true);
   });
 
   it("keeps English selected for the bundled local engine", () => {
@@ -104,7 +103,7 @@ describe("Language toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Multilingual" }));
 
     expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
-    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeTruthy();
+    expect(screen.getByText("Cloud mode requires an active Dictate Pro subscription or personal xAI API key.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Multilingual" }).getAttribute("aria-pressed")).toBe("false");
   });

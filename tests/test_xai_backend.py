@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+from dictate.config import Config
 
 from dictate.stt.xai_backend import (
     XAISpeechToText,
@@ -147,6 +148,30 @@ class XAIBackendTests(unittest.TestCase):
             patch("dictate.stt.xai_backend.read_api_key", return_value=None),
         ):
             self.assertTrue(xai_api_key_available())
+
+    def test_cloud_router_prefers_pro_and_falls_back_to_personal_key(self) -> None:
+        stt = XAISpeechToText()
+        with (
+            patch("dictate.stt.xai_backend.load_config", return_value=Config(cloud_provider_preference="pro-first")),
+            patch.object(stt, "_transcribe_pro", side_effect=RuntimeError("Pro unavailable")) as pro,
+            patch.object(stt, "_transcribe_personal", return_value="personal result") as personal,
+        ):
+            result = stt.transcribe(np.zeros(1600, dtype=np.float32))
+        self.assertEqual(result, "personal result")
+        pro.assert_called_once()
+        personal.assert_called_once()
+
+    def test_cloud_router_can_prefer_personal_key(self) -> None:
+        stt = XAISpeechToText()
+        with (
+            patch("dictate.stt.xai_backend.load_config", return_value=Config(cloud_provider_preference="personal-first")),
+            patch.object(stt, "_transcribe_personal", return_value="personal result") as personal,
+            patch.object(stt, "_transcribe_pro") as pro,
+        ):
+            result = stt.transcribe(np.zeros(1600, dtype=np.float32))
+        self.assertEqual(result, "personal result")
+        personal.assert_called_once()
+        pro.assert_not_called()
 
 
 if __name__ == "__main__":

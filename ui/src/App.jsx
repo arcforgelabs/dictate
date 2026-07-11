@@ -154,8 +154,9 @@ function LocalEngineToggle() {
   };
   const pickMultilingual = () => {
     s.toast("Multilingual is available in Cloud mode only.", { tone: "amber" });
-    if (!s.keys.xai) {
-      s.toast("Requires Dictate Pro or API key.", {
+    const proActive = !!(s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active);
+    if (!proActive && !s.keys.xai) {
+      s.toast("Cloud mode requires an active Dictate Pro subscription or personal xAI API key.", {
         bad: true,
         ms: 12_000,
         copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
@@ -331,6 +332,7 @@ function AccountDialog() {
   const syncError = String(sync.lastResult?.error || sync.error || "").trim();
   const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
   const betaSelected = s.updateChannel === "unstable";
+  const storeInstall = s.updateStatus?.installKind === "windows-store";
   const updateBusy = !!(s.updateStatus?.checking || s.updateStatus?.updating);
   const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
   const syncedLabel = !sync.enabled
@@ -733,7 +735,7 @@ function AccountDialog() {
           )}
           <div className="account-row">
             <span>Updates</span>
-            <div className="account-channel" role="group" aria-label="Update channel">
+            {storeInstall ? <strong>Microsoft Store · Stable</strong> : <div className="account-channel" role="group" aria-label="Update channel">
               <button
                 type="button"
                 className={!betaSelected ? "active" : ""}
@@ -751,7 +753,7 @@ function AccountDialog() {
               >
                 Beta
               </button>
-            </div>
+            </div>}
           </div>
           {sync.enabled && (
             <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
@@ -1449,6 +1451,7 @@ export default function App() {
   const tgtRef = useRef(""); tgtRef.current = targetText;
   const actRef = useRef(activation); actRef.current = activation;
   const capRef = useRef(false); capRef.current = capturing;
+  const providerModeRef = useRef("private"); providerModeRef.current = providerMode;
   const transcriptIdRef = useRef(null);
   const terminalTranscriptIdsRef = useRef(new Set());
   const terminalTranscriptIdOrderRef = useRef([]);
@@ -1586,14 +1589,21 @@ export default function App() {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
       } else if (ev.type === "provider-degraded") {
-        // Online provider failed — fell back to on-device. Visible switch: flash + amber toast.
-        setProviderDegraded(true);
+        // A fallback is a real persisted mode change, not a cosmetic degraded state.
+        providerModeRef.current = "private";
+        setProviderMode("private");
+        setModelState(PRIVATE_MODEL);
+        setProviderHealthy(true);
+        setProviderDegraded(false);
         setProviderReason(ev.reason || null);
-        setProviderActive(ev.active || "faster-whisper");
+        setProviderActive("parakeet");
+        ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
+          .catch(() => toast("Switched locally, but could not save the change", { bad: true }));
         triggerFlash("local");
-        toast("Switched to on-device", { tone: "amber", icon: "cloudoff" });
+        toast("Cloud failed — switched to on-device", { tone: "amber", icon: "cloudoff", ms: 6000 });
       } else if (ev.type === "provider-recovered") {
-        // Online provider reachable again — auto-recovered. Visible switch: flash + green toast.
+        // Ignore a late online probe after the fallback persisted Local.
+        if (providerModeRef.current === "private") return;
         setProviderDegraded(false);
         setProviderActive(ev.active || "online");
         triggerFlash("remote");
@@ -1680,12 +1690,23 @@ export default function App() {
     if (typeof st.installedPackageVersion === "string") setInstalledPackageVersion(st.installedPackageVersion);
     if (st.providerHealth) {
       const ph = st.providerHealth;
-      setProviderHealthy(!!ph.healthy);
-      setProviderStatus(ph.status || "ok");
-      setProviderMode(ph.mode || "private");
-      setProviderDegraded(!!ph.degraded);
-      if (ph.reason !== undefined) setProviderReason(ph.reason || null);
-      if (ph.active) setProviderActive(ph.active);
+      if (ph.mode === "online" && ph.degraded) {
+        providerModeRef.current = "private";
+        setProviderMode("private");
+        setModelState(PRIVATE_MODEL);
+        setProviderHealthy(true);
+        setProviderDegraded(false);
+        setProviderActive("parakeet");
+        ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
+          .catch(() => {});
+      } else {
+        setProviderHealthy(!!ph.healthy);
+        setProviderStatus(ph.status || "ok");
+        setProviderMode(ph.mode || "private");
+        setProviderDegraded(!!ph.degraded);
+        if (ph.reason !== undefined) setProviderReason(ph.reason || null);
+        if (ph.active) setProviderActive(ph.active);
+      }
     }
     if (st.dictatePro) setDictatePro(st.dictatePro);
     if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
@@ -1732,6 +1753,7 @@ export default function App() {
     // Private (local) models are always healthy; switching clears any degraded state immediately.
     const newMode = m.local ? "private" : "online";
     setProviderMode(newMode);
+    providerModeRef.current = newMode;
     if (m.local) { setProviderHealthy(true); setProviderDegraded(false); }
     persist({ model: { backend: m.backend, model: id.split("/").slice(1).join("/") } });
   };
@@ -1890,13 +1912,26 @@ export default function App() {
 
   const hydrateProviderHealth = useCallback((ph) => {
     if (!ph) return;
+    if (ph.mode === "online" && ph.degraded) {
+      providerModeRef.current = "private";
+      setProviderMode("private");
+      setModelState(PRIVATE_MODEL);
+      setProviderHealthy(true);
+      setProviderDegraded(false);
+      setProviderActive("parakeet");
+      ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
+        .catch(() => toast("Switched locally, but could not save the change", { bad: true }));
+      triggerFlash("local");
+      toast("Cloud failed — switched to on-device", { tone: "amber", icon: "cloudoff", ms: 6000 });
+      return;
+    }
     setProviderHealthy(!!ph.healthy);
     setProviderStatus(ph.status || "ok");
     setProviderMode(ph.mode || "private");
     setProviderDegraded(!!ph.degraded);
     if (ph.reason !== undefined) setProviderReason(ph.reason || null);
     if (ph.active) setProviderActive(ph.active);
-  }, []);
+  }, [toast, triggerFlash]);
 
   const applyNoteState = (r) => {
     if (!r) return;
@@ -2097,6 +2132,12 @@ export default function App() {
       .then((status) => {
         const next = { ...(status || {}), checking: false };
         setUpdateStatus(next);
+        if (next.installKind === "windows-store") {
+          setUpdateChannel("stable");
+          toast("Checking for updates in Microsoft Store");
+          startUpdate();
+          return;
+        }
         if (next.updateAvailable && next.latestVersion) toast(`Dictate ${next.latestVersion} is available`);
         else if (next.checked) toast("You're on the latest version");
         else toast("Could not check for updates", { bad: true });
@@ -2252,8 +2293,10 @@ export default function App() {
     // Live: silent check (no toast); surface the pill if an update exists.
     let cancelled = false;
     ipc.checkUpdates().then((st) => {
-      if (cancelled || !st || !st.updateAvailable) return;
+      if (cancelled || !st) return;
       setUpdateStatus((u) => ({ ...u, ...st }));
+      if (st.installKind === "windows-store") setUpdateChannel("stable");
+      if (!st.updateAvailable) return;
       setUpdatePhase("available");
       // TODO(backend): a /api/update/prepare endpoint can pre-download in the
       // background and flip the phase to "ready"; until then the Update click

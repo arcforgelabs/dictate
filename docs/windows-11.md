@@ -19,9 +19,10 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 
 ## Install
 
-The target public Windows channel is Microsoft Store distribution. A stable
+The signed, stable Windows channel is Microsoft Store distribution. A stable
 Windows release means a Store package that we are happy to submit and support.
-Paid Authenticode signing for direct-download MSI assets is a future option only;
+Direct stable and unstable installers are also supported and update independently
+from GitHub release assets. Paid Authenticode signing for those assets is a future option only;
 it is not a current release blocker or standing task. Early testers can use
 staging MSI builds and accept the expected Windows untrusted-publisher warnings.
 
@@ -41,6 +42,18 @@ Pre-stable developer/source bootstrap from the npm `unstable` channel:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
+
+Direct installs can choose Normal or Beta updates inside Dictate. Microsoft Store
+installs show `Microsoft Store · Stable`; checking for updates opens the Store's
+Downloads and updates surface and never switches to the direct-install ecosystem.
+
+Cloud transcription prefers an active Dictate Pro entitlement, then falls back to a
+configured personal xAI API key. Advanced users can reverse that order:
+
+```powershell
+dictate config set-cloud-preference personal-first
+dictate config set-cloud-preference pro-first
+```
 ```
 
 The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. It is a developer/bootstrap path, not the public Windows install target. If Node.js is already installed, this is equivalent:

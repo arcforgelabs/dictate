@@ -1507,14 +1507,14 @@ describe("Provider resilience — graceful degradation", () => {
     expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
   });
 
-  it("provider-degraded SSE triggers amber toast and degraded strip during recording", async () => {
+  it("provider-degraded SSE loudly persists the on-device model", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
       close() {}
     };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({ history: [] }),
     });
@@ -1542,15 +1542,18 @@ describe("Provider resilience — graceful degradation", () => {
       expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument()
     );
 
-    // Privacy toggle stays on (on-device fallback) and shows degraded styling
+    // Privacy toggle is genuinely Local and the model change is persisted.
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-    expect(document.querySelector(".privpill.degraded")).toBeInTheDocument();
+    expect(document.querySelector(".privpill.degraded")).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) =>
+      String(opts?.body || "").includes("parakeet-tdt-0.6b-v2")
+    )).toBe(true));
 
     // Mic remains functional (recording still active)
     expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
 
-  it("provider-recovered SSE clears degraded state and shows recovery toast", async () => {
+  it("ignores late provider recovery after fallback persisted Local", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -1580,20 +1583,20 @@ describe("Provider resilience — graceful degradation", () => {
       });
     });
 
-    // Recovery toast appears
-    await waitFor(() => expect(screen.getByText(/Back online/)).toBeInTheDocument());
+    expect(screen.queryByText(/Back online/)).not.toBeInTheDocument();
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     // Home screen is still reachable (mic not disabled)
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
   });
 
-  it("degraded strip renders when hydrated with providerDegraded=true and recording starts", async () => {
+  it("hydrated degradation is persisted as Local before recording starts", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
       constructor() { sources.push(this); }
       close() {}
     };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
         history: [],
@@ -1604,16 +1607,18 @@ describe("Provider resilience — graceful degradation", () => {
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
 
-    // Start recording via SSE (providerDegraded is already true from hydration)
+    // Start recording after hydration has committed the Local model.
     act(() => {
       sources[0].onmessage({
         data: JSON.stringify({ type: "note-recording", active: true }),
       });
     });
 
-    await waitFor(() =>
-      expect(document.querySelector(".privpill.degraded")).toBeInTheDocument()
-    );
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) =>
+      String(opts?.body || "").includes("parakeet-tdt-0.6b-v2")
+    )).toBe(true));
+    expect(document.querySelector(".privpill.degraded")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
 });

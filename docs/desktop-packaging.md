@@ -89,13 +89,13 @@ scripts/build-windows-desktop.ps1
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the
   requested `v20*` tag is reachable from the default branch. Public stable
-  Windows distribution is the Microsoft Store path. Direct-download Windows
-  installers are staging/tester artifacts unless we later decide to pay for and
+  Windows distribution supports Microsoft Store stable builds and direct-download
+  stable/unstable builds. Direct installers are unsigned unless we later decide to pay for and
   maintain Authenticode signing.
 - **Unstable (`.github/workflows/npm-unstable.yml`)** runs the same Windows
   desktop build and the Linux user encrypted-sync install smoke before moving
   the npm `unstable` dist-tag. It uploads the `.msi` and NSIS setup `.exe` as
-  workflow artifacts for lab validation of the exact unstable commit.
+  workflow artifacts and durable GitHub prerelease assets for the exact unstable commit.
 - **Manual (`.github/workflows/windows-desktop-bundle.yml`, `workflow_dispatch`)**
   builds the Windows bundle and uploads artifacts + the full log without cutting
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
@@ -117,7 +117,7 @@ scripts/build-windows-desktop.ps1
   ordinary release or staging work. We are not currently paying for that
   certificate path.
 
-If a future revenue-backed direct-download MSI lane is explicitly approved,
+If a future revenue-backed signing lane is explicitly approved,
 backfill a signed MSI onto an existing release after the signing certificate is
 configured:
 

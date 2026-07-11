@@ -33,6 +33,7 @@ class Config:
     openai_api_key_command: str | None = None
     xai_api_key_command: str | None = None
     gemini_api_key_command: str | None = None
+    cloud_provider_preference: str | None = None
     update_channel: str | None = None
     installed_package_version: str | None = None
     # Which record categories sync: "meetings" (note+segment only, the default) or
@@ -101,6 +102,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     openai_api_key_command = data.get("openai_api_key_command")
     xai_api_key_command = data.get("xai_api_key_command")
     gemini_api_key_command = data.get("gemini_api_key_command")
+    cloud_provider_preference = data.get("cloud_provider_preference")
     update_channel = data.get("update_channel")
     installed_package_version = data.get("installed_package_version")
     sync_scope = data.get("sync_scope")
@@ -124,6 +126,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         xai_api_key_command = None
     if not isinstance(gemini_api_key_command, str):
         gemini_api_key_command = None
+    if cloud_provider_preference not in {"pro-first", "personal-first"}:
+        cloud_provider_preference = None
     if not isinstance(update_channel, str):
         update_channel = None
     if not isinstance(installed_package_version, str):
@@ -144,6 +148,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         openai_api_key_command=openai_api_key_command,
         xai_api_key_command=xai_api_key_command,
         gemini_api_key_command=gemini_api_key_command,
+        cloud_provider_preference=cloud_provider_preference,
         update_channel=update_channel,
         installed_package_version=installed_package_version,
         sync_scope=sync_scope,
@@ -253,6 +258,17 @@ def set_update_channel(channel: str, path: Path = CONFIG_PATH) -> str:
         raise ValueError("update channel must be stable or unstable")
     data = _load_raw(path)
     data["update_channel"] = normalized
+    _save_raw(data, path)
+    return normalized
+
+
+def set_cloud_provider_preference(preference: str, path: Path = CONFIG_PATH) -> str:
+    """Persist the priority between Pro and personal hosted credentials."""
+    normalized = preference.strip().lower()
+    if normalized not in {"pro-first", "personal-first"}:
+        raise ValueError("cloud provider preference must be pro-first or personal-first")
+    data = _load_raw(path)
+    data["cloud_provider_preference"] = normalized
     _save_raw(data, path)
     return normalized
 

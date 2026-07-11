@@ -24,6 +24,8 @@ NPM_PACKAGE_URL = "https://registry.npmjs.org/@arcforgelabs%2fdictate"
 RELEASES_URL = "https://github.com/arcforgelabs/dictate/releases"
 DOCUMENTATION_URL = "https://github.com/arcforgelabs/dictate#readme"
 TERMS_URL = "https://arcforge.au/terms"
+STORE_UPDATES_URL = "ms-windows-store://downloadsandupdates"
+DISTRIBUTION_MARKER = "dictate-distribution.json"
 
 
 @dataclass(frozen=True)
@@ -134,7 +136,17 @@ def is_newer_version(latest: str | None, current: str | None = RELEASE_VERSION) 
 def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     context = _update_context()
     cfg = context["config"]
-    current_version = cfg.installed_package_version or RELEASE_VERSION
+    if context["install_kind"] == "windows-store":
+        current_version = context.get("package_version") or RELEASE_VERSION
+    else:
+        current_version = cfg.installed_package_version or context.get("package_version") or RELEASE_VERSION
+    if context["install_kind"] == "windows-store":
+        return UpdateStatus(
+            current_version=str(current_version), checked=True, platform="windows",
+            install_kind="windows-store", phase="store", step="store", progress=100,
+            actions=["check", "open_store"], commands={"store": STORE_UPDATES_URL}, missing_deps=[],
+            url=STORE_UPDATES_URL,
+        )
     try:
         latest, url = _fetch_latest_version(_update_channel_for_context(context), timeout=timeout)
         update_available = is_newer_version(latest, current_version)
@@ -185,6 +197,10 @@ def start_update_flow() -> UpdateFlow:
         return _run_linux_user_update(context)
     if context["install_kind"] == "linux-package":
         return _run_linux_package_update(context)
+    if context["install_kind"] == "windows-direct":
+        return _run_windows_direct_update(context)
+    if context["install_kind"] == "windows-store":
+        return _open_windows_store_updates(context)
     if context["install_kind"] == "linux-source":
         source_root = context["source_root"]
         if source_root is not None:
@@ -241,6 +257,7 @@ def start_update_flow() -> UpdateFlow:
 DEB_ASSET_SUFFIX = "_amd64.deb"
 _DOWNLOAD_TIMEOUT = 600.0
 NPM_PACKAGE_NAME = "@arcforgelabs/dictate"
+WINDOWS_INSTALLER_SUFFIX = "-setup.exe"
 
 
 def _run_linux_user_update(context: dict[str, object]) -> UpdateFlow:
@@ -338,8 +355,60 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
     )
 
 
-def _find_release_asset(suffix: str, *, timeout: float = 10.0) -> tuple[str, str]:
-    payload = _fetch_json(LATEST_RELEASE_URL, timeout=timeout)
+def _run_windows_direct_update(context: dict[str, object]) -> UpdateFlow:
+    """Download and launch the installer published for the selected channel."""
+    cfg = context["config"]
+    current_version = (
+        getattr(cfg, "installed_package_version", None)
+        or context.get("package_version")
+        or RELEASE_VERSION
+    )
+    try:
+        latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
+        if not is_newer_version(latest, current_version):
+            return UpdateFlow(
+                mode="current", started=False, platform="windows", install_kind="windows-direct",
+                phase="current", step="current", progress=100, actions=["check"],
+                commands=_commands_for_context(context), missing_deps=[], message="Dictate is up to date.",
+            )
+        asset_url, asset_name = _find_release_asset(
+            WINDOWS_INSTALLER_SUFFIX,
+            release_tag=f"v{latest}",
+        )
+        installer = _download_file(asset_url, asset_name)
+        subprocess.Popen([str(installer), "/S", "/UPDATE"])  # noqa: S603
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(context, "windows_update_failed", str(exc))
+    return UpdateFlow(
+        mode="installer", started=True, platform="windows", install_kind="windows-direct",
+        phase="working", step="update", progress=0, actions=["check"],
+        commands=_commands_for_context(context), missing_deps=[],
+        message="Started the Dictate installer. The app will restart when the update is complete.",
+    )
+
+
+def _open_windows_store_updates(context: dict[str, object]) -> UpdateFlow:
+    """Hand Store-packaged builds back to the Microsoft Store update service."""
+    try:
+        os.startfile(STORE_UPDATES_URL)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(context, "store_open_failed", str(exc))
+    return UpdateFlow(
+        mode="store", started=True, url=STORE_UPDATES_URL, platform="windows",
+        install_kind="windows-store", phase="working", step="store", progress=0,
+        actions=["open_store"], commands={"store": STORE_UPDATES_URL}, missing_deps=[],
+        message="Opened Microsoft Store updates. Store builds receive stable releases only.",
+    )
+
+
+def _find_release_asset(
+    suffix: str, *, timeout: float = 10.0, release_tag: str | None = None
+) -> tuple[str, str]:
+    url = (
+        f"https://api.github.com/repos/arcforgelabs/dictate/releases/tags/{release_tag}"
+        if release_tag else LATEST_RELEASE_URL
+    )
+    payload = _fetch_json(url, timeout=timeout)
     assets = payload.get("assets") if isinstance(payload, dict) else None
     if not isinstance(assets, list):
         raise RuntimeError("release has no downloadable assets")
@@ -434,6 +503,44 @@ def _platform_key() -> str:
     return sys.platform
 
 
+def _windows_distribution() -> str:
+    """Return the updater ecosystem embedded by the Windows packager."""
+    configured = os.environ.get("DICTATE_DISTRIBUTION", "").strip().lower()
+    if configured in {"direct", "store"}:
+        return configured
+    executable = Path(sys.executable).resolve()
+    candidates = [executable.parent / DISTRIBUTION_MARKER, executable.parent.parent / DISTRIBUTION_MARKER]
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / DISTRIBUTION_MARKER)
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        distribution = str(payload.get("distribution") or "").strip().lower()
+        if distribution in {"direct", "store"}:
+            return distribution
+    # Existing MSI/NSIS installs predate the marker and belong to the direct lane.
+    return "direct"
+
+
+def _windows_distribution_metadata() -> dict[str, str]:
+    executable = Path(sys.executable).resolve()
+    candidates = [executable.parent / DISTRIBUTION_MARKER, executable.parent.parent / DISTRIBUTION_MARKER]
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / DISTRIBUTION_MARKER)
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(payload, dict):
+            return {str(key): str(value) for key, value in payload.items()}
+    return {}
+
+
 def _update_context() -> dict[str, object]:
     platform = _platform_key()
     source_root = _find_source_root()
@@ -442,11 +549,13 @@ def _update_context() -> dict[str, object]:
         config = load_config()
     except Exception:  # noqa: BLE001
         config = SimpleNamespace(update_channel=None, installed_package_version=None)
+    metadata = _windows_distribution_metadata() if platform == "windows" else {}
     return {
         "platform": platform,
         "install_kind": install_kind,
         "source_root": source_root,
         "config": config,
+        "package_version": metadata.get("packageVersion"),
     }
 
 
@@ -460,7 +569,8 @@ def _install_kind(platform: str, source_root: Path | None) -> str:
     if source_root is not None:
         return f"{platform}-source" if platform in {"windows"} else "source"
     if platform == "windows":
-        return "windows-package"
+        distribution = _windows_distribution()
+        return "windows-store" if distribution == "store" else "windows-direct"
     if platform == "mac":
         return "mac-package"
     return "manual"
@@ -469,11 +579,12 @@ def _install_kind(platform: str, source_root: Path | None) -> str:
 def _available_actions(install_kind: str, has_update: bool) -> list[str]:
     actions = ["check"]
     if has_update:
-        # In-app update for source checkouts, Linux user installs, and Linux
-        # system packages; Windows (Store) and macOS (bundle) still open the
-        # release page.
-        if install_kind.endswith("-source") or install_kind in {"linux-user", "linux-package"}:
+        # Direct/source installs update in-app. Store builds stay in their
+        # platform ecosystem; other bundles open their release surface.
+        if install_kind.endswith("-source") or install_kind in {"linux-user", "linux-package", "windows-direct"}:
             actions.append("update")
+        elif install_kind == "windows-store":
+            actions.append("open_store")
         else:
             actions.append("open_release")
     actions.append("open_docs")
@@ -496,6 +607,10 @@ def _commands_for_context(context: dict[str, object]) -> dict[str, str]:
                 f'"{source_root / "update-windows.ps1"}"'
             )
         }
+    if install_kind == "windows-direct":
+        return {"update": "download and run the selected channel's Dictate setup.exe"}
+    if install_kind == "windows-store":
+        return {"store": STORE_UPDATES_URL}
     return {"release": RELEASES_URL}
 
 
@@ -505,8 +620,10 @@ def _manual_update_message(context: dict[str, object]) -> str:
         return "Open the latest Linux system package from GitHub releases."
     if install_kind == "linux-user":
         return "Run the Linux user updater."
-    if install_kind == "windows-package":
-        return "Open the latest signed Windows installer from GitHub releases."
+    if install_kind == "windows-direct":
+        return "Download and run the latest Dictate installer for this channel."
+    if install_kind == "windows-store":
+        return "Open Microsoft Store updates. Store installs receive stable releases only."
     if install_kind == "mac-package":
         return "Open the latest macOS package from GitHub releases."
     return "Open the latest release for this platform."
@@ -521,6 +638,8 @@ def _npm_update_channel() -> str:
 
 
 def _update_channel_for_context(context: dict[str, object]) -> str:
+    if context.get("install_kind") == "windows-store":
+        return "stable"
     configured = getattr(context.get("config"), "update_channel", None)
     channel = _normalize_update_channel(configured)
     if channel:

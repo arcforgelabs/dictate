@@ -1599,7 +1599,8 @@ class UiBackend:
             # supervisor is healthy. Local Parakeet/Whisper lanes need no key.
             if not is_private and healthy:
                 has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(preferred), False)
-                if not has_key:
+                has_pro = preferred == "xai" and _pro_state_active(self._dictate_pro_state())
+                if not has_key and not has_pro:
                     healthy = False
                     status = "no-key"
             return {
@@ -1628,6 +1629,8 @@ class UiBackend:
 
         # Online: check that a key is present
         has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(backend), False)
+        if backend == "xai" and _pro_state_active(self._dictate_pro_state()):
+            has_key = True
         if not has_key:
             return {
                 "healthy": False,

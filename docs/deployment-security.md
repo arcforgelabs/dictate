@@ -64,11 +64,11 @@ Current repository settings:
 3. The release workflow must be dispatched from the default branch.
 4. Release jobs must pass tests before any publish step.
 5. Stable public Windows releases go through Microsoft Store packaging and
-   certification. Unsigned MSI/NSIS artifacts may be shared as staging/tester
+   certification. Unsigned MSI/NSIS artifacts may be published for direct installs
    builds when the tester accepts Windows untrusted-publisher warnings.
 6. Do not block ordinary release work on Windows signing configuration. The
    dedicated signing scripts/workflow are future-only unless a revenue-backed
-   direct-download MSI lane is explicitly approved.
+   direct-download signing spend is explicitly approved.
 7. Microsoft Store `draft` mode uploads a package without committing the
    submission. Microsoft Store `publish` mode submits the current draft for
    certification and must be explicitly approved.

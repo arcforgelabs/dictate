@@ -1167,6 +1167,9 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     suc = sub.add_parser("set-update-channel", help="Opt into stable or unstable app updates")
     suc.add_argument("channel", choices=["stable", "unstable"])
 
+    scp = sub.add_parser("set-cloud-preference", help="Choose whether Dictate Pro or personal API keys are used first")
+    scp.add_argument("preference", choices=["pro-first", "personal-first"])
+
     sipv = sub.add_parser("set-installed-package-version", help=argparse.SUPPRESS)
     sipv.add_argument("version")
 
@@ -1299,6 +1302,13 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"ok: update_channel={channel}")
         return 0
 
+    if args.cmd == "set-cloud-preference":
+        from dictate.config import set_cloud_provider_preference
+
+        preference = set_cloud_provider_preference(args.preference)
+        print(f"ok: cloud_provider_preference={preference}")
+        return 0
+
     # ---- set-installed-package-version ------------------------------------
     if args.cmd == "set-installed-package-version":
         version = set_installed_package_version(args.version)
@@ -1328,6 +1338,7 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"sound: {'on' if prefs.get('sound') else 'off'}")
         update_channel = cfg.update_channel if cfg.update_channel in {"stable", "unstable"} else "stable"
         print(f"update_channel: {update_channel}")
+        print(f"cloud_provider_preference: {cfg.cloud_provider_preference or 'pro-first'}")
         if cfg.installed_package_version:
             print(f"installed_package_version: {cfg.installed_package_version}")
         try:

@@ -451,19 +451,39 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(calls[0][0][-1], str(root / "update-windows.ps1"))
         self.assertEqual(calls[0][1], str(root))
 
-    def test_windows_package_update_opens_release_guidance(self) -> None:
-        with patch("dictate.update_status.sys.platform", "win32"):
-            with patch("dictate.update_status._candidate_source_roots", return_value=[]):
-                with patch("dictate.update_status.subprocess.Popen") as popen:
-                    flow = start_update_flow()
+    def test_windows_direct_update_downloads_selected_channel_installer(self) -> None:
+        with (
+            patch("dictate.update_status.sys.platform", "win32"),
+            patch("dictate.update_status._candidate_source_roots", return_value=[]),
+            patch("dictate.update_status._windows_distribution", return_value="direct"),
+            patch("dictate.update_status.load_config", return_value=Config(update_channel="unstable", installed_package_version="2026.7.4-unstable.1.1")),
+            patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.4-unstable.2.1", "https://example.test")),
+            patch("dictate.update_status._find_release_asset", return_value=("https://example.test/Dictate-setup.exe", "Dictate-setup.exe")) as find,
+            patch("dictate.update_status._download_file", return_value=Path("C:/Temp/Dictate-setup.exe")),
+            patch("dictate.update_status.subprocess.Popen") as popen,
+        ):
+            flow = start_update_flow()
 
-        self.assertEqual(flow.mode, "release")
-        self.assertFalse(flow.started)
-        self.assertEqual(flow.url, RELEASES_URL)
+        self.assertEqual(flow.mode, "installer")
+        self.assertTrue(flow.started)
         self.assertEqual(flow.platform, "windows")
-        self.assertEqual(flow.install_kind, "windows-package")
-        self.assertIn("signed Windows installer", flow.message)
-        popen.assert_not_called()
+        self.assertEqual(flow.install_kind, "windows-direct")
+        find.assert_called_once_with("-setup.exe", release_tag="v2026.7.4-unstable.2.1")
+        popen.assert_called_once_with([str(Path("C:/Temp/Dictate-setup.exe")), "/S", "/UPDATE"])
+
+    def test_windows_store_update_opens_store_and_ignores_unstable_channel(self) -> None:
+        with (
+            patch("dictate.update_status.sys.platform", "win32"),
+            patch("dictate.update_status._candidate_source_roots", return_value=[]),
+            patch("dictate.update_status._windows_distribution", return_value="store"),
+            patch("dictate.update_status.load_config", return_value=Config(update_channel="unstable")),
+            patch("dictate.update_status.os.startfile", create=True) as startfile,
+        ):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "store")
+        self.assertEqual(flow.install_kind, "windows-store")
+        startfile.assert_called_once_with("ms-windows-store://downloadsandupdates")
 
 
 if __name__ == "__main__":

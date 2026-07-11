@@ -185,6 +185,13 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _run_config(["set-update-channel", "nightly"])
 
+    def test_set_cloud_preference_personal_first(self) -> None:
+        with patch("dictate.config.set_cloud_provider_preference", return_value="personal-first") as mock_set:
+            code, out, _ = _run_config(["set-cloud-preference", "personal-first"])
+        self.assertEqual(code, 0)
+        mock_set.assert_called_once_with("personal-first")
+        self.assertIn("cloud_provider_preference=personal-first", out)
+
     def test_show_no_subcommand_returns_2(self) -> None:
         code, _, _ = _run_config([])
         self.assertEqual(code, 2)

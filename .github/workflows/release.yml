@@ -359,31 +359,7 @@ jobs:
           WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: .\scripts\sign-windows-artifacts.ps1
 
-      - name: Check whether Windows artifacts are signed
-        id: signed
-        shell: pwsh
-        run: |
-          try {
-            .\scripts\assert-windows-artifacts-signed.ps1
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "upload=true"
-          } catch {
-            Write-Warning $_.Exception.Message
-            Write-Warning "Skipping public GitHub release upload for unsigned Windows artifacts."
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "upload=false"
-          }
-
-      - name: Upload unsigned Windows artifacts for internal validation
-        if: steps.signed.outputs.upload != 'true'
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: unsigned-windows-desktop-bundle
-          path: |
-            ui-shell/src-tauri/target/release/bundle/msi/*.msi
-            ui-shell/src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-
-      - name: Attach signed Windows desktop artifacts to the release
-        if: steps.signed.outputs.upload == 'true'
+      - name: Attach Windows desktop artifacts to the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
