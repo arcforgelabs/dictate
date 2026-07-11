@@ -87,6 +87,7 @@ describe("Language toggle", () => {
 
     expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
     await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.method) === "PATCH")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: "Cloud" })).toBeTruthy());
     expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("grok-speech-to-text"))).toBe(true);
   });
 

@@ -34,16 +34,27 @@ echo "▶ building the front-end (ui/ -> dist/)"
 npm --prefix ui ci 2>/dev/null || npm --prefix ui install
 npm --prefix ui run build
 
-echo "▶ freezing the Python engine sidecar (PyInstaller, onefile)"
-# onefile: the AppDir then holds a single self-extracting binary, so linuxdeploy
-# (AppImage) doesn't trip over PyInstaller's mangled _internal/*.so tree. The
-# .deb/.rpm are happy with it too (one file instead of ~1200).
-export DICTATE_ONEFILE=1
+if printf '%s' "$BUNDLES" | grep -q appimage; then
+  echo "▶ freezing the Python engine sidecar (PyInstaller, onefile for AppImage)"
+  # linuxdeploy walks the AppDir and trips over PyInstaller's mangled native
+  # libraries, so AppImage builds require a single self-extracting executable.
+  export DICTATE_ONEFILE=1
+else
+  echo "▶ freezing the Python engine sidecar (PyInstaller, onedir for native packages)"
+  # deb/rpm can safely carry an onedir bundle. Avoiding onefile's giant archive
+  # compression step keeps Meeting builds within normal workstation resources.
+  unset DICTATE_ONEFILE
+fi
 ./packaging/build-engine.sh
 echo "▶ staging the engine into the Tauri bundle resources"
 mkdir -p ui-shell/src-tauri/engine
-rm -f ui-shell/src-tauri/engine/dictate-engine
-cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine
+if [ "${DICTATE_ONEFILE:-}" = "1" ]; then
+  rm -rf ui-shell/src-tauri/engine/dictate-engine ui-shell/src-tauri/engine/_internal
+  cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine
+else
+  rm -rf ui-shell/src-tauri/engine/dictate-engine ui-shell/src-tauri/engine/_internal
+  cp -a packaging/dist/dictate-engine/. ui-shell/src-tauri/engine/
+fi
 chmod +x ui-shell/src-tauri/engine/dictate-engine
 
 echo "▶ ensuring the Tauri CLI is available"

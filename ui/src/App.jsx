@@ -213,10 +213,10 @@ function PrivacyPill() {
   };
 
   return (
-    <Tooltip label={privateOn ? "Local" : "Pro"}>
+    <Tooltip label={privateOn ? "Local" : "Cloud"}>
       <div className={"privpill" + (degraded ? " degraded" : "")}>
         <Toggle on={privateOn} onChange={onToggle} />
-        <span className="priv-icon" aria-label={privateOn ? "Local" : "Pro"}>
+        <span className="priv-icon" aria-label={privateOn ? "Local" : "Cloud"}>
           <Icon name={privateOn ? "laptop" : "cloud"} size={23} />
         </span>
       </div>
