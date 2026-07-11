@@ -41,19 +41,19 @@ build_engine_and_stage() {
       ;;
     *)
       echo "✗ unsupported engine layout: $layout" >&2
-      exit 1
+      return 1
       ;;
   esac
-  ./packaging/build-engine.sh
+  ./packaging/build-engine.sh || return 1
   echo "▶ staging the engine into the Tauri bundle resources"
-  mkdir -p ui-shell/src-tauri/engine
-  rm -rf ui-shell/src-tauri/engine/dictate-engine ui-shell/src-tauri/engine/_internal
+  mkdir -p ui-shell/src-tauri/engine || return 1
+  rm -rf ui-shell/src-tauri/engine/dictate-engine ui-shell/src-tauri/engine/_internal || return 1
   if [ "$layout" = "onefile" ]; then
-    cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine
+    cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine || return 1
   else
-    cp -a packaging/dist/dictate-engine/. ui-shell/src-tauri/engine/
+    cp -a packaging/dist/dictate-engine/. ui-shell/src-tauri/engine/ || return 1
   fi
-  chmod +x ui-shell/src-tauri/engine/dictate-engine
+  chmod +x ui-shell/src-tauri/engine/dictate-engine || return 1
 }
 
 echo "▶ preflight"
@@ -86,14 +86,33 @@ if [ -n "$RELIABLE" ]; then
   echo "▶ building native packages ($RELIABLE)"
   ( cd ui-shell && npm run tauri -- build --bundles "$RELIABLE" )
 fi
+APPIMAGE_FAILED=0
 if printf '%s' "$BUNDLES" | grep -q appimage; then
-  build_engine_and_stage onefile
-  echo "▶ building the AppImage bundle (best-effort)"
-  ( cd ui-shell && npm run tauri -- build --bundles appimage --verbose ) \
-    || echo "⚠ AppImage bundling failed (linuxdeploy); shipping native packages only"
+  if build_engine_and_stage onefile; then
+    echo "▶ building the AppImage bundle (best-effort)"
+    if ! ( cd ui-shell && npm run tauri -- build --bundles appimage --verbose ); then
+      APPIMAGE_FAILED=1
+      echo "⚠ AppImage bundling failed (linuxdeploy)" >&2
+    fi
+  else
+    APPIMAGE_FAILED=1
+    echo "⚠ AppImage preparation failed (PyInstaller)" >&2
+  fi
+  if [ "$APPIMAGE_FAILED" -ne 0 ]; then
+    if [ -n "$RELIABLE" ]; then
+      echo "⚠ AppImage lane failed; shipping native packages only"
+    else
+      echo "⚠ AppImage lane failed; no AppImage artifact was produced" >&2
+    fi
+  fi
 fi
 
 echo
 echo "✓ artifacts:"
-find ui-shell/src-tauri/target/release/bundle -maxdepth 2 -type f \
-  \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print
+if [ -d ui-shell/src-tauri/target/release/bundle ]; then
+  find ui-shell/src-tauri/target/release/bundle -maxdepth 2 -type f \
+    \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print
+fi
+if [ "$APPIMAGE_FAILED" -ne 0 ] && [ -z "$RELIABLE" ]; then
+  exit 1
+fi

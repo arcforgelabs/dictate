@@ -39,7 +39,45 @@ class LinuxPackagingLayoutTests(unittest.TestCase):
                     else:
                         self.assertFalse((engine / "_internal").exists())
 
-    def _run_build(self, root: Path, bundles: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    def test_mixed_build_keeps_native_artifact_when_appimage_preparation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result, log_path = self._run_build(root, "deb,appimage", fail_onefile=True)
+
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output)
+            self.assertEqual(
+                tuple(log_path.read_text(encoding="utf-8").splitlines()),
+                ("engine:onedir", "tauri:deb:unset", "engine:onefile"),
+            )
+            self.assertIn("AppImage preparation failed (PyInstaller)", output)
+            self.assertIn("shipping native packages only", output)
+            self.assertTrue(
+                (root / "ui-shell" / "src-tauri" / "target" / "release" / "bundle" / "deb" / "stub.deb").is_file()
+            )
+            self.assertFalse(
+                (root / "ui-shell" / "src-tauri" / "target" / "release" / "bundle" / "appimage" / "stub.AppImage").exists()
+            )
+
+    def test_appimage_only_preparation_failure_is_non_success_without_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result, log_path = self._run_build(root, "appimage", fail_onefile=True)
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, output)
+            self.assertEqual(log_path.read_text(encoding="utf-8").splitlines(), ["engine:onefile"])
+            self.assertIn("AppImage preparation failed (PyInstaller)", output)
+            self.assertIn("no AppImage artifact was produced", output)
+            self.assertFalse((root / "ui-shell" / "src-tauri" / "target").exists())
+
+    def _run_build(
+        self,
+        root: Path,
+        bundles: str,
+        *,
+        fail_onefile: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
         (root / "scripts").mkdir(parents=True)
         (root / "packaging" / "dist").mkdir(parents=True)
         (root / "ui").mkdir()
@@ -91,6 +129,7 @@ set -euo pipefail
 layout=onedir
 if [[ "${DICTATE_ONEFILE:-}" == "1" ]]; then layout=onefile; fi
 printf 'engine:%s\\n' "$layout" >> "$STUB_LOG"
+if [[ "$layout" == "onefile" && "${STUB_FAIL_ONEFILE:-0}" == "1" ]]; then exit 17; fi
 rm -rf packaging/dist/dictate-engine
 if [[ "$layout" == "onefile" ]]; then
   printf '#!/usr/bin/env bash\\n' > packaging/dist/dictate-engine
@@ -107,6 +146,7 @@ fi
                 "DICTATE_BUNDLES": bundles,
                 "PATH": f"{stub_bin}{os.pathsep}{env['PATH']}",
                 "STUB_LOG": str(log_path),
+                "STUB_FAIL_ONEFILE": "1" if fail_onefile else "0",
             }
         )
         result = subprocess.run(
