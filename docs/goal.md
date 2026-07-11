@@ -1,34 +1,56 @@
-# Goal — Finish Dictate Pro on the Arc Forge Account and Usage Platform
+# Goal — Finish Dictate on the Arc Forge Account and Usage Platform
+
+**Status:** Current cross-system goal and planning authority.
+
+This file governs the shared Arc Forge identity, Dictate product, Dictate Pro
+paid offering, hosted usage, sync, Deck boundary, migration, and release proof.
+The narrower documents below remain useful, but they are subordinate inputs and
+must not establish a competing cross-system architecture.
+
+### Planning authority map
+
+| Document | Status and authority |
+| --- | --- |
+| `docs/goal.md` | Current authority for cross-system product and architecture decisions. |
+| `docs/TRANSCRIPTION_PLAN.md` | Active scoped authority only for local transcription and release evidence; subordinate to this goal for account, cloud, commerce, and Deck decisions. |
+| `docs/DICTATE_PRO_CLOUD_SYNC_PLAN.md` | Reference and migration input for cloud sync/account detail; subordinate to this goal. |
+| `docs/deck-sections-and-dictate-space-spec.md` | Proposed Deck-space reference and migration input; subordinate to this goal for product/account semantics. |
+
+When these documents disagree, this goal controls the cross-system decision and
+the narrower document records the resulting migration or implementation detail.
 
 ## Outcome
 
-Dictate and Dictate Pro reach a stable, cohesive product baseline. Local Dictate
-remains complete without an account. Dictate Pro uses the shared Arc Forge
-account, commerce, entitlement, and hosted-model platform without exposing
-provider keys or borrowing Deck-specific identity and language.
+Dictate reaches a stable, cohesive product baseline. Local Dictate remains
+complete without an account. Dictate uses the shared Arc Forge account,
+commerce, entitlement, and hosted-model platform for its Dictate Pro offering
+without exposing provider keys or borrowing Deck-specific identity and
+language.
 
 This goal is complete when:
 
 - A person has one Arc Forge login. The login surface says **Arc Forge**, not
   Deck, Dictate, Console, or the name of whichever product initiated sign-in.
-- The same Arc Forge account can enter Deck, Dictate Pro, and future products.
+- The same Arc Forge account can enter Deck, Dictate, and future products.
   Each product has its own space and entitlements; none impersonates the account
   platform itself.
-- Dictate Pro hosted transcription runs through the approved shared Arc Forge
-  model-usage tooling, with server-side credentials, policy checks, durable usage
-  accounting, budgets, observability, and privacy-safe operations.
+- Dictate hosted transcription, when enabled by the Dictate Pro offering, runs
+  through the approved shared Arc Forge model-usage tooling, with server-side
+  credentials, policy checks, durable usage accounting, budgets, observability,
+  and privacy-safe operations.
 - The desktop's browser sign-in, email fallback, refresh, device registration,
   revocation, encrypted sync, hosted jobs, and account management survive normal
   deploys and service restarts.
-- Interim Dictate Pro paths are either promoted to the production contract or
-  removed. The in-repo `/v1` Pro server remains only a labelled test/reference
-  harness and cannot be mistaken for production architecture.
+- Interim Dictate hosted paths are either promoted to the production contract
+  or removed. The in-repo `/v1` Pro server remains only a labelled
+  test/reference harness and cannot be mistaken for production architecture.
 - Current code, live deployment, tests, user-facing copy, and current
   documentation describe the same system.
 
 The desired product model is the same one used by Google: a neutral company
 login establishes identity, then the person enters the product they intended to
-use. An Arc Forge user may have Dictate Pro, Deck, both, or neither. Login is not
+use. An Arc Forge account may use Dictate with the Dictate Pro offering, use
+Deck, use both, or use neither. Login is not
 an advertisement for another product.
 
 ## Scope rule
@@ -38,8 +60,8 @@ Finish and consolidate what already exists before adding new product surface.
 In scope:
 
 - Dictate desktop account and hosted-usage integration.
-- Dictate Pro identity, entitlement, commerce, devices, encrypted sync, hosted
-  jobs, usage accounting, and account UX.
+- Dictate identity, Dictate Pro entitlement/commerce, devices, encrypted sync,
+  hosted jobs, usage accounting, and account UX.
 - Shared Arc Forge login branding and return-to-product behavior needed by
   Dictate.
 - The shared Arc Forge hosted-model contract used by Dictate and Deck.
@@ -108,15 +130,18 @@ Rules:
   fallback.
 - Public native clients have no client secret.
 
-### Separate products on one account
+### Separate products and paid offerings on one account
 
 - Deck and Dictate share account, commerce, and gateway primitives.
+- Dictate is the product and product space. Dictate Pro is its paid offering,
+  plan, entitlement, and hosted/sync capabilities; it is not a second product
+  or account identity.
 - `deck_agent` and `dictate_pro` remain separate entitlements.
 - Deck agent/model usage and Dictate audio-second usage remain separate product
   ledgers, even when they use the same underlying gateway machinery.
 - A free Arc Forge account can open the account hub and see available products,
-  downloads, and purchase paths without being provisioned into Deck or Dictate
-  Pro automatically.
+  downloads, and purchase paths without being provisioned into Deck or the
+  Dictate Pro offering automatically.
 - Dictate's account destination is its Arc Forge product space, not the agent
   dashboard. The target route is canonical, deep-linkable, and compatible with
   old links during a bounded migration.
@@ -156,6 +181,21 @@ Rules:
   and is deleted according to a tested lifecycle.
 - The server may meter hosted work and retain non-content job metadata, but it
   must not retain readable transcript content after delivery.
+
+### Hosted result handoff contract
+
+- Worker completion is durable independently of the request that submitted the
+  job or the client poll that observes completion.
+- A completed result is an owner-bound encrypted artifact. Retrieval and
+  acknowledgement require the authenticated owning account/device and are
+  idempotent, so a lost response or repeated request cannot expose another
+  account's result or create a second delivery.
+- Result artifacts, temporary plaintext, and any acknowledgement window have
+  explicit bounded expiry and deletion rules. Completion is not a license to
+  retain readable transcript content indefinitely.
+- The proof must cover worker completion versus client polling, restart and lost
+  response, duplicate retrieval and acknowledgement, account isolation,
+  expiry/deletion, and the full plaintext lifetime.
 
 ### Durable, revocable sessions
 
@@ -307,7 +347,7 @@ Dictate clients never receive or require an upstream provider key.
 ### Phase 4 — Make Dictate usage and commerce authoritative
 
 1. Keep one Stripe webhook authority and one shared commerce subscription model.
-2. Make Dictate's Stripe price map explicitly to product `dictate`, plan
+2. Make Dictate's Stripe price map explicitly to product `dictate`, paid plan
    `dictate_pro_monthly`, and entitlement `dictate_pro`. Never feed it through
    Deck's agent price map.
 3. Backfill and reconcile legacy Dictate subscription rows into shared commerce,
@@ -342,14 +382,19 @@ and operator reconciliation.
    Make retries idempotent and cap attempts.
 5. Delete raw audio after success, terminal failure, cancellation, or TTL. Prove
    cleanup for local spool and object storage.
-6. Return transcript content only to the authenticated owning client. Persist
-   only the minimum job/segment metadata needed operationally; encrypt any
-   transcript content that enters sync.
+6. Return an owner-bound encrypted result artifact only to the authenticated
+   owning client. Persist only the minimum job/segment metadata needed
+   operationally; encrypt any transcript content that enters sync. Retrieval
+   and acknowledgement are idempotent, and the artifact expires and is deleted
+   on the tested privacy schedule.
 7. Support capability-level routing for ordinary cloud dictation and diarized
    meetings without exposing provider brands as the account contract.
 8. Add end-to-end tests from desktop audio to provider fixture to transcript,
    including quota, provider failure, restart, duplicate completion, deletion,
    and account isolation.
+9. Prove worker completion versus client polling, lost responses, duplicate
+   retrieval and acknowledgement, result expiry/deletion, and plaintext
+   lifetime across worker and gateway restarts.
 
 Gate: a hosted job is private, metered exactly once, restart-safe, observable,
 and recoverable without manual database repair.
@@ -378,7 +423,8 @@ Dictate remains intact.
 ### Phase 7 — Converge the desktop product
 
 1. Present three distinct states: local Dictate, signed-in Arc Forge account,
-   and explicitly enabled Dictate Pro sync/hosted capability.
+   and explicitly enabled Dictate Pro sync/hosted capability in the Dictate
+   product.
 2. Remove “Pro” where the user is choosing execution location; use Local and
    Cloud. Use Dictate Pro only for the product entitlement/account offering.
 3. Make account state resilient: distinguish signed out, session expired,
@@ -468,8 +514,9 @@ Before stable promotion:
 
 This goal is not achieved merely because the UI can sign in or one hosted
 transcription succeeds. It is achieved when Arc Forge identity is neutral,
-Dictate Pro is a first-class product on that identity, Dictate and Deck share a
-governed model-usage foundation without sharing accidental product semantics,
+Dictate is a first-class product on that identity, with Dictate Pro as its paid
+offering; Dictate and Deck share a governed model-usage foundation without
+sharing accidental product semantics,
 and every auth, billing, usage, sync, privacy, deployment, and recovery path is
 durable and operationally boring.
 
@@ -477,7 +524,8 @@ At that point:
 
 - Dictate contains no production provider secret.
 - Deck is not a prerequisite or accidental landing page for Dictate.
-- Dictate Pro does not operate a parallel account universe.
+- Dictate does not operate a parallel account universe; Dictate Pro is its
+  product entitlement and capability set.
 - Provider access is policy-controlled and observable.
 - Deployments do not log users out.
 - Usage is explainable and reconcilable.

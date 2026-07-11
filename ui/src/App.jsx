@@ -140,6 +140,10 @@ const ONLINE_MODEL = "xai/grok-speech-to-text";
 // cloud/Pro action rather than a regular local option.
 const PRIVATE_MODEL = "parakeet/parakeet-tdt-0.6b-v2";
 
+function cloudAvailable(s) {
+  return Boolean((s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active) || s.keys.xai);
+}
+
 /* Local language toggle — only shown in Private mode. English stays on-device;
    Multilingual is a cloud-only action that routes through the existing sign-in
    / Dictate Pro flow before switching providers. */
@@ -154,8 +158,7 @@ function LocalEngineToggle() {
   };
   const pickMultilingual = () => {
     s.toast("Multilingual is available in Cloud mode only.", { tone: "amber" });
-    const proActive = !!(s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active);
-    if (!proActive && !s.keys.xai) {
+    if (!cloudAvailable(s)) {
       s.toast("Cloud mode requires an active Dictate Pro subscription or personal xAI API key.", {
         bad: true,
         ms: 12_000,
@@ -200,7 +203,7 @@ function PrivacyPill() {
       s.setModel(PRIVATE_MODEL);
       return;
     }
-    if (!s.keys.xai) {
+    if (!cloudAvailable(s)) {
       s.toast("Requires Dictate Pro or API key.", {
         bad: true,
         ms: 12_000,

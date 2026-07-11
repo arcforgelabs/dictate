@@ -2,9 +2,13 @@
 
 Date: 2026-07-05
 
-This is the canonical plan for Dictate Pro accounts, encrypted cloud sync, and
-multi-device state. Dictate remains local-first: the app must work without an
-account, and signing out must not delete local dictations.
+**Status:** Reference and migration input, subordinate to `docs/goal.md`.
+
+This document supplies scoped detail for Dictate Pro accounts, encrypted cloud
+sync, and multi-device state. `docs/goal.md` is the current cross-system goal
+and authority for identity, product/account boundaries, commerce, hosted work,
+and release decisions. Dictate remains local-first: the app must work without
+an account, and signing out must not delete local dictations.
 
 ## Goal
 
