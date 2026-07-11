@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.arcforge.au/dictate-platform/v1",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Dictate Platform Contract",
+    "version": "1.0.0",
+    "description": "Dictate-side Phase 0 contract for the Arc Forge account and usage platform.",
+    "x-status": "phase_0_draft_not_deployed"
+  },
+  "x-contract": {
+    "name": "dictate-platform",
+    "version": "v1",
+    "authority": "docs/goal.md",
+    "owner_confirmation": "pending",
+    "implementation_claim": "This contract is a planning and handoff artifact; deployed services are not claimed to conform."
+  },
+  "x-identity": {
+    "subject_claim": "account_id",
+    "subject_type": "PortalAccount.account_id",
+    "account_boundary": "account_id",
+    "product": "dictate",
+    "entitlement": "dictate_pro",
+    "capabilities": [
+      "dictate.transcribe",
+      "dictate.transcribe_diarized",
+      "dictate.sync",
+      "dictate.devices.manage",
+      "dictate.account.manage"
+    ],
+    "separation_rule": "Dictate is the product; Dictate Pro is the paid offering, entitlement, and capability set."
+  },
+  "x-surfaces": {
+    "canonical_future_production": {
+      "status": "proposed_not_deployed",
+      "owner_confirmation": "pending",
+      "origin": {
+        "scheme": "https",
+        "url_template": "https://{canonical_arc_forge_origin}",
+        "requires_owner_confirmation": true,
+        "advertised_urls_must_use_scheme": "https"
+      },
+      "routes": {
+        "discovery": {
+          "method": "GET",
+          "path": "/api/account/auth/desktop",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/desktop",
+          "capability": "account.discovery",
+          "status": "proposed_not_deployed"
+        },
+        "authorize": {
+          "method": "GET",
+          "path": "/api/account/auth/authorize",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/authorize",
+          "capability": "account.login",
+          "status": "proposed_not_deployed"
+        },
+        "token": {
+          "method": "POST",
+          "path": "/api/account/auth/token",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/token",
+          "capability": "account.token_exchange",
+          "grants": ["authorization_code_pkce", "refresh_token"],
+          "status": "proposed_not_deployed"
+        },
+        "device_authorization": {
+          "method": "POST",
+          "path": "/api/account/auth/device",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/device",
+          "capability": "account.device_authorization",
+          "status": "proposed_not_deployed"
+        },
+        "entitlements": {
+          "method": "GET",
+          "path": "/api/account/entitlements?product=dictate",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/entitlements?product=dictate",
+          "capability": "dictate.entitlements.read",
+          "status": "proposed_not_deployed"
+        },
+        "commerce": {
+          "method": "GET",
+          "path": "/api/account/commerce?product=dictate",
+          "url_template": "https://{canonical_arc_forge_origin}/api/account/commerce?product=dictate",
+          "capability": "dictate.commerce.read",
+          "status": "proposed_not_deployed"
+        },
+        "devices": {
+          "methods": ["GET", "POST", "DELETE"],
+          "path": "/api/dictate/devices",
+          "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices",
+          "capability": "dictate.devices.manage",
+          "status": "proposed_not_deployed"
+        },
+        "sync": {
+          "methods": ["GET", "POST", "DELETE"],
+          "path": "/api/dictate/sync",
+          "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync",
+          "capability": "dictate.sync",
+          "status": "proposed_not_deployed"
+        },
+        "hosted_jobs": {
+          "methods": ["POST", "GET", "DELETE"],
+          "path": "/api/dictate/jobs",
+          "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs",
+          "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+          "status": "proposed_not_deployed"
+        },
+        "gateway_invocation": {
+          "transport": "internal_contract",
+          "path": "internal://arc-forge-gateway/model/invoke",
+          "capability": "gateway.invoke",
+          "status": "proposed_not_deployed",
+          "public_client_access": false
+        }
+      }
+    },
+    "current_reference_compatibility": {
+      "status": "test_reference_only",
+      "label": "reference /v1 compatibility; not a production authority",
+      "production_authority": false,
+      "canonical_for_production": false,
+      "base_url": "https://console.arcforge.au",
+      "base_path": "/v1",
+      "client_default_current": true,
+      "implementation": "src/dictate/pro/server.py",
+      "allowed_use": "test and migration compatibility only"
+    }
+  },
+  "x-authentication": {
+    "access_token_subject": "account_id",
+    "desktop_flow": "authorization_code_pkce",
+    "headless_fallback": "device_authorization",
+    "email_code_fallback": true,
+    "refresh": {
+      "rotation": true,
+      "reuse_detection": true,
+      "family_and_device_revocation": true,
+      "durable_store_required": true
+    },
+    "consent": {
+      "browser_session_required": true,
+      "single_use_grant": true,
+      "validated_return_to_product": true
+    }
+  },
+  "x-commerce_and_entitlement": {
+    "product": "dictate",
+    "entitlement": "dictate_pro",
+    "commerce_authority": "shared_arc_forge_commerce",
+    "usage_ledger": "dictate_audio_seconds",
+    "deck_usage_separate": true,
+    "entitlement_states": {
+      "$ref": "#/x-state-sets/entitlement"
+    }
+  },
+  "x-devices": {
+    "device_subject": "device_id",
+    "registration_account_subject": "account_id",
+    "states": {
+      "$ref": "#/x-state-sets/device"
+    },
+    "revocation_effect": ["refresh_family", "sync", "hosted_jobs"]
+  },
+  "x-sync": {
+    "opt_in_required": true,
+    "payload_encryption": "client_side_before_upload",
+    "server_receives": ["public_device_keys", "encrypted_envelopes", "ciphertext_metadata"],
+    "raw_audio_in_normal_sync": false,
+    "account_scope": "account_id",
+    "state_set": {
+      "$ref": "#/x-state-sets/sync"
+    }
+  },
+  "x-hosted_jobs": {
+    "state_set": {
+      "$ref": "#/x-state-sets/hosted_job"
+    },
+    "ownership": "authenticated_account_id_and_device_id",
+    "result": {
+      "type": "owner_bound_encrypted_artifact",
+      "retrieval_idempotent": true,
+      "acknowledgement_idempotent": true,
+      "expiry_required": true,
+      "deletion_required": true,
+      "plaintext_lifetime_must_be_bounded": true
+    },
+    "raw_audio": {
+      "retention": "bounded_processing_window",
+      "delete_on": ["completed", "failed", "cancelled", "expired", "ttl"]
+    }
+  },
+  "x-gateway": {
+    "request_envelope_required": [
+      "account_id",
+      "product",
+      "feature",
+      "capability",
+      "provider_alias",
+      "model_alias",
+      "credential_mode",
+      "request_id",
+      "idempotency_key"
+    ],
+    "product": "dictate",
+    "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+    "usage_unit": "audio_seconds",
+    "usage_event_state_set": {
+      "$ref": "#/x-state-sets/usage_event"
+    },
+    "provider_selection": "server_policy_allowlist",
+    "provider_error_model": "normalized_error_shape"
+  },
+  "x-state-sets": {
+    "entitlement": ["active", "inactive", "grace", "past_due", "cancelled", "expired", "refunded", "revoked", "store_active"],
+    "device": ["pending", "trusted", "revoked", "expired"],
+    "sync": ["disabled", "pending", "enabled", "paused", "revoked", "deleted"],
+    "hosted_job": ["created", "awaiting_upload", "uploaded", "queued", "processing", "completed", "failed", "cancelled", "expired", "quota_rejected"],
+    "usage_event": ["reserved", "settled", "rolled_back", "rejected"]
+  },
+  "x-requirements": {
+    "idempotency": {
+      "header": "Idempotency-Key",
+      "required_for": [
+        "auth.authorization_code.consume",
+        "auth.refresh.rotate",
+        "devices.register",
+        "sync.push",
+        "hosted_jobs.create",
+        "hosted_jobs.upload_complete",
+        "hosted_jobs.result_ack",
+        "gateway.usage.reserve",
+        "gateway.usage.settle",
+        "gateway.usage.rollback"
+      ],
+      "replay_semantics": "same account, operation, and key returns the original outcome without duplicate side effects"
+    },
+    "privacy": {
+      "provider_credentials": "server_runtime_only",
+      "provider_keys_in_client": false,
+      "client_secret_for_public_native_clients": false,
+      "sync_payload": "encrypted_client_side_before_upload",
+      "hosted_result": "owner_bound_encrypted_artifact",
+      "raw_audio": "bounded_processing_window_then_deleted",
+      "readable_transcript_after_delivery": false,
+      "logs_must_exclude": ["audio", "transcript", "dictated_text", "access_token", "refresh_token", "provider_key", "signed_upload_url"]
+    },
+    "account_isolation": "every entitlement, device, sync, job, result, and usage query is scoped by account_id"
+  },
+  "security": {
+    "public_native_client": {
+      "client_secret_required": false
+    },
+    "provider_credentials": {
+      "server_runtime_only": true,
+      "client_visible": false,
+      "browser_payload_visible": false,
+      "sync_visible": false,
+      "logs_visible": false
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error", "code", "message", "request_id", "retryable"],
+        "properties": {
+          "error": {"type": "string"},
+          "code": {"type": "string"},
+          "message": {"type": "string"},
+          "request_id": {"type": "string"},
+          "retryable": {"type": "boolean"},
+          "details": {"type": "object"}
+        }
+      },
+      "AccountContext": {
+        "type": "object",
+        "required": ["account_id", "product"],
+        "properties": {
+          "account_id": {"type": "string"},
+          "product": {"const": "dictate"},
+          "entitlement": {"const": "dictate_pro"}
+        }
+      },
+      "DiscoveryDocument": {
+        "type": "object",
+        "required": ["issuer", "authorization_endpoint", "token_endpoint", "device_authorization_endpoint"],
+        "properties": {
+          "issuer": {"type": "string", "pattern": "^https://"},
+          "authorization_endpoint": {"type": "string", "pattern": "^https://"},
+          "token_endpoint": {"type": "string", "pattern": "^https://"},
+          "device_authorization_endpoint": {"type": "string", "pattern": "^https://"}
+        }
+      },
+      "Entitlement": {
+        "type": "object",
+        "required": ["account_id", "product", "entitlement", "state", "capabilities"],
+        "properties": {
+          "account_id": {"type": "string"},
+          "product": {"const": "dictate"},
+          "entitlement": {"const": "dictate_pro"},
+          "state": {"type": "string"},
+          "capabilities": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "Device": {
+        "type": "object",
+        "required": ["account_id", "device_id", "state"],
+        "properties": {
+          "account_id": {"type": "string"},
+          "device_id": {"type": "string"},
+          "state": {"type": "string"}
+        }
+      },
+      "SyncEnvelope": {
+        "type": "object",
+        "required": ["account_id", "device_id", "ciphertext", "key_envelope", "aad"],
+        "properties": {
+          "account_id": {"type": "string"},
+          "device_id": {"type": "string"},
+          "ciphertext": {"type": "string"},
+          "key_envelope": {"type": "string"},
+          "aad": {"type": "string"}
+        }
+      },
+      "HostedJob": {
+        "type": "object",
+        "required": ["job_id", "account_id", "product", "capability", "state", "result_contract"],
+        "properties": {
+          "job_id": {"type": "string"},
+          "account_id": {"type": "string"},
+          "product": {"const": "dictate"},
+          "capability": {"type": "string"},
+          "state": {"type": "string"},
+          "result_contract": {"const": "owner_bound_encrypted_artifact"}
+        }
+      },
+      "GatewayUsageEvent": {
+        "type": "object",
+        "required": ["request_id", "account_id", "product", "capability", "idempotency_key", "state", "unit"],
+        "properties": {
+          "request_id": {"type": "string"},
+          "account_id": {"type": "string"},
+          "product": {"const": "dictate"},
+          "capability": {"type": "string"},
+          "idempotency_key": {"type": "string"},
+          "state": {"type": "string"},
+          "unit": {"const": "audio_seconds"}
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/account/auth/desktop": {
+      "get": {"operationId": "discoverDesktopAuth", "x-status": "proposed_not_deployed"}
+    },
+    "/api/account/auth/authorize": {
+      "get": {"operationId": "authorizeDesktopClient", "x-status": "proposed_not_deployed"}
+    },
+    "/api/account/auth/token": {
+      "post": {"operationId": "exchangeOrRefreshDesktopToken", "x-status": "proposed_not_deployed"}
+    },
+    "/api/dictate/devices": {
+      "get": {"operationId": "listDictateDevices", "x-status": "proposed_not_deployed"},
+      "post": {"operationId": "registerDictateDevice", "x-status": "proposed_not_deployed"}
+    },
+    "/api/dictate/sync": {
+      "get": {"operationId": "pullEncryptedSync", "x-status": "proposed_not_deployed"},
+      "post": {"operationId": "pushEncryptedSync", "x-status": "proposed_not_deployed"}
+    },
+    "/api/dictate/jobs": {
+      "get": {"operationId": "getHostedJobOrResult", "x-status": "proposed_not_deployed"},
+      "post": {"operationId": "createHostedJob", "x-status": "proposed_not_deployed"}
+    }
+  }
+}

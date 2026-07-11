@@ -19,6 +19,16 @@ must not establish a competing cross-system architecture.
 When these documents disagree, this goal controls the cross-system decision and
 the narrower document records the resulting migration or implementation detail.
 
+## Phase 0 execution status
+
+**Status:** PENDING — not passed. Dictate-side contract, inventory, and backend
+handoff evidence are recorded for owner confirmation; no shared backend or live
+implementation is claimed to match them.
+
+- [Machine-readable contract v1](contracts/dictate-platform-v1.json)
+- [Dictate platform inventory v1](platform/dictate-platform-inventory-v1.md)
+- [Arc Forge backend handoff v1](platform/arc-forge-backend-handoff-v1.md)
+
 ## Outcome
 
 Dictate reaches a stable, cohesive product baseline. Local Dictate remains
