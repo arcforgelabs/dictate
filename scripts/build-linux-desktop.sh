@@ -41,8 +41,8 @@ echo "▶ freezing the Python engine sidecar (PyInstaller, onefile)"
 export DICTATE_ONEFILE=1
 ./packaging/build-engine.sh
 echo "▶ staging the engine into the Tauri bundle resources"
-rm -rf ui-shell/src-tauri/engine
 mkdir -p ui-shell/src-tauri/engine
+rm -f ui-shell/src-tauri/engine/dictate-engine
 cp packaging/dist/dictate-engine ui-shell/src-tauri/engine/dictate-engine
 chmod +x ui-shell/src-tauri/engine/dictate-engine
 

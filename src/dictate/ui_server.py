@@ -95,6 +95,9 @@ DEFAULT_PREFS: dict[str, Any] = {
 _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
 _VALID_OUTPUT_FORMATS = ("plain", "markdown")
+_PRIVATE_DICTATION_BACKEND = "parakeet"
+_PRIVATE_DICTATION_MODEL = "parakeet-tdt-0.6b-v2"
+_LEGACY_REGULAR_BACKENDS = {"faster-whisper", "whisperx"}
 
 
 def _pro_state_active(pro: dict[str, Any] | None) -> bool:
@@ -492,8 +495,26 @@ class UiBackend:
             return resolve_default_local_model(cfg.stt_device or "auto")
         return resolve_model_name(backend, cfg.stt_model)
 
-    def get_state(self) -> dict[str, Any]:
+    def _load_ui_config(self) -> config_mod.Config:
+        """Load config and migrate stale regular dictation backends for the UI.
+
+        The UI ships Parakeet as the private regular dictation default. Legacy
+        faster-whisper / whisperx values are treated as stale regular dictation
+        state and rewritten so the runtime follows the shipped default instead
+        of continuing to hydrate the old multilingual local path.
+        """
         cfg = config_mod.load_config(self.config_path)
+        if cfg.stt_backend in _LEGACY_REGULAR_BACKENDS:
+            config_mod.set_stt_selection(
+                _PRIVATE_DICTATION_BACKEND,
+                _PRIVATE_DICTATION_MODEL,
+                path=self.config_path,
+            )
+            cfg = config_mod.load_config(self.config_path)
+        return cfg
+
+    def get_state(self) -> dict[str, Any]:
+        cfg = self._load_ui_config()
         prefs = self.prefs_store.load()
         # No saved backend → the hardware-aware default (Parakeet English on CPU).
         backend = cfg.stt_backend or resolve_default_local_backend(cfg.stt_device or "auto")[0]

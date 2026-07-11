@@ -19,15 +19,16 @@ The Windows tray uses the native notification area. The Linux GTK/Ayatana tray r
 
 ## Install
 
-The target public channel is Microsoft Store distribution. Tagged GitHub
-releases can also attach a signed Windows `.msi` as a direct-download fallback
-for users who do not want the Store route. Unsigned Windows installer artifacts
-remain internal validation artifacts only.
+The target public Windows channel is Microsoft Store distribution. A stable
+Windows release means a Store package that we are happy to submit and support.
+Paid Authenticode signing for direct-download MSI assets is a future option only;
+it is not a current release blocker or standing task. Early testers can use
+staging MSI builds and accept the expected Windows untrusted-publisher warnings.
 
 Direct MSI download:
 
 1. Open the latest GitHub release.
-2. Download `Dictate_*_x64_en-US.msi` when it is attached.
+2. Download `Dictate_*_x64_en-US.msi` when a staging MSI is attached.
 3. Run the installer and open **Dictate** from the Start Menu.
 
 Developer/source bootstrap from PowerShell:

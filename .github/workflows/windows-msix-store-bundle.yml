@@ -56,6 +56,8 @@ jobs:
 
       - name: Build Store MSIX
         shell: pwsh
+        env:
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe" 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-msix.log"
 
       - name: Upload Store MSIX artifact

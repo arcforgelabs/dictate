@@ -74,6 +74,7 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn("Windows SDK MakeAppx", script)
         self.assertIn("Invoke-MakeAppx", script)
         self.assertIn("Assert-MsixPackage", script)
+        self.assertIn("Assert-MsixStagePayload", script)
         self.assertIn("unpack", script)
         self.assertIn("ArcForgeLabs.ArcForgeDictate", script)
         self.assertIn("building shared Windows desktop payload", script)
@@ -81,6 +82,10 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn('-Bundles "no-bundle"', script)
         self.assertIn(r"target\release\dictate-ui-shell.exe", script)
         self.assertIn(r"target\release\engine\dictate-engine.exe", script)
+        self.assertIn(r"ui-shell\src-tauri\engine\*", script)
+        self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\config.json", script)
+        self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt", script)
+        self.assertIn(r"engine\models\pyannote-speaker-diarization-community-1\config.*", script)
 
     def test_windows_msi_uses_installer_safe_version(self) -> None:
         config = json.loads((ROOT / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(

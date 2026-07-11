@@ -16,19 +16,21 @@ automation are maintained separately from GitHub releases; see
 
 Windows 11 normal install:
 
-The target public channel is Microsoft Store distribution. Tagged GitHub
-releases can also attach a signed Windows `.msi` as a direct-download fallback
-for users who do not want the Store route. Unsigned Windows installers are never
-published as public release assets.
+The target public Windows channel is Microsoft Store distribution. A stable
+Windows release means a Store package that we are happy to submit and support.
+Paid Authenticode signing for direct-download MSI assets is a future option only;
+it is not a current release blocker or standing task.
 
 Windows direct download:
 
 1. Open the latest GitHub release.
-2. Download `Dictate_*_x64_en-US.msi` when it is attached.
-3. Run the MSI and open **Dictate** from the Start Menu.
+2. Download `Dictate_*_x64_en-US.msi` when a staging MSI is attached.
+3. Run the MSI and open **Dictate** from the Start Menu. Windows may warn that
+   the installer is from an untrusted publisher; that is expected for staging
+   builds.
 
 If a release does not yet have an MSI attached, use the developer/source
-bootstrap below or wait for the signed MSI asset to be published.
+bootstrap below or wait for the Microsoft Store package.
 
 Windows developer/source install from the hosted bootstrap:
 

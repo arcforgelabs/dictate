@@ -232,16 +232,30 @@ class WindowsPlatformTests(unittest.TestCase):
     def test_windows_desktop_bundle_stages_offline_meeting_runtime(self) -> None:
         root = Path(__file__).resolve().parents[1]
         script = (root / "scripts" / "build-windows-desktop.ps1").read_text(encoding="utf-8")
+        linux_script = (root / "scripts" / "build-linux-desktop.sh").read_text(encoding="utf-8")
+        engine_script = (root / "packaging" / "build-engine.sh").read_text(encoding="utf-8")
         spec = (root / "packaging" / "dictate-engine.spec").read_text(encoding="utf-8")
         shell = (root / "ui-shell" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
 
         self.assertIn("$Root[windows,meeting]", script)
+        self.assertIn("prepare-parakeet-v2-int8-model.py", script)
+        self.assertIn("parakeet-tdt-0.6b-v2-onnx", script)
         self.assertIn("prepare-pyannote-community-model.py", script)
         self.assertIn("pyannote-speaker-diarization-community-1", script)
+        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", script)
+        self.assertLess(script.index("Hugging Face token via DICTATE_HF_TOKEN"), script.index("building the front-end"))
+        self.assertIn("[x11,wayland,meeting]", engine_script)
+        self.assertIn("prepare-parakeet-v2-int8-model.py", engine_script)
+        self.assertIn("prepare-pyannote-community-model.py", engine_script)
+        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", engine_script)
+        self.assertLess(engine_script.index("Hugging Face token via DICTATE_HF_TOKEN"), engine_script.index("creating isolated build venv"))
+        self.assertIn("rm -f ui-shell/src-tauri/engine/dictate-engine", linux_script)
         self.assertIn('"torch"', spec)
         self.assertIn('"pyannote.audio"', spec)
         self.assertNotIn('"torch", "matplotlib"', spec)
+        self.assertIn("DICTATE_PARAKEET_MODEL_PATH", shell)
         self.assertIn("DICTATE_PYANNOTE_MODEL_PATH", shell)
+        self.assertIn("bundled_parakeet_model", shell)
         self.assertIn("pyannote-speaker-diarization-community-1", shell)
 
     def test_windows_installer_prunes_stale_user_install_surfaces(self) -> None:
@@ -678,6 +692,10 @@ class WindowsPlatformTests(unittest.TestCase):
         )
         self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
+        self.assertIn(
+            "if: inputs.run_tests == 'true' && (inputs.source_ref == '' || inputs.source_ref == github.ref)",
+            workflow,
+        )
         self.assertIn("desktop-shell", workflow)
         self.assertIn("needs.tests.result == 'success'", workflow)
         self.assertIn("npm publish --access public --tag", workflow)
@@ -699,6 +717,30 @@ class WindowsPlatformTests(unittest.TestCase):
             "needs: [validate-release-ref, tests, windows-user-smoke, linux-user-sync-smoke]",
             workflow,
         )
+
+    def test_bundle_workflows_pass_huggingface_token_to_staging_builds(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        desktop_bundle = (root / ".github" / "workflows" / "desktop-bundle.yml").read_text(
+            encoding="utf-8"
+        )
+        msix_store_bundle = (root / ".github" / "workflows" / "windows-msix-store-bundle.yml").read_text(
+            encoding="utf-8"
+        )
+        msstore_publish = (root / ".github" / "workflows" / "msstore-publish-msix.yml").read_text(
+            encoding="utf-8"
+        )
+        unstable = (root / ".github" / "workflows" / "npm-unstable.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(release.count("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}"), 2)
+        self.assertIn("Build the desktop bundle (freezes engine + builds .deb)", release)
+        self.assertIn("Build the Windows desktop bundle", release)
+        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", desktop_bundle)
+        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msix_store_bundle)
+        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msstore_publish)
+        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", unstable)
 
 
 if __name__ == "__main__":

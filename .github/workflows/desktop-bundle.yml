@@ -47,6 +47,7 @@ jobs:
         env:
           DICTATE_BUNDLES: ${{ inputs.bundles }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
           NO_STRIP: "true"
           ARCH: "x86_64"
         run: ./scripts/build-linux-desktop.sh 2>&1 | tee /tmp/bundle.log

@@ -3,8 +3,10 @@
 Dictate is open source. The repository contents, tests, and build scripts are
 public by design, but deployment authority must stay private and deliberate.
 
-This document defines the security boundary for workflows that publish packages,
-sign installers, or change Microsoft Partner Center state.
+This document defines the security boundary for workflows that publish packages
+or change Microsoft Partner Center state. Authenticode signing support remains
+in the repository as future plumbing only; paid Windows signing is not part of
+the current release plan.
 
 ## Deployment Boundaries
 
@@ -19,7 +21,6 @@ Privileged:
 
 - Creating or updating GitHub releases.
 - Publishing the npm shim package.
-- Signing Windows `.msi` or `.exe` artifacts.
 - Uploading Microsoft Store packages to a draft.
 - Publishing or committing a Microsoft Store submission.
 - Reading or mutating Partner Center state with app credentials.
@@ -37,7 +38,7 @@ lanes:
 | --- | --- | --- |
 | `release` | GitHub release assets and npm publish | `NPM_TOKEN` |
 | `npm-publish` | Manual unstable npm dist-tag publish | `NPM_TOKEN` |
-| `windows-signing` | Authenticode signing and signed Windows release upload | `WINDOWS_SIGNING_PFX_B64`, `WINDOWS_SIGNING_PFX_PASSWORD`, signing timestamp variables |
+| `windows-signing` | Future paid Authenticode lane only; not required for current Store/staging releases | `WINDOWS_SIGNING_PFX_B64`, `WINDOWS_SIGNING_PFX_PASSWORD`, signing timestamp variables |
 | `microsoft-store-status` | Read-only Store credential smoke/status checks | Store tenant/client/seller/product values and Store client secret |
 | `microsoft-store-draft` | Build and upload Store package to an uncommitted draft | Store tenant/client/seller/product values and Store client secret |
 | `microsoft-store-publish` | Commit a Store submission for Microsoft certification | Store tenant/client/seller/product values and Store client secret |
@@ -62,11 +63,12 @@ Current repository settings:
 2. The release tag must resolve to a commit reachable from the default branch.
 3. The release workflow must be dispatched from the default branch.
 4. Release jobs must pass tests before any publish step.
-5. Unsigned Windows desktop artifacts may be uploaded only as internal workflow
-   artifacts. They must not be attached to a public GitHub release.
-6. Signed Windows artifacts may be attached only after `assert-windows-artifacts-signed.ps1`
-   passes. The dedicated `windows-msi-release.yml` backfill workflow may attach a
-   signed MSI to an existing release tag without rerunning the full release.
+5. Stable public Windows releases go through Microsoft Store packaging and
+   certification. Unsigned MSI/NSIS artifacts may be shared as staging/tester
+   builds when the tester accepts Windows untrusted-publisher warnings.
+6. Do not block ordinary release work on Windows signing configuration. The
+   dedicated signing scripts/workflow are future-only unless a revenue-backed
+   direct-download MSI lane is explicitly approved.
 7. Microsoft Store `draft` mode uploads a package without committing the
    submission. Microsoft Store `publish` mode submits the current draft for
    certification and must be explicitly approved.
@@ -80,7 +82,8 @@ Current repository settings:
 - Prefer environment secrets over repository-wide secrets for deployment lanes.
 - Keep Microsoft Store read/status, draft-upload, and publish credentials
   separate where Partner Center permissions allow it.
-- Keep Windows signing material only in the `windows-signing` environment.
+- If Windows signing material is ever purchased, keep it only in the
+  `windows-signing` environment.
 - Do not expose provider keys, signing certificates, npm tokens, Store secrets,
   access tokens, or customer data to pull request workflows.
 - Rotate a secret immediately if it is printed, copied into an artifact, or

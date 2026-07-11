@@ -28,6 +28,13 @@ Set-StrictMode -Version Latest
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
+$HuggingFaceToken = @($env:DICTATE_HF_TOKEN, $env:HUGGINGFACE_HUB_TOKEN, $env:HF_TOKEN) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($HuggingFaceToken)) {
+    throw "Staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
+}
+
 if ([string]::IsNullOrWhiteSpace($Bundles)) {
     $Bundles = "msi,nsis"
 }
@@ -129,6 +136,14 @@ $StageDir = Join-Path $Root "ui-shell\src-tauri\engine"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $StageDir
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
+
+Write-Host "staging Parakeet v2 int8 for bundled local English ASR"
+$ParakeetModelDir = Join-Path $StageDir "models\parakeet-tdt-0.6b-v2-onnx"
+Invoke-Native "downloading Parakeet v2 int8 model files" $VenvPython @(
+    (Join-Path $Root "scripts\prepare-parakeet-v2-int8-model.py"),
+    "--output",
+    $ParakeetModelDir
+)
 
 Write-Host "staging pyannote Community-1 for offline Meeting mode"
 $PyannoteModelDir = Join-Path $StageDir "models\pyannote-speaker-diarization-community-1"

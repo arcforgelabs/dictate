@@ -19,8 +19,26 @@ dictates (`--no-tray`) and serves the control API (`DICTATE_UI_SERVER=1`,
 implemented in `src/dictate/ui_server.py`). The webview talks to that server over
 loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.json`.
 
-Models are **not** bundled - they download on first use, exactly as in a `pip`
-install.
+The desktop bundles stage the default offline resources beside the frozen
+engine: Parakeet v2 int8 ONNX for regular English dictation and pyannote
+Community-1 for Meeting speaker attribution. Customers should not need Hugging
+Face accounts or model downloads for those bundled paths.
+
+Hugging Face appears in the build pipeline only because pyannote Community-1 is
+a gated upstream model. The build needs access to the already-approved model
+once, before packaging, so it can copy the model snapshot into
+`ui-shell/src-tauri/engine/models/`. Parakeet v2 int8 is public and does not
+need a private token. Runtime customer installs must prefer the bundled model
+paths and must not ask customers for Hugging Face credentials for the shipped
+default dictation or Meeting paths.
+
+Operator credential source: use the existing secret-management lane, such as
+Bitwarden Secrets Manager materialized into GitHub Actions secrets or a
+protected runner environment. The app and customer runtime must not call
+Bitwarden or Hugging Face. If an internal model mirror/artifact becomes the
+source of truth, update `scripts/prepare-pyannote-community-model.py` to stage
+from that artifact before falling back to Hugging Face; do not reintroduce a
+customer-time download.
 
 GPU provider packages are packaging inputs, not UI choices. The default bundled
 engine can run CPU Parakeet. NVIDIA builds that should exercise CUDA install the
@@ -70,10 +88,10 @@ scripts/build-windows-desktop.ps1
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the
-  requested `v20*` tag is reachable from the default branch. It attaches
-  `.msi`/installer `.exe` assets
-  to the GitHub release only when Authenticode signatures validate; unsigned
-  artifacts are uploaded as internal workflow artifacts instead.
+  requested `v20*` tag is reachable from the default branch. Public stable
+  Windows distribution is the Microsoft Store path. Direct-download Windows
+  installers are staging/tester artifacts unless we later decide to pay for and
+  maintain Authenticode signing.
 - **Unstable (`.github/workflows/npm-unstable.yml`)** runs the same Windows
   desktop build and the Linux user encrypted-sync install smoke before moving
   the npm `unstable` dist-tag. It uploads the `.msi` and NSIS setup `.exe` as
@@ -82,27 +100,26 @@ scripts/build-windows-desktop.ps1
   builds the Windows bundle and uploads artifacts + the full log without cutting
   a release tag. Trigger: `gh workflow run windows-desktop-bundle.yml`.
 - **Manual (`.github/workflows/windows-msi-release.yml`, `workflow_dispatch`)**
-  builds only the MSI for an existing release tag, signs it, verifies the
-  Authenticode signature, and attaches it to that GitHub release. Trigger:
-  `gh workflow run windows-msi-release.yml -f release_tag=v2026.7.4`.
-- Unsigned Windows artifacts are for internal validation only. Signed MSI assets
-  attached to GitHub releases are the direct-download fallback for users who do
-  not want Microsoft Store distribution. The Store path remains tracked in
+  is retained as future plumbing for a paid Authenticode direct-download lane.
+  It is not part of the current Windows release plan and should not block
+  tester-ready or Store-ready work.
+- Unsigned Windows MSI/NSIS artifacts are acceptable for early/staging testers.
+  Those users will see Windows untrusted-publisher warnings and may need to
+  approve the install manually. That is expected for staging builds. The stable
+  public Windows path remains the Microsoft Store package tracked in
   [msstore-automation.md](msstore-automation.md).
 - The Tauri shell looks for `dictate-engine.exe` on Windows and for
   `dictate-engine` elsewhere. It also reads the UI handshake from
   `%LOCALAPPDATA%\dictate`, matching `src/dictate/platform_paths.py`.
-- `scripts/assert-windows-artifacts-signed.ps1` is the public-release guardrail:
-  direct-download Windows installers must be signed before they are attached to a
-  GitHub release.
-- `scripts/sign-windows-artifacts.ps1` signs `.msi` and `.exe` artifacts when a
-  signing certificate is configured. CI supports either a base64 PFX in
-  `WINDOWS_SIGNING_PFX_B64` plus `WINDOWS_SIGNING_PFX_PASSWORD`, or a runner-local
-  `WINDOWS_SIGNING_CERT_PATH`. Without those credentials, Windows release
-  artifacts remain internal workflow artifacts.
+- `scripts/assert-windows-artifacts-signed.ps1` and
+  `scripts/sign-windows-artifacts.ps1` exist only for the future paid
+  Authenticode lane. Do not keep revisiting Windows signing configuration during
+  ordinary release or staging work. We are not currently paying for that
+  certificate path.
 
-To backfill the signed MSI onto an existing release after the signing
-certificate is configured:
+If a future revenue-backed direct-download MSI lane is explicitly approved,
+backfill a signed MSI onto an existing release after the signing certificate is
+configured:
 
 ```bash
 gh workflow run windows-msi-release.yml \

@@ -252,8 +252,8 @@ data, and a small local recent transcript history for copy/paste recovery.
 - Confirm `https://arcforge.au/privacy/dictate` is still live.
 - Build Store MSIX package from `windows-msix-store-bundle.yml`.
 - Test the new bundled version before upload.
-- Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as the signed
-  direct-download fallback only.
+- Keep MSI/NSIS artifacts from `windows-desktop-bundle.yml` as staging/tester
+  artifacts only. Stable public Windows delivery is the Microsoft Store path.
 - Upload package.
 - Store listing prep is already staged in Submission 2:
   - The four clean current-UI screenshots from

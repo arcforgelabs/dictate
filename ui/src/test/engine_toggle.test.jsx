@@ -1,28 +1,110 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import App from "../App.jsx";
 
-afterEach(() => { cleanup(); delete window.__DICTATE__; vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); delete window.__DICTATE__; delete window.EventSource; vi.restoreAllMocks(); });
 
-describe("Local engine toggle (English/Multilingual)", () => {
-  it("shows English + Multilingual options in private mode", () => {
+const ACTIVE_PRO = {
+  signedIn: true,
+  entitlements: { active: true, display_name: "Dictate Pro", status: "active" },
+};
+
+describe("Language toggle", () => {
+  it("shows English and cloud-only Multilingual actions in private mode", () => {
     render(<App />);
     expect(screen.getByRole("button", { name: "English" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Multilingual" })).toBeTruthy();
   });
 
-  it("exactly one option is selected, reflecting the active backend", () => {
+  it("keeps English selected when a stale whisperx config is hydrated in private mode", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() {}
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            model: { id: "whisperx/large-v3" },
+            history: [],
+            providers: { xai: { configured: false } },
+            dictatePro: { signedIn: false },
+          }),
+        };
+      }
+      if (path === "/api/config" && opts.method === "PATCH") {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByRole("button", { name: "Multilingual" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/config",
+      expect.objectContaining({
+        method: "PATCH",
+      }),
+    ));
+    expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("parakeet-tdt-0.6b-v2"))).toBe(true);
+  });
+
+  it("shows both gating toasts and stays on English when Pro is active but xAI is missing", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() {}
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            providers: { xai: { configured: false } },
+            dictatePro: ACTIVE_PRO,
+          }),
+        };
+      }
+      if (path === "/api/config" && opts.method === "PATCH") {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Multilingual" }));
+
+    expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
+    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeTruthy();
+    expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.method) === "PATCH")).toBe(false);
+    expect(screen.getByRole("button", { name: "Multilingual" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps English selected for the bundled local engine", () => {
     render(<App />);
     const en = screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed");
     const multi = screen.getByRole("button", { name: "Multilingual" }).getAttribute("aria-pressed");
-    // Mutually exclusive; the default fresh/mock state is Parakeet English.
-    expect([en, multi].filter((v) => v === "true")).toHaveLength(1);
     expect(en).toBe("true");
+    expect(multi).toBe("false");
   });
 
-  it("clicking English switches selection to the English engine", () => {
+  it("clicking Multilingual shows the cloud-only toast and keeps the sign-in flow intact", async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    fireEvent.click(screen.getByRole("button", { name: "Multilingual" }));
+
+    expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
+    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Multilingual" }).getAttribute("aria-pressed")).toBe("false");
   });

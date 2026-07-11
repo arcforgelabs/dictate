@@ -135,41 +135,51 @@ function noteMarkdown(note, titleDate) {
 
 /* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
 const ONLINE_MODEL = "xai/grok-speech-to-text";
-// Local engines. English (Parakeet) is the private default — fast + accurate on
-// this machine. Multilingual (Whisper) is backend-only so the server picks the
-// hardware-aware tier. No brand names surface in the UI.
+// Local engine. English (Parakeet) is the private default — fast + accurate on
+// this machine. Multilingual is cloud-only, so the UI only offers it as a
+// cloud/Pro action rather than a regular local option.
 const PRIVATE_MODEL = "parakeet/parakeet-tdt-0.6b-v2";
-const PRIVATE_MODEL_MULTI = "faster-whisper";
 
-/* Local language toggle — only shown in Private mode. English uses the on-device
-   Parakeet engine (fast, accurate); Multilingual uses Whisper for other languages.
-   Neither name is surfaced; the choice is framed by capability, not brand. */
+/* Local language toggle — only shown in Private mode. English stays on-device;
+   Multilingual is a cloud-only action that routes through the existing sign-in
+   / Dictate Pro flow before switching providers. */
 function LocalEngineToggle() {
   const s = useStore();
   const online = s.providerMode === "online";
   const privateOn = !online || s.providerDegraded;
   if (!privateOn) return null;
-  const backend = String(s.model || "").split("/")[0];
-  const isEnglish = backend !== "faster-whisper" && backend !== "whisperx";
-  const pick = (english) => {
-    if (english === isEnglish) return;
-    s.setModel(english ? PRIVATE_MODEL : PRIVATE_MODEL_MULTI);
+  const isEnglish = true;
+  const pickEnglish = () => {
+    if (s.model !== PRIVATE_MODEL) s.setModel(PRIVATE_MODEL);
+  };
+  const pickMultilingual = () => {
+    s.toast("Multilingual is available in Cloud mode only.", { tone: "amber" });
+    if (!s.keys.xai) {
+      s.toast("Requires Dictate Pro or API key.", {
+        bad: true,
+        ms: 12_000,
+        copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
+        href: DICTATE_PRO_URL,
+      });
+      return;
+    }
+    s.setModel(ONLINE_MODEL);
   };
   return (
-    <div className="engine-seg" role="group" aria-label="Local language">
+    <div className="engine-seg" role="group" aria-label="Language mode">
       <button
         type="button"
         className={"engine-opt" + (isEnglish ? " on" : "")}
         aria-pressed={isEnglish}
-        onClick={() => pick(true)}
+        onClick={pickEnglish}
       >
         English
       </button>
       <button
         type="button"
         className={"engine-opt" + (!isEnglish ? " on" : "")}
-        aria-pressed={!isEnglish}
-        onClick={() => pick(false)}
+        aria-pressed={false}
+        onClick={pickMultilingual}
       >
         Multilingual
       </button>
@@ -182,7 +192,6 @@ function PrivacyPill() {
   const online = s.providerMode === "online";
   const degraded = s.providerDegraded;
   const privateOn = !online || degraded;
-  const proActive = !!s.dictatePro?.signedIn && !!s.dictatePro?.entitlements?.active;
 
   const onToggle = (on) => {
     if (on === privateOn) return;
@@ -190,7 +199,7 @@ function PrivacyPill() {
       s.setModel(PRIVATE_MODEL);
       return;
     }
-    if (!s.keys.xai && !proActive) {
+    if (!s.keys.xai) {
       s.toast("Requires Dictate Pro or API key.", {
         bad: true,
         ms: 12_000,

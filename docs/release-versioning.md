@@ -117,8 +117,9 @@ the unstable channel.
 With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
 matrix, the Windows user install/update/uninstall smoke, the Linux user
 encrypted-sync install smoke, UI build/server smoke, desktop shell compile/Rust
-tests, and npm package dry-run. Store upload/publish and signed Windows artifact
-release remain separate guarded workflows.
+tests, and npm package dry-run. Store upload/publish remains a separate guarded
+workflow. Paid Authenticode signing for direct-download Windows installers is a
+future-only lane, not a current release blocker.
 
 To publish an unstable bootstrap:
 
@@ -155,5 +156,7 @@ Microsoft Store through their own guarded workflows. Never promote by retagging
 an unstable npm package as stable.
 
 Do not present this as the normal public Windows install path. The Windows
-release target is Microsoft Store distribution, with signed direct-download
-artifacts only as a secondary fallback.
+release target is Microsoft Store distribution. Unstable/staging MSI builds may
+be shared with testers who accept the expected Windows untrusted-publisher
+warnings. Do not revisit paid Windows signing until there is an explicit
+revenue-backed decision to maintain a direct-download MSI lane.

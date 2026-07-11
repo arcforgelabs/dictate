@@ -97,6 +97,8 @@ jobs:
       - name: Build Store MSIX
         if: inputs.mode == 'draft'
         shell: pwsh
+        env:
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe"
 
       - name: Upload package to draft without committing

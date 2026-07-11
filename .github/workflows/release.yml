@@ -295,6 +295,7 @@ jobs:
       - name: Build the desktop bundle (freezes engine + builds .deb)
         env:
           DICTATE_BUNDLES: "deb"
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
           NO_STRIP: "true"
           ARCH: "x86_64"
         run: ./scripts/build-linux-desktop.sh
@@ -344,6 +345,8 @@ jobs:
 
       - name: Build the Windows desktop bundle
         shell: pwsh
+        env:
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-desktop.ps1
 
       - name: Sign Windows desktop artifacts

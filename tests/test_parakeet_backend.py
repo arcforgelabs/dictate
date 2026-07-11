@@ -7,9 +7,11 @@ transcribe wrapper against a fake onnx-asr model.
 
 from __future__ import annotations
 
+import os
 import unittest
 import sys
 import types
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -194,6 +196,42 @@ class ParakeetTranscribeTests(unittest.TestCase):
         )
 
         self.assertEqual(stt.quantization, None)
+
+    def test_bundled_v2_int8_model_root_is_used_before_downloads(self) -> None:
+        fake_onnx_asr = types.SimpleNamespace(load_model=Mock(return_value=_FakeOnnxModel("ok")))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(os.environ, {"DICTATE_PARAKEET_MODEL_PATH": temp_dir}, clear=True),
+                patch("dictate.stt.parakeet_backend._model_files_present", return_value=True),
+                patch("dictate.stt.parakeet_backend._download_model_files") as download,
+                patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
+            ):
+                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2", device="cpu")
+                self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
+
+        download.assert_not_called()
+        args, kwargs = fake_onnx_asr.load_model.call_args
+        self.assertEqual(Path(args[1]), Path(temp_dir))
+        self.assertEqual(kwargs["quantization"], "int8")
+
+    def test_v3_model_still_resolves_from_the_normal_download_path(self) -> None:
+        fake_onnx_asr = types.SimpleNamespace(load_model=Mock(return_value=_FakeOnnxModel("ok")))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            isolated_model_dir = Path(temp_dir) / "normal-model-dir"
+            with (
+                patch.dict(os.environ, {"DICTATE_PARAKEET_MODEL_PATH": temp_dir}, clear=True),
+                patch("dictate.stt.parakeet_backend._model_dir", return_value=isolated_model_dir),
+                patch("dictate.stt.parakeet_backend._download_model_files") as download,
+                patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
+            ):
+                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v3", device="cpu")
+                self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
+
+        download.assert_called_once()
+        args, kwargs = fake_onnx_asr.load_model.call_args
+        self.assertEqual(Path(args[1]), isolated_model_dir)
+        self.assertNotEqual(Path(args[1]), Path(temp_dir))
+        self.assertEqual(kwargs["quantization"], "int8")
 
 
 class ParakeetReadinessTests(unittest.TestCase):

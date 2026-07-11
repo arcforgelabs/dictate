@@ -28,7 +28,7 @@
     ],
     "category": "Utility",
     "shortDescription": "Desktop dictation — the Quiet Console.",
-    "longDescription": "Dictate types your speech straight into whatever app you're focused on. The frozen Python engine ships inside this package, so no separate install is needed; speech models download on first use.",
+    "longDescription": "Dictate types your speech straight into whatever app you're focused on. The frozen Python engine and default local speech resources ship inside this package, so no separate install is needed.",
     "resources": ["engine/**/*"],
     "publisher": "Arc Forge Labs",
     "copyright": "Copyright (c) Arc Forge Labs",

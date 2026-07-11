@@ -510,9 +510,9 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(weak["model"]["model"], "small")
             self.assertEqual(weak["model"]["id"], "faster-whisper/small")
 
-    def test_saved_local_model_overrides_hardware_resolver(self) -> None:
-        # An explicit (CLI-set) saved model always wins over the hardware default
-        # and is NOT clobbered on load (get_state).
+    def test_stale_regular_local_model_migrates_to_parakeet_on_state_load(self) -> None:
+        # Legacy regular dictation backends are UI-stale state and should be
+        # rewritten to the shipped private default when the UI hydrates.
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:
@@ -520,21 +520,43 @@ class UiBackendStateTests(unittest.TestCase):
             config_mod.set_stt_selection("faster-whisper", "base", path=backend.config_path)
             with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
                 state = backend.get_state()
-            self.assertEqual(state["model"]["model"], "base")
+            cfg = config_mod.load_config(backend.config_path)
+            self.assertEqual(state["model"]["backend"], "parakeet")
+            self.assertEqual(state["model"]["model"], "parakeet-tdt-0.6b-v2")
+            self.assertEqual(cfg.stt_backend, "parakeet")
+            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
 
-    def test_faster_whisper_selection_persists_resolved_tier_not_client_value(self) -> None:
-        # P2-1: a faster-whisper selection from the GUI (which has no tier picker)
-        # must persist the hardware-resolved tier, never the client's hardcoded id,
-        # so a weak CPU never gets turbo pinned in config.
+    def test_state_load_migration_leaves_meeting_selection_untouched(self) -> None:
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
-                # Client sends the old hardcoded "faster-whisper/turbo" intent.
-                backend.patch_config({"model": {"backend": "faster-whisper", "model": "turbo"}})
+            config_mod.set_stt_selection("whisperx", "large-v3", path=backend.config_path)
+            config_mod.set_meeting_stt_selection("whisperx", "large-v3", path=backend.config_path)
+
+            state = backend.get_state()
             cfg = config_mod.load_config(backend.config_path)
-            self.assertEqual(cfg.stt_model, "small")
+
+            self.assertEqual(state["model"]["backend"], "parakeet")
+            self.assertEqual(state["meetingModel"]["backend"], "whisperx")
+            self.assertEqual(state["meetingModel"]["model"], "large-v3")
+            self.assertEqual(cfg.stt_backend, "parakeet")
+            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
+            self.assertEqual(cfg.meeting_stt_backend, "whisperx")
+            self.assertEqual(cfg.meeting_stt_model, "large-v3")
+
+    def test_faster_whisper_selection_is_migrated_on_state_load(self) -> None:
+        # Legacy regular dictation selections are normalized through the UI state
+        # path before they can persist, so the config is corrected to Parakeet.
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            # Client sends the old hardcoded "faster-whisper/turbo" intent.
+            backend.patch_config({"model": {"backend": "faster-whisper", "model": "turbo"}})
+            cfg = config_mod.load_config(backend.config_path)
+            self.assertEqual(cfg.stt_backend, "parakeet")
+            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
 
     def test_models_default_flag_tracks_resolved_local_tier(self) -> None:
         # P3-1: the models list "default" flag for faster-whisper matches the

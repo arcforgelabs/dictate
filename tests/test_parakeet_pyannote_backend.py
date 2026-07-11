@@ -82,6 +82,7 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"HF_HOME": temp_dir}, clear=True),
                 patch("dictate.stt.parakeet_pyannote_backend.Path.home", return_value=Path(temp_dir)),
+                patch("huggingface_hub.utils.get_token", return_value=None),
             ):
                 self.assertEqual(pyannote_token(), "cached-token")
 
@@ -210,6 +211,7 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"HF_HOME": temp_dir}, clear=True),
                 patch("dictate.stt.parakeet_pyannote_backend.Path.home", return_value=Path(temp_dir)),
+                patch("huggingface_hub.utils.get_token", return_value=None),
                 patch.dict(sys.modules, {"pyannote": fake_pyannote, "pyannote.audio": fake_audio}),
             ):
                 with self.assertRaisesRegex(RuntimeError, "requires a Hugging Face token"):

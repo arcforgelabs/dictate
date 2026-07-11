@@ -20,8 +20,10 @@ packaging quirks are handled here:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+import os
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -37,6 +39,8 @@ from dictate.stt.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+PARAKEET_MODEL_PATH_ENV = "DICTATE_PARAKEET_MODEL_PATH"
 
 @dataclass(frozen=True, slots=True)
 class _ParakeetModelSpec:
@@ -73,6 +77,13 @@ def _model_dir(spec: _ParakeetModelSpec) -> Path:
     return user_data_dir() / "models" / spec.model_dirname
 
 
+def _bundled_model_root() -> Path | None:
+    raw_path = os.environ.get(PARAKEET_MODEL_PATH_ENV)
+    if not raw_path:
+        return None
+    return Path(raw_path).expanduser()
+
+
 # The exact ONNX files onnx-asr needs, per quantization. Downloaded individually
 # (not via snapshot's symlinked cache) so onnxruntime can resolve them and so a
 # stalled multi-file snapshot can't wedge the whole download.
@@ -100,22 +111,19 @@ def _ensure_model(model_name: str, quantization: str | None) -> Path:
     symlinks) so onnxruntime can resolve the external weights regardless of its
     version's path checks. Idempotent: files already present are not re-fetched.
     """
-    from huggingface_hub import hf_hub_download
-
     spec = _MODEL_SPECS[model_name]
+    files = _INT8_FILES if quantization == "int8" else _FP32_FILES
+    if model_name == "parakeet-tdt-0.6b-v2" and quantization == "int8":
+        bundled_root = _bundled_model_root()
+        if bundled_root and _model_files_present(bundled_root, files):
+            return bundled_root
+
     target = _model_dir(spec)
     target.mkdir(parents=True, exist_ok=True)
-    files = _INT8_FILES if quantization == "int8" else _FP32_FILES
-    for name in files:
-        dest = target / name
-        if dest.exists() and dest.stat().st_size > 0:
-            continue
-        hf_hub_download(
-            spec.hf_repo,
-            filename=name,
-            local_dir=str(target),
-            local_dir_use_symlinks=False,
-        )
+    if _model_files_present(target, files):
+        return target
+
+    _download_model_files(target, spec, files)
     return target
 
 
@@ -168,6 +176,35 @@ def _quantization_for_compute_type(compute_type: ComputeType) -> str | None:
     if compute_type == "float32":
         return None
     return "int8"
+
+
+def _model_files_present(root: Path, files: tuple[str, ...]) -> bool:
+    return all((root / name).is_file() and (root / name).stat().st_size > 0 for name in files)
+
+
+def _download_model_files(target: Path, spec: _ParakeetModelSpec, files: tuple[str, ...]) -> None:
+    from huggingface_hub import hf_hub_download
+
+    for name in files:
+        dest = target / name
+        if dest.exists() and dest.stat().st_size > 0:
+            continue
+        hf_hub_download(
+            spec.hf_repo,
+            filename=name,
+            local_dir=str(target),
+            local_dir_use_symlinks=False,
+        )
+
+
+def prepare_parakeet_v2_int8_model(output: str | Path) -> Path:
+    """Stage the bundled Parakeet v2 int8 runtime files into a flat directory."""
+    target = Path(output).expanduser().resolve()
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    _download_model_files(target, _MODEL_SPECS["parakeet-tdt-0.6b-v2"], _INT8_FILES)
+    return target
 
 
 class ParakeetSpeechToText(SpeechToText):

@@ -149,7 +149,15 @@ function Assert-MsixPackage {
         if ($Identity.Version -ne $ExpectedVersion) {
             throw "MSIX validation failed: expected version '$ExpectedVersion', got '$($Identity.Version)'"
         }
-        foreach ($Payload in @("dictate-ui-shell.exe", "engine\dictate-engine.exe")) {
+        foreach (
+            $Payload in @(
+                "dictate-ui-shell.exe",
+                "engine\dictate-engine.exe",
+                "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
+                "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
+                "engine\models\pyannote-speaker-diarization-community-1\config.*"
+            )
+        ) {
             $PayloadPath = Join-Path $InspectDir $Payload
             if (-not (Test-Path $PayloadPath)) {
                 throw "MSIX validation failed: missing payload '$Payload'"
@@ -157,6 +165,27 @@ function Assert-MsixPackage {
         }
     } finally {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $InspectDir
+    }
+}
+
+function Assert-MsixStagePayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$StageDir
+    )
+
+    foreach (
+        $Payload in @(
+            "dictate-ui-shell.exe",
+            "engine\dictate-engine.exe",
+            "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
+            "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
+            "engine\models\pyannote-speaker-diarization-community-1\config.*"
+        )
+    ) {
+        $PayloadPath = Join-Path $StageDir $Payload
+        if (-not (Test-Path $PayloadPath)) {
+            throw "MSIX staging failed: missing payload '$Payload'"
+        }
     }
 }
 
@@ -202,7 +231,9 @@ Write-Host "staging MSIX loose layout"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $Dist, $OutDir
 New-Item -ItemType Directory -Force -Path $Dist, $Assets, (Join-Path $Dist "engine"), $OutDir | Out-Null
 Copy-Item $ShellExe (Join-Path $Dist "dictate-ui-shell.exe")
-Copy-Item $Engine (Join-Path $Dist "engine\dictate-engine.exe")
+Copy-Item (Join-Path $Root "ui-shell\src-tauri\engine\*") (Join-Path $Dist "engine") -Recurse -Force
+
+Assert-MsixStagePayload -StageDir $Dist
 
 $ManifestContent = Get-Content $ManifestTemplate -Raw
 $ManifestContent = $ManifestContent.Replace("{{VERSION}}", $MsixVersion)

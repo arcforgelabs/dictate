@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from dictate.model_prepare import _create_loaded_stt, _prepare_backend_resources, _should_retry_on_cpu
+from dictate.stt.parakeet_backend import _INT8_FILES, prepare_parakeet_v2_int8_model
 from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText
 
 
@@ -88,6 +91,18 @@ class ModelPrepareTests(unittest.TestCase):
 
         self.assertTrue(stt.prepared)
         self.assertFalse(stt.model_loaded)
+
+    def test_prepare_parakeet_v2_int8_model_targets_exact_int8_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "engine" / "models" / "parakeet-tdt-0.6b-v2-onnx"
+            with patch("dictate.stt.parakeet_backend._download_model_files") as download:
+                result = prepare_parakeet_v2_int8_model(output)
+
+        self.assertEqual(result, output.resolve())
+        download.assert_called_once()
+        args, _kwargs = download.call_args
+        self.assertEqual(Path(args[0]), output.resolve())
+        self.assertEqual(args[2], _INT8_FILES)
 
     def test_parakeet_pyannote_prepare_loads_asr_and_pyannote_pipeline(self) -> None:
         stt = ParakeetPyannoteSpeechToText()

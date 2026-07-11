@@ -194,6 +194,19 @@ fn bundled_pyannote_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf>
     None
 }
 
+fn bundled_parakeet_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
+    for base in engine_resource_dirs(app) {
+        let candidate = base
+            .join("engine")
+            .join("models")
+            .join("parakeet-tdt-0.6b-v2-onnx");
+        if candidate.join("config.json").exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn engine_resource_dirs<R: Runtime, M: Manager<R>>(app: &M) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(exe) = env::current_exe() {
@@ -237,6 +250,9 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         let mut cmd = Command::new(&bin);
         cmd.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
         cmd.env("DICTATE_SHELL_VERSION", shell_version);
+        if let Some(model_path) = bundled_parakeet_model(app) {
+            cmd.env("DICTATE_PARAKEET_MODEL_PATH", model_path);
+        }
         if let Some(model_path) = bundled_pyannote_model(app) {
             cmd.env("DICTATE_PYANNOTE_MODEL_PATH", model_path);
         }

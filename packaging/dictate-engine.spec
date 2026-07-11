@@ -1,9 +1,9 @@
 # PyInstaller spec for the frozen Dictate engine sidecar.
 #
 # Bundles the Python runtime + STT stack (faster-whisper / ctranslate2 /
-# onnxruntime / av) plus the local Meeting runtime. General ASR models download
-# on first use; the Windows desktop build stages pyannote Community-1 beside the
-# engine so Meeting mode does not need customer Hugging Face credentials.
+# onnxruntime / av) plus the local Meeting runtime. The desktop builds stage
+# Parakeet v2 int8 and pyannote Community-1 beside the engine so the default
+# English ASR and Meeting mode do not need customer Hugging Face credentials.
 #
 # Two layouts, selected by DICTATE_ONEFILE:
 #   - onedir (default): dist/dictate-engine/dictate-engine  — fast start; used
