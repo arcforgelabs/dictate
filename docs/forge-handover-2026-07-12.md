@@ -244,7 +244,7 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Branch tips (local, not pushed):**
 - arc-forge-deck `forge/wave1-durable-auth` @ **`965fe40`**
-- dictate `forge/dictate-pro-platform` @ **`4cc83f0`**
+- dictate `forge/dictate-pro-platform` @ **`1c5ebf7`**
 
 ## Wave 4 Round 2 — conductor doc fixes
 
@@ -259,6 +259,17 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 4. **[P3]** Inventory stale rows annotated superseded by forge overlay /
    DurableAuthStore / server-managed artifacts.
 
+## Wave 4 Round 3 — tip SHA honesty
+
+**Status:** done locally (not pushed).
+
+1. **[P2]** Aligned dictate branch tip fields in readiness and handover so both
+   document the same local HEAD after this commit (no internal contradiction).
+2. **[P2]** Incorporated the uncommitted handover boundary fix and retired stale
+   `4cc83f0` / `584b3f6` split across readiness vs external boundary block.
+
+**Wave 4 Round 3 commit:** `1c5ebf7` (dictate); deck tip unchanged `965fe40`.
+
 ## Waves 0–4 local status
 
 | Wave | Status |
@@ -269,6 +280,7 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 | Wave 3 | **COMPLETE LOCAL** — devices, sync, desktop convergence |
 | Wave 4 R1 | **COMPLETE LOCAL PROOF** — docs/integration gates; pending human deploy go |
 | Wave 4 R2 | **COMPLETE LOCAL** — residual auth inventory + doc SHA fixes |
+| Wave 4 R3 | **COMPLETE LOCAL** — tip SHA honesty across readiness + handover |
 
 Nothing has been pushed, merged, deployed, or released.
 
@@ -325,7 +337,7 @@ branch tip (local): 965fe40
 /home/samuel/repos/dictate
 branch: forge/dictate-pro-platform
 Wave 4 Round 1: 57d02c6 (+ handover fix 6c1faa8)
-branch tip (local): 584b3f6
+branch tip (local): 1c5ebf7
 ```
 
 Do not push, merge, or deploy without explicit human go.

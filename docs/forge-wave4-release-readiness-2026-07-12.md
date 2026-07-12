@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
 **Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
-**Dictate branch tip:** `forge/dictate-pro-platform` @ `4cc83f0`
+**Dictate branch tip:** `forge/dictate-pro-platform` @ `1c5ebf7`
+
 **Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
 **Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
 
@@ -126,3 +127,4 @@ cd ui && npm test
 Record actual pass counts in the handover after each run.
 
 **Wave 4 Round 1 results:** deck 124 passed; dictate 221 passed; ui vitest 98 passed.
+<!-- w4r3-sync: 15091 -->
