@@ -97,6 +97,11 @@ Dictate-side work or expand the planning pack.
 Gate: every production surface has one proposed authority and no unresolved
 decision prevents Wave 1 implementation.
 
+Status: **PASSED — planning authority lock only.** The linked contract,
+inventory, and handoff assign one proposed authority per production surface;
+deployment facts remain **UNKNOWN** later verification tasks. No live
+conformance or Wave 1 implementation is claimed in this status.
+
 ### Wave 1 — Durable account, login, commerce, and usage
 
 Build as one backend milestone:

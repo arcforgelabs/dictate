@@ -1,11 +1,14 @@
 # Arc Forge Backend Handoff v1
 
-**Status:** PENDING OWNER CONFIRMATION.
+**Status:** WAVE 0 AUTHORITY LOCKED — DEPLOYMENT VERIFICATION UNKNOWN.
 
-**Phase 0 gate:** **PENDING — not passed.** This handoff is the smallest
+**Wave 0 gate:** **PASSED — planning authority lock only.** This handoff is the smallest
 Dictate-side request to the external active `arc-forge-deck` owner. It does not
 claim that source implementation or live routes conform to the
 [Dictate Platform Contract v1](../contracts/dictate-platform-v1.json).
+External owner response, deployment SHA, and live behavior remain later
+verification tasks and do not leave an implementation decision unresolved for
+independent Wave 1 work.
 
 ## Repository boundary and evidence status
 
@@ -30,9 +33,28 @@ routes are deployed at that SHA.
 | Hosted gateway | Dictate capability request and audio-second consumer | Provider credential boundary, allowlists, shared middleware, STT adapter, usage event authority, and normalized errors |
 | Sync and jobs | Encrypted envelopes, opt-in behavior, local outbox, polling/retrieval client, and privacy UX | Account-scoped devices, encrypted record/job APIs, durable workers, encrypted result artifacts, retention/deletion, and cross-account authorization |
 
+## Locked proposed authority map
+
+The contract's `authority_map` is the only machine-readable authority map. Each
+production surface has one proposed authority; `UNKNOWN` below is deployment
+verification status, not a second candidate or an open implementation choice.
+
+| Production surface | One proposed authority | Owner role | Source status | Deployment verification | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| Desktop/local compatibility | `dictate_desktop_client` | Dictate implementation lane | Source present | Not applicable | `/api` current compatibility; `/v1` local/explicit legacy only |
+| Identity/auth/discovery | `arc_forge_shared_account_backend` | External shared backend owner | Pinned candidate present | **UNKNOWN** | Durable Arc Forge account, email fallback, PKCE, device grant, refresh |
+| Commerce/entitlement | `arc_forge_shared_commerce_backend` | External shared backend owner | Pinned candidate present | **UNKNOWN** | Dictate checkout/webhook/projection; canonical `canceled` mapping |
+| Devices/recovery | `arc_forge_shared_account_backend` | External shared backend owner | Pinned candidate present; recovery route requires migration | **UNKNOWN** | Registration, consent/approval, recovery, revocation |
+| Encrypted sync | `arc_forge_shared_backend_with_dictate_client_encryption` | External shared backend + Dictate client | Contract locked; storage implementation pending | **UNKNOWN** | Client encrypts; backend owns durable envelopes/cursors |
+| Hosted jobs/results | `arc_forge_shared_dictate_hosted_backend` | External shared backend owner | Pinned candidate present; artifact migration required | **UNKNOWN** | Durable worker, owner-bound authenticated artifact, ack/delete |
+| Dictate usage | `arc_forge_shared_dictate_usage_ledger` | External shared backend owner | Pinned candidate present; lifecycle extension required | **UNKNOWN** | Dictate audio-second ledger, separate from Deck |
+| Provider-neutral STT gateway | `arc_forge_shared_provider_gateway` | External shared backend owner | Direct provider source present; shared STT contract not proven | **UNKNOWN** | Governed provider request; server-only credentials |
+| Dictate product surface | `dictate_desktop_and_dictate_product_ui` | Dictate implementation lane; Deck UI separate | Source present | Not applicable | Local/Cloud execution copy; Dictate Pro remains paid offering |
+
 ## Smallest requested backend changes
 
-1. **Canonical account discovery and login.** Confirm one neutral Arc Forge
+1. **Canonical account discovery and login.** Use the locked proposed origin
+   `https://console.arcforge.au` and one neutral Arc Forge
    origin and make the discovery document advertise only HTTPS issuer,
    authorization, token, refresh, and device endpoints. The current live
    `console.arcforge.au` and `deck.arcforge.au` probes return `200` but
@@ -60,14 +82,19 @@ routes are deployed at that SHA.
 5. **Encrypted sync authority.** Provide opt-in push/pull/cursor, key-envelope,
    export, and delete operations. The server may see only the contract's
    explicitly permitted envelope metadata and ciphertext; it must not turn raw
-   audio or readable transcript text into normal sync data.
+   audio or readable transcript text into normal sync data. Implement the
+   contract's `SyncEnvelope` fields and per-record accepted/rejected/winner/
+   conflict outcomes so an offline outbox can drain page by page.
 
 6. **Durable hosted job handoff.** Make create/upload/status/result/ack/cancel
    worker-owned and restart-safe. Completion must persist before the worker
    responds; client polling must find the same owner-bound encrypted artifact
    after a lost response; retrieval and acknowledgement must be idempotent;
    raw audio and readable result material must expire and be deleted after the
-   tested lifecycle.
+   tested lifecycle. Every result is the contract's mandatory
+   `HostedResultArtifact`: versioned authenticated encryption or a bounded
+   artifact reference, algorithm, recipient key, nonce, account/device/job/
+   artifact AAD and integrity binding, expiry, and delete-after-ack semantics.
 
 7. **Governed gateway and exact usage.** Route Dictate capabilities
    `dictate.transcribe` and `dictate.transcribe_diarized` through one agreed
@@ -75,7 +102,9 @@ routes are deployed at that SHA.
    `event_id`, `account_id`, product/capability, request/job/idempotency and
    correlation identifiers, period, event type, lifecycle, numeric amount and
    quantity in `audio_seconds`, and enough linkage for reserve, settle, and
-   rollback.
+   rollback. The gateway may carry audio bytes or a bounded artifact reference
+   only at the governed provider request surface; provider/model aliases are
+   server-selected and credentials remain server-only.
 
 8. **Migrate source risks before acceptance.** The pinned source has a direct
    xAI provider path and two audio-storage modes, and it persists/returns
@@ -89,21 +118,21 @@ routes are deployed at that SHA.
 ## Canonical route agreement
 
 The machine-readable contract's root `operations` object is the only canonical
-route map. The external owner must confirm that map as a whole, including the
-following operation groups and their HTTPS origin; this handoff does not create
-a second machine-readable route map.
+proposed route map. It is locked for independent implementation; the external
+owner later verifies deployment of that map and its HTTPS origin. This handoff
+does not create a second machine-readable route map.
 
 | Surface | Contract operation IDs | Owner decision |
 | --- | --- | --- |
-| Discovery/login/token/refresh | `account.discovery`, `account.login_authorize`, `account.token`, `account.device_authorize` | Issuer/origin, HTTPS advertisement, PKCE, device grant, refresh rotation/reuse, and neutral Arc Forge return behavior |
-| Entitlement and commerce | `entitlement.read`, `commerce.read` | Shared account read authority, product filter, plan/state mapping, and Stripe projection |
-| Devices | `device.register`, `device.list`, `device.approve`, `device.revoke` | Device key binding, approval, revocation propagation, and account isolation |
+| Discovery/email/browser/device auth | `account.discovery`, `account.email_code_start`, `account.email_code_verify`, `account.browser_consent`, `account.browser_consent_decision`, `account.token`, `account.device_authorize`, `account.device_approval` | HTTPS discovery, permanent email fallback, PKCE/browser consent, RFC device grant/polling, refresh rotation/reuse, and neutral Arc Forge return behavior |
+| Entitlement, usage, and commerce | `entitlement.read`, `usage.read`, `commerce.read`, `commerce.checkout`, `commerce.webhook` | Shared account read authority, product filter, checkout/webhook projection, plan/state mapping, canonical `canceled`, and Dictate usage ledger |
+| Devices and recovery | `device.register`, `device.list`, `device.approve`, `device.revoke`, `device.recovery_approve` | Device key binding, browser/device approval, current-device recovery, revocation propagation, and account isolation |
 | Encrypted sync | `sync.push`, `sync.pull`, `sync.cursor`, `sync.key_envelopes.write`, `sync.key_envelopes.read`, `sync.export`, `sync.delete` | Opt-in, envelope encryption, cursor/conflict semantics, export, and cloud deletion |
-| Hosted jobs | `hosted.create`, `hosted.upload`, `hosted.status`, `hosted.result`, `hosted.ack`, `hosted.cancel` | Durable worker, upload/processing TTL, owner-bound encrypted result, retry/ack/delete semantics |
+| Hosted jobs | `hosted.create`, `hosted.upload`, `hosted.status`, `hosted.result`, `hosted.ack`, `hosted.cancel` | Durable worker, upload/processing TTL, inherited diarized capability, owner-bound authenticated result envelope/reference, retry/ack/delete semantics |
 | Shared gateway | `gateway.invoke` | Internal-only transport, provider policy, normalized errors, and usage ledger ownership |
 
 The current source route candidates are visible at
-`arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12807-12855` and
+`arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12632-12725,12807-13007,13125-13127` and
 `arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1329-1638`; they require
 reconciliation with the contract and are not deployed-route proof.
 
@@ -115,7 +144,8 @@ This matrix is an acceptance contract, not a prose aspiration.
 | --- | --- | --- | --- |
 | Provider credentials and server client secrets | Server runtime secret boundary only | Desktop client, browser payload, sync, logs, analytics, support exports | Never client-visible; no public-native client secret |
 | Access/refresh/auth/device tokens | Auth protocol and secure native storage only | Logs, sync, support exports, analytics, provider requests | Protocol TTL, refresh rotation/revocation, and OS-backed storage |
-| Hosted audio | Explicit hosted upload and bounded processing worker | Normal sync, logs, analytics, support exports | Upload/processing TTL; delete on terminal outcome or expiry |
+| Hosted audio | Explicit hosted upload, bounded processing worker, and governed provider request | Normal sync, logs, analytics, support exports | Upload/processing/provider-request TTL; delete on terminal outcome or expiry |
+| Governed provider-request audio | Governed server-side provider request only | Desktop provider credentials, normal sync, logs, analytics, support exports | Audio bytes or bounded artifact reference only; provider/model aliases are server-selected |
 | Readable transcript | Authenticated client delivery and owner-bound encrypted result artifact | Logs, analytics, support exports, normal sync | Bounded artifact lifetime; delete after acknowledgement or TTL |
 
 The structured version of this matrix is
@@ -171,13 +201,14 @@ production architecture:
 - The local `/v1` server remains explicitly non-production, and no released
   `/v1` client count is claimed until an evidence source is supplied.
 
-## Pending owner confirmation
+## Later owner and deployment verification tasks
 
-The Phase 0 gate remains **PENDING** until the external active owner provides a
-versioned response confirming:
+The Wave 0 gate is **PASSED** because the proposed authorities and contract are
+locked. The external active owner must still provide a versioned response and
+live evidence for these later verification tasks:
 
-- the canonical Arc Forge origin and the single contract operation map;
-- the owner role and source/deployment status for account, commerce,
+- deployment of the canonical Arc Forge origin and the single contract operation map;
+- the source/deployment status for account, commerce,
   entitlement, device, sync, hosted-job, gateway, and usage authorities;
 - the durable store/worker/deletion design and all privacy proofs;
 - the governed provider/gateway path, including whether and how existing
@@ -189,5 +220,6 @@ versioned response confirming:
   explicit legacy `/v1` reference behavior.
 
 Until that confirmation exists, this document and the v1 contract are
-Dictate-side planning inputs only. Phase 1 implementation must not begin from
-this handoff alone.
+Dictate-side authority/implementation inputs without a live-conformance claim.
+This round does not begin Wave 1 or authorize external repository, deployment,
+merge, or release changes.
