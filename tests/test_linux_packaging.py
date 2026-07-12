@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = ROOT / "scripts" / "build-linux-desktop.sh"
 
 
+@unittest.skipUnless(
+    sys.platform.startswith("linux"),
+    "Linux packaging stubs require a native bash environment",
+)
 class LinuxPackagingLayoutTests(unittest.TestCase):
     def test_engine_layout_matches_each_requested_bundle_lane(self) -> None:
         cases = (
