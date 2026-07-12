@@ -119,6 +119,32 @@ Implemented:
 **Wave 1 gate:** Slices 1–3 complete locally. Residual: `portal_refresh` cookies remain
 in-memory (not durable); full Svelte `/dictate` section can replace HTML shell later.
 
+## Wave 2 Round 1 — governed hosted transcription
+
+**Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth`
+(Wave 1–2 backend branch) and `dictate` branch `forge/dictate-pro-platform` (not pushed).
+
+Implemented in this round:
+
+1. **Durable hosted job lifecycle** — worker-owned create/upload/status/result/ack/cancel
+   with idempotent completion (`worker_should_skip`, `persist_hosted_result_artifact`) and
+   restart-safe artifact retrieval after lost responses.
+2. **Capability gate** — job create accepts `dictate.transcribe` / `dictate.transcribe_diarized`;
+   clients never receive provider credentials.
+3. **Usage ledger wiring** — hosted path settles via existing `DictateUsageLedger`
+   (reserve on create, settle on success, rollback on cancel/failure).
+4. **Encrypted results** — `DictateResultArtifact` model with owner-bound AES-256-GCM,
+   account/device/job AAD, ack/delete-after-ack, configurable TTL.
+5. **Audio cleanup** — upload files deleted on success, failure, cancel, and TTL expiry.
+6. **Executable tests** — `tests/test_dictate_hosted_jobs.py` (happy path, restart,
+   idempotent ack, quota rejection, cross-account denial, audio cleanup).
+7. **Dictate client** — `get_result`, `ack_result`, `cancel_job`, `capability` on create.
+
+**Deferred within Wave 2:** device-key decryption (fixture server-derived key for now);
+separate worker process vs in-request durable commits; object-store-only production hardening.
+
+**Wave 2 Round 1 commits:** `6896fc4` (arc-forge-deck), `4cbb6e4` (dictate).
+
 ## Recommended next Forge actions
 
 1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and

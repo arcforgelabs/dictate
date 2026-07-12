@@ -35,6 +35,7 @@ class CapturingProClient(ProClient):
         *,
         auth: str | None = None,
         content_type: str = "application/json",
+        headers: dict[str, str] | None = None,
     ):
         self.calls.append(
             {
@@ -43,6 +44,7 @@ class CapturingProClient(ProClient):
                 "payload": payload,
                 "auth": auth,
                 "content_type": content_type,
+                "headers": headers,
             }
         )
         return self.responses.pop(0) if self.responses else {}
@@ -333,6 +335,39 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[2]["payload"], {"upload_id": "upload_1", "byte_size": 3})
         self.assertEqual(client.calls[3]["path"], "/api/dictate/jobs/job_1")
         self.assertEqual(client.calls[4]["path"], "/api/dictate/jobs/job_1/transcript")
+
+    def test_arc_forge_gateway_routes_hosted_result_ack_and_cancel(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        with patch.object(client, "load_session", return_value=session):
+            client.get_result("job_1")
+            client.ack_result(
+                "job_1",
+                artifact_id="artifact_1",
+                acknowledgement_id="ack_1",
+                idempotency_key="idem_1",
+            )
+            client.cancel_job("job_1")
+
+        self.assertEqual(client.calls[0]["path"], "/api/dictate/jobs/job_1/result")
+        self.assertEqual(client.calls[1]["path"], "/api/dictate/jobs/job_1/result/ack")
+        self.assertEqual(
+            client.calls[1]["payload"],
+            {
+                "artifact_id": "artifact_1",
+                "acknowledgement_id": "ack_1",
+                "idempotency_key": "idem_1",
+            },
+        )
+        self.assertEqual(client.calls[1]["headers"], {"Idempotency-Key": "idem_1"})
+        self.assertEqual(client.calls[2]["path"], "/api/dictate/jobs/job_1/cancel")
 
     def test_arc_forge_gateway_routes_sync_under_api_dictate(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)

@@ -513,6 +513,8 @@ class ProClient:
         *,
         language: str | None = None,
         audio_duration_seconds: float | None = None,
+        capability: str | None = None,
+        requested_diarization: bool | None = None,
         mode: str = "batch_meeting",
     ) -> dict[str, Any]:
         session = self._require_session()
@@ -527,6 +529,10 @@ class ProClient:
                 payload["mode"] = mode
             if language:
                 payload["language"] = language
+            if capability:
+                payload["capability"] = capability
+            if requested_diarization is not None:
+                payload["requested_diarization"] = requested_diarization
             return self._request("POST", "/api/dictate/jobs", payload, auth=session.access_token)
         payload = {}
         if mode != "batch_meeting":
@@ -596,6 +602,36 @@ class ProClient:
     def get_transcript(self, job_id: str) -> dict[str, Any]:
         session = self._require_session()
         return self._request("GET", self._dictate_job_path(job_id, suffix="/transcript"), auth=session.access_token)
+
+    def get_result(self, job_id: str) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("GET", self._dictate_job_path(job_id, suffix="/result"), auth=session.access_token)
+
+    def ack_result(
+        self,
+        job_id: str,
+        *,
+        artifact_id: str,
+        acknowledgement_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        session = self._require_session()
+        payload = {
+            "artifact_id": artifact_id,
+            "acknowledgement_id": acknowledgement_id,
+            "idempotency_key": idempotency_key,
+        }
+        return self._request(
+            "POST",
+            self._dictate_job_path(job_id, suffix="/result/ack"),
+            payload,
+            auth=session.access_token,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("POST", self._dictate_job_path(job_id, suffix="/cancel"), {}, auth=session.access_token)
 
     def push_sync_records(self, records: list[EncryptedSyncRecord]) -> dict[str, Any]:
         session = self._require_session()
@@ -845,21 +881,24 @@ class ProClient:
         *,
         auth: str | None = None,
         content_type: str = "application/json",
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        headers = {"Accept": "application/json"}
+        request_headers = {"Accept": "application/json"}
+        if headers:
+            request_headers.update(headers)
         if auth:
-            headers["Authorization"] = f"Bearer {auth}"
+            request_headers["Authorization"] = f"Bearer {auth}"
         data: bytes | None
         if isinstance(payload, dict):
             data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = content_type
+            request_headers["Content-Type"] = content_type
         elif isinstance(payload, (bytes, bytearray)):
             data = bytes(payload)
-            headers["Content-Type"] = content_type
+            request_headers["Content-Type"] = content_type
         else:
             data = None
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
                 body = response.read().decode("utf-8")
