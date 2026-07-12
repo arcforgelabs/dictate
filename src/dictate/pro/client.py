@@ -22,6 +22,7 @@ from dictate.api_keys import (
     save_pro_refresh_token,
 )
 from dictate.platform_paths import user_data_dir
+from dictate.pro.platform_state import build_convergence_state, classify_pro_client_error, should_clear_session_on_error
 from dictate.pro.browser_auth import (
     DEVICE_CODE_GRANT_TYPE,
     BrowserAuthAttempt,
@@ -482,7 +483,19 @@ class ProClient:
     def get_state(self) -> dict[str, Any]:
         session = self.refresh_if_needed()
         if session is None:
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
+            return {
+                "signedIn": False,
+                "entitlements": None,
+                "usage": None,
+                "account": None,
+                "commerce": None,
+                "convergence": build_convergence_state(
+                    signed_in=False,
+                    entitlements=None,
+                    provider_mode="private",
+                    sync_enabled=False,
+                ),
+            }
         try:
             if self._uses_arcforge_gateway():
                 account = {"account_id": session.account_id, "device_id": session.device_id}
@@ -496,9 +509,41 @@ class ProClient:
                 commerce = None
                 entitlements = self._request("GET", "/v1/entitlements", auth=session.access_token)
                 usage = self._request("GET", "/v1/usage/current", auth=session.access_token)
-        except ProClientError:
-            self.clear_session()
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
+        except ProClientError as exc:
+            error_code = classify_pro_client_error(exc.status, exc.message)
+            if should_clear_session_on_error(error_code):
+                self.clear_session()
+                return {
+                    "signedIn": False,
+                    "entitlements": None,
+                    "usage": None,
+                    "account": None,
+                    "commerce": None,
+                    "lastError": error_code,
+                    "convergence": build_convergence_state(
+                        signed_in=False,
+                        entitlements=None,
+                        provider_mode="private",
+                        sync_enabled=False,
+                        last_error=error_code,
+                    ),
+                }
+            return {
+                "signedIn": True,
+                "account": {"account_id": session.account_id, "device_id": session.device_id},
+                "commerce": None,
+                "entitlements": None,
+                "usage": None,
+                "apiUrl": self.base_url,
+                "lastError": error_code,
+                "convergence": build_convergence_state(
+                    signed_in=True,
+                    entitlements=None,
+                    provider_mode="private",
+                    sync_enabled=False,
+                    last_error=error_code,
+                ),
+            }
         return {
             "signedIn": True,
             "account": account,
@@ -506,6 +551,13 @@ class ProClient:
             "entitlements": entitlements,
             "usage": usage,
             "apiUrl": self.base_url,
+            "convergence": build_convergence_state(
+                signed_in=True,
+                entitlements=entitlements if isinstance(entitlements, dict) else None,
+                provider_mode="online" if self._uses_arcforge_gateway() else "private",
+                sync_enabled=bool(entitlements.get("active")) if isinstance(entitlements, dict) else False,
+                sync_state="enabled" if isinstance(entitlements, dict) and entitlements.get("active") else "disabled",
+            ),
         }
 
     def create_meeting(

@@ -58,6 +58,7 @@ from dictate.stt.factory import (
     resolve_default_local_model,
     resolve_model_name,
 )
+from dictate.pro.platform_state import build_convergence_state
 from dictate.pro.client import ProClient, ProClientError
 from dictate.pro.product_destinations import PRODUCT_DESTINATIONS
 from dictate.sync import (
@@ -678,6 +679,37 @@ class UiBackend:
         has_key = False
         if state.enabled:
             has_key = bool(self._safe(lambda: settings.account_key() is not None, False))
+        pro_state = self._dictate_pro_state()
+        pro_active = _pro_state_active(pro_state)
+        sync_state = "disabled"
+        if not pro_active:
+            sync_state = "disabled"
+        elif state.enabled and has_key:
+            sync_state = "enabled"
+        elif state.enabled:
+            sync_state = "paused"
+        elif pro_state.get("lastError") == "device_revoked":
+            sync_state = "revoked"
+        convergence = pro_state.get("convergence")
+        if not isinstance(convergence, dict):
+            convergence = build_convergence_state(
+                signed_in=bool(pro_state.get("signedIn")),
+                entitlements=pro_state.get("entitlements") if isinstance(pro_state.get("entitlements"), dict) else None,
+                provider_mode="online" if pro_active else "private",
+                sync_enabled=state.enabled and pro_active,
+                sync_state=sync_state,
+                last_error=pro_state.get("lastError"),
+            )
+        else:
+            convergence = {
+                **convergence,
+                "sync": {
+                    **(convergence.get("sync") if isinstance(convergence.get("sync"), dict) else {}),
+                    "state": sync_state,
+                    "enabled": state.enabled and pro_active,
+                },
+                "lastError": pro_state.get("lastError") or convergence.get("lastError"),
+            }
         return {
             "enabled": state.enabled,
             "accountId": state.account_id or None,
@@ -687,6 +719,8 @@ class UiBackend:
             "keyAvailable": has_key,
             "lastResult": last_result,
             "scope": config_mod.load_config(self.config_path).sync_scope or "everything",
+            "state": sync_state,
+            "convergence": convergence,
         }
 
     def set_sync_scope(self, scope: str) -> dict[str, Any]:

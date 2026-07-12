@@ -169,25 +169,62 @@ separate worker process vs in-request durable commits.
 
 **Wave 2 Round 3:** contract `hosted.result.idempotency.replay` server-managed wording (dictate).
 
+## Wave 3 Round 1 — devices, encrypted sync, desktop convergence
+
+**Status:** done locally (not pushed).
+
+Implemented in this round:
+
+1. **Unified device revocation** — `revoke_dictate_device_unified` revokes the
+   `DictateDevice`, all refresh families for that `device_id`, and marks the sync
+   cursor `revoked`. Refresh rotation fails closed after revoke; sync push and
+   registered-device hosted work return 403.
+2. **Device registry API** — `GET/POST /api/dictate/devices`,
+   `POST /api/dictate/devices/register`, approve/revoke routes, and
+   `POST /api/dictate/devices/current/approve-with-recovery` (closes
+   `device.recovery_approve` gap).
+3. **Encrypted sync path** — push/pull/cursor/key-envelope routes accept contract
+   `SyncEnvelope` fields (`envelopes`) plus legacy `records`; server stores
+   ciphertext only; cross-account envelope push denied.
+4. **Hosted gate** — `require_hosted_dictate_device` blocks registered revoked or
+   pending devices without breaking legacy jobs that pass an unregistered
+   `device_id`.
+5. **Dictate desktop convergence** — `platform_state.py` classifies
+   auth expiry, gateway outage, entitlement inactive, quota, provider failure,
+   sync paused, and device revoked; `ProClient.get_state()` keeps session on
+   transient outages; `ui_server._sync_state()` exposes `state` + `convergence`.
+6. **Executable tests** — `tests/test_dictate_devices_sync.py` (deck);
+   `tests/test_platform_state.py` plus `ProClient` outage/revoke tests (dictate).
+
+**Deferred within Wave 3:** `sync.export` / `sync.delete`; full AAD hash
+verification; device public-key wrapping for hosted results; background sync
+loop; macOS Keychain; bind `device_id` on device-code token grant; portal
+`PortalDevice` vs `DictateDevice` unification.
+
 ## Recommended next Forge actions
 
 1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and
    the complete current `docs/goal.md`.
-2. Confirm both worktrees are clean and note the new commit SHAs below.
+2. Confirm both worktrees are clean and note the Wave 3 Round 1 commit SHAs below.
 3. Run focused gates on `arc-forge-deck` and `dictate` (commands below).
-4. Run one fresh, read-only Sol review against the Wave 1 Slice 3 diff.
-5. Continue Wave 2 only after the slice review is clean or explicitly waived.
+4. Continue Wave 3 Rounds 2–4 (export/delete, refresh binding, deeper sync UX).
+5. Wave 4 canary/live deploy remains out of scope until explicitly authorized.
 
 ## Last independently verified gates
 
-At `28caac1` on `arc-forge-deck` (Slice 2 R3) and `ba23836` on `dictate`, the
-conductor independently ran:
+Wave 3 Round 1 green gates (both repos, not pushed):
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/test_dictate_usage_ledger.py tests/test_dictate.py tests/test_durable_auth.py -q   PASS
+  uv run python -m pytest tests/test_dictate_devices_sync.py tests/test_dictate_hosted_jobs.py tests/test_dictate_usage_ledger.py tests/test_durable_auth.py tests/test_dictate.py -q   PASS (52)
+  git diff --check                                                                                                  PASS
+
+dictate:
+  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py tests/test_platform_state.py   PASS (56)
   git diff --check                                                                                                  PASS
 ```
+
+Prior Slice 2 verification at `28caac1` on `arc-forge-deck` and `ba23836` on `dictate`.
 
 Useful focused commands:
 
@@ -199,7 +236,7 @@ git diff --check
 
 # dictate
 python3 -m compileall -q src tests scripts
-.venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py
+.venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py tests/test_platform_state.py
 git diff --check
 ```
 

@@ -546,6 +546,49 @@ class ProClientTests(unittest.TestCase):
         )
         self.assertEqual(client.calls[0]["auth"], "access")
 
+    def test_get_state_gateway_outage_keeps_session(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+
+        def fake_request(*args, **kwargs):
+            raise ProClientError(503, "gateway unreachable")
+
+        with patch.object(client, "load_session", return_value=session), patch.object(client, "_request", side_effect=fake_request), patch.object(client, "clear_session") as clear_session:
+            state = client.get_state()
+
+        self.assertTrue(state["signedIn"])
+        self.assertEqual(state["lastError"], "gateway_outage")
+        self.assertEqual(state["convergence"]["lastError"], "gateway_outage")
+        clear_session.assert_not_called()
+
+    def test_get_state_device_revoked_clears_session(self) -> None:
+        client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+
+        def fake_request(*args, **kwargs):
+            raise ProClientError(403, "Dictate device is revoked.")
+
+        with patch.object(client, "load_session", return_value=session), patch.object(client, "_request", side_effect=fake_request):
+            state = client.get_state()
+
+        self.assertFalse(state["signedIn"])
+        self.assertEqual(state["lastError"], "device_revoked")
+        self.assertIsNone(client.load_session())
+
     def test_arc_forge_gateway_requires_duration_before_reserving_job(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)
         session = ProSession(
