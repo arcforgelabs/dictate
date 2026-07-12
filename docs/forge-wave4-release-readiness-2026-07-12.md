@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
 **Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
-**Dictate branch tip:** `forge/dictate-pro-platform` @ `1c5ebf7`
+**Dictate branch tip:** `forge/dictate-pro-platform` @ `1423030`
 
 **Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
 
