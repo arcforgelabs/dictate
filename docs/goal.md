@@ -146,8 +146,9 @@ Gate: login and refresh survive restart/rolling deploy; all login methods return
 to Dictate; commerce and usage answers agree across backend, portal, and client.
 
 Status: **MERGED + DEPLOYED** (Waves 1 R1–R2). Durable hashed auth/commerce/usage,
-neutral login return, and product destinations are live; `portal_refresh` and
-email codes remain in-process-memory interim.
+neutral login return, and product destinations are live; browser login codes and
+``portal_refresh`` cookies cut over to ``AccountChallengeStore`` + ``PortalRefreshStore``
+(locally on ``forge/dictate-pro-dod-closeout``; production soak pending).
 
 ### Wave 2 — Governed hosted transcription
 

@@ -116,8 +116,10 @@ Implemented:
 4. **Executable tests** — `tests/test_dictate_account_return.py` (next/continue preservation,
    evil-host rejection); updated `tests/test_dictate_desktop_auth.py`.
 
-**Wave 1 gate:** Slices 1–3 complete locally. Residual: `portal_refresh` cookies remain
-in-memory (not durable); full Svelte `/dictate` section can replace HTML shell later.
+**Wave 1 gate:** Slices 1–3 complete locally. Browser login codes and
+``portal_refresh`` cookies cut over to ``AccountChallengeStore`` +
+``PortalRefreshStore`` (production soak pending); full Svelte ``/dictate`` section
+can replace HTML shell later.
 
 ## Wave 2 Round 1 — governed hosted transcription
 
