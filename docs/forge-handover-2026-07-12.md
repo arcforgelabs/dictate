@@ -47,7 +47,7 @@ Primary artifacts:
 ## Wave 1 Slice 1 — durable desktop auth foundation
 
 **Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth`
-(commit on that branch; not pushed).
+(commit `2a19ec4`; not pushed).
 
 Implemented in the shared backend (read/write authorized for this Forge round):
 
@@ -62,9 +62,31 @@ Implemented in the shared backend (read/write authorized for this Forge round):
    known) per `TokenResponse` in `docs/contracts/dictate-platform-v1.json`.
 5. Executable restart/replay test: `tests/test_durable_auth.py`.
 
-Remaining Wave 1 work (not in this slice): commerce dual-read migration, usage
-ledger lifecycle on the live gateway, hosted jobs, sync, and later Wave 2–4
-milestones.
+## Wave 1 Slice 2 — commerce single authority + usage ledger lifecycle
+
+**Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth`
+(commit `2ca2b8c`; not pushed).
+
+Implemented in the shared backend:
+
+1. **Single commerce authority** — `dictate_entitlement_for` and
+   `_require_active_dictate_subscription` read `CommerceSubscription` +
+   `Entitlement` only. Legacy `DictateSubscription` rows are one-way bridged on
+   first read via `_bridge_legacy_dictate_subscription_to_commerce` (Stripe
+   webhooks still ingest legacy rows; they are not a competing gate authority).
+2. **Usage ledger lifecycle** — new `DictateUsageLedger` module with
+   reservation → settlement|rollback|rejection, gateway correlation fields
+   (`request_id`, `idempotency_key`, `correlation_id`), and event_type-scoped
+   retry dedup per `usage_events.idempotency_model` in
+   `docs/contracts/dictate-platform-v1.json`. `DictateUsageEvent` model and DB
+   migration extended; job create reserves, reconcile settles, failure paths
+   rollback.
+3. **Executable tests** — `tests/test_dictate_usage_ledger.py` (reserve→settle
+   idempotent retry, over-settlement rejected, terminal exclusivity,
+   duplicate-key rejection); entitlement bridge test in same file.
+
+Remaining Wave 1 work (not in Slice 2): hosted jobs hardening (Wave 2 overlap),
+sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
 
 ## Recommended next Forge actions
 
@@ -72,32 +94,32 @@ milestones.
    the complete current `docs/goal.md`.
 2. Confirm both worktrees are clean and note the new commit SHAs below.
 3. Run focused gates on `arc-forge-deck` and `dictate` (commands below).
-4. Run one fresh, read-only Sol review against the Wave 1 Slice 1 diff.
-5. Continue Wave 1 Slice 2+ only after the slice review is clean or explicitly
+4. Run one fresh, read-only Sol review against the Wave 1 Slice 2 diff.
+5. Continue Wave 1 Slice 3+ only after the slice review is clean or explicitly
    waived.
 
 ## Last independently verified gates
 
-At `d552dce` on `dictate` and the Wave 1 Slice 1 commit on `arc-forge-deck`,
-the conductor independently ran:
+At `2ca2b8c` on `arc-forge-deck` (Slice 2) and `d552dce` on `dictate`, the
+conductor independently ran:
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/ -k "refresh_token_rotation or shared_account_token or dictate_device or account_auth or durable_auth" -q   PASS
-  uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q                                                PASS
-  git diff --check                                                                                                                        PASS
+  uv run python -m pytest tests/ -k "entitle or commerce or usage or dictate_subscription or durable_auth" -q   PASS
+  uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q                        PASS
+  git diff --check                                                                                                PASS
 
 dictate:
-  python3 -m compileall -q src tests scripts                                                                                            PASS
-  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py                                                    PASS
-  git diff --check                                                                                                                        PASS
+  python3 -m compileall -q src tests scripts                                                                    PASS
+  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py                            PASS
+  git diff --check                                                                                                PASS
 ```
 
 Useful focused commands:
 
 ```bash
 # arc-forge-deck
-uv run python -m pytest tests/ -k "refresh_token_rotation or shared_account_token or dictate_device or account_auth or durable_auth" -q
+uv run python -m pytest tests/ -k "entitle or commerce or usage or dictate_subscription or durable_auth" -q
 uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q
 git diff --check
 
@@ -109,12 +131,15 @@ git diff --check
 
 ## External repository boundary
 
-The shared backend implementation for Wave 1 Slice 1 lives on:
+The shared backend implementation for Wave 1 lives on:
 
 ```text
 /home/samuel/repos/arc-forge-deck
 branch: forge/wave1-durable-auth
 parent: forge/handover-sharpen @ ae663a0
+commits:
+  Slice 1 durable auth: 2a19ec4
+  Slice 2 commerce + usage ledger: 2ca2b8c
 ```
 
 Do not push, merge, or deploy without explicit human go.
