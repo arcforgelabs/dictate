@@ -1,14 +1,15 @@
 # Goal — Ship Dictate on the Arc Forge Platform
 
 **Status:** Active execution authority — platform **merged and production-deployed**;
-true E2E DoD still needs canary, migration counts, and residual-auth durability.
+true E2E DoD still needs canary, migration counts, and production soak for durable
+browser auth cutover (local proof complete on `forge/dictate-pro-dod-closeout`).
 
 ## Progress scoreboard
 
 | Wave | Status | Remaining for true DoD |
 | --- | --- | --- |
 | 0 | CLEAN / contract locked (merged) | Live product conformance via canary |
-| 1 | MERGED + deployed (auth, commerce, usage, login return, destinations) | portal_refresh + email codes still in-memory |
+| 1 | MERGED + deployed (auth, commerce, usage, login return, destinations) | production soak for durable portal_refresh + challenge stores (local cutover done) |
 | 2 | MERGED + deployed (hosted jobs, encrypted artifacts, audio cleanup) | device-key wrapping deferred; separate worker; live canary |
 | 3 | MERGED + deployed (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
 | 4 | MERGED + deployed (quarantine + readiness + push/deploy/HTTPS discovery) | canary soak, migration counts, human release sign-off |

@@ -1,7 +1,7 @@
 # Forge Wave 4 — Release readiness evidence
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
-**Status:** MERGED + PRODUCTION DEPLOYED — canary / migration counts / residual auth still open
+**Status:** MERGED + PRODUCTION DEPLOYED — canary / migration counts / production soak for durable browser auth still open (local cutover complete)
 
 **Dictate branch:** `master` (merged PR [#17](https://github.com/arcforgelabs/dictate/pull/17) @ `f6ea882`)  
 **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
@@ -18,8 +18,9 @@
 
 Waves 0–3 are implemented and merged. Wave 4 local proof shipped; push/merge/deploy
 of the Dictate Pro platform stack is done. Remaining true-DoD gaps: internal canary
-(hosted + sync + revoke), migration reconciliation counts, and residual interim auth
-stores (portal refresh, magic-link, MFA, password-reset, login codes).
+(hosted + sync + revoke), migration reconciliation counts, and production soak for
+durable browser auth (AccountChallengeStore + PortalRefreshStore; local cutover on
+`forge/dictate-pro-dod-closeout`).
 
 **E2E scoreboard of record:** [goal.md](goal.md) (progress table + DoD). This
 readiness doc is release evidence; [forge-handover-2026-07-12.md](forge-handover-2026-07-12.md)
@@ -46,8 +47,7 @@ is session continuity.
 | Rolling deploy durability | Local SQLite tests ≠ multi-instance Postgres + Redis | Staging/prod-shaped soak under load |
 | Object-store + worker split | Hosted worker runs in-request in tests | Production worker topology |
 | Migration counts | No production account/subscription reconciliation run | Migration dry-run with counts |
-| Email login-code durability | `_login_codes` remains residual interim | Migrate or accept risk |
-| Browser `portal_refresh` | In-memory cookie refresh, not DB-backed | Durable browser refresh or document limit |
+| Durable browser auth production soak | Local cutover to AccountChallengeStore + PortalRefreshStore; multi-instance/restart proof pending | Staging soak + canary |
 
 ## Residual risks (accepted for local gate; not for production without plan)
 
@@ -55,23 +55,11 @@ is session continuity.
    (account/device/job AAD), not device-public-key wrapped ciphertext.
 2. **Recovery approve disabled (`501`)** — cryptographic recovery verification not
    implemented; endpoint fail-closed.
-3. **`portal_refresh` in-memory** — browser portal refresh cookies may not survive
-   restart/rolling deploy (labelled RESIDUAL_INTERIM).
-4. **Email login-code in-memory** — `/api/account/auth/login-code` uses
-   `_login_codes` dict; not DurableAuthStore (labelled RESIDUAL_INTERIM).
-5. **Legacy companion `_auth_codes`** — companion enrollment only; not Dictate
-   desktop PKCE (labelled RESIDUAL_INTERIM).
-6. **Browser MFA challenges in-memory** — `_browser_mfa_challenges` dict for
-   new-browser verification; lost on restart (labelled RESIDUAL_INTERIM).
-7. **Magic-link tokens in-memory** — `_magic_tokens` dict for passwordless login;
-   not DurableAuthStore (labelled RESIDUAL_INTERIM).
-8. **Password-reset tokens in-memory** — `_password_reset_tokens` dict for reset
-   links; not DurableAuthStore (labelled RESIDUAL_INTERIM).
-9. **Browser `_refresh_tokens` dict** — backs `portal_refresh` cookies for
-   portal/dashboard sessions; distinct from DurableAuthStore desktop refresh
-   families (labelled RESIDUAL_INTERIM).
-10. **Sync export/delete** — Wave 3 deferred; not in local proof scope.
-11. **Unregistered hosted `device_id` spoof** — unbound bearer may still create jobs
+3. **Durable browser auth (local)** — magic links, resets, login codes, browser MFA,
+   companion OAuth, and `portal_refresh` now use hashed SQLite authorities via
+   `portal_account_auth` adapters; production rolling-deploy/restart soak still required.
+4. **Sync export/delete** — Wave 3 deferred; not in local proof scope.
+5. **Unregistered hosted `device_id` spoof** — unbound bearer may still create jobs
    for unregistered device_id strings (registered devices require bound JWT).
 
 ## Rollback notes (pre-deploy planning)
