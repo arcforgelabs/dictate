@@ -200,7 +200,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Manage account"));
     expect(open).toHaveBeenCalledWith(
-      "https://console.arcforge.au/deck/account",
+      "https://deck.arcforge.au/dictate",
       "_blank",
       "noopener,noreferrer",
     );

@@ -97,15 +97,36 @@ Implemented in the shared backend:
 Remaining Wave 1 work (not in Slice 2): hosted jobs hardening (Wave 2 overlap),
 sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
 
+## Wave 1 Slice 3 — neutral login return + Dictate product destinations
+
+**Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth` and
+`dictate` branch `forge/dictate-pro-platform` (not pushed).
+
+Implemented:
+
+1. **Neutral account login entry** — unauthenticated Dictate consent (`/api/account/auth/authorize`)
+   and device-link (`/account/link`, legacy `/deck/link`) redirect to `/account/login?next=…&continue=dictate`
+   instead of hard-forcing `/deck/login`. `/login` also routes through `/account/login` when Svelte is enabled.
+   Unsafe `next` values (absolute URLs, `//evil`, backslashes) are stripped before hand-off to the login SPA.
+2. **Dictate product portal** — session-gated HTML destinations at `/dictate` with sub-pages for
+   plan, usage, billing, devices, and sync-recovery. Device-code `verification_uri` now advertises
+   `/account/link`.
+3. **Dictate desktop client** — `ACCOUNT_PORTAL_URL` → `https://deck.arcforge.au/dictate`;
+   `src/dictate/pro/product_destinations.py` documents durable destination URLs.
+4. **Executable tests** — `tests/test_dictate_account_return.py` (next/continue preservation,
+   evil-host rejection); updated `tests/test_dictate_desktop_auth.py`.
+
+**Wave 1 gate:** Slices 1–3 complete locally. Residual: `portal_refresh` cookies remain
+in-memory (not durable); full Svelte `/dictate` section can replace HTML shell later.
+
 ## Recommended next Forge actions
 
 1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and
    the complete current `docs/goal.md`.
 2. Confirm both worktrees are clean and note the new commit SHAs below.
 3. Run focused gates on `arc-forge-deck` and `dictate` (commands below).
-4. Run one fresh, read-only Sol review against the Wave 1 Slice 2 diff.
-5. Continue Wave 1 Slice 3+ only after the slice review is clean or explicitly
-   waived.
+4. Run one fresh, read-only Sol review against the Wave 1 Slice 3 diff.
+5. Continue Wave 2 only after the slice review is clean or explicitly waived.
 
 ## Last independently verified gates
 

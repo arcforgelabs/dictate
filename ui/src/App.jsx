@@ -17,7 +17,7 @@ const DEFAULT_VERSION = "2026.7.4";
 // Web-only account/billing management (subscription, plan, invoices) -- no in-app
 // equivalent, so signed-in users need a way back to it. A hardcoded https literal, so
 // it's safe to open directly (no scheme-clamp needed the way gateway-supplied URIs do).
-const ACCOUNT_PORTAL_URL = "https://console.arcforge.au/deck/account";
+const ACCOUNT_PORTAL_URL = "https://deck.arcforge.au/dictate";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
