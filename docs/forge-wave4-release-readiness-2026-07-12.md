@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
 **Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
-**Dictate branch tip:** `forge/dictate-pro-platform` @ `ab65a65`
+**Dictate branch tip:** `forge/dictate-pro-platform` @ `584b3f6`
 **Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
 **Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
 
