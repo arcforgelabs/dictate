@@ -1,30 +1,27 @@
 # Goal — Ship Dictate on the Arc Forge Platform
 
-**Status:** Active execution authority.
-
-**E2E objective not complete until human push/canary/deploy proof.** Local Waves
-0–4 are implementation plus local gates only — not live production conformance.
+**Status:** Active execution authority — platform **merged and production-deployed**;
+true E2E DoD still needs canary, migration counts, and residual-auth durability.
 
 ## Progress scoreboard
 
-| Wave | Local forge status | Remaining for true DoD |
+| Wave | Status | Remaining for true DoD |
 | --- | --- | --- |
-| 0 | CLEAN / contract locked | Live deploy conformance UNKNOWN |
-| 1 | CLEAN locally (auth, commerce, usage, login return, product destinations) | portal_refresh + email codes still in-memory; prod-shaped durability |
-| 2 | CLEAN locally (hosted jobs, server-managed artifacts, audio cleanup) | device-key wrapping deferred; separate worker process; live canary |
-| 3 | CLEAN locally (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
-| 4 | LOCAL PROOF (quarantine + readiness doc + broad gates) | push, canary, migration counts, live discovery HTTPS, human release |
+| 0 | CLEAN / contract locked (merged) | Live product conformance via canary |
+| 1 | MERGED + deployed (auth, commerce, usage, login return, destinations) | portal_refresh + email codes still in-memory |
+| 2 | MERGED + deployed (hosted jobs, encrypted artifacts, audio cleanup) | device-key wrapping deferred; separate worker; live canary |
+| 3 | MERGED + deployed (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
+| 4 | MERGED + deployed (quarantine + readiness + push/deploy/HTTPS discovery) | canary soak, migration counts, human release sign-off |
 
-**Deck integration base:** post–Deployment Harmony `main` @ `7db8c38` (PR 207, closed/merged) —
-not `ae663a0` / `forge/handover-sharpen`. `forge/wave1-durable-auth` rebased onto that
-`main` (no conflicts); post-rebase test fix `a6ff42e`. Do not push/merge deck without
-human go; DH is closed — Dictate work sits on top of the closed DH baseline.
+**Deck integration base:** post–Deployment Harmony `main` (PR 207 @ `7db8c38`), then
+Dictate Pro platform PR [#208](https://github.com/arcforgelabs/arc-forge-deck/pull/208)
+@ `f5e6be3`. Production image tip @ `7ee9c07` (includes #209). Dictate PR
+[#17](https://github.com/arcforgelabs/dictate/pull/17) merged to `master` @ `f6ea882`.
 
-**Local forge branches (not pushed):**
-- dictate **Branch:** `forge/dictate-pro-platform` (local; not pushed)
-- dictate **Last docs-hygiene content commit:** `06e376c`
+**Current tips:**
+- dictate **Branch:** `master`
 - dictate **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
-- arc-forge-deck `forge/wave1-durable-auth` @ `a6ff42e` (rebased on DH `main` @ `7db8c38`)
+- arc-forge-deck **Branch:** `main` @ `7ee9c07` (production deployed)
 
 Ship one coherent, production-ready Dictate product: local Dictate works without
 an account; Arc Forge provides neutral identity, commerce, entitlements,
@@ -147,10 +144,9 @@ Build as one backend milestone:
 Gate: login and refresh survive restart/rolling deploy; all login methods return
 to Dictate; commerce and usage answers agree across backend, portal, and client.
 
-Status: **IMPLEMENTED LOCALLY — CLEAN** on forge branches (Waves 1 R1–R2). Durable
-hashed auth/commerce/usage, neutral login return, and product destinations are
-local-green; `portal_refresh` and email codes remain in-process-memory interim.
-**Not deployed.**
+Status: **MERGED + DEPLOYED** (Waves 1 R1–R2). Durable hashed auth/commerce/usage,
+neutral login return, and product destinations are live; `portal_refresh` and
+email codes remain in-process-memory interim.
 
 ### Wave 2 — Governed hosted transcription
 
@@ -172,10 +168,9 @@ Gate: desktop-to-provider-fixture-to-result works across restart, retry, lost
 response, duplicate completion/retrieval, quota failure, provider failure,
 cross-account attempts, and cleanup.
 
-Status: **IMPLEMENTED LOCALLY — CLEAN** on forge branches (Waves 2 R1–R3).
-Governed hosted jobs, server-managed encrypted artifacts, and audio cleanup are
-local-green; device-key wrapping deferred, separate worker process, and live
-canary remain open. **Not deployed.**
+Status: **MERGED + DEPLOYED** (Waves 2 R1–R3). Governed hosted jobs,
+server-managed encrypted artifacts, and audio cleanup are live; device-key
+wrapping deferred, separate worker process, and live canary remain open.
 
 ### Wave 3 — Devices, encrypted sync, and desktop convergence
 
@@ -200,8 +195,8 @@ Gate: two clean installations can join, sync encrypted records, recover,
 revoke, export, and delete; users can always predict what leaves the device and
 local Dictate stays usable during a total platform outage.
 
-Status: **IMPLEMENTED LOCALLY** on forge branches (Waves 3 R1–R2). Recovery approve
-is fail-closed (`501`); export/delete deferred. **Not deployed.**
+Status: **MERGED + DEPLOYED** (Waves 3 R1–R2). Recovery approve is fail-closed
+(`501`); export/delete deferred.
 
 ### Wave 4 — Integrate, migrate, release, and delete interim architecture
 
@@ -223,10 +218,9 @@ provider-secret finding; canary metrics and reconciliation are clean; rollback
 is proven; existing clients have a bounded compatibility path; stable artifacts
 are reproducible and ready for explicit human release approval.
 
-Status: **LOCAL PROOF — Rounds 1–3** — `goal.md` scoreboard refreshed, residual
-auth quarantined, tip-SHA honesty across readiness/handover, broad pytest gates
-run. Push/deploy/canary/migration counts/live discovery HTTPS remain **out of
-scope** until explicit human go. See
+Status: **MERGED + DEPLOYED — Rounds 1–3** — residual auth quarantined; push,
+merge, production deploy, and live HTTPS discovery recorded. Remaining: canary
+soak, migration counts, residual-auth durability, human release sign-off. See
 [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
 
 ## Required final proof

@@ -1,34 +1,29 @@
-# Forge Wave 4 — Release readiness evidence (local)
+# Forge Wave 4 — Release readiness evidence
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
-**Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**
+**Status:** MERGED + PRODUCTION DEPLOYED — canary / migration counts / residual auth still open
 
-**Branch:** `forge/dictate-pro-platform` (local; not pushed)  
-**Last docs-hygiene content commit:** `06e376c`  
+**Dictate branch:** `master` (merged PR [#17](https://github.com/arcforgelabs/dictate/pull/17) @ `f6ea882`)  
 **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
 
-**Shared backend branch:** `forge/wave1-durable-auth` @ `a6ff42e` (rebased on DH `main` @ `7db8c38`; not pushed)
+**Shared backend:** arc-forge-deck `main` — Dictate Pro platform PR [#208](https://github.com/arcforgelabs/arc-forge-deck/pull/208) merge `f5e6be3`; production currently @ `7ee9c07` (includes follow-on #209). Forge feature branches deleted after merge.
 
 **Deployment Harmony (closed):** merged to arc-forge-deck `main` @ `7db8c38` (PR 207).
-Platform branch rebased onto that `main` (no conflicts); post-rebase test fix `a6ff42e`
-(dashboard tests assert `DurableAuthStore` for account verify-code refresh). Do not
-push/merge deck without explicit human go.
 
-**Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
+**Production image:** `ghcr.io/arcforgelabs/arc-forge-console:sha-7ee9c07d4a798b0fe660b36f41133f8a0f806540`  
+**Deploy run:** https://github.com/arcforgelabs/arc-forge-deck/actions/runs/29193423615  
+**Live discovery (2026-07-12):** `https://console.arcforge.au/api/account/auth/desktop` returns HTTPS authorize/token/device-code endpoints; `https://console.arcforge.au/healthz` → 200.
 
 ## Executive summary
 
-Waves 0–3 are implemented and conductor-green on local forge branches. Wave 4
-Round 1 integrates documentation, quarantines residual interim auth claims, runs
-broad focused test suites, and records what is proven locally versus what remains
-**UNKNOWN** until an explicit human authorizes push, canary, and production deploy.
+Waves 0–3 are implemented and merged. Wave 4 local proof shipped; push/merge/deploy
+of the Dictate Pro platform stack is done. Remaining true-DoD gaps: internal canary
+(hosted + sync + revoke), migration reconciliation counts, and residual interim auth
+stores (portal refresh, magic-link, MFA, password-reset, login codes).
 
 **E2E scoreboard of record:** [goal.md](goal.md) (progress table + DoD). This
 readiness doc is release evidence; [forge-handover-2026-07-12.md](forge-handover-2026-07-12.md)
 is session continuity.
-
-Nothing in this document authorizes push, merge, Helm changes, live canary, or
-credential rotation.
 
 ## What is proven locally
 
@@ -43,15 +38,13 @@ credential rotation.
 | Desktop convergence | `platform_state.py`, selective session clearing, UI sync state | `d23adc3`, `b102c33` |
 | Residual auth quarantine | `residual_interim_auth.py` labels non-durable stores | Wave 4 R1 |
 
-## What is UNKNOWN (requires human gate)
+## What is UNKNOWN (requires further gate)
 
-| Item | Why unknown | Human action needed |
+| Item | Why unknown | Action needed |
 | --- | --- | --- |
-| Deployed SHA | Forge branches are local-only; no live revision proof | Push + deploy + record SHA |
-| Canary metrics | No production-shaped soak | Internal canary with opt-in cohort |
-| Rolling deploy durability | Local SQLite tests ≠ multi-instance Postgres + Redis | Staging/prod-shaped integration |
+| Canary metrics | No production-shaped soak yet | Internal canary with opt-in cohort |
+| Rolling deploy durability | Local SQLite tests ≠ multi-instance Postgres + Redis | Staging/prod-shaped soak under load |
 | Object-store + worker split | Hosted worker runs in-request in tests | Production worker topology |
-| Live discovery HTTPS | Historical probes showed HTTP `issuer` URLs | Post-deploy discovery verification |
 | Migration counts | No production account/subscription reconciliation run | Migration dry-run with counts |
 | Email login-code durability | `_login_codes` remains residual interim | Migrate or accept risk |
 | Browser `portal_refresh` | In-memory cookie refresh, not DB-backed | Durable browser refresh or document limit |
@@ -95,9 +88,9 @@ credential rotation.
 
 ## Recommended human gate checklist
 
-- [ ] Review this document + `docs/forge-handover-2026-07-12.md`
-- [ ] Authorize push of `forge/wave1-durable-auth` and `forge/dictate-pro-platform`
-- [ ] Record deployed SHA and run discovery/HTTPS verification
+- [x] Review this document + `docs/forge-handover-2026-07-12.md`
+- [x] Authorize push of `forge/wave1-durable-auth` and `forge/dictate-pro-platform`
+- [x] Record deployed SHA and run discovery/HTTPS verification
 - [ ] Run migration dry-run with explicit reconciliation counts
 - [ ] Schedule internal canary (hosted + sync + revoke) before stable promotion
 - [ ] Confirm privacy/support pages published (`docs/dictate-privacy-policy.md`)
