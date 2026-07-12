@@ -1,8 +1,11 @@
 # Forge Wave 4 — Release readiness evidence (local)
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
-**Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
-**Dictate branch tip:** `forge/dictate-pro-platform` @ `1423030`
+**Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**
+
+**Branch:** `forge/dictate-pro-platform` (local; not pushed)  
+**Last docs-hygiene content commit:** `06e376c`  
+**Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
 
 **Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
 

@@ -15,8 +15,11 @@
 | 3 | CLEAN locally (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
 | 4 | LOCAL PROOF (quarantine + readiness doc + broad gates) | push, canary, migration counts, live discovery HTTPS, human release |
 
-**Local branch tips (not pushed):** dictate `forge/dictate-pro-platform` @ `1423030`;
-arc-forge-deck `forge/wave1-durable-auth` @ `965fe40`.
+**Local forge branches (not pushed):**
+- dictate **Branch:** `forge/dictate-pro-platform` (local; not pushed)
+- dictate **Last docs-hygiene content commit:** `06e376c`
+- dictate **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
+- arc-forge-deck `forge/wave1-durable-auth` @ `965fe40`
 
 Ship one coherent, production-ready Dictate product: local Dictate works without
 an account; Arc Forge provides neutral identity, commerce, entitlements,

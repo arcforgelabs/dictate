@@ -242,9 +242,11 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Wave 4 Round 2 commits:** `965fe40` (arc-forge-deck), `ab65a65` (dictate); tip SHA record `584b3f6` (dictate).
 
-**Branch tips (local, not pushed):**
+**Local forge branches (not pushed):**
 - arc-forge-deck `forge/wave1-durable-auth` @ **`965fe40`**
-- dictate `forge/dictate-pro-platform` @ **`1423030`**
+- dictate **Branch:** `forge/dictate-pro-platform` (local; not pushed)
+- dictate **Last docs-hygiene content commit:** `06e376c`
+- dictate **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
 
 ## Wave 4 Round 2 — conductor doc fixes
 
@@ -263,12 +265,13 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Status:** done locally (not pushed).
 
-1. **[P2]** Aligned dictate branch tip fields in readiness and handover so both
-   document the same local HEAD after this commit (no internal contradiction).
+1. **[P2]** Retired self-referential “branch tip == this commit SHA” claims; dictate
+   tip is verified live via `git rev-parse --short HEAD`, not embedded in the
+   same commit that updates tip fields.
 2. **[P2]** Incorporated the uncommitted handover boundary fix and retired stale
    `4cc83f0` / `584b3f6` split across readiness vs external boundary block.
 
-**Wave 4 Round 3 commit:** `1c5ebf7` (dictate); deck tip unchanged `965fe40`.
+**Wave 4 Round 3 content commit:** `06e376c` (dictate); deck tip unchanged `965fe40`.
 
 ## Docs hygiene — continuous E2E tracking
 
@@ -281,6 +284,8 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
    `TRANSCRIPTION_PLAN.md` (local transcription).
 3. **[P3]** Added superseding banners on `desktop-browser-signin-architecture.md`
    and `DICTATE_PRO_CLOUD_SYNC_PLAN.md` where claims could lag forge truth.
+4. **[P2]** Replaced self-referential dictate tip SHAs with verify-tip pattern
+   (`06e376c` content anchor + `git rev-parse --short HEAD`); deck stays `965fe40`.
 
 **E2E scoreboard of record:** [goal.md](goal.md). This handover is session
 continuity; release evidence is
@@ -353,9 +358,10 @@ Wave 4 Round 2: 965fe40
 branch tip (local): 965fe40
 
 /home/samuel/repos/dictate
-branch: forge/dictate-pro-platform
+branch: forge/dictate-pro-platform (local; not pushed)
+last docs-hygiene content commit: 06e376c
+verify tip: git -C /home/samuel/repos/dictate rev-parse --short HEAD
 Wave 4 Round 1: 57d02c6 (+ handover fix 6c1faa8)
-branch tip (local): 1423030
 ```
 
 Do not push, merge, or deploy without explicit human go.
