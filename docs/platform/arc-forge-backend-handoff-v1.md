@@ -46,7 +46,7 @@ verification status, not a second candidate or an open implementation choice.
 | Commerce/entitlement | `arc_forge_shared_commerce_backend` | External shared backend owner | Pinned candidate present | **UNKNOWN** | Dictate checkout/webhook/projection; canonical `canceled` mapping |
 | Devices/recovery | `arc_forge_shared_account_backend` | External shared backend owner | Pinned candidate present; recovery route requires migration | **UNKNOWN** | Registration, consent/approval, recovery, revocation |
 | Encrypted sync | `arc_forge_shared_backend_with_dictate_client_encryption` | External shared backend + Dictate client | Contract locked; storage implementation pending | **UNKNOWN** | Client encrypts; backend owns durable envelopes/cursors |
-| Hosted jobs/results | `arc_forge_shared_dictate_hosted_backend` | External shared backend owner | Pinned candidate present; artifact migration required | **UNKNOWN** | Durable worker, owner-bound authenticated artifact, ack/delete |
+| Hosted jobs/results | `arc_forge_shared_dictate_hosted_backend` | External shared backend owner | Implemented locally on `forge/wave1-durable-auth` (`6896fc4`+) | **UNKNOWN** deploy SHA | Durable worker, server-managed encrypted artifact, ack/delete |
 | Dictate usage | `arc_forge_shared_dictate_usage_ledger` | External shared backend owner | Pinned candidate present; lifecycle extension required | **UNKNOWN** | Dictate audio-second ledger, separate from Deck |
 | Provider-neutral STT gateway | `arc_forge_shared_provider_gateway` | External shared backend owner | Direct provider source present; shared STT contract not proven | **UNKNOWN** | Governed provider request; server-only credentials |
 | Dictate product surface | `dictate_desktop_and_dictate_product_ui` | Dictate implementation lane; Deck UI separate | Source present | Not applicable | Local/Cloud execution copy; Dictate Pro remains paid offering |
@@ -61,13 +61,12 @@ verification status, not a second candidate or an open implementation choice.
    advertise HTTP endpoints and land at Deck-branded `/deck/login`; those are
    migration evidence, not accepted production behavior.
 
-2. **Durable desktop authentication.** Move authorization grants, device-code
-   records, refresh families, replay guards, and revocation state out of
-   process memory so restart and rolling deploy do not invalidate or duplicate
-   authentication. The source stores are visible at
-  `arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:206-257` and
-  token consumption/rotation at
-  `arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12106-12268`.
+2. **Durable desktop authentication.** Authorization grants, device-code
+   records, and refresh families for Dictate desktop paths are implemented
+   locally in ``DurableAuthStore`` (hashed SQLite). Residual interim stores
+   (email login-code dict, companion ``_auth_codes``, browser ``portal_refresh``)
+   are labelled in ``residual_interim_auth.py`` and must not be claimed as
+   production-durable desktop auth.
 
 3. **One neutral identity boundary.** Make `account_id` the authenticated
    subject and ownership boundary. Keep `product=dictate` and
@@ -88,7 +87,7 @@ verification status, not a second candidate or an open implementation choice.
 
 6. **Durable hosted job handoff.** Make create/upload/status/result/ack/cancel
    worker-owned and restart-safe. Completion must persist before the worker
-   responds; client polling must find the same owner-bound encrypted artifact
+   responds; client polling must find the same server-managed encrypted artifact
    after a lost response; retrieval and acknowledgement must be idempotent;
    raw audio and readable result material must expire and be deleted after the
    tested lifecycle. Every result is the contract's mandatory
@@ -128,7 +127,7 @@ does not create a second machine-readable route map.
 | Entitlement, usage, and commerce | `entitlement.read`, `usage.read`, `commerce.read`, `commerce.checkout`, `commerce.webhook` | Shared account read authority, product filter, checkout/webhook projection, plan/state mapping, canonical `canceled`, and Dictate usage ledger |
 | Devices and recovery | `device.register`, `device.list`, `device.approve`, `device.revoke`, `device.recovery_approve` | Device key binding, browser/device approval, current-device recovery, revocation propagation, and account isolation |
 | Encrypted sync | `sync.push`, `sync.pull`, `sync.cursor`, `sync.key_envelopes.write`, `sync.key_envelopes.read`, `sync.export`, `sync.delete` | Opt-in, envelope encryption, cursor/conflict semantics, export, and cloud deletion |
-| Hosted jobs | `hosted.create`, `hosted.upload`, `hosted.status`, `hosted.result`, `hosted.ack`, `hosted.cancel` | Durable worker, upload/processing TTL, inherited diarized capability, owner-bound authenticated result envelope/reference, retry/ack/delete semantics |
+| Hosted jobs | `hosted.create`, `hosted.upload`, `hosted.status`, `hosted.result`, `hosted.ack`, `hosted.cancel` | Durable worker, upload/processing TTL, inherited diarized capability, server-managed encrypted result envelope/reference, retry/ack/delete semantics |
 | Shared gateway | `gateway.invoke` | Internal-only transport, provider policy, normalized errors, and usage ledger ownership |
 
 The current source route candidates are visible at
@@ -146,8 +145,8 @@ This matrix is an acceptance contract, not a prose aspiration.
 | Access/refresh/auth/device tokens | Auth protocol and secure native storage only | Logs, sync, support exports, analytics, provider requests | Protocol TTL, refresh rotation/revocation, and OS-backed storage |
 | Hosted audio | Explicit hosted upload, bounded processing worker, and governed provider request | Normal sync, logs, analytics, support exports | Upload/processing/provider-request TTL; delete on terminal outcome or expiry |
 | Governed provider-request audio | Governed server-side provider request only | Desktop provider credentials, normal sync, logs, analytics, support exports | Audio bytes or bounded artifact reference only; provider/model aliases are server-selected |
-| Governed provider response | Bounded gateway/worker memory and immediate owner-bound encryption | Persistence, logs, analytics, support exports, normal sync | Request-scoped memory only; encrypt immediately, then delete readable provider response |
-| Readable transcript | Authenticated client delivery and owner-bound encrypted result artifact | Logs, analytics, support exports, normal sync | Bounded artifact lifetime; delete after acknowledgement or TTL |
+| Governed provider response | Bounded gateway/worker memory and immediate server-managed encryption | Persistence, logs, analytics, support exports, normal sync | Request-scoped memory only; encrypt immediately, then delete readable provider response |
+| Readable transcript | Authenticated client delivery and server-managed encrypted result artifact | Logs, analytics, support exports, normal sync | Bounded artifact lifetime; delete after acknowledgement or TTL |
 
 The structured version of this matrix is
 `data_flow_matrix.rows` in the contract and must be used by implementation and

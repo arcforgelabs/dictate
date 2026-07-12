@@ -22,7 +22,7 @@ This file controls cross-system decisions. `TRANSCRIPTION_PLAN.md`,
 - Dictate Pro commerce and entitlement state has one authority and one policy.
 - Hosted transcription uses server-side credentials, product capability checks,
   exact-once audio-second accounting, durable workers, bounded audio retention,
-  and owner-bound encrypted results.
+  and server-managed encrypted hosted results.
 - Sync is explicitly enabled, client-side encrypted, multi-device capable,
   recoverable, revocable, exportable, and deletable.
 - Production code, deployment, tests, copy, and current documentation describe
@@ -116,7 +116,7 @@ Build as one backend milestone:
 - Establish the Dictate product destination for plan, usage, billing, devices,
   sync/recovery, downloads, export, and cloud deletion.
 - Consolidate Stripe/webhook, commerce, entitlement, and policy states into one
-  authority; migrate legacy Dictate rows and remove dual-read ambiguity.
+  authority; legacy Dictate rows bridge one-way into commerce (no dual-read gates).
 - Implement immutable Dictate usage events and balances with reservation,
   measured settlement, rollback, idempotency, constraints, and reconciliation.
 
@@ -135,7 +135,7 @@ Build the complete hosted lane:
   queued, processing, completed, failed, cancelled, expired, quota rejected.
 - Use constrained signed uploads and durable queue/worker processing.
 - Meter exactly once; make retries and completion idempotent.
-- Deliver owner-bound encrypted result artifacts with authenticated retrieval,
+- Deliver server-managed encrypted result artifacts with authenticated retrieval,
   acknowledgement, expiry, deletion, and account isolation.
 - Delete audio on success, failure, cancellation, or TTL in every storage mode.
 
@@ -166,6 +166,9 @@ Gate: two clean installations can join, sync encrypted records, recover,
 revoke, export, and delete; users can always predict what leaves the device and
 local Dictate stays usable during a total platform outage.
 
+Status: **IMPLEMENTED LOCALLY** on forge branches (Waves 3 R1–R2). Recovery approve
+is fail-closed (`501`); export/delete deferred. **Not deployed.**
+
 ### Wave 4 — Integrate, migrate, release, and delete interim architecture
 
 - Test in a production-shaped environment using the real proxy, database,
@@ -185,6 +188,11 @@ Gate: no open P0/P1 security, privacy, billing, cross-account, data-loss, or
 provider-secret finding; canary metrics and reconciliation are clean; rollback
 is proven; existing clients have a bounded compatibility path; stable artifacts
 are reproducible and ready for explicit human release approval.
+
+Status: **ROUND 1 LOCAL PROOF** — docs aligned, residual auth quarantined,
+broad pytest gates run, release-readiness note added. Push/deploy/canary remain
+**out of scope** until explicit human go. See
+[forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
 
 ## Required final proof
 

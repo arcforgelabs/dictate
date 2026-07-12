@@ -66,9 +66,9 @@ revoked device is not remotely erased by device revocation.
 Hosted Pro transcription is separate from encrypted sync. A hosted transcription
 job intentionally sends audio to Arc Forge and, where applicable, to a hosted
 model provider for processing. Hosted jobs are metered for entitlement and usage
-limits. The Dictate control plane must not persist readable hosted transcript
-text; returned transcript content is delivered back to the requesting client and
-is encrypted by the client before it enters cloud sync.
+limits. The Dictate control plane stores hosted results as server-managed
+encrypted artifacts (account/device/job AAD binding); readable transcript text
+is not retained server-side after bounded delivery and acknowledgement.
 
 Provider-side processing, retention, and deletion behavior are governed by the
 provider terms disclosed for the hosted model path. Users who do not want audio

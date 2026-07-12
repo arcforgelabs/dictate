@@ -181,8 +181,8 @@ Implemented in this round:
    registered-device hosted work return 403.
 2. **Device registry API** — `GET/POST /api/dictate/devices`,
    `POST /api/dictate/devices/register`, approve/revoke routes, and
-   `POST /api/dictate/devices/current/approve-with-recovery` (closes
-   `device.recovery_approve` gap).
+   `POST /api/dictate/devices/current/approve-with-recovery` (fail-closed `501`
+   until crypto verification ships).
 3. **Encrypted sync path** — push/pull/cursor/key-envelope routes accept contract
    `SyncEnvelope` fields (`envelopes`) plus legacy `records`; server stores
    ciphertext only; cross-account envelope push denied.
@@ -221,32 +221,58 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Wave 3 Round 2 commits:** `779daf9` (arc-forge-deck), `b6b347d` (dictate).
 
-## Recommended next Forge actions
+## Wave 4 Round 1 — integrate, migrate, release prep (local proof)
 
-1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and
-   the complete current `docs/goal.md`.
-2. Confirm both worktrees are clean and note the Wave 3 Round 1 commit SHAs below.
-3. Run focused gates on `arc-forge-deck` and `dictate` (commands below).
-4. Continue Wave 3 Rounds 2–4 (export/delete, refresh binding, deeper sync UX).
-5. Wave 4 canary/live deploy remains out of scope until explicitly authorized.
+**Status:** done locally (not pushed, not deployed).
+
+1. **Residual auth quarantine** — `residual_interim_auth.py` documents
+   non-durable stores (`_login_codes`, companion `_auth_codes`, `portal_refresh`);
+   Dictate desktop OAuth/device/refresh paths remain on `DurableAuthStore`.
+2. **Commerce honesty** — `_ensure_canonical_dictate_commerce` documented as single
+   authority; legacy `DictateSubscription` is one-way bridge only (no dual-read).
+3. **Docs alignment** — `goal.md`, backend handoff, inventory overlay, privacy
+   policy updated for server-managed hosted results and not-deployed honesty.
+4. **Release readiness** — [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md)
+   records local proof, UNKNOWN deploy facts, rollback notes, residual risks.
+5. **Broad gates** — see results below.
+
+**Out of scope:** push, merge, Helm, live canary, production credentials.
+
+## Waves 0–4 local status
+
+| Wave | Status |
+| --- | --- |
+| Wave 0 | **PASSED** — planning authority lock |
+| Wave 1 | **COMPLETE LOCAL** — durable auth, commerce, usage, neutral login |
+| Wave 2 | **COMPLETE LOCAL** — governed hosted transcription |
+| Wave 3 | **COMPLETE LOCAL** — devices, sync, desktop convergence |
+| Wave 4 R1 | **COMPLETE LOCAL PROOF** — docs/integration gates; pending human deploy go |
+
+Nothing has been pushed, merged, deployed, or released.
+
+## Recommended next actions (human gate)
+
+1. Review [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
+2. Authorize push of both forge branches when ready.
+3. Record deployed SHA; run discovery HTTPS + migration dry-run + internal canary.
+4. Wave 4 Rounds 2–4 may continue local hardening before deploy go.
 
 ## Last independently verified gates
 
-Wave 3 Round 2 green gates (both repos, not pushed):
+Wave 4 Round 1 broad gates (both repos, not pushed):
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/test_dictate_devices_sync.py tests/test_dictate_hosted_jobs.py tests/test_dictate_usage_ledger.py tests/test_durable_auth.py tests/test_dictate.py -q   PASS (56)
+  uv run python -m pytest tests/test_dictate_devices_sync.py tests/test_dictate_hosted_jobs.py tests/test_dictate_usage_ledger.py tests/test_durable_auth.py tests/test_dictate.py tests/test_dictate_desktop_auth.py tests/test_dictate_account_return.py tests/test_commerce.py -q   PASS (124)
   git diff --check                                                                                                  PASS
 
 dictate:
-  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py tests/test_platform_state.py   PASS (56)
+  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py tests/test_platform_state.py tests/test_pro_auth.py tests/test_pro_service.py tests/test_ui_server.py tests/test_sync.py tests/test_sync_engine.py tests/test_browser_auth.py   PASS (221)
+  cd ui && npm test                                                                                                 PASS (98)
   git diff --check                                                                                                  PASS
 ```
 
-Wave 3 Round 1 green gates at `cbbda15` / `1208b41`.
-
-Prior Slice 2 verification at `28caac1` on `arc-forge-deck` and `ba23836` on `dictate`.
+Prior Wave 3 Round 2 gates at `779daf9` / `b102c33`.
 
 Useful focused commands:
 
@@ -276,6 +302,8 @@ commits:
   Slice 2 conductor R2 fixes: 6fef9a6
   Slice 2 conductor R3 fixes: 28caac1
   Wave 3 Round 1 devices + sync: cbbda15
+  Wave 3 Round 2 security fixes: 779daf9
+  Wave 4 Round 1 release prep: (see dictate handover tip)
 ```
 
 Do not push, merge, or deploy without explicit human go.

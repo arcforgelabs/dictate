@@ -56,6 +56,28 @@ for this Dictate work.
 | Forge LLM gateway repository | Supplied evidence: `/home/samuel/repos/forge-llm-gateway` is 311 commits behind `origin` | No owner authority for this work | Not an authority candidate for this contract | Not applicable | Dead/excluded |
 | Dictate-side contract and handoff | `docs/contracts/dictate-platform-v1.json`; `docs/platform/arc-forge-backend-handoff-v1.md` in this branch | Dictate implementation lane → external shared backend owner | Versioned Wave 0 authority/contract artifacts lock one proposed authority per production surface; no live conformance is claimed | Not deployed; **UNKNOWN** | Migration input and later deployment-verification task |
 
+## Forge local implementation overlay (2026-07-12)
+
+Local forge branches supersede several pinned `2ee29c9` inventory rows for
+**source implementation** (not deployment):
+
+| Surface | Local branch | Tip evidence | Deploy status |
+| --- | --- | --- | --- |
+| Durable desktop auth | `forge/wave1-durable-auth` | `DurableAuthStore`, `test_durable_auth.py` | **NOT DEPLOYED** |
+| Single commerce authority | `forge/wave1-durable-auth` | `_ensure_canonical_dictate_commerce` — no dual-read gates | **NOT DEPLOYED** |
+| Hosted encrypted results | `forge/wave1-durable-auth` | `DictateResultArtifact`, `test_dictate_hosted_jobs.py` | **NOT DEPLOYED** |
+| Devices + sync | `forge/wave1-durable-auth` | `dictate_devices.py`, `dictate_sync.py`, `test_dictate_devices_sync.py` | **NOT DEPLOYED** |
+| Desktop convergence | `forge/dictate-pro-platform` | `platform_state.py`, `test_platform_state.py` | **NOT DEPLOYED** |
+
+Residual interim auth (`_login_codes`, companion `_auth_codes`, `portal_refresh`)
+is documented in `arc_forge_console/residual_interim_auth.py` and must not be
+described as production-durable Dictate desktop auth.
+
+Hosted transcript handoff at the pinned revision stored plaintext segments.
+Local forge implementation delivers server-managed encrypted artifacts; legacy
+transcript routes may remain for compatibility but are not the authoritative
+hosted result path.
+
 ## Current/reference state mapping
 
 The custom contract records reusable enum definitions and maps source values
