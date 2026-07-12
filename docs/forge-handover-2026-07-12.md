@@ -219,7 +219,7 @@ loop; macOS Keychain; bind `device_id` on device-code token grant; portal
 **Deferred:** full recovery-key crypto verification; device-code grant `device_id`
 binding at mint; hosted spoof hardening for unregistered legacy `device_id` strings.
 
-**Wave 3 Round 2 commits:** see SHAs below after commit.
+**Wave 3 Round 2 commits:** `779daf9` (arc-forge-deck), `b6b347d` (dictate).
 
 ## Recommended next Forge actions
 
