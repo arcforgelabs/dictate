@@ -3,7 +3,7 @@
 **Date:** 2026-07-12 (Australia/Adelaide)  
 **Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
 **Dictate branch:** `forge/dictate-pro-platform` @ see handover for tip SHA  
-**Shared backend branch:** `forge/wave1-durable-auth` @ `779daf9` (Wave 3 R2 tip; Wave 4 R1 pending commit)
+**Shared backend branch:** `forge/wave1-durable-auth` @ `67914b9` (Wave 4 R1 tip)
 
 ## Executive summary
 

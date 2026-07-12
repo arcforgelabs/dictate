@@ -234,9 +234,11 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
    policy updated for server-managed hosted results and not-deployed honesty.
 4. **Release readiness** — [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md)
    records local proof, UNKNOWN deploy facts, rollback notes, residual risks.
-5. **Broad gates** — see results below.
+5. **Broad gates** — deck 124, dictate 221, ui vitest 98 (see below).
 
 **Out of scope:** push, merge, Helm, live canary, production credentials.
+
+**Wave 4 Round 1 commits:** `67914b9` (arc-forge-deck), `57d02c6` (dictate).
 
 ## Waves 0–4 local status
 
@@ -303,7 +305,7 @@ commits:
   Slice 2 conductor R3 fixes: 28caac1
   Wave 3 Round 1 devices + sync: cbbda15
   Wave 3 Round 2 security fixes: 779daf9
-  Wave 4 Round 1 release prep: (see dictate handover tip)
+  Wave 4 Round 1 release prep: 67914b9
 ```
 
 Do not push, merge, or deploy without explicit human go.
