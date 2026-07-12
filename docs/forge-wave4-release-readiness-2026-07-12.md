@@ -2,8 +2,9 @@
 
 **Date:** 2026-07-12 (Australia/Adelaide)  
 **Status:** LOCAL PROOF ONLY — **not deployed**, **not pushed**, **not released**  
-**Dictate branch:** `forge/dictate-pro-platform` @ see handover for tip SHA  
-**Shared backend branch:** `forge/wave1-durable-auth` @ `67914b9` (Wave 4 R1 tip)
+**Dictate branch tip:** `forge/dictate-pro-platform` @ update after commit
+**Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
+**Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
 
 ## Executive summary
 
@@ -53,8 +54,17 @@ credential rotation.
    `_login_codes` dict; not DurableAuthStore (labelled RESIDUAL_INTERIM).
 5. **Legacy companion `_auth_codes`** — companion enrollment only; not Dictate
    desktop PKCE (labelled RESIDUAL_INTERIM).
-6. **Sync export/delete** — Wave 3 deferred; not in local proof scope.
-7. **Unregistered hosted `device_id` spoof** — unbound bearer may still create jobs
+6. **Browser MFA challenges in-memory** — `_browser_mfa_challenges` dict for
+   new-browser verification; lost on restart (labelled RESIDUAL_INTERIM).
+7. **Magic-link tokens in-memory** — `_magic_tokens` dict for passwordless login;
+   not DurableAuthStore (labelled RESIDUAL_INTERIM).
+8. **Password-reset tokens in-memory** — `_password_reset_tokens` dict for reset
+   links; not DurableAuthStore (labelled RESIDUAL_INTERIM).
+9. **Browser `_refresh_tokens` dict** — backs `portal_refresh` cookies for
+   portal/dashboard sessions; distinct from DurableAuthStore desktop refresh
+   families (labelled RESIDUAL_INTERIM).
+10. **Sync export/delete** — Wave 3 deferred; not in local proof scope.
+11. **Unregistered hosted `device_id` spoof** — unbound bearer may still create jobs
    for unregistered device_id strings (registered devices require bound JWT).
 
 ## Rollback notes (pre-deploy planning)

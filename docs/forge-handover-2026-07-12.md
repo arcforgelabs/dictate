@@ -240,6 +240,25 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Wave 4 Round 1 commits:** `67914b9` (arc-forge-deck), `57d02c6` (dictate).
 
+**Wave 4 Round 2 commits:** `965fe40` (arc-forge-deck), see dictate tip below (dictate).
+
+**Branch tips (local, not pushed):**
+- arc-forge-deck `forge/wave1-durable-auth` @ **`965fe40`**
+- dictate `forge/dictate-pro-platform` @ update after R2 commit
+
+## Wave 4 Round 2 — conductor doc fixes
+
+**Status:** done locally (not pushed).
+
+1. **[P2]** Residual risks expanded — MFA, magic-link, password-reset, browser
+   `_refresh_tokens` added to readiness doc matching `residual_interim_auth.py`.
+2. **[P2]** `residual_interim_auth.py` complete — `_magic_tokens`, `_refresh_tokens`
+   inventory; RESIDUAL_INTERIM labels on matching `dashboard.py` sites.
+3. **[P2]** Tip SHAs recorded separately from Round 1 commit list in readiness
+   and handover.
+4. **[P3]** Inventory stale rows annotated superseded by forge overlay /
+   DurableAuthStore / server-managed artifacts.
+
 ## Waves 0–4 local status
 
 | Wave | Status |
@@ -249,6 +268,7 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 | Wave 2 | **COMPLETE LOCAL** — governed hosted transcription |
 | Wave 3 | **COMPLETE LOCAL** — devices, sync, desktop convergence |
 | Wave 4 R1 | **COMPLETE LOCAL PROOF** — docs/integration gates; pending human deploy go |
+| Wave 4 R2 | **COMPLETE LOCAL** — residual auth inventory + doc SHA fixes |
 
 Nothing has been pushed, merged, deployed, or released.
 
@@ -298,14 +318,14 @@ The shared backend implementation for Wave 1 lives on:
 /home/samuel/repos/arc-forge-deck
 branch: forge/wave1-durable-auth
 parent: forge/handover-sharpen @ ae663a0
-commits:
-  Slice 1 durable auth: 2a19ec4
-  Slice 2 commerce + usage ledger: 2ca2b8c
-  Slice 2 conductor R2 fixes: 6fef9a6
-  Slice 2 conductor R3 fixes: 28caac1
-  Wave 3 Round 1 devices + sync: cbbda15
-  Wave 3 Round 2 security fixes: 779daf9
-  Wave 4 Round 1 release prep: 67914b9
+Wave 4 Round 1: 67914b9
+Wave 4 Round 2: 965fe40
+branch tip (local): 965fe40
+
+/home/samuel/repos/dictate
+branch: forge/dictate-pro-platform
+Wave 4 Round 1: 57d02c6 (+ handover fix 6c1faa8)
+branch tip (local): see readiness doc after R2 commit
 ```
 
 Do not push, merge, or deploy without explicit human go.
