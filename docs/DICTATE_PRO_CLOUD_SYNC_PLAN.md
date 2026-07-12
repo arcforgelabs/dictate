@@ -4,6 +4,11 @@ Date: 2026-07-05
 
 **Status:** Reference and migration input, subordinate to `docs/goal.md`.
 
+> **Superseded claims:** Hosted results use **server-managed** encrypted artifacts
+> (AES+AAD account isolation); owner-bound device-key wrapping is **deferred** per
+> `goal.md` Wave 2. Process-memory auth and dual commerce reads are interim only —
+> not intentional production design.
+
 This document supplies scoped detail for Dictate's use of the Arc Forge account,
 encrypted cloud sync, and Dictate Pro paid capabilities. `docs/goal.md` is the
 current cross-system goal and authority for identity, product/account

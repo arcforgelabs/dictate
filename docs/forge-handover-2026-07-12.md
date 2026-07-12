@@ -270,6 +270,22 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Wave 4 Round 3 commit:** `1c5ebf7` (dictate); deck tip unchanged `965fe40`.
 
+## Docs hygiene — continuous E2E tracking
+
+**Status:** done locally (not pushed).
+
+1. **[P2]** Refreshed [goal.md](goal.md) as living E2E authority — progress
+   scoreboard, Wave 1–2 status lines, Wave 4 Rounds 1–3 summary, explicit
+   push/canary/deploy gate.
+2. **[P2]** Redirected [GOALS.md](GOALS.md) to `goal.md` (platform) vs
+   `TRANSCRIPTION_PLAN.md` (local transcription).
+3. **[P3]** Added superseding banners on `desktop-browser-signin-architecture.md`
+   and `DICTATE_PRO_CLOUD_SYNC_PLAN.md` where claims could lag forge truth.
+
+**E2E scoreboard of record:** [goal.md](goal.md). This handover is session
+continuity; release evidence is
+[forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
+
 ## Waves 0–4 local status
 
 | Wave | Status |
@@ -281,12 +297,14 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 | Wave 4 R1 | **COMPLETE LOCAL PROOF** — docs/integration gates; pending human deploy go |
 | Wave 4 R2 | **COMPLETE LOCAL** — residual auth inventory + doc SHA fixes |
 | Wave 4 R3 | **COMPLETE LOCAL** — tip SHA honesty across readiness + handover |
+| Docs hygiene | **COMPLETE LOCAL** — `goal.md` scoreboard + stale-doc redirects |
 
 Nothing has been pushed, merged, deployed, or released.
 
 ## Recommended next actions (human gate)
 
-1. Review [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
+1. Review [goal.md](goal.md) scoreboard and
+   [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
 2. Authorize push of both forge branches when ready.
 3. Record deployed SHA; run discovery HTTPS + migration dry-run + internal canary.
 4. Wave 4 Rounds 2–4 may continue local hardening before deploy go.

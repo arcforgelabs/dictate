@@ -5,6 +5,7 @@
 **Dictate branch tip:** `forge/dictate-pro-platform` @ `1c5ebf7`
 
 **Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
+
 **Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
 
 ## Executive summary
@@ -13,6 +14,10 @@ Waves 0–3 are implemented and conductor-green on local forge branches. Wave 4
 Round 1 integrates documentation, quarantines residual interim auth claims, runs
 broad focused test suites, and records what is proven locally versus what remains
 **UNKNOWN** until an explicit human authorizes push, canary, and production deploy.
+
+**E2E scoreboard of record:** [goal.md](goal.md) (progress table + DoD). This
+readiness doc is release evidence; [forge-handover-2026-07-12.md](forge-handover-2026-07-12.md)
+is session continuity.
 
 Nothing in this document authorizes push, merge, Helm changes, live canary, or
 credential rotation.
