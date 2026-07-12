@@ -65,7 +65,7 @@ Implemented in the shared backend (read/write authorized for this Forge round):
 ## Wave 1 Slice 2 — commerce single authority + usage ledger lifecycle
 
 **Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth`
-(commits `2ca2b8c` initial, `6fef9a6` conductor Round 2 fixes; not pushed).
+(commits `2ca2b8c` initial, `6fef9a6` Round 2, `28caac1` Round 3; not pushed).
 
 Implemented in the shared backend:
 
@@ -90,6 +90,9 @@ Implemented in the shared backend:
    idempotent retry, over-settlement without amendment, actual>reserve settle
    with amendment, terminal exclusivity serial + DB constraint, commerce refresh,
    duplicate-key rejection).
+5. **Round 3** — `_release_job_usage` no-ops when any terminal ledger outcome
+   exists (prevents quota leak after settlement); trialing subscriptions report
+   `active: true` with `status: trialing`.
 
 Remaining Wave 1 work (not in Slice 2): hosted jobs hardening (Wave 2 overlap),
 sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
@@ -106,14 +109,13 @@ sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
 
 ## Last independently verified gates
 
-At `6fef9a6` on `arc-forge-deck` (Slice 2 R2) and `c677f9d` on `dictate`, the
+At `28caac1` on `arc-forge-deck` (Slice 2 R3) and `ba23836` on `dictate`, the
 conductor independently ran:
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/test_dictate_usage_ledger.py tests/test_dictate.py -q   PASS
-  uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q   PASS
-  git diff --check                                                                      PASS
+  uv run python -m pytest tests/test_dictate_usage_ledger.py tests/test_dictate.py tests/test_durable_auth.py -q   PASS
+  git diff --check                                                                                                  PASS
 ```
 
 Useful focused commands:
@@ -141,6 +143,8 @@ parent: forge/handover-sharpen @ ae663a0
 commits:
   Slice 1 durable auth: 2a19ec4
   Slice 2 commerce + usage ledger: 2ca2b8c
+  Slice 2 conductor R2 fixes: 6fef9a6
+  Slice 2 conductor R3 fixes: 28caac1
 ```
 
 Do not push, merge, or deploy without explicit human go.
