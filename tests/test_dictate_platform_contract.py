@@ -209,12 +209,14 @@ class _UsageLedgerModel:
     """Executable contract model for cross-event invariants, not backend code."""
 
     _LINKED_FIELDS = ("account_id", "request_id", "job_id", "idempotency_key", "period", "correlation_id")
+    _CORRELATION_FIELDS = ("account_id", "request_id", "job_id", "idempotency_key", "correlation_id")
     _TERMINAL_EVENT_TYPES = frozenset({"settlement", "rollback", "rejection"})
 
     def __init__(self) -> None:
         self.events: dict[str, dict[str, Any]] = {}
         self.by_retry_key: dict[tuple[str, str, str, str, str], str] = {}
-        self.terminal_outcomes: dict[str, str] = {}
+        self.terminal_outcomes: dict[tuple[str, str, str, str, str], str] = {}
+        self.reservations_by_correlation: dict[tuple[str, str, str, str, str], str] = {}
 
     def _retry_key(self, event: dict[str, Any]) -> tuple[str, str, str, str, str]:
         return (
@@ -225,24 +227,36 @@ class _UsageLedgerModel:
             event["event_type"],
         )
 
+    def _correlation_key(self, event: dict[str, Any]) -> tuple[str, str, str, str, str]:
+        return tuple(event[field] for field in self._CORRELATION_FIELDS)
+
     def _assert_linked_fields(self, event: dict[str, Any], anchor: dict[str, Any]) -> None:
         for field in self._LINKED_FIELDS:
             if event[field] != anchor[field]:
                 raise ValueError("linked field mismatch")
 
-    def _apply_terminal_outcome(self, event: dict[str, Any], event_type: str, predecessor: str) -> None:
-        if predecessor not in self.events:
-            raise ValueError("missing reservation predecessor")
-        existing_terminal = self.terminal_outcomes.get(predecessor)
+    def _reservation_for_correlation(self, event: dict[str, Any]) -> dict[str, Any]:
+        reservation_id = self.reservations_by_correlation.get(self._correlation_key(event))
+        if reservation_id is None:
+            raise ValueError("missing reservation correlation")
+        return self.events[reservation_id]
+
+    def _apply_terminal_outcome(self, event: dict[str, Any], event_type: str) -> None:
+        correlation_key = self._correlation_key(event)
+        existing_terminal = self.terminal_outcomes.get(correlation_key)
         if existing_terminal is not None:
             if existing_terminal == event_type:
                 raise ValueError(f"duplicate {event_type}")
             raise ValueError("terminal outcome conflict")
-        reservation = self.events[predecessor]
+        reservation = self._reservation_for_correlation(event)
+        if event_type in {"settlement", "rollback"}:
+            predecessor = event.get("predecessor_event_id")
+            if predecessor != reservation["event_id"]:
+                raise ValueError("missing reservation predecessor")
         self._assert_linked_fields(event, reservation)
         if event_type == "settlement" and event["quantity"] > reservation["quantity"]:
             raise ValueError("settlement exceeds reservation")
-        self.terminal_outcomes[predecessor] = event_type
+        self.terminal_outcomes[correlation_key] = event_type
 
     def apply(self, event: dict[str, Any]) -> dict[str, Any]:
         retry_key = self._retry_key(event)
@@ -252,9 +266,10 @@ class _UsageLedgerModel:
                 return self.events[existing_id]
             raise ValueError("duplicate idempotency key")
         event_type = event["event_type"]
-        predecessor = event.get("predecessor_event_id")
-        if event_type in self._TERMINAL_EVENT_TYPES and predecessor is not None:
-            self._apply_terminal_outcome(event, event_type, predecessor)
+        if event_type == "reservation":
+            self.reservations_by_correlation[self._correlation_key(event)] = event["event_id"]
+        elif event_type in self._TERMINAL_EVENT_TYPES:
+            self._apply_terminal_outcome(event, event_type)
         self.events[event["event_id"]] = event
         self.by_retry_key[retry_key] = event["event_id"]
         return event
@@ -852,27 +867,30 @@ class DictatePlatformContractTests(unittest.TestCase):
                 )
             )
         with self.assertRaisesRegex(ValueError, "linked field mismatch"):
-            ledger.apply(
-                _usage_event(
-                    "settlement",
-                    "settled",
-                    event_id="settle-mismatch",
-                    quantity=8,
-                    idempotency_key="different-idem",
-                    correlation_id=shared_correlation_id,
-                    predecessor_event_id="reserve-1",
-                )
+            mismatched_period_settlement = _usage_event(
+                "settlement",
+                "settled",
+                event_id="settle-mismatch",
+                quantity=8,
+                idempotency_key=shared_idempotency_key,
+                correlation_id=shared_correlation_id,
+                predecessor_event_id="reserve-1",
             )
+            mismatched_period_settlement["period"] = {
+                **mismatched_period_settlement["period"],
+                "period_id": "period-2",
+            }
+            ledger.apply(mismatched_period_settlement)
         self.assertIs(ledger.apply(settlement), settlement)
         self.assertIs(ledger.apply(dict(settlement)), settlement)
-        with self.assertRaisesRegex(ValueError, "duplicate settlement"):
+        with self.assertRaisesRegex(ValueError, "duplicate idempotency"):
             ledger.apply(
                 _usage_event(
                     "settlement",
                     "settled",
                     event_id="settle-duplicate",
                     quantity=8,
-                    idempotency_key="second-settlement-attempt",
+                    idempotency_key=shared_idempotency_key,
                     correlation_id=shared_correlation_id,
                     predecessor_event_id="reserve-1",
                 )
@@ -884,20 +902,83 @@ class DictatePlatformContractTests(unittest.TestCase):
         rollback_ledger.apply(reservation)
         self.assertIs(rollback_ledger.apply(rollback), rollback)
         self.assertIs(rollback_ledger.apply(dict(rollback)), rollback)
-        with self.assertRaisesRegex(ValueError, "duplicate rollback"):
+        with self.assertRaisesRegex(ValueError, "duplicate idempotency"):
             rollback_ledger.apply(
                 _usage_event(
                     "rollback",
                     "rolled_back",
                     event_id="rollback-duplicate",
                     quantity=10,
-                    idempotency_key="second-rollback-attempt",
+                    idempotency_key=shared_idempotency_key,
                     correlation_id=shared_correlation_id,
                     predecessor_event_id="reserve-1",
                 )
             )
         with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
             rollback_ledger.apply(settlement)
+
+    def test_usage_ledger_model_enforces_rejection_terminal_exclusivity(self) -> None:
+        shared_idempotency_key = self.contract["contract_fixtures"]["usage_events"]["lifecycle_shared_idempotency_key"]
+        shared_correlation_id = self.contract["contract_fixtures"]["usage_events"]["lifecycle_correlation_id"]
+        reservation = _usage_event(
+            "reservation",
+            "reserved",
+            event_id="reserve-1",
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
+        )
+        settlement = _usage_event(
+            "settlement",
+            "settled",
+            event_id="settle-1",
+            quantity=8,
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
+            predecessor_event_id="reserve-1",
+        )
+        rollback = _usage_event(
+            "rollback",
+            "rolled_back",
+            event_id="rollback-1",
+            quantity=10,
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
+            predecessor_event_id="reserve-1",
+        )
+        rejection = _usage_event(
+            "rejection",
+            "rejected",
+            event_id="reject-1",
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
+        )
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/UsageEvent", rejection))
+        self.assertNotIn("predecessor_event_id", rejection)
+
+        reject_then_settle = _UsageLedgerModel()
+        reject_then_settle.apply(reservation)
+        self.assertIs(reject_then_settle.apply(rejection), rejection)
+        self.assertIs(reject_then_settle.apply(dict(rejection)), rejection)
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            reject_then_settle.apply(settlement)
+
+        settle_then_reject = _UsageLedgerModel()
+        settle_then_reject.apply(reservation)
+        settle_then_reject.apply(settlement)
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            settle_then_reject.apply(rejection)
+
+        reject_then_rollback = _UsageLedgerModel()
+        reject_then_rollback.apply(reservation)
+        reject_then_rollback.apply(rejection)
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            reject_then_rollback.apply(rollback)
+
+        rollback_then_reject = _UsageLedgerModel()
+        rollback_then_reject.apply(reservation)
+        rollback_then_reject.apply(rollback)
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            rollback_then_reject.apply(rejection)
 
     def test_diarized_authorization_survives_hosted_lifecycle(self) -> None:
         for operation_id in ["hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]:

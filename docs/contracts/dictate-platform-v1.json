@@ -1349,7 +1349,7 @@
         "reserve, settle, rollback, and reject events for one gateway invocation share request_id, job_id, idempotency_key, period, and correlation_id",
         "idempotency_key is the gateway request correlation key and is shared across lifecycle events; retry deduplication is scoped by account_id, request_id, job_id, idempotency_key, and event_type",
         "settlement quantity cannot exceed the reservation quantity for the same correlation_id and predecessor",
-        "at most one terminal outcome (settlement, rollback, or rejection) is accepted per reservation predecessor",
+        "at most one terminal outcome (settlement, rollback, or rejection) is accepted per gateway correlation",
         "duplicate retry returns the existing event/outcome for the same account_id, request_id, job_id, idempotency_key, and event_type without a second ledger mutation",
         "rollback is exactly-once per predecessor; duplicate rollback delivery with the same retry key is a no-op replay and never mutates the original event"
       ]
@@ -1534,14 +1534,15 @@
       "gateway_correlation_key": "idempotency_key",
       "shared_across_lifecycle": ["request_id", "job_id", "idempotency_key", "period", "correlation_id"],
       "retry_dedup_key": ["account_id", "request_id", "job_id", "idempotency_key", "event_type"],
-      "settlement_limit": "at most one effective settlement per reservation predecessor",
-      "rollback_limit": "exactly one effective rollback per predecessor; duplicate delivery replays the original rollback event",
-      "terminal_outcome_exclusivity": "at most one settlement, rollback, or rejection per reservation predecessor"
+      "terminal_correlation_fields": ["account_id", "request_id", "job_id", "idempotency_key", "correlation_id"],
+      "settlement_limit": "at most one effective settlement per gateway correlation",
+      "rollback_limit": "exactly one effective rollback per gateway correlation; duplicate delivery replays the original rollback event",
+      "terminal_outcome_exclusivity": "at most one settlement, rollback, or rejection per gateway correlation (account_id, request_id, job_id, idempotency_key, correlation_id); rejection links via shared correlation fields without predecessor_event_id"
     },
     "cross_event_invariants": [
       "Lifecycle events for one gateway invocation share request_id, job_id, idempotency_key, period, and correlation_id.",
       "A retry with the same account_id, request_id, job_id, idempotency_key, and event_type returns the original immutable event.",
-      "Each reservation accepts at most one terminal outcome: settlement, rollback, or rejection.",
+      "Each gateway correlation accepts at most one terminal outcome: settlement, rollback, or rejection.",
       "A settlement is accepted only once per reservation predecessor and its quantity is no greater than the correlated reservation.",
       "A rollback has one predecessor and exactly one effective reversal; duplicate rollback delivery with the same retry key is a no-op replay.",
       "All lifecycle events remain in the same account and usage period; Deck events cannot satisfy Dictate ledger predicates."
@@ -1638,7 +1639,7 @@
       "correlation_fields": ["account_id", "request_id", "job_id", "idempotency_key", "period", "correlation_id", "predecessor_event_id"],
       "ledger_invariants": [
         "Duplicate gateway retries use usage_events.idempotency_model.retry_dedup_key (account_id, request_id, job_id, idempotency_key, event_type) and return the original immutable event without a second mutation.",
-        "Each reservation accepts at most one terminal outcome: settlement, rollback, or rejection.",
+        "Each gateway correlation accepts at most one terminal outcome: settlement, rollback, or rejection.",
         "Settlement quantity must be no greater than the correlated reservation and may be accepted only once per predecessor.",
         "Rollback requires the reservation predecessor and exactly one effective reversal; duplicate rollback delivery with the same retry key is a no-op replay.",
         "A provider failure or quota rejection still produces a linked rejection or rollback outcome, never a second terminal outcome."
