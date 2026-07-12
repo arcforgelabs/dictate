@@ -201,6 +201,8 @@ verification; device public-key wrapping for hosted results; background sync
 loop; macOS Keychain; bind `device_id` on device-code token grant; portal
 `PortalDevice` vs `DictateDevice` unification.
 
+**Wave 3 Round 1 commits:** `cbbda15` (arc-forge-deck), `d23adc3` (dictate).
+
 ## Recommended next Forge actions
 
 1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and
@@ -253,6 +255,7 @@ commits:
   Slice 2 commerce + usage ledger: 2ca2b8c
   Slice 2 conductor R2 fixes: 6fef9a6
   Slice 2 conductor R3 fixes: 28caac1
+  Wave 3 Round 1 devices + sync: cbbda15
 ```
 
 Do not push, merge, or deploy without explicit human go.
