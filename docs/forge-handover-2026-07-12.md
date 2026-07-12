@@ -158,7 +158,16 @@ separate worker process vs in-request durable commits.
    account isolation retained; device-key wrapping deferred.
 
 **Wave 2 Round 1 commits:** `6896fc4` (arc-forge-deck), `ea673cc` (dictate).
-**Wave 2 Round 2 commits:** `d069430` (arc-forge-deck), `9ff58e7` (dictate).
+**Wave 2 Round 2 commits:** `d069430` (arc-forge-deck), `810100c` (dictate).
+
+## Wave 2 Round 3 — contract wording cleanup
+
+**Status:** done locally (not pushed).
+
+1. **[P2]** `hosted.result.idempotency.replay` and residual hosted-result contract
+   text use server-managed encrypted artifact wording (no owner-bound claims).
+
+**Wave 2 Round 3:** contract `hosted.result.idempotency.replay` server-managed wording (dictate).
 
 ## Recommended next Forge actions
 

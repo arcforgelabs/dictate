@@ -581,7 +581,7 @@
       "request_schema": "#/schemas/HostedJobRequest",
       "response_schema": "#/schemas/HostedResultArtifact",
       "state_refs": ["#/enums/hosted_job_state"],
-      "idempotency": {"required": false, "header": "not_applicable", "replay": "same owner-bound artifact"},
+      "idempotency": {"required": false, "header": "not_applicable", "replay": "same server-managed encrypted artifact"},
       "account_scope": "account_id"
     },
     "hosted.ack": {
