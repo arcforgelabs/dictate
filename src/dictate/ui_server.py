@@ -753,7 +753,7 @@ class UiBackend:
             except (InvalidTag, ValueError) as exc:
                 raise ApiError(400, "Recovery key could not unlock Dictate Pro sync for this account.") from exc
             try:
-                client.approve_current_device_with_recovery()
+                client.approve_current_device_with_recovery(recovery_key_envelope=envelope_payload)
             except Exception as exc:  # noqa: BLE001
                 raise ApiError(403, "Recovery key unlocked sync, but this device could not be trusted.") from exc
             state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)

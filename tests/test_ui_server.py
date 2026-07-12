@@ -273,8 +273,14 @@ class _FakeProClient:
         self.approved_devices.append({"device_id": device_id, "envelope": envelope})
         return {"approved": True, "device": {"device_id": device_id, "trusted_at": "2026-07-05T12:00:00+00:00"}}
 
-    def approve_current_device_with_recovery(self) -> dict[str, object]:
+    def approve_current_device_with_recovery(
+        self,
+        *,
+        recovery_key_envelope: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
         self.approved_with_recovery = True
+        self.recovery_approval_envelope = recovery_key_envelope
         return {"approved": True, "method": "recovery"}
 
     def export_cloud_data(self) -> dict[str, object]:
