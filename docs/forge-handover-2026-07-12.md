@@ -65,7 +65,7 @@ Implemented in the shared backend (read/write authorized for this Forge round):
 ## Wave 1 Slice 2 — commerce single authority + usage ledger lifecycle
 
 **Status:** done locally on `arc-forge-deck` branch `forge/wave1-durable-auth`
-(commit `2ca2b8c`; not pushed).
+(commits `2ca2b8c` initial, `6fef9a6` conductor Round 2 fixes; not pushed).
 
 Implemented in the shared backend:
 
@@ -74,16 +74,22 @@ Implemented in the shared backend:
    `Entitlement` only. Legacy `DictateSubscription` rows are one-way bridged on
    first read via `_bridge_legacy_dictate_subscription_to_commerce` (Stripe
    webhooks still ingest legacy rows; they are not a competing gate authority).
+   Stale commerce rows re-project when legacy `updated_at` is newer.
 2. **Usage ledger lifecycle** — new `DictateUsageLedger` module with
    reservation → settlement|rollback|rejection, gateway correlation fields
    (`request_id`, `idempotency_key`, `correlation_id`), and event_type-scoped
    retry dedup per `usage_events.idempotency_model` in
    `docs/contracts/dictate-platform-v1.json`. `DictateUsageEvent` model and DB
-   migration extended; job create reserves, reconcile settles, failure paths
-   rollback.
-3. **Executable tests** — `tests/test_dictate_usage_ledger.py` (reserve→settle
-   idempotent retry, over-settlement rejected, terminal exclusivity,
-   duplicate-key rejection); entitlement bridge test in same file.
+   migration extended; job create reserves, reconcile settles (auto-extending
+   reservation when actual exceeds initial estimate), failure paths rollback with
+   period compensation on ledger errors.
+3. **Terminal exclusivity** — partial unique index
+   `uq_dictate_usage_terminal_correlation` plus reservation row lock before
+   terminal insert; `IntegrityError` maps to `UsageTerminalConflictError`.
+4. **Executable tests** — `tests/test_dictate_usage_ledger.py` (reserve→settle
+   idempotent retry, over-settlement without amendment, actual>reserve settle
+   with amendment, terminal exclusivity serial + DB constraint, commerce refresh,
+   duplicate-key rejection).
 
 Remaining Wave 1 work (not in Slice 2): hosted jobs hardening (Wave 2 overlap),
 sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
@@ -100,19 +106,14 @@ sync/devices UX (Wave 3), portal browser `portal_refresh` cookie durability.
 
 ## Last independently verified gates
 
-At `2ca2b8c` on `arc-forge-deck` (Slice 2) and `d552dce` on `dictate`, the
+At `6fef9a6` on `arc-forge-deck` (Slice 2 R2) and `c677f9d` on `dictate`, the
 conductor independently ran:
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/ -k "entitle or commerce or usage or dictate_subscription or durable_auth" -q   PASS
-  uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q                        PASS
-  git diff --check                                                                                                PASS
-
-dictate:
-  python3 -m compileall -q src tests scripts                                                                    PASS
-  .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py                            PASS
-  git diff --check                                                                                                PASS
+  uv run python -m pytest tests/test_dictate_usage_ledger.py tests/test_dictate.py -q   PASS
+  uv run python -m pytest tests/test_dictate_desktop_auth.py tests/test_durable_auth.py -q   PASS
+  git diff --check                                                                      PASS
 ```
 
 Useful focused commands:
