@@ -243,7 +243,7 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 **Wave 4 Round 2 commits:** `965fe40` (arc-forge-deck), `ab65a65` (dictate); tip SHA record `584b3f6` (dictate).
 
 **Local forge branches (not pushed):**
-- arc-forge-deck `forge/wave1-durable-auth` @ **`965fe40`**
+- arc-forge-deck `forge/wave1-durable-auth` @ **`a6ff42e`** (rebased on DH `main` @ `7db8c38`)
 - dictate **Branch:** `forge/dictate-pro-platform` (local; not pushed)
 - dictate **Last docs-hygiene content commit:** `06e376c`
 - dictate **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
@@ -285,7 +285,18 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 3. **[P3]** Added superseding banners on `desktop-browser-signin-architecture.md`
    and `DICTATE_PRO_CLOUD_SYNC_PLAN.md` where claims could lag forge truth.
 4. **[P2]** Replaced self-referential dictate tip SHAs with verify-tip pattern
-   (`06e376c` content anchor + `git rev-parse --short HEAD`); deck stays `965fe40`.
+   (`06e376c` content anchor + `git rev-parse --short HEAD`).
+
+## Deployment Harmony — closed baseline rebase
+
+**Status:** done locally on arc-forge-deck (not pushed).
+
+1. **Deployment Harmony** closed and merged to `main` @ `7db8c38` (PR 207).
+2. `forge/wave1-durable-auth` rebased onto that `main` (no conflicts).
+3. Post-rebase test fix `a6ff42e` — dashboard tests assert `DurableAuthStore` for
+   account verify-code refresh (`main` is ancestor of branch tip).
+4. Dictate work sits on top of the closed DH baseline; do not push/merge deck
+   without explicit human go.
 
 **E2E scoreboard of record:** [goal.md](goal.md). This handover is session
 continuity; release evidence is
@@ -352,10 +363,10 @@ The shared backend implementation for Wave 1 lives on:
 ```text
 /home/samuel/repos/arc-forge-deck
 branch: forge/wave1-durable-auth
-parent: forge/handover-sharpen @ ae663a0
-Wave 4 Round 1: 67914b9
-Wave 4 Round 2: 965fe40
-branch tip (local): 965fe40
+integration base: main @ 7db8c38 (Deployment Harmony PR 207, closed/merged)
+post-rebase test fix: a6ff42e
+branch tip (local): a6ff42e
+(main is ancestor; not pushed)
 
 /home/samuel/repos/dictate
 branch: forge/dictate-pro-platform (local; not pushed)

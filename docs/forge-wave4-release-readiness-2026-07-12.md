@@ -7,7 +7,12 @@
 **Last docs-hygiene content commit:** `06e376c`  
 **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
 
-**Shared backend branch tip:** `forge/wave1-durable-auth` @ `965fe40`
+**Shared backend branch:** `forge/wave1-durable-auth` @ `a6ff42e` (rebased on DH `main` @ `7db8c38`; not pushed)
+
+**Deployment Harmony (closed):** merged to arc-forge-deck `main` @ `7db8c38` (PR 207).
+Platform branch rebased onto that `main` (no conflicts); post-rebase test fix `a6ff42e`
+(dashboard tests assert `DurableAuthStore` for account verify-code refresh). Do not
+push/merge deck without explicit human go.
 
 **Wave 4 Round 1 commits:** deck `67914b9`, dictate `57d02c6` (implementation); dictate `6c1faa8` (handover SHA fix)
 

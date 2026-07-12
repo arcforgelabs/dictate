@@ -15,11 +15,16 @@
 | 3 | CLEAN locally (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
 | 4 | LOCAL PROOF (quarantine + readiness doc + broad gates) | push, canary, migration counts, live discovery HTTPS, human release |
 
+**Deck integration base:** post–Deployment Harmony `main` @ `7db8c38` (PR 207, closed/merged) —
+not `ae663a0` / `forge/handover-sharpen`. `forge/wave1-durable-auth` rebased onto that
+`main` (no conflicts); post-rebase test fix `a6ff42e`. Do not push/merge deck without
+human go; DH is closed — Dictate work sits on top of the closed DH baseline.
+
 **Local forge branches (not pushed):**
 - dictate **Branch:** `forge/dictate-pro-platform` (local; not pushed)
 - dictate **Last docs-hygiene content commit:** `06e376c`
 - dictate **Verify tip:** `git -C /home/samuel/repos/dictate rev-parse --short HEAD`
-- arc-forge-deck `forge/wave1-durable-auth` @ `965fe40`
+- arc-forge-deck `forge/wave1-durable-auth` @ `a6ff42e` (rebased on DH `main` @ `7db8c38`)
 
 Ship one coherent, production-ready Dictate product: local Dictate works without
 an account; Arc Forge provides neutral identity, commerce, entitlements,
