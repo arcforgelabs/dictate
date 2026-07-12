@@ -12,12 +12,9 @@ import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
+import { PRODUCT_DESTINATIONS } from "./productDestinations.js";
 
 const DEFAULT_VERSION = "2026.7.4";
-// Web-only account/billing management (subscription, plan, invoices) -- no in-app
-// equivalent, so signed-in users need a way back to it. A hardcoded https literal, so
-// it's safe to open directly (no scheme-clamp needed the way gateway-supplied URIs do).
-const ACCOUNT_PORTAL_URL = "https://console.arcforge.au/deck/account";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -140,6 +137,10 @@ const ONLINE_MODEL = "xai/grok-speech-to-text";
 // cloud/Pro action rather than a regular local option.
 const PRIVATE_MODEL = "parakeet/parakeet-tdt-0.6b-v2";
 
+function cloudAvailable(s) {
+  return Boolean((s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active) || s.keys.xai);
+}
+
 /* Local language toggle — only shown in Private mode. English stays on-device;
    Multilingual is a cloud-only action that routes through the existing sign-in
    / Dictate Pro flow before switching providers. */
@@ -154,8 +155,7 @@ function LocalEngineToggle() {
   };
   const pickMultilingual = () => {
     s.toast("Multilingual is available in Cloud mode only.", { tone: "amber" });
-    const proActive = !!(s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active);
-    if (!proActive && !s.keys.xai) {
+    if (!cloudAvailable(s)) {
       s.toast("Cloud mode requires an active Dictate Pro subscription or personal xAI API key.", {
         bad: true,
         ms: 12_000,
@@ -200,7 +200,7 @@ function PrivacyPill() {
       s.setModel(PRIVATE_MODEL);
       return;
     }
-    if (!s.keys.xai) {
+    if (!cloudAvailable(s)) {
       s.toast("Requires Dictate Pro or API key.", {
         bad: true,
         ms: 12_000,
@@ -213,10 +213,10 @@ function PrivacyPill() {
   };
 
   return (
-    <Tooltip label={privateOn ? "Local" : "Pro"}>
+    <Tooltip label={privateOn ? "Local" : "Cloud"}>
       <div className={"privpill" + (degraded ? " degraded" : "")}>
         <Toggle on={privateOn} onChange={onToggle} />
-        <span className="priv-icon" aria-label={privateOn ? "Local" : "Pro"}>
+        <span className="priv-icon" aria-label={privateOn ? "Local" : "Cloud"}>
           <Icon name={privateOn ? "laptop" : "cloud"} size={23} />
         </span>
       </div>
@@ -305,6 +305,7 @@ function syncStatusLabel({ signedIn, sync, syncBusy, syncError }) {
 
 function AccountDialog() {
   const s = useStore();
+  const accountPortalUrl = s.productDestinations?.hub ?? PRODUCT_DESTINATIONS.hub;
   const sync = s.syncState || { enabled: false, keyAvailable: false, lastSeq: 0 };
   const pro = s.dictatePro || { signedIn: false };
   const model = modelById(s.model);
@@ -533,7 +534,7 @@ function AccountDialog() {
   };
 
   const openAccountPortal = () => {
-    window.open(ACCOUNT_PORTAL_URL, "_blank", "noopener,noreferrer");
+    window.open(accountPortalUrl, "_blank", "noopener,noreferrer");
     s.toast("Opened account portal");
   };
 
@@ -1407,6 +1408,7 @@ export default function App() {
   const [providerReason, setProviderReason] = useState(null);
   const [providerActive, setProviderActive] = useState(null);
   const [dictatePro, setDictatePro] = useState({ signedIn: false });
+  const [productDestinations, setProductDestinations] = useState(PRODUCT_DESTINATIONS);
   const [browserSigninEnabled, setBrowserSigninEnabled] = useState(false);
   const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
   const [syncBusy, setSyncBusy] = useState(false);
@@ -1709,6 +1711,7 @@ export default function App() {
       }
     }
     if (st.dictatePro) setDictatePro(st.dictatePro);
+    if (st.productDestinations) setProductDestinations(st.productDestinations);
     if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
     if (st.sync) setSyncState(st.sync);
   }, []);
@@ -2404,7 +2407,7 @@ export default function App() {
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
     meetingReadiness,
-    dictatePro, setDictatePro, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
+    dictatePro, setDictatePro, productDestinations, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
     accountOpen, setAccountOpen, setHistory,
   };
 

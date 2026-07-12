@@ -54,8 +54,8 @@ machine with an ONNX Runtime build that exposes `MIGraphXExecutionProvider` or
 ```
 scripts/build-linux-desktop.sh
   ├─ npm --prefix ui run build                 # web UI -> ui/dist
-  ├─ DICTATE_ONEFILE=1 packaging/build-engine.sh  # freeze engine -> one binary
-  ├─ stage engine -> ui-shell/src-tauri/engine/dictate-engine
+  ├─ packaging/build-engine.sh                 # onedir for deb/rpm; onefile for AppImage
+  ├─ stage engine -> ui-shell/src-tauri/engine/
   └─ tauri build --bundles deb
 ```
 
@@ -214,13 +214,12 @@ scripts/build-windows-msix-store.ps1
 
 ## Gotchas (the expensive lessons)
 
-### Freeze the engine **onefile**, not onedir
-A PyInstaller **onedir** engine ships ~1,200 libs in `_internal/`. A **onefile**
-freeze puts a single self-extracting ELF in the package, which keeps the Linux
-desktop artifact simpler and avoids fragile dependency walking during bundling.
-We use onefile everywhere (set in `build-linux-desktop.sh`;
-`dictate-engine.spec` honours `DICTATE_ONEFILE`). Cost: ~1-2 s extraction at
-launch - fine for a tray app.
+### Match the engine layout to the Linux bundle format
+A PyInstaller **onedir** engine ships its libraries in `_internal/`, which native
+`.deb` and RPM packages can carry safely without a memory-heavy final archive
+compression step. Use onedir for those native packages. AppImage's linuxdeploy
+walks the internal libraries and is less reliable with that layout, so AppImage
+builds set `DICTATE_ONEFILE=1` and stage one self-extracting ELF instead.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if

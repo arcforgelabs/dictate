@@ -1,5 +1,9 @@
 # Dictate Desktop Browser Sign-In — Architecture
 
+> **Authority:** Subordinate to [goal.md](goal.md). Proposed sign-in design input;
+> production auth durability and return-path truth follow Wave 1 forge implementation
+> and [forge-wave4-release-readiness-2026-07-12.md](forge-wave4-release-readiness-2026-07-12.md).
+
 **Status:** Proposed · **Scope:** Arc Forge gateway (`https://console.arcforge.au`) + Dictate desktop client (`src/dictate/pro/client.py`, `src/dictate/ui_server.py`, `ui/src`)
 
 ## Decision summary

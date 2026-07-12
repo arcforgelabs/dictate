@@ -22,6 +22,7 @@ from dictate.api_keys import (
     save_pro_refresh_token,
 )
 from dictate.platform_paths import user_data_dir
+from dictate.pro.platform_state import build_convergence_state, classify_pro_client_error, should_clear_session_on_error
 from dictate.pro.browser_auth import (
     DEVICE_CODE_GRANT_TYPE,
     BrowserAuthAttempt,
@@ -482,7 +483,19 @@ class ProClient:
     def get_state(self) -> dict[str, Any]:
         session = self.refresh_if_needed()
         if session is None:
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
+            return {
+                "signedIn": False,
+                "entitlements": None,
+                "usage": None,
+                "account": None,
+                "commerce": None,
+                "convergence": build_convergence_state(
+                    signed_in=False,
+                    entitlements=None,
+                    provider_mode="private",
+                    sync_enabled=False,
+                ),
+            }
         try:
             if self._uses_arcforge_gateway():
                 account = {"account_id": session.account_id, "device_id": session.device_id}
@@ -496,9 +509,41 @@ class ProClient:
                 commerce = None
                 entitlements = self._request("GET", "/v1/entitlements", auth=session.access_token)
                 usage = self._request("GET", "/v1/usage/current", auth=session.access_token)
-        except ProClientError:
-            self.clear_session()
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
+        except ProClientError as exc:
+            error_code = classify_pro_client_error(exc.status, exc.message)
+            if should_clear_session_on_error(error_code):
+                self.clear_session()
+                return {
+                    "signedIn": False,
+                    "entitlements": None,
+                    "usage": None,
+                    "account": None,
+                    "commerce": None,
+                    "lastError": error_code,
+                    "convergence": build_convergence_state(
+                        signed_in=False,
+                        entitlements=None,
+                        provider_mode="private",
+                        sync_enabled=False,
+                        last_error=error_code,
+                    ),
+                }
+            return {
+                "signedIn": True,
+                "account": {"account_id": session.account_id, "device_id": session.device_id},
+                "commerce": None,
+                "entitlements": None,
+                "usage": None,
+                "apiUrl": self.base_url,
+                "lastError": error_code,
+                "convergence": build_convergence_state(
+                    signed_in=True,
+                    entitlements=None,
+                    provider_mode="private",
+                    sync_enabled=False,
+                    last_error=error_code,
+                ),
+            }
         return {
             "signedIn": True,
             "account": account,
@@ -506,6 +551,13 @@ class ProClient:
             "entitlements": entitlements,
             "usage": usage,
             "apiUrl": self.base_url,
+            "convergence": build_convergence_state(
+                signed_in=True,
+                entitlements=entitlements if isinstance(entitlements, dict) else None,
+                provider_mode="online" if self._uses_arcforge_gateway() else "private",
+                sync_enabled=bool(entitlements.get("active")) if isinstance(entitlements, dict) else False,
+                sync_state="enabled" if isinstance(entitlements, dict) and entitlements.get("active") else "disabled",
+            ),
         }
 
     def create_meeting(
@@ -513,6 +565,8 @@ class ProClient:
         *,
         language: str | None = None,
         audio_duration_seconds: float | None = None,
+        capability: str | None = None,
+        requested_diarization: bool | None = None,
         mode: str = "batch_meeting",
     ) -> dict[str, Any]:
         session = self._require_session()
@@ -527,6 +581,10 @@ class ProClient:
                 payload["mode"] = mode
             if language:
                 payload["language"] = language
+            if capability:
+                payload["capability"] = capability
+            if requested_diarization is not None:
+                payload["requested_diarization"] = requested_diarization
             return self._request("POST", "/api/dictate/jobs", payload, auth=session.access_token)
         payload = {}
         if mode != "batch_meeting":
@@ -596,6 +654,36 @@ class ProClient:
     def get_transcript(self, job_id: str) -> dict[str, Any]:
         session = self._require_session()
         return self._request("GET", self._dictate_job_path(job_id, suffix="/transcript"), auth=session.access_token)
+
+    def get_result(self, job_id: str) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("GET", self._dictate_job_path(job_id, suffix="/result"), auth=session.access_token)
+
+    def ack_result(
+        self,
+        job_id: str,
+        *,
+        artifact_id: str,
+        acknowledgement_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        session = self._require_session()
+        payload = {
+            "artifact_id": artifact_id,
+            "acknowledgement_id": acknowledgement_id,
+            "idempotency_key": idempotency_key,
+        }
+        return self._request(
+            "POST",
+            self._dictate_job_path(job_id, suffix="/result/ack"),
+            payload,
+            auth=session.access_token,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        session = self._require_session()
+        return self._request("POST", self._dictate_job_path(job_id, suffix="/cancel"), {}, auth=session.access_token)
 
     def push_sync_records(self, records: list[EncryptedSyncRecord]) -> dict[str, Any]:
         session = self._require_session()
@@ -845,21 +933,24 @@ class ProClient:
         *,
         auth: str | None = None,
         content_type: str = "application/json",
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        headers = {"Accept": "application/json"}
+        request_headers = {"Accept": "application/json"}
+        if headers:
+            request_headers.update(headers)
         if auth:
-            headers["Authorization"] = f"Bearer {auth}"
+            request_headers["Authorization"] = f"Bearer {auth}"
         data: bytes | None
         if isinstance(payload, dict):
             data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = content_type
+            request_headers["Content-Type"] = content_type
         elif isinstance(payload, (bytes, bytearray)):
             data = bytes(payload)
-            headers["Content-Type"] = content_type
+            request_headers["Content-Type"] = content_type
         else:
             data = None
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
                 body = response.read().decode("utf-8")

@@ -2,9 +2,14 @@
 
 Date: 2026-07-05
 
-This is the canonical planning document for Dictate local transcription,
-recordings, meetings, model lanes, timestamping, speaker attribution, and GPU
-support. Older research/cost notes are archived under `docs/archive/`.
+**Status:** Active scoped authority for local transcription and release evidence.
+
+This is the authoritative planning document only for Dictate local
+transcription, recordings, meetings, model lanes, timestamping, speaker
+attribution, GPU support, and their release evidence. `docs/goal.md` is the
+current cross-system authority; this plan is subordinate for account, cloud,
+commerce, and Deck decisions. Older research/cost notes are archived under
+`docs/archive/`.
 
 ## Goal
 
@@ -20,17 +25,19 @@ Ship a clean local-first transcription stack where:
 
 ## Deployable Goal
 
-Set this document as the active deployment goal:
+Set this document as the active scoped deployment goal for local transcription
+and release evidence:
 
 > Implement `docs/TRANSCRIPTION_PLAN.md` end to end so Dictate is ready for
 > human testing on machines with the capabilities named here, including local
 > CPU, NVIDIA CUDA, AMD GPU readiness, meeting speaker attribution, and a
 > Windows build verified in the local VM lab.
 
-This document is the single source of truth for the transcription/model
+This document is the source of truth only for the scoped transcription/model
 deployment. Older goal, model-research, and cost-planning notes are archived or
-reduced to pointers. If another document conflicts with this one, update that
-document to point here rather than splitting the plan again.
+reduced to pointers. If another document conflicts with this plan on local
+transcription or release evidence, update that document to point here. For a
+cross-system conflict, follow `docs/goal.md`.
 
 ## Planning Map
 
@@ -40,7 +47,9 @@ have narrower roles:
 | File | Role |
 | --- | --- |
 | `docs/GOALS.md` | Compatibility pointer for older links. |
-| `docs/goal.md` | Compatibility pointer for older links. |
+| `docs/goal.md` | Current cross-system goal and authority; this plan is subordinate outside local transcription/release evidence. |
+| `docs/DICTATE_PRO_CLOUD_SYNC_PLAN.md` | Subordinate cloud-sync reference and migration input. |
+| `docs/deck-sections-and-dictate-space-spec.md` | Subordinate Deck-space reference and migration input. |
 | `docs/dictate-pro-subscription-architecture.md` | Compatibility pointer for older subscription-plan links. |
 | `docs/archive/` | Historical notes only; not current direction. |
 | `benchmarks/README.md` | Benchmark command and artifact format referenced by this plan. |

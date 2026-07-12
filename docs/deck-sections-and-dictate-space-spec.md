@@ -1,6 +1,6 @@
 # Deck as a product hub — sub-nav sections + the Dictate space
 
-**Status:** Proposed · **Target app:** `deck.arcforge.au` (SvelteKit deck frontend + `arc_forge_console` backend) · **Also touches:** Dictate desktop client (portal link + sign-in return)
+**Status:** Proposed reference/migration input, subordinate to `docs/goal.md` · **Target app:** `deck.arcforge.au` (SvelteKit deck frontend + `arc_forge_console` backend) · **Also touches:** Dictate desktop client (portal link + sign-in return)
 
 ## The reframe (the core decision)
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within, cleanup, waitFor, act } from "@testing-library/react";
 import App from "../App.jsx";
+import { PRODUCT_DESTINATIONS } from "../productDestinations.js";
 
 afterEach(() => {
   cleanup();
@@ -185,6 +186,7 @@ describe("Quiet Console app (mock mode)", () => {
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
             dictatePro: ACTIVE_PRO,
+            productDestinations: PRODUCT_DESTINATIONS,
             sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
@@ -200,7 +202,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Manage account"));
     expect(open).toHaveBeenCalledWith(
-      "https://console.arcforge.au/deck/account",
+      PRODUCT_DESTINATIONS.hub,
       "_blank",
       "noopener,noreferrer",
     );

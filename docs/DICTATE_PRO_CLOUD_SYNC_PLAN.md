@@ -1,14 +1,25 @@
-# Dictate Pro Cloud Sync And Account Plan
+# Dictate Cloud Sync And Account Plan
 
 Date: 2026-07-05
 
-This is the canonical plan for Dictate Pro accounts, encrypted cloud sync, and
-multi-device state. Dictate remains local-first: the app must work without an
-account, and signing out must not delete local dictations.
+**Status:** Reference and migration input, subordinate to `docs/goal.md`.
+
+> **Superseded claims:** Hosted results use **server-managed** encrypted artifacts
+> (AES+AAD account isolation); owner-bound device-key wrapping is **deferred** per
+> `goal.md` Wave 2. Process-memory auth and dual commerce reads are interim only —
+> not intentional production design.
+
+This document supplies scoped detail for Dictate's use of the Arc Forge account,
+encrypted cloud sync, and Dictate Pro paid capabilities. `docs/goal.md` is the
+current cross-system goal and authority for identity, product/account
+boundaries, commerce, hosted work, and release decisions. Dictate remains
+local-first: the app must work without an account, and signing out must not
+delete local dictations.
 
 ## Goal
 
-Ship Dictate Pro accounts without per-customer VPS infrastructure:
+Ship Dictate's Arc Forge account integration and Dictate Pro capabilities
+without per-customer VPS infrastructure:
 
 1. Use the existing Arc Forge account and gateway path for identity,
    entitlements, subscriptions, usage, and hosted model access.
@@ -107,7 +118,7 @@ Use end-to-end encrypted payloads for synced dictation content.
 
 ### First Device Flow
 
-1. User signs into Dictate Pro.
+1. User signs into Arc Forge for Dictate.
 2. User explicitly enables cloud sync.
 3. App generates `device_id`, device key pair, and `ADK`.
 4. App stores private keys in OS secret store.
@@ -357,7 +368,7 @@ understand audio leaves the device.
 
 Product language should be simple:
 
-- `Sign in to Dictate Pro`
+- `Sign in to Arc Forge for Dictate`
 - `Sync my dictations across devices`
 - `This encrypts your synced dictations before upload`
 - `Approve this device`
@@ -382,7 +393,7 @@ testing:
 | Command | Purpose |
 | --- | --- |
 | `dictate pro status` | Show sign-in, entitlement, and encrypted-sync state. |
-| `dictate pro sign-in <email>` / `dictate pro verify ...` | Start and complete Dictate Pro sign-in while registering this device's sync public key. |
+| `dictate pro sign-in <email>` / `dictate pro verify ...` | Start and complete Arc Forge sign-in for Dictate while registering this device's sync public key. |
 | `dictate pro sync enable [--recovery-key ...]` | Explicitly opt into encrypted sync or restore an existing sync key. |
 | `dictate pro sync run` | Push local encrypted outbox records and pull remote changes once. |
 | `dictate pro sync disable [--clear-key]` | Disable sync on this device without deleting local dictations. |
@@ -476,7 +487,7 @@ Controls:
 
 This plan is complete when:
 
-1. A user can sign into Dictate Pro on two devices and opt into sync.
+1. A user can sign into Arc Forge for Dictate on two devices and opt into Dictate Pro sync.
 2. Dictations created offline on one device sync when network returns.
 3. Synced ciphertext in Postgres cannot be read without the user's account data
    key.

@@ -87,7 +87,44 @@ describe("Language toggle", () => {
 
     expect(await screen.findByText("Multilingual is available in Cloud mode only.")).toBeTruthy();
     await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.method) === "PATCH")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: "Cloud" })).toBeTruthy());
     expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("grok-speech-to-text"))).toBe(true);
+  });
+
+  it("lets the PrivacyPill switch to Cloud for active Pro without a personal xAI key", async () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() {}
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            providers: { xai: { configured: false } },
+            dictatePro: ACTIVE_PRO,
+          }),
+        };
+      }
+      if (path === "/api/config" && opts.method === "PATCH") {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
+    });
+
+    render(<App />);
+    const cloudSwitch = screen.getByRole("switch");
+    await waitFor(() => expect(cloudSwitch).toHaveAttribute("aria-checked", "true"));
+
+    fireEvent.click(cloudSwitch);
+
+    await waitFor(() => expect(cloudSwitch).toHaveAttribute("aria-checked", "false"));
+    expect(fetchSpy.mock.calls.some(([, opts]) => String(opts?.body || "").includes("grok-speech-to-text"))).toBe(true);
+    expect(screen.getByRole("tooltip", { name: "Cloud" })).toBeTruthy();
   });
 
   it("keeps English selected for the bundled local engine", () => {

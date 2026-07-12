@@ -2,9 +2,10 @@
 
 This file is kept as a compatibility pointer for older links.
 
-The current Dictate Pro account, encrypted cloud sync, and multi-device plan is
-[DICTATE_PRO_CLOUD_SYNC_PLAN.md](DICTATE_PRO_CLOUD_SYNC_PLAN.md). Use that
-document as the active goal for Pro account and sync work.
+Cross-system Dictate work follows [goal.md](goal.md). The cloud-sync plan
+[DICTATE_PRO_CLOUD_SYNC_PLAN.md](DICTATE_PRO_CLOUD_SYNC_PLAN.md) remains a
+subordinate reference for account, sync, and Dictate Pro offering details; it is
+not a competing cross-system goal.
 
 The current transcription, meeting, model-lane, hosted comparison, and packaging
 deployment plan is [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md). Use that
