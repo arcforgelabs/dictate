@@ -12,12 +12,9 @@ import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
+import { PRODUCT_DESTINATIONS } from "./productDestinations.js";
 
 const DEFAULT_VERSION = "2026.7.4";
-// Web-only account/billing management (subscription, plan, invoices) -- no in-app
-// equivalent, so signed-in users need a way back to it. A hardcoded https literal, so
-// it's safe to open directly (no scheme-clamp needed the way gateway-supplied URIs do).
-const ACCOUNT_PORTAL_URL = "https://deck.arcforge.au/dictate";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -308,6 +305,7 @@ function syncStatusLabel({ signedIn, sync, syncBusy, syncError }) {
 
 function AccountDialog() {
   const s = useStore();
+  const accountPortalUrl = s.productDestinations?.hub ?? PRODUCT_DESTINATIONS.hub;
   const sync = s.syncState || { enabled: false, keyAvailable: false, lastSeq: 0 };
   const pro = s.dictatePro || { signedIn: false };
   const model = modelById(s.model);
@@ -536,7 +534,7 @@ function AccountDialog() {
   };
 
   const openAccountPortal = () => {
-    window.open(ACCOUNT_PORTAL_URL, "_blank", "noopener,noreferrer");
+    window.open(accountPortalUrl, "_blank", "noopener,noreferrer");
     s.toast("Opened account portal");
   };
 
@@ -1410,6 +1408,7 @@ export default function App() {
   const [providerReason, setProviderReason] = useState(null);
   const [providerActive, setProviderActive] = useState(null);
   const [dictatePro, setDictatePro] = useState({ signedIn: false });
+  const [productDestinations, setProductDestinations] = useState(PRODUCT_DESTINATIONS);
   const [browserSigninEnabled, setBrowserSigninEnabled] = useState(false);
   const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
   const [syncBusy, setSyncBusy] = useState(false);
@@ -1712,6 +1711,7 @@ export default function App() {
       }
     }
     if (st.dictatePro) setDictatePro(st.dictatePro);
+    if (st.productDestinations) setProductDestinations(st.productDestinations);
     if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
     if (st.sync) setSyncState(st.sync);
   }, []);
@@ -2407,7 +2407,7 @@ export default function App() {
     providerDegraded, providerReason, providerActive,
     flash, hydrateProviderHealth, meetingModel,
     meetingReadiness,
-    dictatePro, setDictatePro, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
+    dictatePro, setDictatePro, productDestinations, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
     accountOpen, setAccountOpen, setHistory,
   };
 

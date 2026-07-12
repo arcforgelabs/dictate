@@ -59,6 +59,7 @@ from dictate.stt.factory import (
     resolve_model_name,
 )
 from dictate.pro.client import ProClient, ProClientError
+from dictate.pro.product_destinations import PRODUCT_DESTINATIONS
 from dictate.sync import (
     SYNC_SETTINGS_CONTENT_TYPE,
     SYNCED_PREF_KEYS,
@@ -562,6 +563,7 @@ class UiBackend:
             # Lets the UI show honest idle-state copy ("browser" vs. "email code") instead
             # of promising a browser it won't open when the flag is off.
             "browserSigninEnabled": bool(self._safe(self.browser_signin_enabled, False)),
+            "productDestinations": PRODUCT_DESTINATIONS,
         }
 
     def _dictate_pro_state(self) -> dict[str, Any]:
