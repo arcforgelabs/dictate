@@ -206,7 +206,11 @@ class ProClientTests(unittest.TestCase):
             client.register_device(device_label="Desktop", device_public_key="public_key_1")
             client.revoke_device("dev_other")
             client.approve_device("dev_other", envelope={"algorithm": "test"})
-            client.approve_current_device_with_recovery(recovery_key_envelope=recovery_envelope, idempotency_key="recovery-1")
+            client.approve_current_device_with_recovery(
+                recovery_key_envelope=recovery_envelope,
+                account_key_commitment="commitment_test",
+                idempotency_key="recovery-1",
+            )
             client.export_cloud_data()
             client.delete_cloud_data(idempotency_key="delete-1")
 
@@ -222,7 +226,13 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual([call["method"] for call in client.calls], ["GET", "POST", "POST", "POST", "POST", "GET", "DELETE"])
         self.assertEqual(client.calls[1]["payload"]["device_public_key"], "public_key_1")
         self.assertEqual(client.calls[3]["payload"], {"envelope": {"algorithm": "test"}})
-        self.assertEqual(client.calls[4]["payload"], {"recovery_key_envelope": recovery_envelope})
+        self.assertEqual(
+            client.calls[4]["payload"],
+            {
+                "recovery_key_envelope": recovery_envelope,
+                "account_key_commitment": "commitment_test",
+            },
+        )
         self.assertEqual(client.calls[6]["payload"], {"confirmation": "delete_cloud_data"})
 
     def test_local_sign_in_sends_device_public_key(self) -> None:

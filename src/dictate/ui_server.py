@@ -65,6 +65,7 @@ from dictate.sync import (
     SYNC_SETTINGS_CONTENT_TYPE,
     SYNCED_PREF_KEYS,
     SyncSettingsStore,
+    compute_account_key_commitment,
     create_recovery_envelope,
     enqueue_lexicon_hotwords,
     enqueue_lexicon_replacements,
@@ -753,7 +754,10 @@ class UiBackend:
             except (InvalidTag, ValueError) as exc:
                 raise ApiError(400, "Recovery key could not unlock Dictate Pro sync for this account.") from exc
             try:
-                client.approve_current_device_with_recovery(recovery_key_envelope=envelope_payload)
+                client.approve_current_device_with_recovery(
+                    recovery_key_envelope=envelope_payload,
+                    account_key_commitment=compute_account_key_commitment(account_key),
+                )
             except Exception as exc:  # noqa: BLE001
                 raise ApiError(403, "Recovery key unlocked sync, but this device could not be trusted.") from exc
             state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)
@@ -798,7 +802,11 @@ class UiBackend:
                     recovery_key=returned_recovery_key,
                 )
                 self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
-                client.save_key_envelope(envelope_kind="recovery", envelope=asdict(recovery_envelope))
+                client.save_key_envelope(
+                    envelope_kind="recovery",
+                    envelope=asdict(recovery_envelope),
+                    account_key_commitment=compute_account_key_commitment(account_key),
+                )
         # Newly enabled sync defaults to Meetings-only (docs/record-categories-spec.md);
         # only set when unset so a returning user's explicit choice is preserved.
         if config_mod.load_config(self.config_path).sync_scope is None:

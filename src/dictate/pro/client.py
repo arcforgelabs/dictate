@@ -705,12 +705,25 @@ class ProClient:
             auth=session.access_token,
         )
 
-    def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, Any]) -> dict[str, Any]:
+    def save_key_envelope(
+        self,
+        *,
+        envelope_kind: str,
+        envelope: dict[str, Any],
+        account_key_commitment: str | None = None,
+    ) -> dict[str, Any]:
         session = self._require_session()
+        payload: dict[str, Any] = {
+            "device_id": session.device_id,
+            "envelope_kind": envelope_kind,
+            "envelope": envelope,
+        }
+        if account_key_commitment:
+            payload["account_key_commitment"] = account_key_commitment
         return self._request(
             "POST",
             self._sync_path("key-envelopes"),
-            {"device_id": session.device_id, "envelope_kind": envelope_kind, "envelope": envelope},
+            payload,
             auth=session.access_token,
         )
 
@@ -755,6 +768,7 @@ class ProClient:
         self,
         *,
         recovery_key_envelope: dict[str, Any] | None = None,
+        account_key_commitment: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         session = self._require_session()
@@ -767,11 +781,17 @@ class ProClient:
                     break
         if envelope is None:
             raise ProClientError(400, "recovery_key_envelope is required")
+        commitment = str(account_key_commitment or "").strip()
+        if not commitment:
+            raise ProClientError(400, "account_key_commitment is required")
         key = idempotency_key or secrets.token_urlsafe(16)
         return self._request(
             "POST",
             self._account_path("devices/current/approve-with-recovery"),
-            {"recovery_key_envelope": envelope},
+            {
+                "recovery_key_envelope": envelope,
+                "account_key_commitment": commitment,
+            },
             auth=session.access_token,
             headers={
                 "X-Dictate-Device-Id": session.device_id,
