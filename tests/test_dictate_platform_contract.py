@@ -149,6 +149,12 @@ def _schema_matches(contract: dict[str, Any], schema_or_ref: Any, value: Any) ->
                 return False
     if isinstance(value, (int, float)) and "minimum" in schema and value < schema["minimum"]:
         return False
+    if isinstance(value, list):
+        items_schema = schema.get("items")
+        if items_schema is not None:
+            for item in value:
+                if not _schema_matches(contract, items_schema, item):
+                    return False
     if isinstance(value, dict):
         if not set(schema.get("required", [])).issubset(value):
             return False
@@ -203,12 +209,12 @@ class _UsageLedgerModel:
     """Executable contract model for cross-event invariants, not backend code."""
 
     _LINKED_FIELDS = ("account_id", "request_id", "job_id", "idempotency_key", "period", "correlation_id")
+    _TERMINAL_EVENT_TYPES = frozenset({"settlement", "rollback", "rejection"})
 
     def __init__(self) -> None:
         self.events: dict[str, dict[str, Any]] = {}
         self.by_retry_key: dict[tuple[str, str, str, str, str], str] = {}
-        self.settled_predecessors: set[str] = set()
-        self.rollback_predecessors: set[str] = set()
+        self.terminal_outcomes: dict[str, str] = {}
 
     def _retry_key(self, event: dict[str, Any]) -> tuple[str, str, str, str, str]:
         return (
@@ -224,6 +230,20 @@ class _UsageLedgerModel:
             if event[field] != anchor[field]:
                 raise ValueError("linked field mismatch")
 
+    def _apply_terminal_outcome(self, event: dict[str, Any], event_type: str, predecessor: str) -> None:
+        if predecessor not in self.events:
+            raise ValueError("missing reservation predecessor")
+        existing_terminal = self.terminal_outcomes.get(predecessor)
+        if existing_terminal is not None:
+            if existing_terminal == event_type:
+                raise ValueError(f"duplicate {event_type}")
+            raise ValueError("terminal outcome conflict")
+        reservation = self.events[predecessor]
+        self._assert_linked_fields(event, reservation)
+        if event_type == "settlement" and event["quantity"] > reservation["quantity"]:
+            raise ValueError("settlement exceeds reservation")
+        self.terminal_outcomes[predecessor] = event_type
+
     def apply(self, event: dict[str, Any]) -> dict[str, Any]:
         retry_key = self._retry_key(event)
         existing_id = self.by_retry_key.get(retry_key)
@@ -233,24 +253,8 @@ class _UsageLedgerModel:
             raise ValueError("duplicate idempotency key")
         event_type = event["event_type"]
         predecessor = event.get("predecessor_event_id")
-        if event_type == "settlement":
-            if predecessor not in self.events:
-                raise ValueError("missing reservation predecessor")
-            if predecessor in self.settled_predecessors:
-                raise ValueError("duplicate settlement")
-            reservation = self.events[predecessor]
-            self._assert_linked_fields(event, reservation)
-            if event["quantity"] > reservation["quantity"]:
-                raise ValueError("settlement exceeds reservation")
-            self.settled_predecessors.add(predecessor)
-        elif event_type == "rollback":
-            if predecessor not in self.events:
-                raise ValueError("missing reservation predecessor")
-            if predecessor in self.rollback_predecessors:
-                raise ValueError("duplicate rollback")
-            reservation = self.events[predecessor]
-            self._assert_linked_fields(event, reservation)
-            self.rollback_predecessors.add(predecessor)
+        if event_type in self._TERMINAL_EVENT_TYPES and predecessor is not None:
+            self._apply_terminal_outcome(event, event_type, predecessor)
         self.events[event["event_id"]] = event
         self.by_retry_key[retry_key] = event["event_id"]
         return event
@@ -647,7 +651,10 @@ class DictatePlatformContractTests(unittest.TestCase):
 
         self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRecord", save_response))
         self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeList", list_response))
+        for envelope in list_response["envelopes"]:
+            self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRecord", envelope))
         self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRecord", legacy_unsigned))
+        self.assertFalse(_schema_matches(self.contract, "#/schemas/KeyEnvelopeList", {"envelopes": [{}]}))
         self.assertIsInstance(save_response["server_signature"], dict)
         self.assertIsNone(legacy_unsigned["server_signature"])
         self.assertFalse(
@@ -870,10 +877,15 @@ class DictatePlatformContractTests(unittest.TestCase):
                     predecessor_event_id="reserve-1",
                 )
             )
-        self.assertIs(ledger.apply(rollback), rollback)
-        self.assertIs(ledger.apply(dict(rollback)), rollback)
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            ledger.apply(rollback)
+
+        rollback_ledger = _UsageLedgerModel()
+        rollback_ledger.apply(reservation)
+        self.assertIs(rollback_ledger.apply(rollback), rollback)
+        self.assertIs(rollback_ledger.apply(dict(rollback)), rollback)
         with self.assertRaisesRegex(ValueError, "duplicate rollback"):
-            ledger.apply(
+            rollback_ledger.apply(
                 _usage_event(
                     "rollback",
                     "rolled_back",
@@ -884,6 +896,8 @@ class DictatePlatformContractTests(unittest.TestCase):
                     predecessor_event_id="reserve-1",
                 )
             )
+        with self.assertRaisesRegex(ValueError, "terminal outcome conflict"):
+            rollback_ledger.apply(settlement)
 
     def test_diarized_authorization_survives_hosted_lifecycle(self) -> None:
         for operation_id in ["hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]:
