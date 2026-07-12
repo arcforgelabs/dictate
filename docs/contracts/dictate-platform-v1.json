@@ -37,11 +37,15 @@
       "deployment_verification": "unknown",
       "origin": {
         "scheme": "https",
-        "url_template": "https://{canonical_arc_forge_origin}",
+        "url_template": "https://console.arcforge.au",
         "advertised_endpoint_scheme": "https",
         "proposed_origin": "https://console.arcforge.au",
         "requires_owner_confirmation": false,
-        "route_binding": "Every public operation URL template resolves {canonical_arc_forge_origin} to proposed_origin; no alternate origin is canonical.",
+        "route_binding": "Every public operation URL is the locked HTTPS origin followed by exactly one route path; the origin is already scheme-qualified and is never interpolated into another scheme.",
+        "rendering": {
+          "origin": "https://console.arcforge.au",
+          "public_operation_url_rule": "url_template equals origin + route, with exactly one scheme delimiter"
+        },
         "deployment_verification_task": "verify canonical HTTPS origin, proxy routing, and non-Deck product return before Wave 1 release"
       },
       "operations_ref": "#/operations"
@@ -164,15 +168,15 @@
       {"flow_id": "desktop_discovery", "source_refs": ["src/dictate/pro/server.py:196-205,387-395", "src/dictate/pro/client.py:209-225", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12874-12890"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_https_discovery", "operation_ids": ["account.discovery"]},
       {"flow_id": "email_code_start", "source_refs": ["src/dictate/pro/server.py:327-336", "src/dictate/pro/client.py:159-165", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12810-12812"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "permanent_email_fallback", "operation_ids": ["account.email_code_start"]},
       {"flow_id": "email_code_verify", "source_refs": ["src/dictate/pro/server.py:338-364", "src/dictate/pro/client.py:167-205", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12814-12816"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "permanent_email_fallback", "operation_ids": ["account.email_code_verify"]},
-      {"flow_id": "browser_consent", "source_refs": ["src/dictate/pro/server.py:207-250,397-399", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12892-13007"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_browser_consent", "operation_ids": ["account.browser_consent", "account.browser_consent_decision"]},
-      {"flow_id": "device_consent_and_approval", "source_refs": ["src/dictate/pro/server.py:410-437", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12822-12872,12632-12725"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_rfc8628_device_flow", "operation_ids": ["account.device_authorize", "account.device_approval"]},
+      {"flow_id": "browser_consent", "source_refs": ["src/dictate/pro/server.py:207-250,397-399", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12892-13123"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_browser_consent", "operation_ids": ["account.browser_consent", "account.browser_consent_decision"]},
+      {"flow_id": "device_consent_and_approval", "source_refs": ["src/dictate/pro/server.py:410-437", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12822-12872,12632-12802"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_rfc8628_device_flow", "operation_ids": ["account.device_authorize", "account.device_approval"]},
       {"flow_id": "token_refresh", "source_refs": ["src/dictate/pro/auth.py:164-385", "src/dictate/pro/client.py:450-480", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12106-12268"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_token_protocol", "operation_ids": ["account.token"]},
       {"flow_id": "usage_read", "source_refs": ["src/dictate/pro/server.py:489-490", "src/dictate/pro/service.py:408-419", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1391-1400"], "proposed_authority": "arc_forge_shared_dictate_usage_ledger", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_usage_read", "operation_ids": ["usage.read"]},
-      {"flow_id": "current_device_recovery_approval", "source_refs": ["src/dictate/pro/server.py:523-524", "src/dictate/pro/service.py:387-395", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12632-12725"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "local_source_present_external_route_candidate", "deployment_verification": "unknown", "disposition": "canonical_recovery_flow", "operation_ids": ["device.recovery_approve"]},
+      {"flow_id": "current_device_recovery_approval", "source_refs": ["src/dictate/pro/server.py:523-524", "src/dictate/pro/service.py:387-395", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12632-12802"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "local_source_present_external_route_candidate", "deployment_verification": "unknown", "disposition": "canonical_recovery_flow", "operation_ids": ["device.recovery_approve"]},
       {"flow_id": "device_management", "source_refs": ["src/dictate/pro/server.py:491-522", "src/dictate/pro/service.py:309-395", "arc-forge-deck@2ee29c9:src/arc_forge_console/main.py:312-320"], "proposed_authority": "arc_forge_shared_account_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_device_management", "operation_ids": ["device.register", "device.list", "device.revoke", "device.approve"]},
       {"flow_id": "commerce_checkout", "source_refs": ["src/dictate/pro/server.py:442-480", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1228-1365", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:13125-13127"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_product_checkout_and_read", "operation_ids": ["commerce.checkout", "commerce.read", "entitlement.read"]},
       {"flow_id": "commerce_webhook", "source_refs": ["src/dictate/pro/server.py:439-440,601-634", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/main.py:160-200"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_stripe_dispatch", "operation_ids": ["commerce.webhook"]},
-      {"flow_id": "encrypted_sync", "source_refs": ["src/dictate/pro/store.py:353-400,459-705", "src/dictate/pro/service.py:204-308", "src/dictate/pro/server.py:529-558"], "proposed_authority": "arc_forge_shared_backend_with_dictate_client_encryption", "source_status": "local_source_present_contract_locked", "deployment_verification": "unknown", "disposition": "canonical_sync_protocol", "operation_ids": ["sync.push", "sync.pull", "sync.cursor", "sync.key_envelopes.write", "sync.key_envelopes.read", "sync.export", "sync.delete"]},
+      {"flow_id": "encrypted_sync", "source_refs": ["src/dictate/pro/store.py:353-400,459-705", "src/dictate/pro/service.py:204-308", "src/dictate/pro/server.py:529-558", "src/dictate/sync.py:76-89,166-278,627-638", "src/dictate/pro/client.py:619-633"], "proposed_authority": "arc_forge_shared_backend_with_dictate_client_encryption", "source_status": "local_source_present_contract_locked", "deployment_verification": "unknown", "disposition": "canonical_sync_protocol", "key_envelope_authority": "dictate_client_encryption_with_arc_forge_envelope_storage", "operation_ids": ["sync.push", "sync.pull", "sync.cursor", "sync.key_envelopes.write", "sync.key_envelopes.read", "sync.export", "sync.delete"]},
       {"flow_id": "hosted_job_and_result", "source_refs": ["src/dictate/pro/service.py:431-607", "src/dictate/pro/server.py:559-582", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1402-1637"], "proposed_authority": "arc_forge_shared_dictate_hosted_backend", "source_status": "candidate_source_present_at_pinned_revision", "deployment_verification": "unknown", "disposition": "canonical_durable_hosted_flow", "operation_ids": ["hosted.create", "hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]},
       {"flow_id": "governed_stt_provider_request", "source_refs": ["src/dictate/pro/relay.py:27-92", "src/dictate/pro/service.py:41-44,512-563", "arc-forge-deck@2ee29c9:src/arc_forge_console/provider_gateway.py:61-71,239-282"], "proposed_authority": "arc_forge_shared_provider_gateway", "source_status": "direct_provider_source_present_shared_contract_not_proven", "deployment_verification": "unknown", "disposition": "migration_required_before_hosted_release", "operation_ids": ["gateway.invoke"]}
     ]
@@ -182,7 +186,7 @@
       "operation_id": "account.discovery",
       "method": "GET",
       "route": "/api/account/auth/desktop",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/desktop",
+      "url_template": "https://console.arcforge.au/api/account/auth/desktop",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.discovery"],
@@ -195,7 +199,7 @@
       "operation_id": "account.browser_consent",
       "method": "GET",
       "route": "/api/account/auth/authorize",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/authorize",
+      "url_template": "https://console.arcforge.au/api/account/auth/authorize",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.login"],
@@ -209,7 +213,7 @@
       "operation_id": "account.browser_consent_decision",
       "method": "POST",
       "route": "/api/account/auth/authorize/approve",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/authorize/approve",
+      "url_template": "https://console.arcforge.au/api/account/auth/authorize/approve",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.login", "account.consent"],
@@ -223,7 +227,7 @@
       "operation_id": "account.token",
       "method": "POST",
       "route": "/api/account/auth/token",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/token",
+      "url_template": "https://console.arcforge.au/api/account/auth/token",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.token_exchange"],
@@ -238,7 +242,7 @@
       "operation_id": "account.email_code_start",
       "method": "POST",
       "route": "/api/account/auth/login-code",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/login-code",
+      "url_template": "https://console.arcforge.au/api/account/auth/login-code",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.email_fallback"],
@@ -251,7 +255,7 @@
       "operation_id": "account.email_code_verify",
       "method": "POST",
       "route": "/api/account/auth/verify-code",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/verify-code",
+      "url_template": "https://console.arcforge.au/api/account/auth/verify-code",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.email_fallback", "account.token_exchange"],
@@ -264,7 +268,7 @@
       "operation_id": "account.device_authorize",
       "method": "POST",
       "route": "/api/account/auth/device-code",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/device-code",
+      "url_template": "https://console.arcforge.au/api/account/auth/device-code",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.device_authorization"],
@@ -279,7 +283,7 @@
       "operation_id": "account.device_approval",
       "method": "POST",
       "route": "/api/account/auth/device/approve",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/auth/device/approve",
+      "url_template": "https://console.arcforge.au/api/account/auth/device/approve",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["account.device_authorization", "account.consent"],
@@ -294,7 +298,7 @@
       "operation_id": "entitlement.read",
       "method": "GET",
       "route": "/api/dictate/entitlement",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/entitlement",
+      "url_template": "https://console.arcforge.au/api/dictate/entitlement",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -308,7 +312,7 @@
       "operation_id": "usage.read",
       "method": "GET",
       "route": "/api/dictate/usage",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/usage",
+      "url_template": "https://console.arcforge.au/api/dictate/usage",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -322,7 +326,7 @@
       "operation_id": "commerce.read",
       "method": "GET",
       "route": "/api/account/commerce?product=dictate",
-      "url_template": "https://{canonical_arc_forge_origin}/api/account/commerce?product=dictate",
+      "url_template": "https://console.arcforge.au/api/account/commerce?product=dictate",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -336,7 +340,7 @@
       "operation_id": "commerce.checkout",
       "method": "POST",
       "route": "/api/dictate/checkout",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/checkout",
+      "url_template": "https://console.arcforge.au/api/dictate/checkout",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -362,7 +366,7 @@
       "operation_id": "device.register",
       "method": "POST",
       "route": "/api/dictate/devices",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices",
+      "url_template": "https://console.arcforge.au/api/dictate/devices",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.devices.manage"],
@@ -376,7 +380,7 @@
       "operation_id": "device.list",
       "method": "GET",
       "route": "/api/dictate/devices",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices",
+      "url_template": "https://console.arcforge.au/api/dictate/devices",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.devices.manage"],
@@ -390,7 +394,7 @@
       "operation_id": "device.revoke",
       "method": "POST",
       "route": "/api/dictate/devices/{device_id}/revoke",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices/{device_id}/revoke",
+      "url_template": "https://console.arcforge.au/api/dictate/devices/{device_id}/revoke",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.devices.manage"],
@@ -404,7 +408,7 @@
       "operation_id": "device.approve",
       "method": "POST",
       "route": "/api/dictate/devices/{device_id}/approve",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices/{device_id}/approve",
+      "url_template": "https://console.arcforge.au/api/dictate/devices/{device_id}/approve",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.devices.manage"],
@@ -418,7 +422,7 @@
       "operation_id": "device.recovery_approve",
       "method": "POST",
       "route": "/api/dictate/devices/current/approve-with-recovery",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/devices/current/approve-with-recovery",
+      "url_template": "https://console.arcforge.au/api/dictate/devices/current/approve-with-recovery",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.devices.manage", "dictate.account.manage"],
@@ -432,7 +436,7 @@
       "operation_id": "sync.push",
       "method": "POST",
       "route": "/api/dictate/sync",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync",
+      "url_template": "https://console.arcforge.au/api/dictate/sync",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.sync"],
@@ -445,7 +449,7 @@
       "operation_id": "sync.pull",
       "method": "GET",
       "route": "/api/dictate/sync",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync",
+      "url_template": "https://console.arcforge.au/api/dictate/sync",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.sync"],
@@ -459,7 +463,7 @@
       "operation_id": "sync.cursor",
       "method": "POST",
       "route": "/api/dictate/sync/cursor",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync/cursor",
+      "url_template": "https://console.arcforge.au/api/dictate/sync/cursor",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.sync"],
@@ -473,12 +477,12 @@
       "operation_id": "sync.key_envelopes.write",
       "method": "POST",
       "route": "/api/dictate/sync/key-envelopes",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync/key-envelopes",
+      "url_template": "https://console.arcforge.au/api/dictate/sync/key-envelopes",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.sync"],
       "request_schema": "#/schemas/KeyEnvelopeRequest",
-      "response_schema": "#/schemas/KeyEnvelope",
+      "response_schema": "#/schemas/KeyEnvelopeRecord",
       "idempotency": {"required": true, "header": "Idempotency-Key", "scope": "account_and_envelope"},
       "account_scope": "account_id"
     },
@@ -486,7 +490,7 @@
       "operation_id": "sync.key_envelopes.read",
       "method": "GET",
       "route": "/api/dictate/sync/key-envelopes",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/sync/key-envelopes",
+      "url_template": "https://console.arcforge.au/api/dictate/sync/key-envelopes",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.sync"],
@@ -499,7 +503,7 @@
       "operation_id": "sync.export",
       "method": "GET",
       "route": "/api/dictate/account/export",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/account/export",
+      "url_template": "https://console.arcforge.au/api/dictate/account/export",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -512,7 +516,7 @@
       "operation_id": "sync.delete",
       "method": "DELETE",
       "route": "/api/dictate/account/cloud-data",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/account/cloud-data",
+      "url_template": "https://console.arcforge.au/api/dictate/account/cloud-data",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.account.manage"],
@@ -525,7 +529,7 @@
       "operation_id": "hosted.create",
       "method": "POST",
       "route": "/api/dictate/jobs",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
@@ -539,10 +543,11 @@
       "operation_id": "hosted.upload",
       "method": "POST",
       "route": "/api/dictate/jobs/{job_id}/upload",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs/{job_id}/upload",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/upload",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+      "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
       "request_schema": "#/schemas/HostedUploadRequest",
       "response_schema": "#/schemas/HostedUpload",
       "state_refs": ["#/enums/hosted_upload_state", "#/enums/hosted_job_state"],
@@ -553,7 +558,7 @@
       "operation_id": "hosted.status",
       "method": "GET",
       "route": "/api/dictate/jobs/{job_id}",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs/{job_id}",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
@@ -568,7 +573,7 @@
       "operation_id": "hosted.result",
       "method": "GET",
       "route": "/api/dictate/jobs/{job_id}/result",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs/{job_id}/result",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/result",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
@@ -583,7 +588,7 @@
       "operation_id": "hosted.ack",
       "method": "POST",
       "route": "/api/dictate/jobs/{job_id}/result/ack",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs/{job_id}/result/ack",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/result/ack",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
@@ -597,7 +602,7 @@
       "operation_id": "hosted.cancel",
       "method": "POST",
       "route": "/api/dictate/jobs/{job_id}/cancel",
-      "url_template": "https://{canonical_arc_forge_origin}/api/dictate/jobs/{job_id}/cancel",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/cancel",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
@@ -699,22 +704,56 @@
         "code_challenge_methods_supported": {"type": "array", "items": {"const": "S256"}}
       }
     },
+    "LoopbackRedirectURI": {
+      "type": "string",
+      "format": "rfc8252-loopback-redirect-uri",
+      "pattern": "^http://(?:127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}/callback$",
+      "semantic_constraints": {"hostname": ["127.0.0.1", "::1"], "port_minimum": 1, "port_maximum": 65535, "path": "/callback", "scheme": "http", "query": false, "fragment": false, "userinfo": false},
+      "description": "RFC 8252 loopback callback: http, literal 127.0.0.1 or [::1], valid non-zero port 1-65535, exact /callback, and no query, fragment, or userinfo."
+    },
+    "PKCECodeChallenge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "description": "RFC 7636 S256 base64url(SHA-256(verifier)) without padding."
+    },
+    "PKCECodeVerifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9\\-._~]{43,128}$",
+      "description": "RFC 7636 43-128 unreserved characters: ALPHA / DIGIT / '-' / '.' / '_' / '~'."
+    },
     "AuthorizationRequest": {
       "type": "object",
       "required": ["response_type", "client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method"],
       "properties": {
         "response_type": {"const": "code"},
         "client_id": {"const": "dictate-desktop"},
-        "redirect_uri": {"type": "string", "pattern": "^http://(127\\.0\\.0\\.1|\\[::1\\])"},
-        "state": {"type": "string"},
-        "code_challenge": {"type": "string"},
+        "redirect_uri": {"$ref": "#/schemas/LoopbackRedirectURI"},
+        "state": {"type": "string", "minLength": 1, "maxLength": 512},
+        "code_challenge": {"$ref": "#/schemas/PKCECodeChallenge"},
         "code_challenge_method": {"const": "S256"}
       }
     },
     "AuthorizationResponse": {
+      "oneOf": [
+        {"$ref": "#/schemas/AuthorizationSuccessResponse"},
+        {"$ref": "#/schemas/AuthorizationErrorResponse"}
+      ]
+    },
+    "AuthorizationSuccessResponse": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["code", "state"],
-      "properties": {"code": {"type": "string"}, "state": {"type": "string"}}
+      "properties": {"code": {"type": "string", "minLength": 1}, "state": {"type": "string", "minLength": 1}}
+    },
+    "AuthorizationErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "state"],
+      "properties": {
+        "error": {"enum": ["access_denied", "invalid_request", "temporarily_unavailable", "server_error"]},
+        "error_description": {"type": "string"},
+        "state": {"type": "string", "minLength": 1}
+      }
     },
     "AuthorizationApprovalRequest": {
       "type": "object",
@@ -723,8 +762,8 @@
         "csrf_token": {"type": "string"},
         "action": {"enum": ["approve", "deny"]},
         "client_id": {"const": "dictate-desktop"},
-        "redirect_uri": {"type": "string", "pattern": "^http://(127\\.0\\.0\\.1|\\[::1\\])"},
-        "code_challenge": {"type": "string"},
+        "redirect_uri": {"$ref": "#/schemas/LoopbackRedirectURI"},
+        "code_challenge": {"$ref": "#/schemas/PKCECodeChallenge"},
         "code_challenge_method": {"const": "S256"},
         "scope": {"const": "dictate"},
         "state": {"type": "string"},
@@ -761,8 +800,8 @@
       "properties": {
         "grant_type": {"const": "authorization_code"},
         "code": {"type": "string", "minLength": 1},
-        "code_verifier": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{43,128}$"},
-        "redirect_uri": {"type": "string", "pattern": "^http://(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}/callback$"},
+        "code_verifier": {"$ref": "#/schemas/PKCECodeVerifier"},
+        "redirect_uri": {"$ref": "#/schemas/LoopbackRedirectURI"},
         "client_id": {"const": "dictate-desktop"}
       }
     },
@@ -1024,15 +1063,74 @@
       "required": ["state", "cursor"],
       "properties": {"state": {"$ref": "#/enums/sync_state"}, "cursor": {"type": "integer", "minimum": 0}}
     },
-    "KeyEnvelopeRequest": {
+    "DeviceKeyEnvelope": {
       "type": "object",
-      "required": ["account_id", "device_id", "kind", "ciphertext", "aad"],
-      "properties": {"account_id": {"type": "string"}, "device_id": {"type": "string"}, "kind": {"type": "string"}, "ciphertext": {"type": "string"}, "aad": {"type": "string"}}
+      "additionalProperties": false,
+      "required": ["version", "algorithm", "ephemeral_public_key", "salt", "nonce", "ciphertext", "aad_hash"],
+      "properties": {
+        "version": {"const": 1},
+        "algorithm": {"const": "x25519-aes-256-gcm"},
+        "ephemeral_public_key": {"type": "string", "minLength": 1},
+        "salt": {"type": "string", "minLength": 1},
+        "nonce": {"type": "string", "minLength": 1},
+        "ciphertext": {"type": "string", "minLength": 1},
+        "aad_hash": {"type": "string", "minLength": 1}
+      },
+      "description": "Current src/dictate/sync.py X25519 ephemeral wrapping envelope; account and recipient device scope are supplied by the authenticated record."
+    },
+    "RecoveryKeyEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "kdf", "iterations", "salt", "nonce", "ciphertext", "aad_hash"],
+      "properties": {
+        "version": {"const": 1},
+        "kdf": {"const": "pbkdf2-sha256"},
+        "iterations": {"type": "integer", "minimum": 100000},
+        "salt": {"type": "string", "minLength": 1},
+        "nonce": {"type": "string", "minLength": 1},
+        "ciphertext": {"type": "string", "minLength": 1},
+        "aad_hash": {"type": "string", "minLength": 1}
+      },
+      "description": "Current src/dictate/sync.py PBKDF2 recovery envelope; the recovery key remains client-held and the account-bound AAD is not a free-form field."
     },
     "KeyEnvelope": {
+      "oneOf": [
+        {"$ref": "#/schemas/DeviceKeyEnvelope"},
+        {"$ref": "#/schemas/RecoveryKeyEnvelope"}
+      ]
+    },
+    "KeyEnvelopeRequest": {
       "type": "object",
-      "required": ["account_id", "device_id", "kind", "ciphertext", "aad"],
-      "properties": {"account_id": {"type": "string"}, "device_id": {"type": "string"}, "kind": {"type": "string"}, "ciphertext": {"type": "string"}, "aad": {"type": "string"}}
+      "additionalProperties": false,
+      "required": ["device_id", "envelope_kind", "envelope"],
+      "oneOf": [
+        {"properties": {"envelope_kind": {"const": "device"}, "envelope": {"$ref": "#/schemas/DeviceKeyEnvelope"}}},
+        {"properties": {"envelope_kind": {"const": "recovery"}, "envelope": {"$ref": "#/schemas/RecoveryKeyEnvelope"}}}
+      ],
+      "properties": {
+        "device_id": {"type": "string", "minLength": 1},
+        "envelope_kind": {"enum": ["device", "recovery"]},
+        "envelope": {"$ref": "#/schemas/KeyEnvelope"}
+      },
+      "description": "The authenticated account is the account scope; this wrapper matches the current client/service transport."
+    },
+    "KeyEnvelopeRecord": {
+      "type": "object",
+      "required": ["account_id", "device_id", "envelope_kind", "envelope", "created_at", "updated_at", "signed_metadata", "server_signature"],
+      "oneOf": [
+        {"properties": {"envelope_kind": {"const": "device"}, "envelope": {"$ref": "#/schemas/DeviceKeyEnvelope"}}},
+        {"properties": {"envelope_kind": {"const": "recovery"}, "envelope": {"$ref": "#/schemas/RecoveryKeyEnvelope"}}}
+      ],
+      "properties": {
+        "account_id": {"type": "string", "minLength": 1},
+        "device_id": {"type": "string", "minLength": 1},
+        "envelope_kind": {"enum": ["device", "recovery"]},
+        "envelope": {"$ref": "#/schemas/KeyEnvelope"},
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"},
+        "signed_metadata": {"type": "object"},
+        "server_signature": {"type": ["string", "null"]}
+      }
     },
     "KeyEnvelopeQuery": {
       "type": "object",
@@ -1042,7 +1140,7 @@
     "KeyEnvelopeList": {
       "type": "object",
       "required": ["envelopes"],
-      "properties": {"envelopes": {"type": "array", "items": {"$ref": "#/schemas/KeyEnvelope"}}}
+      "properties": {"envelopes": {"type": "array", "items": {"$ref": "#/schemas/KeyEnvelopeRecord"}}}
     },
     "EncryptedExport": {
       "type": "object",
@@ -1111,11 +1209,12 @@
     },
     "HostedUpload": {
       "type": "object",
-      "required": ["upload_id", "job_id", "account_id", "state", "expires_at"],
+      "required": ["upload_id", "job_id", "account_id", "capability", "state", "expires_at"],
       "properties": {
         "upload_id": {"type": "string"},
         "job_id": {"type": "string"},
         "account_id": {"type": "string"},
+        "capability": {"enum": ["dictate.transcribe", "dictate.transcribe_diarized"]},
         "state": {"$ref": "#/enums/hosted_upload_state"},
         "expires_at": {"type": "string"}
       }
@@ -1199,7 +1298,7 @@
     "UsageReservationEvent": {
       "allOf": [
         {"$ref": "#/schemas/UsageEventBase"},
-        {"type": "object", "required": ["event_type", "lifecycle"], "properties": {"event_type": {"const": "reservation"}, "lifecycle": {"const": "reserved"}}}
+        {"type": "object", "required": ["event_type", "lifecycle"], "properties": {"event_type": {"const": "reservation"}, "lifecycle": {"const": "reserved"}}, "not": {"required": ["predecessor_event_id"]}}
       ]
     },
     "UsageSettlementEvent": {
@@ -1217,7 +1316,7 @@
     "UsageRejectionEvent": {
       "allOf": [
         {"$ref": "#/schemas/UsageEventBase"},
-        {"type": "object", "required": ["event_type", "lifecycle"], "properties": {"event_type": {"const": "rejection"}, "lifecycle": {"const": "rejected"}}}
+        {"type": "object", "required": ["event_type", "lifecycle"], "properties": {"event_type": {"const": "rejection"}, "lifecycle": {"const": "rejected"}}, "not": {"required": ["predecessor_event_id"]}}
       ]
     },
     "UsageEvent": {
@@ -1266,7 +1365,7 @@
     },
     "GatewayInvocation": {
       "type": "object",
-      "required": ["account_id", "product", "capability", "request_id", "job_id", "idempotency_key", "audio_input", "provider_selection", "provider_alias", "model_alias", "credential_mode", "audit"],
+      "required": ["account_id", "product", "capability", "request_id", "job_id", "idempotency_key", "audio_input", "provider_selection", "provider_alias", "model_alias", "credential_mode", "audit", "usage_event"],
       "properties": {
         "account_id": {"type": "string"},
         "product": {"const": "dictate"},
@@ -1280,7 +1379,7 @@
         "model_alias": {"type": "string", "description": "Server-selected model alias; not a client credential."},
         "credential_mode": {"const": "arc_forge_hosted"},
         "audit": {"$ref": "#/schemas/GatewayAudit"},
-        "usage_event": {"$ref": "#/schemas/UsageEvent"}
+        "usage_event": {"$ref": "#/schemas/UsageReservationEvent"}
       },
       "privacy": "audio is permitted only on this governed provider-request surface and bounded worker path; it is forbidden in logs, sync, support exports, and analytics."
     },
@@ -1303,13 +1402,33 @@
         {"type": "object", "required": ["outcome"], "properties": {"outcome": {"const": "failed"}}}
       ]
     },
+    "GatewayUsageOutcome": {
+      "oneOf": [
+        {"$ref": "#/schemas/UsageSettlementEvent"},
+        {"$ref": "#/schemas/UsageRollbackEvent"},
+        {"$ref": "#/schemas/UsageRejectionEvent"}
+      ],
+      "description": "A gateway response links one settlement, rollback, or rejection event to its durable reservation correlation."
+    },
+    "GatewayProviderResponseProcessing": {
+      "type": "object",
+      "required": ["mode", "memory_only", "immediate_owner_bound_encryption", "persisted", "deleted_after_encryption"],
+      "properties": {
+        "mode": {"const": "memory_only_immediate_encryption"},
+        "memory_only": {"const": true},
+        "immediate_owner_bound_encryption": {"const": true},
+        "persisted": {"const": false},
+        "deleted_after_encryption": {"const": true}
+      }
+    },
     "GatewayResponse": {
       "type": "object",
-      "required": ["request_id", "outcome"],
+      "required": ["request_id", "outcome", "usage_event", "provider_response_processing"],
       "properties": {
         "request_id": {"type": "string"},
         "outcome": {"oneOf": [{"$ref": "#/schemas/GatewayTranscriptionResult"}, {"$ref": "#/schemas/GatewayNormalizedError"}]},
-        "usage_event": {"$ref": "#/schemas/UsageEvent"}
+        "usage_event": {"$ref": "#/schemas/GatewayUsageOutcome"},
+        "provider_response_processing": {"$ref": "#/schemas/GatewayProviderResponseProcessing"}
       }
     },
     "Error": {
@@ -1436,6 +1555,14 @@
         "proof": "The gateway may carry audio only as a governed server-side STT request; it is not a general model or backup surface."
       },
       {
+        "surface": "governed_provider_response_processing",
+        "data": ["provider_response_transcript", "provider_response_segments"],
+        "allowed_surfaces": ["bounded_memory_gateway_worker", "immediate_owner_bound_encryption"],
+        "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync", "sync"],
+        "retention": "request-scoped memory only; encrypt immediately into the owner-bound artifact, then delete readable provider response data",
+        "proof": "The governed worker may process a provider response in bounded memory solely to produce the authenticated owner-bound encrypted handoff; no response persistence or telemetry surface is permitted."
+      },
+      {
         "surface": "readable_transcript",
         "data": ["readable_transcript_text", "transcript_segments"],
         "allowed_surfaces": ["authenticated_client_delivery", "owner_bound_encrypted_result_artifact"],
@@ -1445,8 +1572,8 @@
       }
     ]
   },
-  "requirements": {
-    "idempotency": {
+    "requirements": {
+      "idempotency": {
       "header": "Idempotency-Key",
       "required_operation_ids": [
         "account.token",
@@ -1472,6 +1599,19 @@
         "commerce.webhook"
       ],
       "replay_semantics": "The same account, operation, and key returns the original outcome without duplicate side effects."
+      },
+    "gateway_usage": {
+      "invocation_reservation_schema_ref": "#/schemas/UsageReservationEvent",
+      "response_outcome_schema_ref": "#/schemas/GatewayUsageOutcome",
+      "reservation_durable_before_provider_request": true,
+      "response_must_link_settlement_rollback_or_rejection": true,
+      "correlation_fields": ["account_id", "request_id", "job_id", "idempotency_key", "period", "correlation_id", "predecessor_event_id"],
+      "ledger_invariants": [
+        "A duplicate gateway retry with the same account_id and idempotency_key returns the original reservation and outcome without a second mutation.",
+        "Settlement quantity must be no greater than the correlated reservation and may be accepted only once.",
+        "Rollback requires the reservation predecessor and exactly one effective reversal; duplicate rollback delivery is rejected or a no-op, never a second reversal.",
+        "A provider failure or quota rejection still produces a linked rejection or rollback outcome."
+      ]
     },
     "account_isolation": "Every entitlement, commerce, device, sync, job, result, and usage read/write is authorized against account_id.",
     "durability": {
@@ -1509,7 +1649,13 @@
       "client_secret_for_public_native_clients": false,
       "tokens_only_auth_protocol_and_secure_native_storage": true,
       "audio_only_explicit_hosted_upload_and_processing_ttl": true,
-      "readable_transcript_only_client_delivery_or_encrypted_artifact": true
+      "readable_transcript_only_client_delivery_or_encrypted_artifact": true,
+      "provider_response_processing": {
+        "memory_only": true,
+        "immediate_owner_bound_encryption": true,
+        "delete_after_encryption": true,
+        "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync"]
+      }
     },
     "sync_protocol": {
       "envelope_schema_ref": "#/schemas/SyncEnvelope",
@@ -1518,6 +1664,18 @@
       "required_fields": ["collection", "record_id", "rev", "updated_at", "content_type", "ciphertext", "nonce", "aad", "authenticated_metadata_hash", "tombstone", "device_metadata"],
       "push_outcomes_ref": "#/schemas/SyncRecordOutcome",
       "pull_pagination": {"cursor": true, "page_size": true, "next_cursor": true, "has_more": true}
+      ,"key_envelopes": {
+        "authority": "dictate_client_encryption_with_arc_forge_envelope_storage",
+        "schema_ref": "#/schemas/KeyEnvelope",
+        "device_schema_ref": "#/schemas/DeviceKeyEnvelope",
+        "recovery_schema_ref": "#/schemas/RecoveryKeyEnvelope",
+        "account_bound_aad": {
+          "device": "dictate-sync-device-envelope:v1:{account_id}",
+          "recovery": "dictate-sync-recovery:v1:{account_id}",
+          "encoding": "exact UTF-8 bytes after trimming account_id; no alternate normalization or caller-supplied AAD"
+        },
+        "round_trip_required": true
+      }
     }
   },
   "contract_fixtures": {

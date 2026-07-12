@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+from cryptography.exceptions import InvalidTag
+
+from dictate.sync import (
+    create_recovery_envelope,
+    generate_account_key,
+    generate_device_key_pair,
+    generate_recovery_key,
+    recover_account_key,
+    unwrap_account_key_for_device,
+    wrap_account_key_for_device,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +80,152 @@ def _refs(value: Any) -> list[str]:
         for child in value:
             found.extend(_refs(child))
     return found
+
+
+def _schema_matches(contract: dict[str, Any], schema_or_ref: Any, value: Any) -> bool:
+    """Small dependency-free validator for the contract's executable fixtures."""
+    schema = _resolve(contract, schema_or_ref) if isinstance(schema_or_ref, str) else schema_or_ref
+    if not isinstance(schema, dict):
+        return False
+    if "$ref" in schema and not _schema_matches(contract, schema["$ref"], value):
+        return False
+    if "oneOf" in schema and sum(_schema_matches(contract, option, value) for option in schema["oneOf"]) != 1:
+        return False
+    if "allOf" in schema and not all(_schema_matches(contract, option, value) for option in schema["allOf"]):
+        return False
+    if "not" in schema and _schema_matches(contract, schema["not"], value):
+        return False
+    expected_type = schema.get("type")
+    if expected_type == "string" and not isinstance(value, str):
+        return False
+    if expected_type == "object" and not isinstance(value, dict):
+        return False
+    if expected_type == "array" and not isinstance(value, list):
+        return False
+    if expected_type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+        return False
+    if expected_type == "number" and (not isinstance(value, (int, float)) or isinstance(value, bool)):
+        return False
+    if isinstance(expected_type, list):
+        type_matches = {
+            "string": isinstance(value, str),
+            "object": isinstance(value, dict),
+            "array": isinstance(value, list),
+            "null": value is None,
+            "integer": isinstance(value, int) and not isinstance(value, bool),
+            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        }
+        if not any(type_matches.get(kind, False) for kind in expected_type):
+            return False
+    if "const" in schema and value != schema["const"]:
+        return False
+    if "enum" in schema and value not in schema["enum"]:
+        return False
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            return False
+        pattern = schema.get("pattern")
+        if pattern and re.fullmatch(pattern, value) is None:
+            return False
+        if schema.get("format") == "rfc8252-loopback-redirect-uri":
+            try:
+                parsed = urlsplit(value)
+                port = parsed.port
+            except ValueError:
+                return False
+            if (
+                parsed.scheme != "http"
+                or parsed.hostname not in {"127.0.0.1", "::1"}
+                or port is None
+                or not 1 <= port <= 65535
+                or parsed.path != "/callback"
+                or bool(parsed.query)
+                or bool(parsed.fragment)
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                return False
+    if isinstance(value, (int, float)) and "minimum" in schema and value < schema["minimum"]:
+        return False
+    if isinstance(value, dict):
+        if not set(schema.get("required", [])).issubset(value):
+            return False
+        if schema.get("additionalProperties") is False and set(value) - set(schema.get("properties", {})):
+            return False
+        for name, property_schema in schema.get("properties", {}).items():
+            if name in value and not _schema_matches(contract, property_schema, value[name]):
+                return False
+    return True
+
+
+def _usage_event(
+    event_type: str,
+    lifecycle: str,
+    *,
+    event_id: str,
+    quantity: float = 10,
+    idempotency_key: str = "idem-1",
+    predecessor_event_id: str | None = None,
+) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "event_id": event_id,
+        "account_id": "acct-1",
+        "product": "dictate",
+        "entitlement": "dictate_pro",
+        "capability": "dictate.transcribe",
+        "event_type": event_type,
+        "lifecycle": lifecycle,
+        "amount": quantity,
+        "quantity": quantity,
+        "unit": "audio_seconds",
+        "request_id": "request-1",
+        "job_id": "job-1",
+        "idempotency_key": idempotency_key,
+        "period": {
+            "period_id": "period-1",
+            "start": "2026-07-01T00:00:00Z",
+            "end": "2026-08-01T00:00:00Z",
+            "included_seconds": 100,
+            "used_seconds": 0,
+        },
+        "correlation_id": "corr-1",
+        "occurred_at": "2026-07-12T00:00:00Z",
+    }
+    if predecessor_event_id is not None:
+        event["predecessor_event_id"] = predecessor_event_id
+    return event
+
+
+class _UsageLedgerModel:
+    """Executable contract model for cross-event invariants, not backend code."""
+
+    def __init__(self) -> None:
+        self.events: dict[str, dict[str, Any]] = {}
+        self.by_idempotency: dict[tuple[str, str], str] = {}
+        self.reversed_predecessors: set[str] = set()
+
+    def apply(self, event: dict[str, Any]) -> dict[str, Any]:
+        key = (event["account_id"], event["idempotency_key"])
+        existing_id = self.by_idempotency.get(key)
+        if existing_id is not None:
+            if event["event_id"] == existing_id:
+                return self.events[existing_id]
+            raise ValueError("duplicate idempotency key")
+        event_type = event["event_type"]
+        predecessor = event.get("predecessor_event_id")
+        if event_type == "settlement":
+            if predecessor not in self.events:
+                raise ValueError("missing reservation predecessor")
+            reservation = self.events[predecessor]
+            if event["quantity"] > reservation["quantity"]:
+                raise ValueError("settlement exceeds reservation")
+        elif event_type == "rollback":
+            if predecessor not in self.events or predecessor in self.reversed_predecessors:
+                raise ValueError("duplicate rollback")
+            self.reversed_predecessors.add(predecessor)
+        self.events[event["event_id"]] = event
+        self.by_idempotency[key] = event["event_id"]
+        return event
 
 
 class DictatePlatformContractTests(unittest.TestCase):
@@ -159,6 +320,7 @@ class DictatePlatformContractTests(unittest.TestCase):
 
     def test_canonical_operations_are_unique_https_and_structurally_referenced(self) -> None:
         operations = self.contract["operations"]
+        origin = self.contract["surfaces"]["canonical_future_production"]["origin"]["proposed_origin"]
         operation_ids = [operation["operation_id"] for operation in operations.values()]
         route_methods = [(operation["route"], operation["method"]) for operation in operations.values()]
         self.assertEqual(len(operation_ids), len(set(operation_ids)))
@@ -168,8 +330,12 @@ class DictatePlatformContractTests(unittest.TestCase):
             self.assertIsInstance(_resolve(self.contract, operation["request_schema"]), dict)
             self.assertIsInstance(_resolve(self.contract, operation["response_schema"]), dict)
             if operation["transport"] == "public_https":
-                self.assertTrue(operation["url_template"].startswith("https://"))
-                self.assertNotIn("http://", operation["url_template"])
+                rendered_url = operation["url_template"]
+                self.assertEqual(rendered_url, origin + operation["route"])
+                self.assertEqual(rendered_url.count("://"), 1)
+                self.assertTrue(rendered_url.startswith(origin + "/"))
+                self.assertNotIn("://", operation["route"])
+                self.assertNotIn("{canonical_arc_forge_origin}", rendered_url)
             else:
                 self.assertFalse(operation["public_client_access"])
 
@@ -191,11 +357,23 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertEqual(future["status"], "proposed_not_deployed")
         self.assertEqual(future["deployment_verification"], "unknown")
         self.assertEqual(future["origin"]["scheme"], "https")
-        self.assertTrue(future["origin"]["url_template"].startswith("https://"))
         self.assertEqual(future["origin"]["proposed_origin"], "https://console.arcforge.au")
+        self.assertEqual(future["origin"]["url_template"], future["origin"]["proposed_origin"])
+        self.assertEqual(future["origin"]["url_template"].count("://"), 1)
         self.assertFalse(future["origin"]["requires_owner_confirmation"])
-        self.assertIn("proposed_origin", future["origin"]["route_binding"])
+        self.assertIn("exactly one route path", future["origin"]["route_binding"])
         self.assertEqual(future["operations_ref"], "#/operations")
+
+    def test_every_public_operation_url_rejects_double_scheme_rendering(self) -> None:
+        origin = self.contract["surfaces"]["canonical_future_production"]["origin"]["rendering"]["origin"]
+        self.assertEqual(origin, "https://console.arcforge.au")
+        for operation in self.contract["operations"].values():
+            if operation["transport"] != "public_https":
+                continue
+            rendered = f"{origin}{operation['route']}"
+            self.assertEqual(rendered, operation["url_template"])
+            self.assertFalse(rendered.startswith("https://https://"))
+            self.assertEqual(rendered.count("://"), 1)
 
     def test_reusable_state_enums_and_schema_references_are_exact(self) -> None:
         for enum_name, expected_values in EXPECTED_ENUMS.items():
@@ -255,6 +433,59 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertIn("authorization_pending", self.contract["schemas"]["DevicePollingError"]["properties"]["error"]["enum"])
         self.assertIn("slow_down", self.contract["schemas"]["DevicePollingError"]["properties"]["error"]["enum"])
 
+    def test_oauth_loopback_pkce_and_cancellation_semantics_are_executable(self) -> None:
+        redirect_schema = "#/schemas/LoopbackRedirectURI"
+        valid_redirects = [
+            "http://127.0.0.1:1/callback",
+            "http://127.0.0.1:0001/callback",
+            "http://127.0.0.1:65535/callback",
+            "http://[::1]:43123/callback",
+        ]
+        invalid_redirects = [
+            "https://127.0.0.1:43123/callback",
+            "http://localhost:43123/callback",
+            "http://127.0.0.1:0/callback",
+            "http://127.0.0.1:65536/callback",
+            "http://127.0.0.1:43123/other",
+            "http://user@127.0.0.1:43123/callback",
+            "http://127.0.0.1:43123/callback?state=x",
+            "http://[::1]:43123/callback#fragment",
+        ]
+        for redirect_uri in valid_redirects:
+            self.assertTrue(_schema_matches(self.contract, redirect_schema, redirect_uri), redirect_uri)
+        for redirect_uri in invalid_redirects:
+            self.assertFalse(_schema_matches(self.contract, redirect_schema, redirect_uri), redirect_uri)
+
+        challenge_schema = "#/schemas/PKCECodeChallenge"
+        verifier_schema = "#/schemas/PKCECodeVerifier"
+        self.assertTrue(_schema_matches(self.contract, challenge_schema, "A" * 43))
+        self.assertFalse(_schema_matches(self.contract, challenge_schema, "A" * 42))
+        self.assertFalse(_schema_matches(self.contract, challenge_schema, "A" * 42 + "+"))
+        self.assertTrue(_schema_matches(self.contract, verifier_schema, "A" * 43))
+        self.assertTrue(_schema_matches(self.contract, verifier_schema, "A" * 128))
+        self.assertFalse(_schema_matches(self.contract, verifier_schema, "A" * 42))
+        self.assertFalse(_schema_matches(self.contract, verifier_schema, "A" * 129))
+        self.assertFalse(_schema_matches(self.contract, verifier_schema, "A" * 42 + "+"))
+
+        success = {"code": "code-1", "state": "state-1"}
+        denied = {"error": "access_denied", "state": "state-1"}
+        malformed = {"error": "access_denied"}
+        code_and_error = {"code": "code-1", "error": "access_denied", "state": "state-1"}
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/AuthorizationResponse", success))
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/AuthorizationResponse", denied))
+        self.assertFalse(_schema_matches(self.contract, "#/schemas/AuthorizationResponse", malformed))
+        self.assertFalse(_schema_matches(self.contract, "#/schemas/AuthorizationResponse", code_and_error))
+
+        authorization_code = self.contract["schemas"]["AuthorizationCodeTokenRequest"]
+        self.assertEqual(
+            authorization_code["properties"]["redirect_uri"]["$ref"],
+            "#/schemas/LoopbackRedirectURI",
+        )
+        self.assertEqual(
+            authorization_code["properties"]["code_verifier"]["$ref"],
+            "#/schemas/PKCECodeVerifier",
+        )
+
     def test_sync_protocol_is_encrypted_account_device_scoped_and_outbox_drivable(self) -> None:
         envelope = self.contract["schemas"]["SyncEnvelope"]
         required = set(envelope["required"])
@@ -287,6 +518,91 @@ class DictatePlatformContractTests(unittest.TestCase):
             )
         )
         self.assertTrue(self.contract["requirements"]["sync_protocol"]["client_side_encryption"])
+
+    def test_key_envelope_variants_match_current_crypto_and_account_bound_aad(self) -> None:
+        sync_flow = next(flow for flow in self.contract["source_flow_manifest"]["flows"] if flow["flow_id"] == "encrypted_sync")
+        self.assertEqual(
+            sync_flow["key_envelope_authority"],
+            "dictate_client_encryption_with_arc_forge_envelope_storage",
+        )
+        self.assertIn("src/dictate/sync.py:76-89,166-278,627-638", sync_flow["source_refs"])
+        key_envelope = self.contract["schemas"]["KeyEnvelope"]
+        self.assertEqual(
+            [entry["$ref"] for entry in key_envelope["oneOf"]],
+            ["#/schemas/DeviceKeyEnvelope", "#/schemas/RecoveryKeyEnvelope"],
+        )
+        self.assertEqual(
+            self.contract["requirements"]["sync_protocol"]["key_envelopes"]["account_bound_aad"],
+            {
+                "device": "dictate-sync-device-envelope:v1:{account_id}",
+                "recovery": "dictate-sync-recovery:v1:{account_id}",
+                "encoding": "exact UTF-8 bytes after trimming account_id; no alternate normalization or caller-supplied AAD",
+            },
+        )
+        self.assertEqual(
+            set(self.contract["schemas"]["DeviceKeyEnvelope"]["required"]),
+            {"version", "algorithm", "ephemeral_public_key", "salt", "nonce", "ciphertext", "aad_hash"},
+        )
+        self.assertEqual(
+            set(self.contract["schemas"]["RecoveryKeyEnvelope"]["required"]),
+            {"version", "kdf", "iterations", "salt", "nonce", "ciphertext", "aad_hash"},
+        )
+
+        account_key = generate_account_key()
+        recipient = generate_device_key_pair()
+        device_envelope = wrap_account_key_for_device(
+            account_id="acct-1",
+            account_key=account_key,
+            recipient_public_key=recipient.public_key,
+        )
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/DeviceKeyEnvelope", device_envelope))
+        self.assertEqual(
+            unwrap_account_key_for_device(
+                account_id="acct-1",
+                private_key=recipient.private_key,
+                envelope=device_envelope,
+            ),
+            account_key,
+        )
+        with self.assertRaises(InvalidTag):
+            unwrap_account_key_for_device(
+                account_id="acct-1",
+                private_key=generate_device_key_pair().private_key,
+                envelope=device_envelope,
+            )
+
+        recovery_key = generate_recovery_key()
+        recovery_envelope = create_recovery_envelope(
+            account_id="acct-1",
+            account_key=account_key,
+            recovery_key=recovery_key,
+        )
+        recovery_payload = asdict(recovery_envelope)
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/RecoveryKeyEnvelope", recovery_payload))
+        self.assertEqual(
+            recover_account_key(
+                account_id="acct-1",
+                recovery_key=recovery_key,
+                envelope=recovery_envelope,
+            ),
+            account_key,
+        )
+        with self.assertRaises(ValueError):
+            recover_account_key(
+                account_id="acct-2",
+                recovery_key=recovery_key,
+                envelope=recovery_envelope,
+            )
+
+        request = {"device_id": "device-1", "envelope_kind": "device", "envelope": device_envelope}
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRequest", request))
+        self.assertFalse(
+            _schema_matches(
+                self.contract,
+                "#/schemas/KeyEnvelopeRequest",
+                {**request, "envelope_kind": "recovery"},
+            )
+        )
 
     def test_hosted_result_artifact_has_authenticated_one_of_and_scope_fixtures(self) -> None:
         artifact = self.contract["schemas"]["HostedResultArtifact"]
@@ -347,13 +663,23 @@ class DictatePlatformContractTests(unittest.TestCase):
                 "model_alias",
                 "credential_mode",
                 "audit",
+                "usage_event",
             }.issubset(set(invocation["required"]))
         )
         self.assertEqual(invocation["properties"]["audio_input"]["$ref"], "#/schemas/GatewayAudioInput")
         self.assertEqual(len(self.contract["schemas"]["GatewayAudioInput"]["oneOf"]), 2)
         self.assertEqual(invocation["properties"]["credential_mode"]["const"], "arc_forge_hosted")
+        self.assertEqual(invocation["properties"]["usage_event"]["$ref"], "#/schemas/UsageReservationEvent")
         response = self.contract["schemas"]["GatewayResponse"]
-        self.assertTrue({"request_id", "outcome"}.issubset(response["required"]))
+        self.assertTrue({"request_id", "outcome", "usage_event", "provider_response_processing"}.issubset(response["required"]))
+        self.assertEqual(response["properties"]["usage_event"]["$ref"], "#/schemas/GatewayUsageOutcome")
+        self.assertEqual(
+            response["properties"]["provider_response_processing"]["$ref"],
+            "#/schemas/GatewayProviderResponseProcessing",
+        )
+        gateway_usage = self.contract["requirements"]["gateway_usage"]
+        self.assertTrue(gateway_usage["reservation_durable_before_provider_request"])
+        self.assertTrue(gateway_usage["response_must_link_settlement_rollback_or_rejection"])
         rows = {row["surface"]: row for row in self.contract["data_flow_matrix"]["rows"]}
         provider_audio = rows["governed_provider_request_audio"]
         self.assertIn("governed_provider_request", provider_audio["allowed_surfaces"])
@@ -408,8 +734,60 @@ class DictatePlatformContractTests(unittest.TestCase):
         rollback = self.contract["contract_fixtures"]["usage_events"]["duplicate_rollback"]
         self.assertEqual(rollback["expected_effective_reversals"], 1)
 
+    def test_usage_ledger_model_rejects_duplicate_idempotency_over_settlement_and_rollback(self) -> None:
+        reservation = _usage_event("reservation", "reserved", event_id="reserve-1")
+        settlement = _usage_event(
+            "settlement",
+            "settled",
+            event_id="settle-1",
+            quantity=8,
+            idempotency_key="settle-1",
+            predecessor_event_id="reserve-1",
+        )
+        rollback = _usage_event(
+            "rollback",
+            "rolled_back",
+            event_id="rollback-1",
+            quantity=10,
+            idempotency_key="rollback-1",
+            predecessor_event_id="reserve-1",
+        )
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/UsageEvent", reservation))
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/UsageEvent", settlement))
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/UsageEvent", rollback))
+
+        ledger = _UsageLedgerModel()
+        self.assertIs(ledger.apply(reservation), reservation)
+        self.assertIs(ledger.apply(dict(reservation)), reservation)
+        with self.assertRaisesRegex(ValueError, "duplicate idempotency"):
+            ledger.apply({**reservation, "event_id": "reserve-duplicate"})
+        with self.assertRaisesRegex(ValueError, "settlement exceeds"):
+            ledger.apply(
+                _usage_event(
+                    "settlement",
+                    "settled",
+                    event_id="settle-over",
+                    quantity=11,
+                    idempotency_key="settle-over",
+                    predecessor_event_id="reserve-1",
+                )
+            )
+        self.assertIs(ledger.apply(settlement), settlement)
+        self.assertIs(ledger.apply(rollback), rollback)
+        with self.assertRaisesRegex(ValueError, "duplicate rollback"):
+            ledger.apply(
+                _usage_event(
+                    "rollback",
+                    "rolled_back",
+                    event_id="rollback-duplicate",
+                    quantity=10,
+                    idempotency_key="rollback-duplicate",
+                    predecessor_event_id="reserve-1",
+                )
+            )
+
     def test_diarized_authorization_survives_hosted_lifecycle(self) -> None:
-        for operation_id in ["hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]:
+        for operation_id in ["hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]:
             operation = self.contract["operations"][operation_id]
             self.assertIn("dictate.transcribe_diarized", operation["capabilities"])
             self.assertEqual(operation["capability_authorization"]["mode"], "job_inherited")
@@ -437,6 +815,17 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertTrue({"logs", "analytics", "support_exports", "normal_sync"}.issubset(transcript["forbidden_surfaces"]))
         self.assertIn("ack", transcript["retention"])
         self.assertIn("TTL", transcript["retention"])
+        provider_response = rows["governed_provider_response_processing"]
+        self.assertTrue({"bounded_memory_gateway_worker", "immediate_owner_bound_encryption"}.issubset(provider_response["allowed_surfaces"]))
+        self.assertTrue({"persistence", "logs", "analytics", "support_exports", "normal_sync"}.issubset(provider_response["forbidden_surfaces"]))
+        self.assertIn("memory only", provider_response["retention"])
+        self.assertIn("delete readable provider response", provider_response["retention"])
+        response_processing = self.contract["requirements"]["privacy"]["provider_response_processing"]
+        self.assertTrue(response_processing["memory_only"])
+        self.assertTrue(response_processing["immediate_owner_bound_encryption"])
+        self.assertTrue(response_processing["delete_after_encryption"])
+        self.assertTrue(set(response_processing["forbidden_surfaces"]).issubset(provider_response["forbidden_surfaces"]))
+        self.assertTrue(self.contract["schemas"]["GatewayProviderResponseProcessing"]["properties"]["persisted"]["const"] is False)
         self.assertTrue(self.contract["requirements"]["privacy"]["provider_credentials_never_client_visible"])
         self.assertFalse(self.contract["requirements"]["privacy"]["client_secret_for_public_native_clients"])
 
@@ -455,6 +844,11 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertEqual(evidence["deployment_verification"], "unknown")
         self.assertEqual(evidence["owner_confirmation"], "deployment_confirmation_later")
         self.assertEqual(self.contract["state_mappings"]["current_backend"]["deployment_verification"], "unknown")
+        inventory = (ROOT / "docs/platform/dictate-platform-inventory-v1.md").read_text(encoding="utf-8")
+        handoff = (ROOT / "docs/platform/arc-forge-backend-handoff-v1.md").read_text(encoding="utf-8")
+        self.assertIn("dashboard.py:12892-13123", inventory)
+        self.assertIn("dashboard.py:12632-12802", inventory)
+        self.assertIn("dashboard.py:12632-12802,12807-13123,13125-13127", handoff)
 
 
 if __name__ == "__main__":

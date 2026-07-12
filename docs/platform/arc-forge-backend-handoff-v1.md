@@ -132,7 +132,7 @@ does not create a second machine-readable route map.
 | Shared gateway | `gateway.invoke` | Internal-only transport, provider policy, normalized errors, and usage ledger ownership |
 
 The current source route candidates are visible at
-`arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12632-12725,12807-13007,13125-13127` and
+`arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:12632-12802,12807-13123,13125-13127` and
 `arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1329-1638`; they require
 reconciliation with the contract and are not deployed-route proof.
 
@@ -146,6 +146,7 @@ This matrix is an acceptance contract, not a prose aspiration.
 | Access/refresh/auth/device tokens | Auth protocol and secure native storage only | Logs, sync, support exports, analytics, provider requests | Protocol TTL, refresh rotation/revocation, and OS-backed storage |
 | Hosted audio | Explicit hosted upload, bounded processing worker, and governed provider request | Normal sync, logs, analytics, support exports | Upload/processing/provider-request TTL; delete on terminal outcome or expiry |
 | Governed provider-request audio | Governed server-side provider request only | Desktop provider credentials, normal sync, logs, analytics, support exports | Audio bytes or bounded artifact reference only; provider/model aliases are server-selected |
+| Governed provider response | Bounded gateway/worker memory and immediate owner-bound encryption | Persistence, logs, analytics, support exports, normal sync | Request-scoped memory only; encrypt immediately, then delete readable provider response |
 | Readable transcript | Authenticated client delivery and owner-bound encrypted result artifact | Logs, analytics, support exports, normal sync | Bounded artifact lifetime; delete after acknowledgement or TTL |
 
 The structured version of this matrix is
