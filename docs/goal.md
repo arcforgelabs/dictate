@@ -1,16 +1,17 @@
 # Goal — Ship Dictate on the Arc Forge Platform
 
 **Status:** Active execution authority — platform **merged and production-deployed**;
-true E2E DoD still needs canary, migration counts, and residual-auth durability.
+true E2E DoD still needs canary, migration counts, and production soak for durable
+browser auth cutover (local proof complete on `forge/dictate-pro-dod-closeout`).
 
 ## Progress scoreboard
 
 | Wave | Status | Remaining for true DoD |
 | --- | --- | --- |
 | 0 | CLEAN / contract locked (merged) | Live product conformance via canary |
-| 1 | MERGED + deployed (auth, commerce, usage, login return, destinations) | portal_refresh + email codes still in-memory |
+| 1 | MERGED + deployed (auth, commerce, usage, login return, destinations) | production soak for durable portal_refresh + challenge stores (local cutover done) |
 | 2 | MERGED + deployed (hosted jobs, encrypted artifacts, audio cleanup) | device-key wrapping deferred; separate worker; live canary |
-| 3 | MERGED + deployed (devices, sync, revoke, desktop states) | recovery crypto (501); sync export/delete; Keychain |
+| 3 | MERGED + deployed (devices, sync, revoke, desktop states) | Keychain UX; production soak for recovery/export/delete |
 | 4 | MERGED + deployed (quarantine + readiness + push/deploy/HTTPS discovery) | canary soak, migration counts, human release sign-off |
 
 **Deck integration base:** post–Deployment Harmony `main` (PR 207 @ `7db8c38`), then
@@ -145,8 +146,9 @@ Gate: login and refresh survive restart/rolling deploy; all login methods return
 to Dictate; commerce and usage answers agree across backend, portal, and client.
 
 Status: **MERGED + DEPLOYED** (Waves 1 R1–R2). Durable hashed auth/commerce/usage,
-neutral login return, and product destinations are live; `portal_refresh` and
-email codes remain in-process-memory interim.
+neutral login return, and product destinations are live; browser login codes and
+``portal_refresh`` cookies cut over to ``AccountChallengeStore`` + ``PortalRefreshStore``
+(locally on ``forge/dictate-pro-dod-closeout``; production soak pending).
 
 ### Wave 2 — Governed hosted transcription
 
@@ -195,8 +197,8 @@ Gate: two clean installations can join, sync encrypted records, recover,
 revoke, export, and delete; users can always predict what leaves the device and
 local Dictate stays usable during a total platform outage.
 
-Status: **MERGED + DEPLOYED** (Waves 3 R1–R2). Recovery approve is fail-closed
-(`501`); export/delete deferred.
+Status: **MERGED + DEPLOYED** (Waves 3 R1–R2). Recovery approve, encrypted export, and
+account-scoped cloud delete are implemented locally; Keychain UX and production soak remain.
 
 ### Wave 4 — Integrate, migrate, release, and delete interim architecture
 

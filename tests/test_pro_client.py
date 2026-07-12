@@ -191,14 +191,28 @@ class ProClientTests(unittest.TestCase):
             refresh_expires_at="2028-01-01T00:00:00+00:00",
         )
 
+        recovery_envelope = {
+            "version": 1,
+            "kdf": "pbkdf2-sha256",
+            "iterations": 200_000,
+            "salt": "c2FsdA==",
+            "nonce": "bm9uY2U=",
+            "ciphertext": "Y2lwaGVy",
+            "aad_hash": "YWFk",
+        }
+
         with patch.object(client, "load_session", return_value=session):
             client.list_devices()
             client.register_device(device_label="Desktop", device_public_key="public_key_1")
             client.revoke_device("dev_other")
             client.approve_device("dev_other", envelope={"algorithm": "test"})
-            client.approve_current_device_with_recovery()
+            client.approve_current_device_with_recovery(
+                recovery_key_envelope=recovery_envelope,
+                account_key_commitment="commitment_test",
+                idempotency_key="recovery-1",
+            )
             client.export_cloud_data()
-            client.delete_cloud_data()
+            client.delete_cloud_data(idempotency_key="delete-1")
 
         self.assertEqual([call["path"] for call in client.calls], [
             "/v1/devices",
@@ -212,6 +226,14 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual([call["method"] for call in client.calls], ["GET", "POST", "POST", "POST", "POST", "GET", "DELETE"])
         self.assertEqual(client.calls[1]["payload"]["device_public_key"], "public_key_1")
         self.assertEqual(client.calls[3]["payload"], {"envelope": {"algorithm": "test"}})
+        self.assertEqual(
+            client.calls[4]["payload"],
+            {
+                "recovery_key_envelope": recovery_envelope,
+                "account_key_commitment": "commitment_test",
+            },
+        )
+        self.assertEqual(client.calls[6]["payload"], {"confirmation": "delete_cloud_data"})
 
     def test_local_sign_in_sends_device_public_key(self) -> None:
         client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
@@ -424,7 +446,7 @@ class ProClientTests(unittest.TestCase):
             client.register_device(device_label="Desktop", device_public_key="public_key_1")
             client.revoke_device("device_2")
             client.export_cloud_data()
-            client.delete_cloud_data()
+            client.delete_cloud_data(idempotency_key="delete-arc-1")
 
         self.assertEqual([call["path"] for call in client.calls], [
             "/api/dictate/devices",
@@ -434,6 +456,10 @@ class ProClientTests(unittest.TestCase):
             "/api/dictate/account/cloud-data",
         ])
         self.assertEqual(client.calls[1]["payload"]["device_public_key"], "public_key_1")
+        self.assertEqual(client.calls[3]["headers"], {"X-Dictate-Device-Id": "device_1"})
+        self.assertEqual(client.calls[4]["payload"], {"confirmation": "delete_cloud_data"})
+        self.assertEqual(client.calls[4]["headers"]["Idempotency-Key"], "delete-arc-1")
+        self.assertEqual(client.calls[4]["headers"]["X-Dictate-Device-Id"], "device_1")
 
     def test_drain_sync_outbox_removes_accepted_records(self) -> None:
         from dictate.sync import SyncOutbox

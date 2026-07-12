@@ -228,9 +228,18 @@ class _FakeProClient:
     def update_sync_cursor(self, *, last_seq: int):
         return {"last_seq": last_seq}
 
-    def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, object]) -> dict[str, object]:
-        self.saved_key_envelopes.append({"envelope_kind": envelope_kind, "envelope": envelope})
-        return {"envelope_kind": envelope_kind, "envelope": envelope}
+    def save_key_envelope(
+        self,
+        *,
+        envelope_kind: str,
+        envelope: dict[str, object],
+        account_key_commitment: str | None = None,
+    ) -> dict[str, object]:
+        saved = {"envelope_kind": envelope_kind, "envelope": envelope}
+        if account_key_commitment:
+            saved["account_key_commitment"] = account_key_commitment
+        self.saved_key_envelopes.append(saved)
+        return saved
 
     def list_key_envelopes(self, *, envelope_kind: str | None = None) -> dict[str, object]:
         envelopes = [
@@ -273,8 +282,16 @@ class _FakeProClient:
         self.approved_devices.append({"device_id": device_id, "envelope": envelope})
         return {"approved": True, "device": {"device_id": device_id, "trusted_at": "2026-07-05T12:00:00+00:00"}}
 
-    def approve_current_device_with_recovery(self) -> dict[str, object]:
+    def approve_current_device_with_recovery(
+        self,
+        *,
+        recovery_key_envelope: dict[str, object] | None = None,
+        account_key_commitment: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
         self.approved_with_recovery = True
+        self.recovery_approval_envelope = recovery_key_envelope
+        self.recovery_approval_commitment = account_key_commitment
         return {"approved": True, "method": "recovery"}
 
     def export_cloud_data(self) -> dict[str, object]:
@@ -698,6 +715,12 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertTrue(result["sync"]["keyAvailable"])
             self.assertEqual(pro_client.sync_drains, 1)
             self.assertEqual(len(backend.history_store._sync_outbox.pending()), 1)
+            recovery_saves = [
+                item for item in pro_client.saved_key_envelopes
+                if item["envelope_kind"] == "recovery"
+            ]
+            self.assertEqual(len(recovery_saves), 1)
+            self.assertIn("account_key_commitment", recovery_saves[0])
 
     def test_enable_sync_uploads_current_device_key_envelope(self) -> None:
         from dictate.sync import unwrap_account_key_for_device
@@ -852,6 +875,12 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertNotIn("recoveryKey", restored)
             self.assertEqual(sync_settings.account_key(), original_key)
             self.assertTrue(pro_client.approved_with_recovery)
+            from dictate.sync import compute_account_key_commitment
+
+            self.assertEqual(
+                pro_client.recovery_approval_commitment,
+                compute_account_key_commitment(original_key),
+            )
 
     def test_enable_sync_rejects_wrong_recovery_key(self) -> None:
         with tempfile.TemporaryDirectory() as d:

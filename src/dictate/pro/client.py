@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import secrets
 import time
 import urllib.error
 import urllib.parse
@@ -704,12 +705,25 @@ class ProClient:
             auth=session.access_token,
         )
 
-    def save_key_envelope(self, *, envelope_kind: str, envelope: dict[str, Any]) -> dict[str, Any]:
+    def save_key_envelope(
+        self,
+        *,
+        envelope_kind: str,
+        envelope: dict[str, Any],
+        account_key_commitment: str | None = None,
+    ) -> dict[str, Any]:
         session = self._require_session()
+        payload: dict[str, Any] = {
+            "device_id": session.device_id,
+            "envelope_kind": envelope_kind,
+            "envelope": envelope,
+        }
+        if account_key_commitment:
+            payload["account_key_commitment"] = account_key_commitment
         return self._request(
             "POST",
             self._sync_path("key-envelopes"),
-            {"device_id": session.device_id, "envelope_kind": envelope_kind, "envelope": envelope},
+            payload,
             auth=session.access_token,
         )
 
@@ -750,22 +764,66 @@ class ProClient:
             payload["envelope"] = envelope
         return self._request("POST", self._account_path(f"devices/{target}/approve"), payload, auth=session.access_token)
 
-    def approve_current_device_with_recovery(self) -> dict[str, Any]:
+    def approve_current_device_with_recovery(
+        self,
+        *,
+        recovery_key_envelope: dict[str, Any] | None = None,
+        account_key_commitment: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         session = self._require_session()
+        envelope = recovery_key_envelope
+        if envelope is None:
+            listed = self.list_key_envelopes(envelope_kind="recovery").get("envelopes", [])
+            for item in listed:
+                if isinstance(item, dict) and isinstance(item.get("envelope"), dict):
+                    envelope = item["envelope"]
+                    break
+        if envelope is None:
+            raise ProClientError(400, "recovery_key_envelope is required")
+        commitment = str(account_key_commitment or "").strip()
+        if not commitment:
+            raise ProClientError(400, "account_key_commitment is required")
+        key = idempotency_key or secrets.token_urlsafe(16)
         return self._request(
             "POST",
             self._account_path("devices/current/approve-with-recovery"),
-            {},
+            {
+                "recovery_key_envelope": envelope,
+                "account_key_commitment": commitment,
+            },
             auth=session.access_token,
+            headers={
+                "X-Dictate-Device-Id": session.device_id,
+                "Idempotency-Key": key,
+            },
         )
 
     def export_cloud_data(self) -> dict[str, Any]:
         session = self._require_session()
-        return self._request("GET", self._account_path("account/export"), auth=session.access_token)
+        headers = {"X-Dictate-Device-Id": session.device_id} if self._uses_arcforge_gateway() else None
+        return self._request(
+            "GET",
+            self._account_path("account/export"),
+            auth=session.access_token,
+            headers=headers,
+        )
 
-    def delete_cloud_data(self) -> dict[str, Any]:
+    def delete_cloud_data(self, *, idempotency_key: str | None = None) -> dict[str, Any]:
         session = self._require_session()
-        return self._request("DELETE", self._account_path("account/cloud-data"), auth=session.access_token)
+        key = idempotency_key or secrets.token_urlsafe(16)
+        headers = {
+            "Idempotency-Key": key,
+        }
+        if self._uses_arcforge_gateway():
+            headers["X-Dictate-Device-Id"] = session.device_id
+        return self._request(
+            "DELETE",
+            self._account_path("account/cloud-data"),
+            {"confirmation": "delete_cloud_data"},
+            auth=session.access_token,
+            headers=headers,
+        )
 
     def drain_sync_outbox(self, outbox: SyncOutbox) -> dict[str, Any]:
         pending = outbox.pending()

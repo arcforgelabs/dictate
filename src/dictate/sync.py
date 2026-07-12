@@ -683,6 +683,11 @@ def _validate_key(key: bytes) -> None:
         raise ValueError("sync account key must be 32 bytes")
 
 
+def compute_account_key_commitment(account_key: bytes) -> str:
+    _validate_key(account_key)
+    return base64.b64encode(hashlib.sha256(account_key).digest()).decode("ascii")
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     _atomic_write_text(path, json.dumps(payload, indent=2))
 

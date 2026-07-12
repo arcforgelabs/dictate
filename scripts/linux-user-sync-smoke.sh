@@ -91,8 +91,16 @@ class FakeProClient:
             ]
         }
 
-    def save_key_envelope(self, *, envelope_kind: str, envelope: dict) -> dict:
+    def save_key_envelope(
+        self,
+        *,
+        envelope_kind: str,
+        envelope: dict,
+        account_key_commitment: str | None = None,
+    ) -> dict:
         saved = {"envelope_kind": envelope_kind, "envelope": envelope}
+        if account_key_commitment:
+            saved["account_key_commitment"] = account_key_commitment
         self.saved_key_envelopes.append(saved)
         return saved
 

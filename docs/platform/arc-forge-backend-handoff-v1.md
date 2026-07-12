@@ -61,12 +61,13 @@ verification status, not a second candidate or an open implementation choice.
    advertise HTTP endpoints and land at Deck-branded `/deck/login`; those are
    migration evidence, not accepted production behavior.
 
-2. **Durable desktop authentication.** Authorization grants, device-code
+2. **Durable desktop and browser authentication.** Authorization grants, device-code
    records, and refresh families for Dictate desktop paths are implemented
-   locally in ``DurableAuthStore`` (hashed SQLite). Residual interim stores
-   (email login-code dict, companion ``_auth_codes``, browser ``portal_refresh``)
-   are labelled in ``residual_interim_auth.py`` and must not be claimed as
-   production-durable desktop auth.
+   locally in ``DurableAuthStore`` (hashed SQLite). Browser login codes and
+   ``portal_refresh`` cookies use ``AccountChallengeStore`` + ``PortalRefreshStore``
+   (hashed SQLite via ``portal_account_auth``). Remaining ephemeral guards are
+   labelled in ``residual_interim_auth.py`` and must not be claimed as credential
+   authority.
 
 3. **One neutral identity boundary.** Make `account_id` the authenticated
    subject and ownership boundary. Keep `product=dictate` and
