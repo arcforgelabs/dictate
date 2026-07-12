@@ -1010,13 +1010,13 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertIn("ack", transcript["retention"])
         self.assertIn("TTL", transcript["retention"])
         provider_response = rows["governed_provider_response_processing"]
-        self.assertTrue({"bounded_memory_gateway_worker", "immediate_owner_bound_encryption"}.issubset(provider_response["allowed_surfaces"]))
+        self.assertTrue({"bounded_memory_gateway_worker", "immediate_server_managed_encryption"}.issubset(provider_response["allowed_surfaces"]))
         self.assertTrue({"persistence", "logs", "analytics", "support_exports", "normal_sync"}.issubset(provider_response["forbidden_surfaces"]))
         self.assertIn("memory only", provider_response["retention"])
         self.assertIn("delete readable provider response", provider_response["retention"])
         response_processing = self.contract["requirements"]["privacy"]["provider_response_processing"]
         self.assertTrue(response_processing["memory_only"])
-        self.assertTrue(response_processing["immediate_owner_bound_encryption"])
+        self.assertTrue(response_processing["immediate_server_managed_encryption"])
         self.assertTrue(response_processing["delete_after_encryption"])
         self.assertTrue(set(response_processing["forbidden_surfaces"]).issubset(provider_response["forbidden_surfaces"]))
         self.assertTrue(self.contract["schemas"]["GatewayProviderResponseProcessing"]["properties"]["persisted"]["const"] is False)

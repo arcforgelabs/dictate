@@ -1217,7 +1217,7 @@
         "entitlement": {"const": "dictate_pro"},
         "capability": {"enum": ["dictate.transcribe", "dictate.transcribe_diarized"]},
         "state": {"$ref": "#/enums/hosted_job_state"},
-        "result_contract": {"const": "owner_bound_encrypted_artifact"},
+        "result_contract": {"const": "server_managed_encrypted_artifact"},
         "request_id": {"type": "string"},
         "usage_event_id": {"type": "string"},
         "created_at": {"type": "string", "format": "date-time"},
@@ -1263,7 +1263,7 @@
         "job_id": {"type": "string"},
         "account_id": {"type": "string"},
         "device_id": {"type": "string"},
-        "encryption": {"const": "owner_bound_encrypted_artifact"},
+        "encryption": {"const": "server_managed_encrypted_artifact"},
         "version": {"const": "dictate_result_artifact_v1"},
         "algorithm": {"enum": ["AES-256-GCM"]},
         "recipient_key_id": {"type": "string"},
@@ -1431,11 +1431,11 @@
     },
     "GatewayProviderResponseProcessing": {
       "type": "object",
-      "required": ["mode", "memory_only", "immediate_owner_bound_encryption", "persisted", "deleted_after_encryption"],
+      "required": ["mode", "memory_only", "immediate_server_managed_encryption", "persisted", "deleted_after_encryption"],
       "properties": {
         "mode": {"const": "memory_only_immediate_encryption"},
         "memory_only": {"const": true},
-        "immediate_owner_bound_encryption": {"const": true},
+        "immediate_server_managed_encryption": {"const": true},
         "persisted": {"const": false},
         "deleted_after_encryption": {"const": true}
       }
@@ -1587,15 +1587,15 @@
       {
         "surface": "governed_provider_response_processing",
         "data": ["provider_response_transcript", "provider_response_segments"],
-        "allowed_surfaces": ["bounded_memory_gateway_worker", "immediate_owner_bound_encryption"],
+        "allowed_surfaces": ["bounded_memory_gateway_worker", "immediate_server_managed_encryption"],
         "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync", "sync"],
-        "retention": "request-scoped memory only; encrypt immediately into the owner-bound artifact, then delete readable provider response data",
-        "proof": "The governed worker may process a provider response in bounded memory solely to produce the authenticated owner-bound encrypted handoff; no response persistence or telemetry surface is permitted."
+        "retention": "request-scoped memory only; encrypt immediately into the server-managed artifact, then delete readable provider response data",
+        "proof": "The governed worker may process a provider response in bounded memory solely to produce the authenticated server-managed encrypted handoff; no response persistence or telemetry surface is permitted."
       },
       {
         "surface": "readable_transcript",
         "data": ["readable_transcript_text", "transcript_segments"],
-        "allowed_surfaces": ["authenticated_client_delivery", "owner_bound_encrypted_result_artifact"],
+        "allowed_surfaces": ["authenticated_client_delivery", "server_managed_encrypted_result_artifact"],
         "forbidden_surfaces": ["logs", "analytics", "support_exports", "normal_sync"],
         "retention": "bounded artifact lifetime; delete after acknowledgement or TTL",
         "proof": "Readable transcript exists only for client delivery or the encrypted result handoff, then is deleted after ack/TTL."
@@ -1653,7 +1653,7 @@
       "result_handoff": "worker completion is separate from client delivery and acknowledgement"
     },
     "hosted_result_handoff": {
-      "artifact": "owner_bound_encrypted_result_artifact",
+      "artifact": "server_managed_encrypted_result_artifact",
       "artifact_schema_ref": "#/schemas/HostedResultArtifact",
       "artifact_payload_one_of": ["ciphertext", "artifact_reference"],
       "authenticated_encryption_required": true,
@@ -1662,14 +1662,15 @@
       "ack_state_ref": "#/enums/hosted_result_ack_state",
       "retrieval_idempotent": true,
       "acknowledgement_idempotent": true,
-      "owner_bound": true,
+      "server_managed": true,
+      "device_key_wrapping": false,
       "expiry_required": true,
       "deletion_required": true,
       "plaintext_lifetime_bounded": true,
       "proofs_required": [
         "worker completion survives a lost client response",
         "client polling survives worker restart",
-        "duplicate retrieval returns the same owner-bound artifact",
+        "duplicate retrieval returns the same server-managed artifact",
         "acknowledgement is safe to retry",
         "expiry and deletion remove raw audio and readable result material",
         "cross-account retrieval is denied",
@@ -1684,7 +1685,7 @@
       "readable_transcript_only_client_delivery_or_encrypted_artifact": true,
       "provider_response_processing": {
         "memory_only": true,
-        "immediate_owner_bound_encryption": true,
+        "immediate_server_managed_encryption": true,
         "delete_after_encryption": true,
         "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync"]
       }
@@ -1717,7 +1718,7 @@
         "job_id": "job_1",
         "account_id": "acct_1",
         "device_id": "device_1",
-        "encryption": "owner_bound_encrypted_artifact",
+        "encryption": "server_managed_encrypted_artifact",
         "version": "dictate_result_artifact_v1",
         "algorithm": "AES-256-GCM",
         "recipient_key_id": "key_1",

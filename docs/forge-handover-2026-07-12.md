@@ -133,17 +133,32 @@ Implemented in this round:
    clients never receive provider credentials.
 3. **Usage ledger wiring** — hosted path settles via existing `DictateUsageLedger`
    (reserve on create, settle on success, rollback on cancel/failure).
-4. **Encrypted results** — `DictateResultArtifact` model with owner-bound AES-256-GCM,
-   account/device/job AAD, ack/delete-after-ack, configurable TTL.
-5. **Audio cleanup** — upload files deleted on success, failure, cancel, and TTL expiry.
+4. **Encrypted results** — `DictateResultArtifact` model with server-managed AES-256-GCM
+   (platform secret + account/device/job AAD; not device-key wrapped yet),
+   ack/delete-after-ack, configurable TTL.
+5. **Audio cleanup** — local spool and object-store uploads deleted on success,
+   failure, cancel, and TTL expiry.
 6. **Executable tests** — `tests/test_dictate_hosted_jobs.py` (happy path, restart,
    idempotent ack, quota rejection, cross-account denial, audio cleanup).
 7. **Dictate client** — `get_result`, `ack_result`, `cancel_job`, `capability` on create.
 
-**Deferred within Wave 2:** device-key decryption (fixture server-derived key for now);
-separate worker process vs in-request durable commits; object-store-only production hardening.
+**Deferred within Wave 2:** device public-key wrapping for result decryption;
+separate worker process vs in-request durable commits.
 
-**Wave 2 Round 1 commits:** `6896fc4` (arc-forge-deck), `4cbb6e4` (dictate).
+## Wave 2 Round 2 — conductor security fixes
+
+**Status:** done locally (not pushed).
+
+1. **[P0]** Hosted result encryption fails closed when `PORTAL_JWT_SECRET` is missing;
+   no default fixture secret.
+2. **[P1]** Object-store audio deleted via `artifact_store.delete_object` on
+   success/failure/cancel/TTL (local spool unchanged).
+3. **[P1]** Honest naming: `server_managed_encrypted_artifact` replaces
+   overclaimed owner-bound labels in backend, contract, and handover. AES+AAD
+   account isolation retained; device-key wrapping deferred.
+
+**Wave 2 Round 1 commits:** `6896fc4` (arc-forge-deck), `ea673cc` (dictate).
+**Wave 2 Round 2 commits:** `d069430` (arc-forge-deck), `9ff58e7` (dictate).
 
 ## Recommended next Forge actions
 
