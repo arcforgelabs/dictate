@@ -203,6 +203,24 @@ loop; macOS Keychain; bind `device_id` on device-code token grant; portal
 
 **Wave 3 Round 1 commits:** `cbbda15` (arc-forge-deck), `d23adc3` (dictate).
 
+## Wave 3 Round 2 — conductor security fixes
+
+**Status:** done locally (not pushed).
+
+1. **[P0]** Recovery approve endpoint fail-closed (`501`) until cryptographic
+   recovery envelope verification ships; pending devices stay pending.
+2. **[P1]** Access JWTs mint `device_id` on refresh (and optional token-exchange
+   `device_id`); sync/device-mutating routes require matching bearer claim;
+   registered-device hosted jobs require bound access tokens.
+3. **[P2]** Key-envelope list requires `device_id` + trusted-device gate.
+4. **[P2]** Sync AAD constrained to contract allowlist (`SyncAuthenticatedMetadata`
+   keys only); unknown fields rejected.
+
+**Deferred:** full recovery-key crypto verification; device-code grant `device_id`
+binding at mint; hosted spoof hardening for unregistered legacy `device_id` strings.
+
+**Wave 3 Round 2 commits:** see SHAs below after commit.
+
 ## Recommended next Forge actions
 
 1. Read the full Forge skill at `/home/samuel/.agents/skills/forge/SKILL.md` and
@@ -214,17 +232,19 @@ loop; macOS Keychain; bind `device_id` on device-code token grant; portal
 
 ## Last independently verified gates
 
-Wave 3 Round 1 green gates (both repos, not pushed):
+Wave 3 Round 2 green gates (both repos, not pushed):
 
 ```text
 arc-forge-deck:
-  uv run python -m pytest tests/test_dictate_devices_sync.py tests/test_dictate_hosted_jobs.py tests/test_dictate_usage_ledger.py tests/test_durable_auth.py tests/test_dictate.py -q   PASS (52)
+  uv run python -m pytest tests/test_dictate_devices_sync.py tests/test_dictate_hosted_jobs.py tests/test_dictate_usage_ledger.py tests/test_durable_auth.py tests/test_dictate.py -q   PASS (56)
   git diff --check                                                                                                  PASS
 
 dictate:
   .venv/bin/pytest -q tests/test_dictate_platform_contract.py tests/test_pro_client.py tests/test_platform_state.py   PASS (56)
   git diff --check                                                                                                  PASS
 ```
+
+Wave 3 Round 1 green gates at `cbbda15` / `1208b41`.
 
 Prior Slice 2 verification at `28caac1` on `arc-forge-deck` and `ba23836` on `dictate`.
 
