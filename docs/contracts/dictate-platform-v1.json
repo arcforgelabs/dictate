@@ -1099,6 +1099,18 @@
         {"$ref": "#/schemas/RecoveryKeyEnvelope"}
       ]
     },
+    "MetadataSignatureBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "public_key", "signature"],
+      "properties": {
+        "algorithm": {"const": "Ed25519"},
+        "key_id": {"type": "string", "minLength": 1, "pattern": "^ed25519:[0-9a-f]{16}$"},
+        "public_key": {"type": "string", "minLength": 1},
+        "signature": {"type": "string", "minLength": 1}
+      },
+      "description": "Current src/dictate/pro/signing.py MetadataSigner.bundle transport for signed_metadata."
+    },
     "KeyEnvelopeRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -1129,7 +1141,12 @@
         "created_at": {"type": "string"},
         "updated_at": {"type": "string"},
         "signed_metadata": {"type": "object"},
-        "server_signature": {"type": ["string", "null"]}
+        "server_signature": {
+          "oneOf": [
+            {"$ref": "#/schemas/MetadataSignatureBundle"},
+            {"type": "null", "description": "Legacy unsigned envelope rows only; canonical save/list responses are signed bundles."}
+          ]
+        }
       }
     },
     "KeyEnvelopeQuery": {
@@ -1329,10 +1346,12 @@
       "invariants": [
         "event_id is immutable, unique, and never reused",
         "amount and quantity are numeric audio-second values and must be equal",
-        "reserve, settle, rollback, and reject events share request_id, job_id, idempotency_key, period, and correlation_id",
+        "reserve, settle, rollback, and reject events for one gateway invocation share request_id, job_id, idempotency_key, period, and correlation_id",
+        "idempotency_key is the gateway request correlation key and is shared across lifecycle events; retry deduplication is scoped by account_id, request_id, job_id, idempotency_key, and event_type",
         "settlement quantity cannot exceed the reservation quantity for the same correlation_id and predecessor",
-        "duplicate retry returns the existing event/outcome for the same idempotency_key without a second ledger mutation",
-        "rollback is exactly-once per predecessor and never mutates the original event"
+        "at most one effective settlement is accepted per reservation predecessor",
+        "duplicate retry returns the existing event/outcome for the same account_id, request_id, job_id, idempotency_key, and event_type without a second ledger mutation",
+        "rollback is exactly-once per predecessor; duplicate rollback delivery with the same retry key is a no-op replay and never mutates the original event"
       ]
     },
     "GatewayAudioBytes": {
@@ -1511,10 +1530,18 @@
       "rollback": {"event_type": "rollback", "lifecycle": "rolled_back", "predecessor_required": true},
       "reject": {"event_type": "rejection", "lifecycle": "rejected"}
     },
+    "idempotency_model": {
+      "gateway_correlation_key": "idempotency_key",
+      "shared_across_lifecycle": ["request_id", "job_id", "idempotency_key", "period", "correlation_id"],
+      "retry_dedup_key": ["account_id", "request_id", "job_id", "idempotency_key", "event_type"],
+      "settlement_limit": "at most one effective settlement per reservation predecessor",
+      "rollback_limit": "exactly one effective rollback per predecessor; duplicate delivery replays the original rollback event"
+    },
     "cross_event_invariants": [
+      "Lifecycle events for one gateway invocation share request_id, job_id, idempotency_key, period, and correlation_id.",
       "A retry with the same account_id, request_id, job_id, idempotency_key, and event_type returns the original immutable event.",
-      "A settlement is accepted only once and its quantity is no greater than the correlated reservation.",
-      "A rollback has one predecessor and exactly one effective reversal; duplicate rollback delivery is a no-op.",
+      "A settlement is accepted only once per reservation predecessor and its quantity is no greater than the correlated reservation.",
+      "A rollback has one predecessor and exactly one effective reversal; duplicate rollback delivery with the same retry key is a no-op replay.",
       "All lifecycle events remain in the same account and usage period; Deck events cannot satisfy Dictate ledger predicates."
     ],
     "deck_usage_separate": true
@@ -1704,7 +1731,103 @@
       "valid_reservation": {"event_type": "reservation", "lifecycle": "reserved", "amount": 10, "quantity": 10, "unit": "audio_seconds"},
       "mismatched_pair": {"event_type": "settlement", "lifecycle": "reserved", "expected_rejection": "event_type_lifecycle_mismatch"},
       "settlement_over_bound": {"reservation_quantity": 10, "settlement_quantity": 11, "expected_rejection": "settlement_exceeds_reservation"},
-      "duplicate_rollback": {"predecessor_event_id": "event_1", "replay_count": 2, "expected_effective_reversals": 1}
+      "duplicate_rollback": {"predecessor_event_id": "event_1", "replay_count": 2, "expected_effective_reversals": 1},
+      "lifecycle_shared_idempotency_key": "gateway-idem-1",
+      "lifecycle_correlation_id": "corr-gateway-1"
+    },
+    "key_envelopes": {
+      "save_response": {
+        "account_id": "acct-1",
+        "device_id": "device-1",
+        "envelope_kind": "device",
+        "envelope": {
+          "version": 1,
+          "algorithm": "x25519-aes-256-gcm",
+          "ephemeral_public_key": "ZXBoZW1lcmFsX3B1YmxpY19rZXlfMQ==",
+          "salt": "c2FsdF8x",
+          "nonce": "bm9uY2VfMQ==",
+          "ciphertext": "Y2lwaGVydGV4dF8x",
+          "aad_hash": "YWFkX2hhc2hfMQ=="
+        },
+        "created_at": "2026-07-12T00:00:00Z",
+        "updated_at": "2026-07-12T00:00:00Z",
+        "signed_metadata": {
+          "metadata_type": "dictate.pro.key_envelope",
+          "account_id": "acct-1",
+          "device_id": "device-1",
+          "envelope_kind": "device",
+          "envelope_hash": "abc123def456",
+          "created_at": "2026-07-12T00:00:00Z",
+          "updated_at": "2026-07-12T00:00:00Z"
+        },
+        "server_signature": {
+          "algorithm": "Ed25519",
+          "key_id": "ed25519:0123456789abcdef",
+          "public_key": "cHVibGljX2tleV8x",
+          "signature": "c2lnbmF0dXJlXzE="
+        }
+      },
+      "list_response": {
+        "envelopes": [
+          {
+            "account_id": "acct-1",
+            "device_id": "device-1",
+            "envelope_kind": "recovery",
+            "envelope": {
+              "version": 1,
+              "kdf": "pbkdf2-sha256",
+              "iterations": 100000,
+              "salt": "c2FsdF8y",
+              "nonce": "bm9uY2VfMg==",
+              "ciphertext": "Y2lwaGVydGV4dF8y",
+              "aad_hash": "YWFkX2hhc2hfMg=="
+            },
+            "created_at": "2026-07-12T01:00:00Z",
+            "updated_at": "2026-07-12T01:00:00Z",
+            "signed_metadata": {
+              "metadata_type": "dictate.pro.key_envelope",
+              "account_id": "acct-1",
+              "device_id": "device-1",
+              "envelope_kind": "recovery",
+              "envelope_hash": "fedcba987654",
+              "created_at": "2026-07-12T01:00:00Z",
+              "updated_at": "2026-07-12T01:00:00Z"
+            },
+            "server_signature": {
+              "algorithm": "Ed25519",
+              "key_id": "ed25519:fedcba9876543210",
+              "public_key": "cHVibGljX2tleV8y",
+              "signature": "c2lnbmF0dXJlXzI="
+            }
+          }
+        ]
+      },
+      "legacy_unsigned": {
+        "account_id": "acct-legacy",
+        "device_id": "device-legacy",
+        "envelope_kind": "device",
+        "envelope": {
+          "version": 1,
+          "algorithm": "x25519-aes-256-gcm",
+          "ephemeral_public_key": "ZXBoZW1lcmFsX2xlZ2FjeQ==",
+          "salt": "c2FsdF9sZWdhY3k=",
+          "nonce": "bm9uY2VfbGVnYWN5",
+          "ciphertext": "Y2lwaGVydGV4dF9sZWdhY3k=",
+          "aad_hash": "YWFkX2hhc2hfbGVnYWN5"
+        },
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "signed_metadata": {
+          "metadata_type": "dictate.pro.key_envelope",
+          "account_id": "acct-legacy",
+          "device_id": "device-legacy",
+          "envelope_kind": "device",
+          "envelope_hash": "legacyhash000000",
+          "created_at": "2026-01-01T00:00:00Z",
+          "updated_at": "2026-01-01T00:00:00Z"
+        },
+        "server_signature": null
+      }
     }
   },
   "error_shape": {

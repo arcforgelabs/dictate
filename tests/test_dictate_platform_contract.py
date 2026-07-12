@@ -106,6 +106,8 @@ def _schema_matches(contract: dict[str, Any], schema_or_ref: Any, value: Any) ->
         return False
     if expected_type == "number" and (not isinstance(value, (int, float)) or isinstance(value, bool)):
         return False
+    if expected_type == "null" and value is not None:
+        return False
     if isinstance(expected_type, list):
         type_matches = {
             "string": isinstance(value, str),
@@ -165,6 +167,7 @@ def _usage_event(
     event_id: str,
     quantity: float = 10,
     idempotency_key: str = "idem-1",
+    correlation_id: str = "corr-1",
     predecessor_event_id: str | None = None,
 ) -> dict[str, Any]:
     event: dict[str, Any] = {
@@ -188,7 +191,7 @@ def _usage_event(
             "included_seconds": 100,
             "used_seconds": 0,
         },
-        "correlation_id": "corr-1",
+        "correlation_id": correlation_id,
         "occurred_at": "2026-07-12T00:00:00Z",
     }
     if predecessor_event_id is not None:
@@ -199,14 +202,31 @@ def _usage_event(
 class _UsageLedgerModel:
     """Executable contract model for cross-event invariants, not backend code."""
 
+    _LINKED_FIELDS = ("account_id", "request_id", "job_id", "idempotency_key", "period", "correlation_id")
+
     def __init__(self) -> None:
         self.events: dict[str, dict[str, Any]] = {}
-        self.by_idempotency: dict[tuple[str, str], str] = {}
-        self.reversed_predecessors: set[str] = set()
+        self.by_retry_key: dict[tuple[str, str, str, str, str], str] = {}
+        self.settled_predecessors: set[str] = set()
+        self.rollback_predecessors: set[str] = set()
+
+    def _retry_key(self, event: dict[str, Any]) -> tuple[str, str, str, str, str]:
+        return (
+            event["account_id"],
+            event["request_id"],
+            event["job_id"],
+            event["idempotency_key"],
+            event["event_type"],
+        )
+
+    def _assert_linked_fields(self, event: dict[str, Any], anchor: dict[str, Any]) -> None:
+        for field in self._LINKED_FIELDS:
+            if event[field] != anchor[field]:
+                raise ValueError("linked field mismatch")
 
     def apply(self, event: dict[str, Any]) -> dict[str, Any]:
-        key = (event["account_id"], event["idempotency_key"])
-        existing_id = self.by_idempotency.get(key)
+        retry_key = self._retry_key(event)
+        existing_id = self.by_retry_key.get(retry_key)
         if existing_id is not None:
             if event["event_id"] == existing_id:
                 return self.events[existing_id]
@@ -216,15 +236,23 @@ class _UsageLedgerModel:
         if event_type == "settlement":
             if predecessor not in self.events:
                 raise ValueError("missing reservation predecessor")
+            if predecessor in self.settled_predecessors:
+                raise ValueError("duplicate settlement")
             reservation = self.events[predecessor]
+            self._assert_linked_fields(event, reservation)
             if event["quantity"] > reservation["quantity"]:
                 raise ValueError("settlement exceeds reservation")
+            self.settled_predecessors.add(predecessor)
         elif event_type == "rollback":
-            if predecessor not in self.events or predecessor in self.reversed_predecessors:
+            if predecessor not in self.events:
+                raise ValueError("missing reservation predecessor")
+            if predecessor in self.rollback_predecessors:
                 raise ValueError("duplicate rollback")
-            self.reversed_predecessors.add(predecessor)
+            reservation = self.events[predecessor]
+            self._assert_linked_fields(event, reservation)
+            self.rollback_predecessors.add(predecessor)
         self.events[event["event_id"]] = event
-        self.by_idempotency[key] = event["event_id"]
+        self.by_retry_key[retry_key] = event["event_id"]
         return event
 
 
@@ -604,6 +632,32 @@ class DictatePlatformContractTests(unittest.TestCase):
             )
         )
 
+    def test_key_envelope_record_and_list_fixtures_match_signature_bundle_shape(self) -> None:
+        bundle = self.contract["schemas"]["MetadataSignatureBundle"]
+        self.assertEqual(
+            set(bundle["required"]),
+            {"algorithm", "key_id", "public_key", "signature"},
+        )
+        self.assertEqual(bundle["properties"]["algorithm"]["const"], "Ed25519")
+
+        fixtures = self.contract["contract_fixtures"]["key_envelopes"]
+        save_response = fixtures["save_response"]
+        list_response = fixtures["list_response"]
+        legacy_unsigned = fixtures["legacy_unsigned"]
+
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRecord", save_response))
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeList", list_response))
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/KeyEnvelopeRecord", legacy_unsigned))
+        self.assertIsInstance(save_response["server_signature"], dict)
+        self.assertIsNone(legacy_unsigned["server_signature"])
+        self.assertFalse(
+            _schema_matches(
+                self.contract,
+                "#/schemas/KeyEnvelopeRecord",
+                {**save_response, "server_signature": "legacy-string-signature"},
+            )
+        )
+
     def test_hosted_result_artifact_has_authenticated_one_of_and_scope_fixtures(self) -> None:
         artifact = self.contract["schemas"]["HostedResultArtifact"]
         self.assertTrue(
@@ -715,8 +769,15 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertEqual(base["properties"]["lifecycle"]["$ref"], "#/enums/usage_event_lifecycle")
         invariants = usage["invariants"] + self.contract["usage_events"]["cross_event_invariants"]
         self.assertTrue(any("duplicate" in invariant.lower() for invariant in invariants))
-        self.assertTrue(any("exactly-once" in invariant.lower() for invariant in invariants))
+        self.assertTrue(any("exactly-once" in invariant.lower() or "exactly one" in invariant.lower() for invariant in invariants))
         self.assertTrue(any("settlement" in invariant.lower() and "quantity" in invariant.lower() for invariant in invariants))
+        idempotency_model = self.contract["usage_events"]["idempotency_model"]
+        self.assertEqual(idempotency_model["gateway_correlation_key"], "idempotency_key")
+        self.assertEqual(
+            idempotency_model["retry_dedup_key"],
+            ["account_id", "request_id", "job_id", "idempotency_key", "event_type"],
+        )
+        self.assertIn("idempotency_key", idempotency_model["shared_across_lifecycle"])
 
         mismatch = self.contract["contract_fixtures"]["usage_events"]["mismatched_pair"]
         valid_pairs = {
@@ -735,13 +796,22 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertEqual(rollback["expected_effective_reversals"], 1)
 
     def test_usage_ledger_model_rejects_duplicate_idempotency_over_settlement_and_rollback(self) -> None:
-        reservation = _usage_event("reservation", "reserved", event_id="reserve-1")
+        shared_idempotency_key = self.contract["contract_fixtures"]["usage_events"]["lifecycle_shared_idempotency_key"]
+        shared_correlation_id = self.contract["contract_fixtures"]["usage_events"]["lifecycle_correlation_id"]
+        reservation = _usage_event(
+            "reservation",
+            "reserved",
+            event_id="reserve-1",
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
+        )
         settlement = _usage_event(
             "settlement",
             "settled",
             event_id="settle-1",
             quantity=8,
-            idempotency_key="settle-1",
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
             predecessor_event_id="reserve-1",
         )
         rollback = _usage_event(
@@ -749,7 +819,8 @@ class DictatePlatformContractTests(unittest.TestCase):
             "rolled_back",
             event_id="rollback-1",
             quantity=10,
-            idempotency_key="rollback-1",
+            idempotency_key=shared_idempotency_key,
+            correlation_id=shared_correlation_id,
             predecessor_event_id="reserve-1",
         )
         self.assertTrue(_schema_matches(self.contract, "#/schemas/UsageEvent", reservation))
@@ -768,12 +839,39 @@ class DictatePlatformContractTests(unittest.TestCase):
                     "settled",
                     event_id="settle-over",
                     quantity=11,
-                    idempotency_key="settle-over",
+                    idempotency_key=shared_idempotency_key,
+                    correlation_id=shared_correlation_id,
+                    predecessor_event_id="reserve-1",
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "linked field mismatch"):
+            ledger.apply(
+                _usage_event(
+                    "settlement",
+                    "settled",
+                    event_id="settle-mismatch",
+                    quantity=8,
+                    idempotency_key="different-idem",
+                    correlation_id=shared_correlation_id,
                     predecessor_event_id="reserve-1",
                 )
             )
         self.assertIs(ledger.apply(settlement), settlement)
+        self.assertIs(ledger.apply(dict(settlement)), settlement)
+        with self.assertRaisesRegex(ValueError, "duplicate settlement"):
+            ledger.apply(
+                _usage_event(
+                    "settlement",
+                    "settled",
+                    event_id="settle-duplicate",
+                    quantity=8,
+                    idempotency_key="second-settlement-attempt",
+                    correlation_id=shared_correlation_id,
+                    predecessor_event_id="reserve-1",
+                )
+            )
         self.assertIs(ledger.apply(rollback), rollback)
+        self.assertIs(ledger.apply(dict(rollback)), rollback)
         with self.assertRaisesRegex(ValueError, "duplicate rollback"):
             ledger.apply(
                 _usage_event(
@@ -781,7 +879,8 @@ class DictatePlatformContractTests(unittest.TestCase):
                     "rolled_back",
                     event_id="rollback-duplicate",
                     quantity=10,
-                    idempotency_key="rollback-duplicate",
+                    idempotency_key="second-rollback-attempt",
+                    correlation_id=shared_correlation_id,
                     predecessor_event_id="reserve-1",
                 )
             )
