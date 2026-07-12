@@ -240,11 +240,11 @@ binding at mint; hosted spoof hardening for unregistered legacy `device_id` stri
 
 **Wave 4 Round 1 commits:** `67914b9` (arc-forge-deck), `57d02c6` (dictate).
 
-**Wave 4 Round 2 commits:** `965fe40` (arc-forge-deck), see dictate tip below (dictate).
+**Wave 4 Round 2 commits:** `965fe40` (arc-forge-deck), `ab65a65` (dictate).
 
 **Branch tips (local, not pushed):**
 - arc-forge-deck `forge/wave1-durable-auth` @ **`965fe40`**
-- dictate `forge/dictate-pro-platform` @ update after R2 commit
+- dictate `forge/dictate-pro-platform` @ **`ab65a65`**
 
 ## Wave 4 Round 2 — conductor doc fixes
 
@@ -325,7 +325,7 @@ branch tip (local): 965fe40
 /home/samuel/repos/dictate
 branch: forge/dictate-pro-platform
 Wave 4 Round 1: 57d02c6 (+ handover fix 6c1faa8)
-branch tip (local): see readiness doc after R2 commit
+branch tip (local): ab65a65
 ```
 
 Do not push, merge, or deploy without explicit human go.
