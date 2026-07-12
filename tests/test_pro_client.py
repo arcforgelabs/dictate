@@ -119,6 +119,23 @@ class ProClientTests(unittest.TestCase):
         self.assertEqual(client.calls[1]["path"], "/v1/meetings/job_1")
         self.assertEqual(client.calls[2]["path"], "/v1/meetings/job_1/transcript")
 
+    def test_explicit_legacy_mode_keeps_v1_routes_on_non_loopback_url(self) -> None:
+        os.environ["DICTATE_PRO_API_MODE"] = "legacy"
+        client = CapturingProClient(base_url="https://legacy.example", session_path=self.session_path)
+        session = ProSession(
+            account_id="acct_test",
+            device_id="dev_test",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+
+        with patch.object(client, "load_session", return_value=session):
+            client.create_meeting(language="en")
+
+        self.assertEqual(client.calls[0]["path"], "/v1/meetings")
+
     def test_local_api_url_uses_v1_sync_routes(self) -> None:
         client = CapturingProClient(base_url="http://127.0.0.1:18765", session_path=self.session_path)
         session = ProSession(

@@ -25,6 +25,10 @@ the narrower document records the resulting migration or implementation detail.
 handoff evidence are recorded for owner confirmation; no shared backend or live
 implementation is claimed to match them.
 
+The Phase 0 contract separates current non-loopback `/api` client compatibility
+from local or explicitly legacy `/v1` reference behavior, and records external
+source implementation separately from **UNKNOWN** deployment verification.
+
 - [Machine-readable contract v1](contracts/dictate-platform-v1.json)
 - [Dictate platform inventory v1](platform/dictate-platform-inventory-v1.md)
 - [Arc Forge backend handoff v1](platform/arc-forge-backend-handoff-v1.md)
