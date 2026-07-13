@@ -298,10 +298,9 @@ class BrowserAuthTests(unittest.TestCase):
         assert client._browser_attempt is not None
         client._browser_attempt.code_verifier = "wrong-verifier-" + "x" * 64
 
-        with self.assertRaises(ProClientError) as ctx:
-            client.poll_browser_sign_in()
-        self.assertEqual(ctx.exception.status, 400)
-        self.assertIn("invalid_grant", ctx.exception.message)
+        result = client.poll_browser_sign_in()
+        self.assertEqual(result["status"], "error")
+        self.assertIn("invalid_grant", str(result.get("reason", "")))
 
         self.assertFalse(client.signed_in())
         self.assertFalse(self.session_path.exists())
