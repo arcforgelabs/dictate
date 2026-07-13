@@ -75,6 +75,38 @@ describe("Quiet Console app (mock mode)", () => {
     expect(writeText.mock.calls[0][0]).toBeTruthy();
   });
 
+  it("previews the exact whitespace-preserving text copied by copy-last", async () => {
+    const sources = [];
+    const exactText = "First line\n  second line";
+    const writeText = vi.fn().mockResolvedValue();
+    Object.assign(navigator, { clipboard: { writeText } });
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [{ id: "quick_exact", text: exactText, createdAt: "2026-07-13T00:00:00+00:00" }],
+      }),
+    });
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: true }) });
+      sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: false }) });
+    });
+
+    await waitFor(() => expect(container.querySelector(".note-copylast-preview")).not.toBeNull());
+    const preview = container.querySelector(".note-copylast-preview");
+    expect(preview).not.toBeNull();
+    expect(preview.textContent).toBe(exactText);
+    fireEvent.click(screen.getByText("Copy last dictation"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(exactText));
+  });
+
   it("uses native Windows chrome without the inner mock titlebar", () => {
     window.__DICTATE__ = { platform: "win11" };
     const { container } = render(<App />);
@@ -1440,6 +1472,38 @@ describe("Notes list (history view)", () => {
     fireEvent.click(screen.getByLabelText("Back to dictations"));
     expect(screen.getByPlaceholderText("Search dictations")).toBeInTheDocument();
     expect(screen.getByLabelText("Back to capture")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("classifies a hydrated meeting by mode when it has no diarized segments", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [{
+          id: "local_meeting_without_segments",
+          text: "Durable local meeting without speaker labels",
+          createdAt: "2026-07-13T00:00:00+00:00",
+          mode: "meeting",
+          segments: [],
+        }],
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    navTo("Notes");
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+
+    const meeting = await screen.findByText("Durable local meeting without speaker labels");
+    expect(meeting).toBeInTheDocument();
+    fireEvent.click(meeting);
+    expect(screen.getByLabelText("Close note")).toBeInTheDocument();
+    expect(screen.getByText("Durable local meeting without speaker labels")).toBeInTheDocument();
   });
 
   it("rehydrates persisted meeting segments from live state", async () => {

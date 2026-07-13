@@ -1110,7 +1110,7 @@ function CaptureHome() {
   const isMeeting = (n) => n?.mode === "meeting" || (Array.isArray(n?.segments) && n.segments.length > 0);
   const recentQuick = (s.history || []).find((n) => !isMeeting(n));
   const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
-  const recentQuickPreview = recentQuickText.replace(/\s+/g, " ").trim();
+  const recentQuickPreview = recentQuickText;
   const copyLast = () => {
     if (!recentQuickText) return;
     if (typeof navigator !== "undefined" && navigator.clipboard) {
