@@ -27,13 +27,13 @@ Row format (keep it to a few lines):
 
 - [ ] 2026-07-13 — Push-to-talk HUD: compact listening indicator (mic + timer) replaces animated waveform
       code: ui/src/overlays.jsx (ListeningHUD), ui/src/styles.css (.hud-pill) → cloud: needs mapping
-      by: forge build lane · branch/commit: forge/fix-dictation-workflows (uncommitted)
+      by: forge build lane · branch/commit: forge/fix-dictation-workflows @ 10a50f8
       why: waveform in the push-to-talk HUD was a visual regression; note capture still uses WaveTimeline in the cradle stack
       notes: HUD shows reckdot + mic icon + "Listening" + timer + release/tap hint; no `.wave` bars in `.hud`
 
 - [ ] 2026-07-13 — Copy-last preview: ellipsized two-line pill shows exact text that will be copied
       code: ui/src/App.jsx (CaptureHome copy-last), ui/src/styles.css (.note-copylast-*) → cloud: needs mapping
-      by: forge build lane · branch/commit: forge/fix-dictation-workflows (uncommitted)
+      by: forge build lane · branch/commit: forge/fix-dictation-workflows @ 10a50f8
       why: "Copy last dictation" alone was ambiguous; preview clarifies which quick record will be copied
       notes: label stays "Copy last dictation"; preview ellipsizes at 270px; meetings excluded via mode/segment classification
 
