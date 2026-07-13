@@ -81,6 +81,8 @@ class ApiKeysTests(unittest.TestCase):
             with (
                 patch("dictate.api_keys._is_windows", return_value=False),
                 patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+                patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
                 patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
             ):
                 self.assertTrue(api_keys.secret_store_available())
@@ -95,17 +97,58 @@ class ApiKeysTests(unittest.TestCase):
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value=None),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+            patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
         ):
             self.assertIn("private local key file", api_keys.secret_store_description())
 
-    def test_sync_account_key_requires_secret_store(self) -> None:
+    def test_libsecret_gi_used_when_secret_tool_missing(self) -> None:
+        stored: dict[str, str] = {}
+
+        def fake_store(label: str, attrs: dict[str, str], value: str) -> None:
+            stored["label"] = label
+            stored["value"] = value
+            stored["backend"] = attrs["backend"]
+
+        def fake_lookup(attrs: dict[str, str]) -> str | None:
+            if attrs.get("backend") == stored.get("backend"):
+                return stored.get("value")
+            return None
+
+        def fake_clear(attrs: dict[str, str]) -> None:
+            if attrs.get("backend") == stored.get("backend"):
+                stored.clear()
+
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value=None),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=True),
+            patch("dictate.api_keys._libsecret_gi_store", side_effect=fake_store),
+            patch("dictate.api_keys._libsecret_gi_lookup", side_effect=fake_lookup),
+            patch("dictate.api_keys._libsecret_gi_clear", side_effect=fake_clear),
         ):
-            with self.assertRaises(api_keys.ApiKeyStorageError):
+            self.assertEqual(api_keys._linux_secret_backend(), "libsecret-gi")
+            self.assertIn("Secret Service", api_keys.secret_store_description())
+            api_keys.save_api_key("openai", "gi-secret")
+            self.assertEqual(stored["value"], "gi-secret")
+            self.assertEqual(api_keys.read_api_key("openai"), "gi-secret")
+            api_keys.clear_api_key("openai")
+            self.assertEqual(stored, {})
+
+    def test_sync_account_key_uses_private_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            fallback = Path(d) / "api-keys.json"
+            with (
+                patch("dictate.api_keys._is_windows", return_value=False),
+                patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+                patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+                patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
+            ):
                 api_keys.save_sync_account_key("acct_1", "encoded-key")
-            self.assertIsNone(api_keys.read_sync_account_key("acct_1"))
+                self.assertEqual(api_keys.read_sync_account_key("acct_1"), "encoded-key")
+                api_keys.clear_sync_account_key("acct_1")
+                self.assertIsNone(api_keys.read_sync_account_key("acct_1"))
 
     def test_secret_tool_stores_sync_account_key_with_account_scope(self) -> None:
         calls = []
@@ -130,13 +173,47 @@ class ApiKeysTests(unittest.TestCase):
         self.assertIn("acct_1", joined_args)
         self.assertNotIn("encoded-key", joined_args)
 
-    def test_sync_device_private_key_requires_secret_store(self) -> None:
+    def test_pro_refresh_token_uses_private_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            fallback = Path(d) / "api-keys.json"
+            with (
+                patch("dictate.api_keys._is_windows", return_value=False),
+                patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+                patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+                patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
+            ):
+                api_keys.save_pro_refresh_token(" refresh-token ")
+                self.assertEqual(api_keys.read_pro_refresh_token(), "refresh-token")
+                self.assertIn(api_keys.PRO_REFRESH_TOKEN_BACKEND, fallback.read_text(encoding="utf-8"))
+                api_keys.clear_pro_refresh_token()
+                self.assertIsNone(api_keys.read_pro_refresh_token())
+
+    def test_sync_device_private_key_uses_private_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            fallback = Path(d) / "api-keys.json"
+            with (
+                patch("dictate.api_keys._is_windows", return_value=False),
+                patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+                patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+                patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
+            ):
+                api_keys.save_sync_device_private_key("device_1", "encoded-private-key")
+                self.assertEqual(
+                    api_keys.read_sync_device_private_key("device_1"),
+                    "encoded-private-key",
+                )
+                api_keys.clear_sync_device_private_key("device_1")
+                self.assertIsNone(api_keys.read_sync_device_private_key("device_1"))
+
+    def test_sync_device_private_key_requires_values(self) -> None:
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value=None),
         ):
             with self.assertRaises(api_keys.ApiKeyStorageError):
-                api_keys.save_sync_device_private_key("device_1", "encoded-private-key")
+                api_keys.save_sync_device_private_key("device_1", "")
             self.assertIsNone(api_keys.read_sync_device_private_key("device_1"))
 
     def test_secret_tool_stores_sync_device_private_key_with_device_scope(self) -> None:

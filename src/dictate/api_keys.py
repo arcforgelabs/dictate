@@ -13,6 +13,7 @@ import sys
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib import error, request
 
 from dictate.platform_paths import user_config_dir
@@ -57,19 +58,22 @@ def save_pro_refresh_token(token: str) -> None:
     if _is_windows():
         _windows_save_pro_refresh_token(cleaned)
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_save_pro_refresh_token(cleaned)
-        return
-    raise ApiKeyStorageError("No supported OS secret store is available for refresh token storage.")
+    _linux_save_secret(
+        label="Dictate Pro refresh token",
+        attrs=_pro_refresh_secret_attrs(),
+        value=cleaned,
+        local_key=PRO_REFRESH_TOKEN_BACKEND,
+    )
 
 
 def read_pro_refresh_token() -> str | None:
     """Read a Dictate Pro refresh token from the OS secret store, if one exists."""
     if _is_windows():
         return _windows_read_pro_refresh_token()
-    if shutil.which("secret-tool") is not None:
-        return _secret_tool_read_pro_refresh_token()
-    return None
+    return _linux_read_secret(
+        attrs=_pro_refresh_secret_attrs(),
+        local_key=PRO_REFRESH_TOKEN_BACKEND,
+    )
 
 
 def clear_pro_refresh_token() -> None:
@@ -77,8 +81,10 @@ def clear_pro_refresh_token() -> None:
     if _is_windows():
         _windows_clear_pro_refresh_token()
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_clear_pro_refresh_token()
+    _linux_clear_secret(
+        attrs=_pro_refresh_secret_attrs(),
+        local_key=PRO_REFRESH_TOKEN_BACKEND,
+    )
 
 
 def save_sync_account_key(account_id: str, encoded_key: str) -> None:
@@ -90,10 +96,12 @@ def save_sync_account_key(account_id: str, encoded_key: str) -> None:
     if _is_windows():
         _windows_save_secret(_windows_sync_account_key_target_name(account), key, "sync account key")
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_save_sync_account_key(account, key)
-        return
-    raise ApiKeyStorageError("No supported OS secret store is available for sync account key storage.")
+    _linux_save_secret(
+        label="Dictate Pro sync account key",
+        attrs=_sync_account_secret_attrs(account),
+        value=key,
+        local_key=f"sync-account:{account}",
+    )
 
 
 def read_sync_account_key(account_id: str) -> str | None:
@@ -103,9 +111,10 @@ def read_sync_account_key(account_id: str) -> str | None:
         return None
     if _is_windows():
         return _windows_read_secret(_windows_sync_account_key_target_name(account))
-    if shutil.which("secret-tool") is not None:
-        return _secret_tool_read_sync_account_key(account)
-    return None
+    return _linux_read_secret(
+        attrs=_sync_account_secret_attrs(account),
+        local_key=f"sync-account:{account}",
+    )
 
 
 def clear_sync_account_key(account_id: str) -> None:
@@ -116,8 +125,10 @@ def clear_sync_account_key(account_id: str) -> None:
     if _is_windows():
         _windows_clear_secret(_windows_sync_account_key_target_name(account), "sync account key")
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_clear_sync_account_key(account)
+    _linux_clear_secret(
+        attrs=_sync_account_secret_attrs(account),
+        local_key=f"sync-account:{account}",
+    )
 
 
 def save_sync_device_private_key(device_id: str, encoded_key: str) -> None:
@@ -129,10 +140,12 @@ def save_sync_device_private_key(device_id: str, encoded_key: str) -> None:
     if _is_windows():
         _windows_save_secret(_windows_sync_device_private_key_target_name(device), key, "sync device private key")
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_save_sync_device_private_key(device, key)
-        return
-    raise ApiKeyStorageError("No supported OS secret store is available for sync device private key storage.")
+    _linux_save_secret(
+        label="Dictate Pro sync device private key",
+        attrs=_sync_device_secret_attrs(device),
+        value=key,
+        local_key=f"sync-device:{device}",
+    )
 
 
 def read_sync_device_private_key(device_id: str) -> str | None:
@@ -142,9 +155,10 @@ def read_sync_device_private_key(device_id: str) -> str | None:
         return None
     if _is_windows():
         return _windows_read_secret(_windows_sync_device_private_key_target_name(device))
-    if shutil.which("secret-tool") is not None:
-        return _secret_tool_read_sync_device_private_key(device)
-    return None
+    return _linux_read_secret(
+        attrs=_sync_device_secret_attrs(device),
+        local_key=f"sync-device:{device}",
+    )
 
 
 def clear_sync_device_private_key(device_id: str) -> None:
@@ -155,8 +169,10 @@ def clear_sync_device_private_key(device_id: str) -> None:
     if _is_windows():
         _windows_clear_secret(_windows_sync_device_private_key_target_name(device), "sync device private key")
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_clear_sync_device_private_key(device)
+    _linux_clear_secret(
+        attrs=_sync_device_secret_attrs(device),
+        local_key=f"sync-device:{device}",
+    )
 
 
 def save_api_key(backend: str, api_key: str) -> None:
@@ -168,10 +184,12 @@ def save_api_key(backend: str, api_key: str) -> None:
     if _is_windows():
         _windows_save_api_key(backend, cleaned)
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_save_api_key(backend, cleaned)
-        return
-    _local_file_save_api_key(backend, cleaned)
+    _linux_save_secret(
+        label=f"Dictate {API_BACKEND_LABELS[backend]} API key",
+        attrs=_api_key_secret_attrs(backend),
+        value=cleaned,
+        local_key=backend,
+    )
 
 
 def read_api_key(backend: str) -> str | None:
@@ -179,11 +197,10 @@ def read_api_key(backend: str) -> str | None:
     _validate_backend(backend)
     if _is_windows():
         return _windows_read_api_key(backend)
-    if shutil.which("secret-tool") is not None:
-        value = _secret_tool_read_api_key(backend)
-        if value:
-            return value
-    return _local_file_read_api_key(backend)
+    return _linux_read_secret(
+        attrs=_api_key_secret_attrs(backend),
+        local_key=backend,
+    )
 
 
 def clear_api_key(backend: str) -> None:
@@ -192,9 +209,10 @@ def clear_api_key(backend: str) -> None:
     if _is_windows():
         _windows_clear_api_key(backend)
         return
-    if shutil.which("secret-tool") is not None:
-        _secret_tool_clear_api_key(backend)
-    _local_file_clear_api_key(backend)
+    _linux_clear_secret(
+        attrs=_api_key_secret_attrs(backend),
+        local_key=backend,
+    )
 
 
 def has_stored_api_key(backend: str) -> bool:
@@ -294,7 +312,8 @@ def secret_store_description() -> str:
     """Human-readable description of the active secret store."""
     if _is_windows():
         return "Windows Credential Manager"
-    if shutil.which("secret-tool") is not None:
+    backend = _linux_secret_backend()
+    if backend in {"secret-tool", "libsecret-gi", "libsecret-host-python"}:
         return "the desktop Secret Service keyring"
     return f"private local key file ({LOCAL_API_KEYS_PATH})"
 
@@ -317,6 +336,15 @@ def _local_file_clear_api_key(backend: str) -> None:
         _local_file_save(data)
 
 
+def _local_file_key_allowed(backend: str) -> bool:
+    return (
+        backend in API_BACKENDS
+        or backend == PRO_REFRESH_TOKEN_BACKEND
+        or backend.startswith("sync-account:")
+        or backend.startswith("sync-device:")
+    )
+
+
 def _local_file_load(path: Path | None = None) -> dict[str, str]:
     path = path or LOCAL_API_KEYS_PATH
     if not path.is_file():
@@ -329,7 +357,12 @@ def _local_file_load(path: Path | None = None) -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for backend, value in raw.items():
-        if backend in API_BACKENDS and isinstance(value, str) and value.strip():
+        if (
+            isinstance(backend, str)
+            and _local_file_key_allowed(backend)
+            and isinstance(value, str)
+            and value.strip()
+        ):
             out[backend] = value.strip()
     return out
 
@@ -344,272 +377,339 @@ def _local_file_save(data: dict[str, str], path: Path | None = None) -> None:
         pass
 
 
-def _secret_tool_save_api_key(backend: str, api_key: str) -> None:
+def _api_key_secret_attrs(backend: str) -> dict[str, str]:
+    return {"application": "dictate", "backend": backend, "kind": "api-key"}
+
+
+def _pro_refresh_secret_attrs() -> dict[str, str]:
+    return {
+        "application": "dictate",
+        "backend": PRO_REFRESH_TOKEN_BACKEND,
+        "kind": "pro-refresh-token",
+    }
+
+
+def _sync_account_secret_attrs(account_id: str) -> dict[str, str]:
+    return {
+        "application": "dictate",
+        "backend": SYNC_ACCOUNT_KEY_BACKEND,
+        "kind": "sync-account-key",
+        "account": account_id,
+    }
+
+
+def _sync_device_secret_attrs(device_id: str) -> dict[str, str]:
+    return {
+        "application": "dictate",
+        "backend": SYNC_DEVICE_PRIVATE_KEY_BACKEND,
+        "kind": "sync-device-private-key",
+        "device": device_id,
+    }
+
+
+def _linux_secret_backend() -> str:
+    """Prefer secret-tool, then libsecret GI (Ubuntu 25/26 desktop), else local file."""
+    if shutil.which("secret-tool") is not None:
+        return "secret-tool"
+    if _libsecret_gi_available():
+        return "libsecret-gi"
+    if _libsecret_host_python_available():
+        return "libsecret-host-python"
+    return "local-file"
+
+
+def _linux_save_secret(
+    *,
+    label: str,
+    attrs: dict[str, str],
+    value: str,
+    local_key: str,
+) -> None:
+    backend = _linux_secret_backend()
+    if backend == "secret-tool":
+        _secret_tool_store(label, attrs, value)
+        return
+    if backend == "libsecret-gi":
+        _libsecret_gi_store(label, attrs, value)
+        return
+    if backend == "libsecret-host-python":
+        _libsecret_host_python_store(label, attrs, value)
+        return
+    _local_file_save_api_key(local_key, value)
+
+
+def _linux_read_secret(*, attrs: dict[str, str], local_key: str) -> str | None:
+    # Try every available OS backend so secrets remain readable across Ubuntu
+    # upgrades even if the preferred write backend changes.
+    if shutil.which("secret-tool") is not None:
+        value = _secret_tool_lookup(attrs)
+        if value:
+            return value
+    if _libsecret_gi_available():
+        value = _libsecret_gi_lookup(attrs)
+        if value:
+            return value
+    if _libsecret_host_python_available():
+        value = _libsecret_host_python_lookup(attrs)
+        if value:
+            return value
+    return _local_file_read_api_key(local_key)
+
+
+def _linux_clear_secret(*, attrs: dict[str, str], local_key: str) -> None:
+    if shutil.which("secret-tool") is not None:
+        _secret_tool_clear(attrs)
+    if _libsecret_gi_available():
+        _libsecret_gi_clear(attrs)
+    elif _libsecret_host_python_available():
+        _libsecret_host_python_clear(attrs)
+    _local_file_clear_api_key(local_key)
+
+
+def _secret_tool_store(label: str, attrs: dict[str, str], value: str) -> None:
     secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "store",
-            "--label",
-            f"Dictate {API_BACKEND_LABELS[backend]} API key",
-            "application",
-            "dictate",
-            "backend",
-            backend,
-            "kind",
-            "api-key",
-        ],
-        action="store",
-        input=api_key,
-        timeout=20,
-    )
+    args = [secret_tool, "store", "--label", label]
+    for key, item in attrs.items():
+        args.extend([key, item])
+    completed = _run_secret_tool(args, action="store", input=value, timeout=20)
     if completed.returncode != 0:
         raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
 
 
-def _secret_tool_read_api_key(backend: str) -> str | None:
+def _secret_tool_lookup(attrs: dict[str, str]) -> str | None:
     secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "lookup",
-            "application",
-            "dictate",
-            "backend",
-            backend,
-            "kind",
-            "api-key",
-        ],
-        action="lookup",
-        timeout=10,
-    )
+    args = [secret_tool, "lookup"]
+    for key, item in attrs.items():
+        args.extend([key, item])
+    completed = _run_secret_tool(args, action="lookup", timeout=10)
     if completed.returncode != 0:
         return None
     return completed.stdout.strip() or None
 
 
-def _secret_tool_clear_api_key(backend: str) -> None:
+def _secret_tool_clear(attrs: dict[str, str]) -> None:
     secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "clear",
-            "application",
-            "dictate",
-            "backend",
-            backend,
-            "kind",
-            "api-key",
-        ],
-        action="clear",
-        timeout=10,
-    )
+    args = [secret_tool, "clear"]
+    for key, item in attrs.items():
+        args.extend([key, item])
+    completed = _run_secret_tool(args, action="clear", timeout=10)
     if completed.returncode not in {0, 1}:
         raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
 
 
-def _secret_tool_save_pro_refresh_token(token: str) -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "store",
-            "--label",
-            "Dictate Pro refresh token",
-            "application",
-            "dictate",
-            "backend",
-            PRO_REFRESH_TOKEN_BACKEND,
-            "kind",
-            "pro-refresh-token",
-        ],
-        action="store",
-        input=token,
-        timeout=20,
-    )
-    if completed.returncode != 0:
-        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+def _libsecret_gi_available() -> bool:
+    return _load_libsecret_gi() is not None
 
 
-def _secret_tool_read_pro_refresh_token() -> str | None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "lookup",
-            "application",
-            "dictate",
-            "backend",
-            PRO_REFRESH_TOKEN_BACKEND,
-            "kind",
-            "pro-refresh-token",
-        ],
-        action="lookup",
-        timeout=10,
-    )
-    if completed.returncode != 0:
+def _load_libsecret_gi() -> Any | None:
+    try:
+        import gi
+
+        gi.require_version("Secret", "1")
+        from gi.repository import Secret
+    except Exception:  # noqa: BLE001 - optional desktop dependency
         return None
-    return completed.stdout.strip() or None
+    return Secret
 
 
-def _secret_tool_clear_pro_refresh_token() -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "clear",
-            "application",
-            "dictate",
-            "backend",
-            PRO_REFRESH_TOKEN_BACKEND,
-            "kind",
-            "pro-refresh-token",
-        ],
-        action="clear",
-        timeout=10,
+def _libsecret_schema(Secret: Any) -> Any:
+    # Match secret-tool: NULL schema → org.freedesktop.Secret.Generic.
+    return Secret.Schema.new(
+        "org.freedesktop.Secret.Generic",
+        Secret.SchemaFlags.NONE,
+        {
+            "application": Secret.SchemaAttributeType.STRING,
+            "backend": Secret.SchemaAttributeType.STRING,
+            "kind": Secret.SchemaAttributeType.STRING,
+            "account": Secret.SchemaAttributeType.STRING,
+            "device": Secret.SchemaAttributeType.STRING,
+        },
     )
-    if completed.returncode not in {0, 1}:
-        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
 
 
-def _secret_tool_save_sync_account_key(account_id: str, encoded_key: str) -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "store",
-            "--label",
-            "Dictate Pro sync account key",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_ACCOUNT_KEY_BACKEND,
-            "kind",
-            "sync-account-key",
-            "account",
-            account_id,
-        ],
-        action="store",
-        input=encoded_key,
-        timeout=20,
+def _libsecret_gi_store(label: str, attrs: dict[str, str], value: str) -> None:
+    Secret = _load_libsecret_gi()
+    if Secret is None:
+        raise ApiKeyStorageError("libsecret GI bindings are unavailable.")
+    ok = Secret.password_store_sync(
+        _libsecret_schema(Secret),
+        attrs,
+        Secret.COLLECTION_DEFAULT,
+        label,
+        value,
+        None,
     )
-    if completed.returncode != 0:
-        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+    if not ok:
+        raise ApiKeyStorageError("Could not store secret in Secret Service via libsecret.")
 
 
-def _secret_tool_read_sync_account_key(account_id: str) -> str | None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "lookup",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_ACCOUNT_KEY_BACKEND,
-            "kind",
-            "sync-account-key",
-            "account",
-            account_id,
-        ],
-        action="lookup",
-        timeout=10,
-    )
-    if completed.returncode != 0:
+def _libsecret_gi_lookup(attrs: dict[str, str]) -> str | None:
+    Secret = _load_libsecret_gi()
+    if Secret is None:
         return None
-    return completed.stdout.strip() or None
+    value = Secret.password_lookup_sync(_libsecret_schema(Secret), attrs, None)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    return None
 
 
-def _secret_tool_clear_sync_account_key(account_id: str) -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "clear",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_ACCOUNT_KEY_BACKEND,
-            "kind",
-            "sync-account-key",
-            "account",
-            account_id,
-        ],
-        action="clear",
-        timeout=10,
+def _libsecret_gi_clear(attrs: dict[str, str]) -> None:
+    Secret = _load_libsecret_gi()
+    if Secret is None:
+        return
+    Secret.password_clear_sync(_libsecret_schema(Secret), attrs, None)
+
+
+def _host_python_candidates() -> list[str]:
+    candidates: list[str] = []
+    for path in ("/usr/bin/python3", "/bin/python3"):
+        if Path(path).is_file():
+            candidates.append(path)
+    # Source installs can use the active interpreter when it has GI bindings.
+    if not getattr(sys, "frozen", False) and sys.executable:
+        candidates.insert(0, sys.executable)
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for path in candidates:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
+_UNSET = object()
+_HOST_PYTHON_BIN_CACHE: str | None | object = _UNSET
+
+
+def _libsecret_host_python_available() -> bool:
+    return _libsecret_host_python_bin() is not None
+
+
+def _libsecret_host_python_bin() -> str | None:
+    global _HOST_PYTHON_BIN_CACHE
+    if _HOST_PYTHON_BIN_CACHE is not _UNSET:
+        return _HOST_PYTHON_BIN_CACHE  # type: ignore[return-value]
+    _HOST_PYTHON_BIN_CACHE = _resolve_libsecret_host_python_bin()
+    return _HOST_PYTHON_BIN_CACHE  # type: ignore[return-value]
+
+
+def _resolve_libsecret_host_python_bin() -> str | None:
+    helper = (
+        "import gi; gi.require_version('Secret','1'); "
+        "from gi.repository import Secret; print('ok')"
     )
-    if completed.returncode not in {0, 1}:
-        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
+    for python in _host_python_candidates():
+        try:
+            completed = subprocess.run(
+                [python, "-c", helper],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if completed.returncode == 0 and "ok" in completed.stdout:
+            return python
+    return None
 
 
-def _secret_tool_save_sync_device_private_key(device_id: str, encoded_key: str) -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "store",
-            "--label",
-            "Dictate Pro sync device private key",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
-            "kind",
-            "sync-device-private-key",
-            "device",
-            device_id,
-        ],
-        action="store",
-        input=encoded_key,
-        timeout=20,
+_LIBSECRET_HOST_HELPER = r"""
+import json
+import sys
+
+import gi
+
+gi.require_version("Secret", "1")
+from gi.repository import Secret
+
+payload = json.load(sys.stdin)
+action = payload["action"]
+attrs = payload["attrs"]
+schema = Secret.Schema.new(
+    "org.freedesktop.Secret.Generic",
+    Secret.SchemaFlags.NONE,
+    {
+        "application": Secret.SchemaAttributeType.STRING,
+        "backend": Secret.SchemaAttributeType.STRING,
+        "kind": Secret.SchemaAttributeType.STRING,
+        "account": Secret.SchemaAttributeType.STRING,
+        "device": Secret.SchemaAttributeType.STRING,
+    },
+)
+if action == "store":
+    ok = Secret.password_store_sync(
+        schema,
+        attrs,
+        Secret.COLLECTION_DEFAULT,
+        payload["label"],
+        payload["value"],
+        None,
     )
+    json.dump({"ok": bool(ok)}, sys.stdout)
+elif action == "lookup":
+    value = Secret.password_lookup_sync(schema, attrs, None)
+    json.dump({"ok": True, "value": value}, sys.stdout)
+elif action == "clear":
+    Secret.password_clear_sync(schema, attrs, None)
+    json.dump({"ok": True}, sys.stdout)
+else:
+    json.dump({"ok": False, "error": "unknown action"}, sys.stdout)
+    sys.exit(2)
+"""
+
+
+def _libsecret_host_python_call(payload: dict[str, Any]) -> dict[str, Any]:
+    python = _libsecret_host_python_bin()
+    if python is None:
+        raise ApiKeyStorageError("Host Python libsecret bindings are unavailable.")
+    try:
+        completed = subprocess.run(
+            [python, "-c", _LIBSECRET_HOST_HELPER],
+            input=json.dumps(payload),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ApiKeyStorageError("Secret Service timed out via host Python libsecret.") from exc
+    except OSError as exc:
+        raise ApiKeyStorageError(f"Could not run host Python libsecret helper: {exc}") from exc
     if completed.returncode != 0:
-        raise ApiKeyStorageError(_secret_tool_error("store", completed.stderr))
+        detail = (completed.stderr or completed.stdout or "unknown error").strip()
+        raise ApiKeyStorageError(f"Could not access Secret Service via host Python: {detail}")
+    try:
+        response = json.loads(completed.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise ApiKeyStorageError("Host Python libsecret helper returned invalid JSON.") from exc
+    if not isinstance(response, dict) or not response.get("ok"):
+        raise ApiKeyStorageError("Host Python libsecret helper failed.")
+    return response
 
 
-def _secret_tool_read_sync_device_private_key(device_id: str) -> str | None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "lookup",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
-            "kind",
-            "sync-device-private-key",
-            "device",
-            device_id,
-        ],
-        action="lookup",
-        timeout=10,
+def _libsecret_host_python_store(label: str, attrs: dict[str, str], value: str) -> None:
+    _libsecret_host_python_call(
+        {"action": "store", "label": label, "attrs": attrs, "value": value}
     )
-    if completed.returncode != 0:
+
+
+def _libsecret_host_python_lookup(attrs: dict[str, str]) -> str | None:
+    try:
+        response = _libsecret_host_python_call({"action": "lookup", "attrs": attrs})
+    except ApiKeyStorageError:
         return None
-    return completed.stdout.strip() or None
+    value = response.get("value")
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    return None
 
 
-def _secret_tool_clear_sync_device_private_key(device_id: str) -> None:
-    secret_tool = _require_secret_tool()
-    completed = _run_secret_tool(
-        [
-            secret_tool,
-            "clear",
-            "application",
-            "dictate",
-            "backend",
-            SYNC_DEVICE_PRIVATE_KEY_BACKEND,
-            "kind",
-            "sync-device-private-key",
-            "device",
-            device_id,
-        ],
-        action="clear",
-        timeout=10,
-    )
-    if completed.returncode not in {0, 1}:
-        raise ApiKeyStorageError(_secret_tool_error("clear", completed.stderr))
+def _libsecret_host_python_clear(attrs: dict[str, str]) -> None:
+    _libsecret_host_python_call({"action": "clear", "attrs": attrs})
 
 
 def _run_secret_tool(
