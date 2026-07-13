@@ -14,10 +14,20 @@
 #
 # Build:  pyinstaller packaging/dictate-engine.spec --noconfirm
 # (the build script packaging/build-engine.sh wraps this with a clean venv)
+#
+# Linux host audio: do NOT freeze libportaudio / libasound / libpulse. The .deb
+# depends on distro libportaudio2 (Pulse/PipeWire-aware). Bundling an ALSA-only
+# PortAudio made Ubuntu 26 reject 16 kHz capture. Override with
+# DICTATE_BUNDLE_HOST_AUDIO=1 only for deliberate AppImage experiments.
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# packaging/ sits beside this spec; import the shared filter helper.
+sys.path.insert(0, SPECPATH)
+from host_audio_libs import filter_pyinstaller_binaries  # noqa: E402
 
 ONEFILE = os.environ.get("DICTATE_ONEFILE") == "1"
 WINDOWED = os.name == "nt"
@@ -27,8 +37,8 @@ datas, binaries, hiddenimports = [], [], []
 # The native-heavy packages PyInstaller's stock hooks don't fully capture.
 for pkg in ("ctranslate2", "faster_whisper", "av", "onnxruntime", "tokenizers", "huggingface_hub"):
     d, b, h = collect_all(pkg)
-    datas += d
-    binaries += b
+    datas += filter_pyinstaller_binaries(d)
+    binaries += filter_pyinstaller_binaries(b)
     hiddenimports += h
 
 # Optional Linux-only AGC + noise suppression (webrtc-noise-gain). It is imported
@@ -37,8 +47,8 @@ try:
     import webrtc_noise_gain  # noqa: F401
 
     d, b, h = collect_all("webrtc_noise_gain")
-    datas += d
-    binaries += b
+    datas += filter_pyinstaller_binaries(d)
+    binaries += filter_pyinstaller_binaries(b)
     hiddenimports += h
 except Exception:
     pass
@@ -48,8 +58,8 @@ except Exception:
 for pkg in ("onnx_asr", "onnxruntime"):
     try:
         d, b, h = collect_all(pkg)
-        datas += d
-        binaries += b
+        datas += filter_pyinstaller_binaries(d)
+        binaries += filter_pyinstaller_binaries(b)
         hiddenimports += h
     except Exception:
         pass
@@ -59,8 +69,8 @@ for pkg in ("onnx_asr", "onnxruntime"):
 for pkg in ("torch", "torchaudio", "pyannote.audio", "pyannote.core", "pyannote.database", "pyannote.metrics"):
     try:
         d, b, h = collect_all(pkg)
-        datas += d
-        binaries += b
+        datas += filter_pyinstaller_binaries(d)
+        binaries += filter_pyinstaller_binaries(b)
         hiddenimports += h
     except Exception:
         pass
@@ -91,6 +101,11 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Analysis dependency walking can re-introduce host audio libs (_sounddevice →
+# libportaudio, av.libs → libasound). Strip them again on Linux from both TOCs.
+a.binaries = filter_pyinstaller_binaries(a.binaries)
+a.datas = filter_pyinstaller_binaries(a.datas)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

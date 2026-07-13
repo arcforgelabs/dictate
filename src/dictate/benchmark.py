@@ -514,16 +514,9 @@ def read_wav_mono_16k(path: Path) -> np.ndarray:
 
 
 def _resample_to_16k(audio: np.ndarray, src_rate: int) -> np.ndarray:
-    if src_rate <= 0:
-        raise ValueError(f"Invalid source sample rate: {src_rate}")
-    if audio.size == 0:
-        return audio
+    from dictate.audio import resample_audio
 
-    src_duration = audio.size / float(src_rate)
-    target_size = max(1, int(round(src_duration * 16000)))
-    src_x = np.linspace(0.0, src_duration, num=audio.size, endpoint=False)
-    tgt_x = np.linspace(0.0, src_duration, num=target_size, endpoint=False)
-    return np.interp(tgt_x, src_x, audio).astype(np.float32, copy=False)
+    return resample_audio(audio, src_rate, 16000)
 
 
 def normalize_text(text: str) -> list[str]:

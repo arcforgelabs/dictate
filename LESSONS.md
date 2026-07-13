@@ -37,6 +37,11 @@ cost the most:
 - **Can't build the Tauri bundle in the dev sandbox** (no Rust/webkit-dev,
   `static.crates.io` blocked, sudo needs a password). Verify the freeze locally;
   iterate the bundle on CI via the manual `desktop-bundle.yml` workflow.
+- **Never freeze Linux host audio libs** (`libportaudio` / `libasound` / `libpulse`).
+  PyInstaller pulls them from `_sounddevice` and `av.libs`; an ALSA-only private
+  PortAudio defaults to raw `hw:*` and rejects 16 kHz under PipeWire (Ubuntu 26).
+  Strip via `packaging/host_audio_libs.py`, depend on distro `libportaudio2` +
+  `libpulse0`, and keep `resolve_input_capture()` + resample as defense in depth.
 - **Version bump touches ~13 files + tests**, not just the three `release_check.py`
   checks — see the checklist in the runbook.
 

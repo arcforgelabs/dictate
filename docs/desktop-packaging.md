@@ -14,6 +14,25 @@ The desktop app is **two pieces that ship as one package**:
   is **PyInstaller-frozen** (`packaging/`) into a single `dictate-engine` binary
   and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
 
+### Linux host audio (do not freeze PortAudio)
+
+On Linux the engine must **link against distro PortAudio**, not a copy frozen
+into `_internal/`:
+
+- `.deb` / `.rpm` depend on `libportaudio2` + `libpulse0` (Pulse/PipeWire client).
+- `packaging/dictate-engine.spec` strips `libportaudio*`, `libasound*`, and
+  `libpulse*` via `packaging/host_audio_libs.py`.
+- `packaging/build-engine.sh` fails the freeze if those libs still appear in the
+  output (override only with `DICTATE_BUNDLE_HOST_AUDIO=1` for experiments).
+- App-level defense: `resolve_input_capture()` prefers the Pulse host API /
+  `sysdefault` and resamples to 16 kHz when needed.
+
+Bundling an ALSA-only PortAudio made the engine default to raw `hw:*` devices
+that reject 16 kHz under PipeWire (observed on Ubuntu 26). Windows continues to
+ship PortAudio DLLs inside the freeze.
+
+AppImage builds also expect host `libportaudio2`; prefer the `.deb` on Ubuntu.
+
 On launch the shell spawns the engine once as a headless process that **both**
 dictates (`--no-tray`) and serves the control API (`DICTATE_UI_SERVER=1`,
 implemented in `src/dictate/ui_server.py`). The webview talks to that server over

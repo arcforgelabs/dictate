@@ -15,6 +15,19 @@ from dictate.note_chunker import NoteChunkAccumulator
 
 DEFAULT_MAX_RECORDING_SECONDS = 120
 DEFAULT_TRANSCRIPTION_WINDOW_SECONDS = 2.0
+DEFAULT_SAMPLE_RATE = 16000
+
+# Soft ALSA/PipeWire PCMs that typically resample; prefer these over raw hw:*
+# devices. Defense in depth when PortAudio defaults to a hw capture node that
+# rejects 16 kHz (ALSA-only builds / some PipeWire setups).
+_PREFERRED_INPUT_NAMES = (
+    "sysdefault",
+    "default",
+    "pulse",
+    "pipewire",
+    "default source",
+)
+_FALLBACK_CAPTURE_RATES = (48000, 44100, 32000, 22050)
 
 # Overlap-stream (dictation) chunking: shorter windows than notes so perceived
 # latency stays close to "release key -> last chunk decodes", with enough
@@ -27,6 +40,150 @@ DICTATION_OVERLAP_SECONDS = 1.0
 class AudioCaptureError(RuntimeError):
     """Raised when audio recording fails."""
 
+
+def resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+    """Linearly resample mono float audio between sample rates."""
+    if src_rate <= 0 or dst_rate <= 0:
+        raise ValueError(f"Invalid sample rate: src={src_rate} dst={dst_rate}")
+    if audio.size == 0 or src_rate == dst_rate:
+        return np.asarray(audio, dtype=np.float32)
+    src_duration = audio.size / float(src_rate)
+    target_size = max(1, int(round(src_duration * dst_rate)))
+    src_x = np.linspace(0.0, src_duration, num=audio.size, endpoint=False)
+    tgt_x = np.linspace(0.0, src_duration, num=target_size, endpoint=False)
+    return np.interp(tgt_x, src_x, audio).astype(np.float32, copy=False)
+
+
+def _default_input_device(sd: Any) -> int | None:
+    pair = getattr(sd, "default", None)
+    device = getattr(pair, "device", None) if pair is not None else None
+    if isinstance(device, (list, tuple)):
+        index = device[0] if device else None
+    else:
+        index = device
+    try:
+        value = int(index)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _pulse_default_input(sd: Any) -> int | None:
+    """Prefer the PulseAudio/PipeWire host API default when PortAudio has one."""
+    try:
+        hostapis = sd.query_hostapis()
+    except Exception:  # noqa: BLE001
+        return None
+    for api in hostapis:
+        try:
+            name = str(api.get("name", "")).lower()
+            if "pulse" not in name:
+                continue
+            index = int(api.get("default_input_device", -1))
+        except Exception:  # noqa: BLE001
+            continue
+        if index >= 0:
+            return index
+    return None
+
+
+def _input_device_candidates(sd: Any) -> list[int]:
+    """Prefer Pulse default, then PortAudio default, then soft PCMs."""
+    seen: set[int] = set()
+    candidates: list[int] = []
+
+    def add(index: int | None) -> None:
+        if index is None or index < 0 or index in seen:
+            return
+        seen.add(index)
+        candidates.append(index)
+
+    add(_pulse_default_input(sd))
+    add(_default_input_device(sd))
+    try:
+        devices = sd.query_devices()
+    except Exception:  # noqa: BLE001
+        return candidates
+    for index, device in enumerate(devices):
+        try:
+            if int(device.get("max_input_channels", 0)) <= 0:
+                continue
+            name = str(device.get("name", "")).lower()
+        except Exception:  # noqa: BLE001
+            continue
+        if any(token in name for token in _PREFERRED_INPUT_NAMES):
+            add(index)
+    return candidates
+
+
+def _device_supports_input(
+    sd: Any,
+    *,
+    device: int,
+    samplerate: int,
+    channels: int = 1,
+) -> bool:
+    try:
+        sd.check_input_settings(
+            device=device,
+            channels=channels,
+            dtype="float32",
+            samplerate=samplerate,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _native_samplerate(sd: Any, device: int) -> int | None:
+    try:
+        info = sd.query_devices(device)
+        rate = int(round(float(info.get("default_samplerate") or 0)))
+    except Exception:  # noqa: BLE001
+        return None
+    return rate if rate > 0 else None
+
+
+def resolve_input_capture(
+    sd: Any,
+    *,
+    target_rate: int = DEFAULT_SAMPLE_RATE,
+    channels: int = 1,
+) -> tuple[int, int]:
+    """Pick an input device and capture rate that PortAudio can open.
+
+    Prefers ``target_rate`` (16 kHz for STT). When the default hw device rejects
+    that rate — common with ALSA-only PortAudio builds on PipeWire — falls back
+    to a soft PCM (``sysdefault`` / ``pulse`` / …) or captures at a native rate
+    for later resampling.
+    """
+    candidates = _input_device_candidates(sd)
+    if not candidates:
+        raise AudioCaptureError("no microphone input devices detected")
+
+    for device in candidates:
+        if _device_supports_input(
+            sd, device=device, samplerate=target_rate, channels=channels
+        ):
+            return device, target_rate
+
+    for device in candidates:
+        rates: list[int] = []
+        native = _native_samplerate(sd, device)
+        if native is not None:
+            rates.append(native)
+        for rate in _FALLBACK_CAPTURE_RATES:
+            if rate not in rates:
+                rates.append(rate)
+        for rate in rates:
+            if _device_supports_input(
+                sd, device=device, samplerate=rate, channels=channels
+            ):
+                return device, rate
+
+    raise AudioCaptureError(
+        f"no microphone input device supports capture near {target_rate} Hz"
+    )
 
 @dataclass(slots=True)
 class AudioChunk:
@@ -73,7 +230,7 @@ class SoundDeviceRecorder:
 
     def __init__(
         self,
-        sample_rate: int = 16000,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
         max_recording_seconds: int = DEFAULT_MAX_RECORDING_SECONDS,
         transcription_window_seconds: float = DEFAULT_TRANSCRIPTION_WINDOW_SECONDS,
     ):
@@ -98,6 +255,10 @@ class SoundDeviceRecorder:
         self._overlap_stream = False
         self._note_accumulator: NoteChunkAccumulator | None = None
         self._preprocessor: AudioPreprocessor | None = None
+        # Capture may open at a device-native rate; samples are resampled to
+        # ``sample_rate`` before preprocessing / STT.
+        self._capture_rate = sample_rate
+        self._capture_device: int | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -163,19 +324,31 @@ class SoundDeviceRecorder:
         try:
             import sounddevice as sd
 
+            device, capture_rate = resolve_input_capture(sd, target_rate=self.sample_rate)
+            self._capture_device = device
+            self._capture_rate = capture_rate
             self._stream = sd.InputStream(
-                # NOTE: No explicit `device=` means we follow the OS default input device
-                # (e.g. the PulseAudio/PipeWire default source on Linux). Future improvement:
-                # add a config/CLI option to pin a specific input device by index/name.
-                samplerate=self.sample_rate,
+                # Explicit device from resolve_input_capture (Pulse/sysdefault/
+                # native-rate fallback). Avoid relying on PortAudio's default,
+                # which can be a raw hw:* node that rejects 16 kHz.
+                device=device,
+                samplerate=capture_rate,
                 channels=1,
                 dtype="float32",
                 callback=self._audio_callback,
             )
             self._stream.start()
+        except AudioCaptureError:
+            self._stream = None
+            self._recording = False
+            self._capture_rate = self.sample_rate
+            self._capture_device = None
+            raise
         except Exception as exc:  # noqa: BLE001
             self._stream = None
             self._recording = False
+            self._capture_rate = self.sample_rate
+            self._capture_device = None
             raise AudioCaptureError(f"could not start microphone input: {exc}") from exc
 
         self._recording = True
@@ -290,6 +463,10 @@ class SoundDeviceRecorder:
         samples = np.asarray(indata, dtype=np.float32).reshape(-1)
         if samples.size == 0:
             return
+        if self._capture_rate != self.sample_rate:
+            samples = resample_audio(samples, self._capture_rate, self.sample_rate)
+            if samples.size == 0:
+                return
         if self._preprocessor is not None:
             # AGC + noise suppression before anything downstream sees the audio.
             # Emits only whole 10 ms frames; the ~10 ms remainder is flushed on stop.

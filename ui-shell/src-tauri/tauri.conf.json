@@ -39,7 +39,8 @@
           "libgtk-3-0",
           "libayatana-appindicator3-1",
           "libasound2",
-          "libportaudio2"
+          "libportaudio2",
+          "libpulse0"
         ],
         "preInstallScript": "deb/preinst"
       },
@@ -49,7 +50,8 @@
           "gtk3",
           "libayatana-appindicator-gtk3",
           "alsa-lib",
-          "portaudio"
+          "portaudio",
+          "pulseaudio-libs"
         ]
       }
     },

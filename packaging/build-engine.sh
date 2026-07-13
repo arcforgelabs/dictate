@@ -54,4 +54,20 @@ fi
 
 echo "▶ smoke-testing the frozen binary"
 "$BIN" --version >/dev/null
+
+# Linux .deb/.rpm must use distro PortAudio (Pulse/PipeWire-aware). A private
+# libportaudio in _internal shadows libportaudio2 and breaks 16 kHz capture.
+if [ "$(uname -s)" = "Linux" ] && [ -z "${DICTATE_BUNDLE_HOST_AUDIO:-}" ]; then
+  ENGINE_DIR="$(cd "$(dirname "$BIN")" && pwd)"
+  if find "$ENGINE_DIR" \( -name 'libportaudio*' -o -name 'libasound*' -o -name 'libpulse*' \) \
+      ! -path '*/models/*' 2>/dev/null | grep -q .; then
+    echo "✗ frozen engine still bundles host audio libs (portaudio/asound/pulse);" >&2
+    echo "  Linux builds must link against distro libportaudio2. See packaging/host_audio_libs.py." >&2
+    find "$ENGINE_DIR" \( -name 'libportaudio*' -o -name 'libasound*' -o -name 'libpulse*' \) \
+      ! -path '*/models/*' 2>/dev/null | head -20 >&2
+    exit 1
+  fi
+  echo "✓ host audio libs not bundled (using system libportaudio2)"
+fi
+
 echo "✓ engine frozen: $BIN  ($(du -sh "$BIN" | cut -f1))"

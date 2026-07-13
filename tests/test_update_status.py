@@ -379,12 +379,21 @@ class UpdateStatusTests(unittest.TestCase):
             user,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable", installed_package_version="2026.7.4-unstable.1.1"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.4-unstable.2.1", "https://example.test"),
+            ),
+            patch(
                 "dictate.update_status._find_release_asset",
                 return_value=("https://example.test/Dictate_2099.1.2_amd64.deb", "Dictate_2099.1.2_amd64.deb"),
-            ),
+            ) as find,
             patch("dictate.update_status._download_file", return_value=Path("/tmp/x.deb")) as dl,
             patch("dictate.update_status._install_deb", return_value=ok) as install,
             patch("dictate.update_status.Path.unlink"),
+            patch("dictate.config.set_installed_package_version") as stamp,
         ):
             flow = start_update_flow()
 
@@ -392,8 +401,10 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(flow.install_kind, "linux-package")
         self.assertIn("restart", flow.actions or [])
+        find.assert_called_once_with("_amd64.deb", release_tag="v2026.7.4-unstable.2.1")
         dl.assert_called_once()
         install.assert_called_once()
+        stamp.assert_called_once_with("2026.7.4-unstable.2.1")
 
     def test_linux_package_update_reports_cancelled(self) -> None:
         cancelled = subprocess.CompletedProcess(args=[], returncode=126, stdout="", stderr="dismissed")
@@ -403,6 +414,14 @@ class UpdateStatusTests(unittest.TestCase):
             roots,
             user,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="stable", installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.5", "https://example.test"),
+            ),
             patch(
                 "dictate.update_status._find_release_asset",
                 return_value=("https://example.test/x_amd64.deb", "x_amd64.deb"),
