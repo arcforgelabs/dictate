@@ -11,7 +11,8 @@
   at that rate.
 - Beta/unstable Linux `.deb` updates: the unstable publish lane now attaches a
   `.deb` to the prerelease, and the in-app updater downloads that channel tag
-  (not only GitHub `latest`).
+  (not only GitHub `latest`). Linux packaging pins CPU torch and strips
+  nvidia/triton so the `.deb` stays under GitHub's 2 GiB asset limit.
 
 ## 2026-07-04
 

@@ -334,6 +334,13 @@ jobs:
           export DICTATE_PACKAGE_VERSION="${BASE}-${{ inputs.npm_tag }}.${{ github.run_number }}.${{ github.run_attempt }}"
           ./scripts/build-linux-desktop.sh 2>&1 | tee /tmp/linux-desktop-prebuild.log
 
+      - name: Upload Linux .deb artifacts
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: linux-desktop-prebuild-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ui-shell/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
       - name: Publish durable unstable Linux .deb
         env:
           GH_TOKEN: ${{ github.token }}
@@ -348,6 +355,16 @@ jobs:
             echo "No Linux .deb was produced." >&2
             exit 1
           fi
+          for artifact in "${ARTIFACTS[@]}"; do
+            size="$(stat -c%s "$artifact")"
+            echo "$artifact ($size bytes)"
+            # GitHub release assets must be < 2 GiB.
+            if [ "$size" -ge 2147483648 ]; then
+              echo "✗ $artifact is ${size} bytes (>= 2 GiB); refuse upload." >&2
+              echo "  Linux packaging must use CPU torch and exclude nvidia/triton." >&2
+              exit 1
+            fi
+          done
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${ARTIFACTS[@]}" --clobber
           else
@@ -357,13 +374,6 @@ jobs:
               --title "Dictate $VERSION" \
               --notes "Unstable direct-download build for Linux (.deb) and Windows. Uses distro PortAudio on Linux."
           fi
-
-      - name: Upload Linux .deb artifacts
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: linux-desktop-prebuild-${{ github.run_number }}-${{ github.run_attempt }}
-          path: ui-shell/src-tauri/target/release/bundle/deb/*.deb
-          if-no-files-found: error
 
       - name: Upload Linux prebuild log
         if: always()
