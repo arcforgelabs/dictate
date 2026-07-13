@@ -67,8 +67,18 @@ def _check_microphone(report: PreflightReport) -> None:
         try:
             import sounddevice as sd
 
+            from dictate.audio import resolve_input_capture
+
             result["devices"] = sd.query_devices()
             result["default"] = sd.default.device
+            try:
+                device, rate = resolve_input_capture(sd)
+                result["capture_device"] = device
+                result["capture_rate"] = rate
+                info = sd.query_devices(device)
+                result["capture_name"] = info.get("name")
+            except Exception as exc:  # noqa: BLE001
+                result["capture_error"] = exc
         except Exception as exc:  # noqa: BLE001
             result["error"] = exc
 
@@ -102,6 +112,33 @@ def _check_microphone(report: PreflightReport) -> None:
     else:
         if default_input is None or default_input < 0:
             report.warnings.append("No default input device configured.")
+
+    capture_error = result.get("capture_error")
+    if capture_error is not None:
+        report.errors.append(f"Could not open microphone input: {capture_error}")
+        return
+
+    capture_rate = result.get("capture_rate")
+    capture_name = result.get("capture_name")
+    if isinstance(capture_rate, int) and capture_rate != 16000:
+        label = capture_name or f"device {result.get('capture_device')}"
+        report.notes.append(
+            f"Microphone '{label}' opens at {capture_rate} Hz; audio will be resampled to 16 kHz."
+        )
+    elif capture_name:
+        report.notes.append(f"Microphone capture device: {capture_name}")
+
+    try:
+        import sounddevice as sd
+
+        hostapis = [str(api.get("name", "")) for api in sd.query_hostapis()]
+        if hostapis and not any("pulse" in name.lower() for name in hostapis):
+            report.warnings.append(
+                "PortAudio has no PulseAudio host API; capture uses ALSA only. "
+                "Install libportaudio2/libpulse0 from your distro (not a bundled PortAudio)."
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _check_stt_backend(

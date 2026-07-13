@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-13
+
+### Fixed
+
+- Linux microphone capture after Ubuntu 26 / PipeWire upgrades: the frozen engine
+  no longer bundles private `libportaudio` / `libasound` / `libpulse`. Capture
+  uses distro `libportaudio2` (+ `libpulse0`), and the recorder prefers the
+  Pulse host API / soft PCMs and resamples to 16 kHz when a device cannot open
+  at that rate.
+- Beta/unstable Linux `.deb` updates: the unstable publish lane now attaches a
+  `.deb` to the prerelease, and the in-app updater downloads that channel tag
+  (not only GitHub `latest`).
+
 ## 2026-07-04
 
 ### Added

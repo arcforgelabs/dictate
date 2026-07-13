@@ -2465,7 +2465,8 @@ class DaemonHistoryTests(unittest.TestCase):
 
     def test_sounddevice_recorder_overlap_stream_flushes_and_marks_stream_final(self) -> None:
         import os
-        from unittest.mock import patch
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
 
         # Test the raw chunking/flush behavior without the AGC/noise-suppression
         # preprocessor (which buffers 10 ms and would shift exact sample counts).
@@ -2483,7 +2484,15 @@ class DaemonHistoryTests(unittest.TestCase):
             max_recording_seconds=10,
             transcription_window_seconds=2,
         )
-        recorder.start(on_chunk=seen.append, recording_id=7, overlap_stream=True)
+        stream = MagicMock()
+        fake_sd = SimpleNamespace(
+            InputStream=MagicMock(return_value=stream),
+        )
+        with (
+            patch("dictate.audio.resolve_input_capture", return_value=(0, 16000)),
+            patch.dict("sys.modules", {"sounddevice": fake_sd}),
+        ):
+            recorder.start(on_chunk=seen.append, recording_id=7, overlap_stream=True)
 
         # The dictation overlap accumulator is built with the DICTATION_* constants,
         # not the note defaults.

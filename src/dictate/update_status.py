@@ -188,7 +188,8 @@ def start_update_flow() -> UpdateFlow:
 
     User Linux installs update without elevation via the npm bootstrap package.
     System Linux installs (.deb) download the new package from the official
-    release and install it via ``pkexec`` (one polkit prompt). Source checkouts
+    release for the selected update channel and install it via ``pkexec`` (one
+    polkit prompt). Source checkouts
     run the repository's own update.sh after validating the root.
     Windows updates through the Microsoft Store; macOS through its bundle.
     """
@@ -313,14 +314,38 @@ def _subprocess_env_for_tool(tool_path: str) -> dict[str, str]:
 
 
 def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
-    """Download the latest .deb and install it via pkexec; the shell restarts."""
+    """Download the channel's .deb and install it via pkexec; the shell restarts."""
     if not shutil.which("pkexec"):
         return _missing_deps_flow(context, ["pkexec"])
+    cfg = context["config"]
+    current_version = (
+        getattr(cfg, "installed_package_version", None)
+        or context.get("package_version")
+        or RELEASE_VERSION
+    )
     try:
-        asset_url, asset_name = _find_release_asset(DEB_ASSET_SUFFIX)
+        latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
+        if not is_newer_version(latest, current_version):
+            return UpdateFlow(
+                mode="current",
+                started=False,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase="current",
+                step="current",
+                progress=100,
+                actions=["check"],
+                commands=_commands_for_context(context),
+                missing_deps=[],
+                message="Dictate is up to date.",
+            )
+        asset_url, asset_name = _find_release_asset(
+            DEB_ASSET_SUFFIX,
+            release_tag=f"v{latest}",
+        )
     except Exception as exc:  # noqa: BLE001
         return _update_failed(
-            context, "no_asset", f"Could not find a .deb in the latest release: {exc}"
+            context, "no_asset", f"Could not find a .deb for this update channel: {exc}"
         )
     try:
         deb_path = _download_file(asset_url, asset_name)
@@ -340,6 +365,13 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         # pkexec returns 126 (dialog dismissed) / 127 (auth failed) on cancel.
         code = "cancelled" if result.returncode in (126, 127) else "install_failed"
         return _update_failed(context, code, detail)
+    try:
+        from dictate.config import set_installed_package_version
+
+        set_installed_package_version(str(latest))
+    except Exception:  # noqa: BLE001
+        # Install succeeded; version stamp is best-effort for the next check.
+        pass
     return UpdateFlow(
         mode="installed",
         started=True,

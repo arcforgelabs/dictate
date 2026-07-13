@@ -689,13 +689,16 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
         self.assertIn("scripts\\cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
-            "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle]",
+            "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
             workflow,
         )
         self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
+        self.assertIn("needs.linux-desktop-bundle.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
         self.assertIn("Publish durable unstable Windows installers", workflow)
+        self.assertIn("Publish durable unstable Linux .deb", workflow)
         self.assertIn("gh release create $tag $artifacts", workflow)
+        self.assertIn('gh release create "$TAG"', workflow)
         self.assertIn("desktop-shell", workflow)
         self.assertIn("needs.tests.result == 'success'", workflow)
         self.assertIn("npm publish --access public --tag", workflow)

@@ -394,8 +394,11 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
                 items.append("Run `./install.sh` or reinstall Dictate with local STT dependencies.")
         if "API key" in error:
             items.append("Open Dictate Settings and save a valid provider API key before selecting it.")
-        if "No microphone" in error or "audio devices" in error:
-            items.append("Set a default microphone in Windows Sound settings or your desktop audio settings.")
+        if "No microphone" in error or "audio devices" in error or "microphone input" in error:
+            items.append(
+                "Set a default microphone in desktop audio settings, and on Linux ensure "
+                "distro libportaudio2 + libpulse0 are installed (Dictate does not bundle PortAudio)."
+            )
         if "typing backend" in error or "Hotkey backend" in error:
             items.append("Install the platform typing/hotkey dependency, or use `dictate --once`.")
     return _dedupe(items)

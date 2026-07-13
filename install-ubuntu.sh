@@ -59,6 +59,7 @@ APT_PACKAGES=(
   desktop-file-utils
   gir1.2-ayatanaappindicator3-0.1
   libportaudio2
+  libpulse0
   python3
   python3-gi
   python3-venv

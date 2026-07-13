@@ -115,11 +115,13 @@ without a version bump can report the base CalVer while being delivered through
 the unstable channel.
 
 Every unstable publish produces a durable GitHub prerelease containing the matching
-unsigned Windows MSI/NSIS installers, because installed direct builds cannot update
-from short-lived Actions artifacts. With `run_tests=true`, the unstable publish waits for the Linux/Windows Python
+unsigned Windows MSI/NSIS installers **and** the Linux `.deb`, because installed
+direct builds cannot update from short-lived Actions artifacts. With `run_tests=true`,
+the unstable publish waits for the Linux/Windows Python
 matrix, the Windows user install/update/uninstall smoke, the Linux user
 encrypted-sync install smoke, UI build/server smoke, desktop shell compile/Rust
-tests, and npm package dry-run. Store upload/publish remains a separate guarded
+tests, Linux/Windows desktop bundles, and npm package dry-run. Store upload/publish
+remains a separate guarded
 workflow. Paid Authenticode signing for direct-download Windows installers is a
 future-only lane, not a current release blocker.
 
