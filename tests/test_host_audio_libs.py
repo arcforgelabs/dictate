@@ -58,22 +58,29 @@ class HostAudioBinaryTests(unittest.TestCase):
                 "/tmp/site-packages/av.libs/libasound-cfbebb71.so.2.0.0",
                 "DATA",
             ),
+            ("nvidia/cublas/lib/libcublas.so.12", "/tmp/nvidia/cublas.so", "BINARY"),
+            ("triton/_C.cpython-311.so", "/tmp/triton/_C.so", "BINARY"),
         ]
-        kept = filter_pyinstaller_binaries(binaries, exclude=True)
+        kept = filter_pyinstaller_binaries(binaries, exclude_audio=True, exclude_gpu=True)
         self.assertEqual([item[0] for item in kept], ["libavcodec.so.62"])
 
     def test_filter_noop_when_disabled(self) -> None:
         binaries = [("libportaudio.so.2", "/usr/lib/libportaudio.so.2", "BINARY")]
-        kept = filter_pyinstaller_binaries(binaries, exclude=False)
+        kept = filter_pyinstaller_binaries(binaries, exclude_audio=False, exclude_gpu=False)
         self.assertEqual(kept, binaries)
 
     def test_windows_keeps_host_audio_by_default(self) -> None:
         with patch.object(_host.os, "name", "nt"):
             self.assertFalse(should_exclude_host_audio_libs())
+            self.assertFalse(_host.should_exclude_heavy_gpu_runtimes())
 
     def test_bundle_override_keeps_host_audio(self) -> None:
         with patch.dict(_host.os.environ, {"DICTATE_BUNDLE_HOST_AUDIO": "1"}):
             self.assertFalse(should_exclude_host_audio_libs())
+
+    def test_gpu_bundle_override_keeps_nvidia(self) -> None:
+        with patch.dict(_host.os.environ, {"DICTATE_BUNDLE_GPU_LIBS": "1"}):
+            self.assertFalse(_host.should_exclude_heavy_gpu_runtimes())
 
 
 if __name__ == "__main__":
