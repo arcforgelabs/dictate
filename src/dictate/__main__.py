@@ -293,7 +293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _ensure_desktop_integration()
         _run_preflight_or_exit(
             require_typing=True,
-            require_clipboard=False,
+            require_clipboard=True,
             typing_backend=args.type_backend,
             push_to_talk_combo=push_to_talk_combo,
             stt_backend=stt_backend,

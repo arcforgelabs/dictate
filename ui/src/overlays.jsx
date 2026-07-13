@@ -1,7 +1,7 @@
 // overlays.jsx — listening HUD, command palette (⌘K), toast stack.
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Icon, Brand } from "./icons.jsx";
-import { Kbd, Wave } from "./primitives.jsx";
+import { Kbd } from "./primitives.jsx";
 import { useStore } from "./store.jsx";
 
 export function ListeningHUD() {
@@ -21,7 +21,7 @@ export function ListeningHUD() {
     <div className={"hud" + (show ? " show" : "")}>
       <div className="hud-pill">
         <span className="reckdot" />
-        <Wave active={s.recording} bars={16} h={22} />
+        <Icon name="mic" size={16} />
         <span className="txt">Listening</span>
         <span className="timer">{mm}:{ss}</span>
         {s.activation === "hold"

@@ -93,6 +93,8 @@ function mapHistoryPayload(history) {
     id: h.id,
     text: h.text,
     createdAt: h.createdAt,
+    mode: h.mode,
+    status: h.status,
     segments: normalizeSegments(h.segments),
   }));
 }
@@ -1105,9 +1107,10 @@ function CaptureHome() {
   // fresh launch (even with saved notes) and hides once capture begins this run.
   const gettingStarted = !s.noteRecording && !s.sessionStarted;
   // Copy-last: the most recent quick record (a dictation, not a diarized meeting).
-  const isMeeting = (n) => Array.isArray(n?.segments) && n.segments.length > 0;
+  const isMeeting = (n) => n?.mode === "meeting" || (Array.isArray(n?.segments) && n.segments.length > 0);
   const recentQuick = (s.history || []).find((n) => !isMeeting(n));
   const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
+  const recentQuickPreview = recentQuickText.replace(/\s+/g, " ").trim();
   const copyLast = () => {
     if (!recentQuickText) return;
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -1204,7 +1207,10 @@ function CaptureHome() {
                 {s.sessionStarted && recentQuickText && (
                   <button type="button" className="note-copylast t-mono" onClick={copyLast}>
                     <Icon name="copy" size={13} />
-                    <span>Copy last dictation</span>
+                    <span className="note-copylast-content">
+                      <span className="note-copylast-label">Copy last dictation</span>
+                      <span className="note-copylast-preview">{recentQuickPreview}</span>
+                    </span>
                   </button>
                 )}
                 {/* Live push-to-talk transcript — hide once history has the same note. */}
@@ -1563,12 +1569,14 @@ export default function App() {
             id: ev.id || "n" + Date.now(),
             text: ev.text,
             createdAt: ev.createdAt || new Date().toISOString(),
+            mode: ev.mode || captureModeRef.current,
             segments: normalizeSegments(ev.segments),
           };
           setCurrentNote(note);
+          setHistory((entries) => [note, ...entries.filter((entry) => entry.id !== note.id)].slice(0, 50));
           setExpandedFrom("capture");
           setNoteView("expanded");
-          toast(captureModeRef.current === "meeting" ? "Meeting saved" : "Conversation note saved");
+          toast(note.mode === "meeting" ? "Meeting saved to Dictations" : "Conversation note saved");
         } else if (status === "empty") {
           setNoteView(null);
           toast("No speech detected", { bad: true });
@@ -2067,14 +2075,15 @@ export default function App() {
           id: "n" + Date.now(),
           text: demo,
           createdAt: new Date().toISOString(),
+          mode: captureMode,
           segments: demoSegments,
         };
         setNoteText(demo);
         setCurrentNote(note);
-        pushHistory(demo);
+        setHistory((entries) => [note, ...entries].slice(0, 50));
         setExpandedFrom("capture");
         setNoteView("expanded");
-        toast(captureMode === "meeting" ? "Meeting saved" : "Conversation note saved");
+        toast(captureMode === "meeting" ? "Meeting saved to Dictations" : "Conversation note saved");
       }, 800);
       return;
     }

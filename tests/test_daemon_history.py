@@ -1416,6 +1416,9 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(segments[1].speaker_id, "SPEAKER_B")
             self.assertEqual(hist.load()[0].text, "Speaker 1: hello Speaker 2: reply")
             self.assertEqual(note_events[-1]["segments"][0]["speaker_label"], "Speaker 1")
+            self.assertEqual(note_events[-1]["id"], note_id)
+            self.assertEqual(note_events[-1]["mode"], "meeting")
+            self.assertEqual(note_events[-1]["createdAt"], note.started_at)
             output.send.assert_not_called()
 
     def test_meeting_recording_callback_includes_mode(self) -> None:

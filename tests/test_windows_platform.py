@@ -18,7 +18,7 @@ from dictate.doctor import (
     _update_paths,
     build_parser,
 )
-from dictate.outputs import PynputOutput, detect_session_type, resolve_typing_backend
+from dictate.outputs import PasteOutput, PynputOutput, detect_session_type, resolve_typing_backend
 from dictate.startup import set_startup_enabled, startup_enabled, startup_entry_path
 from dictate.windows_tray import (
     NIF_ICON,
@@ -47,7 +47,9 @@ class WindowsPlatformTests(unittest.TestCase):
     def test_windows_auto_typing_backend_uses_pynput(self) -> None:
         with patch("dictate.outputs.detect_session_type", return_value="windows"):
             with patch("dictate.outputs.python_module_available", return_value=True):
-                self.assertIsInstance(resolve_typing_backend("auto"), PynputOutput)
+                output = resolve_typing_backend("auto")
+                self.assertIsInstance(output, PasteOutput)
+                self.assertIsInstance(output.typing_output, PynputOutput)
 
     def test_windows_doctor_checks_start_menu_shortcut_path(self) -> None:
         with patch("dictate.startup.sys.platform", "win32"):

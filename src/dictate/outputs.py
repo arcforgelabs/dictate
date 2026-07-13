@@ -68,6 +68,17 @@ class ClipboardOutput:
             except Exception as exc:  # noqa: BLE001
                 raise OutputError(f"clipboard command failed: {exc}") from exc
 
+        if os.environ.get("WAYLAND_DISPLAY") and command_exists("wl-copy"):
+            try:
+                subprocess.run(
+                    ["wl-copy"],
+                    input=text.encode(),
+                    check=True,
+                )
+                return
+            except subprocess.CalledProcessError as exc:
+                raise OutputError(f"clipboard command failed: {exc}") from exc
+
         if command_exists("xclip"):
             try:
                 subprocess.run(
@@ -87,6 +98,19 @@ class ClipboardOutput:
             raise OutputError("no clipboard backend found; install xclip or pyperclip") from exc
         except Exception as exc:  # noqa: BLE001
             raise OutputError(f"clipboard command failed: {exc}") from exc
+
+
+@dataclass(slots=True)
+class PasteOutput:
+    """Insert completed text in one paste instead of simulating every character."""
+
+    typing_output: TextOutput
+    clipboard_output: TextOutput
+    name: str = "paste"
+
+    def send(self, text: str) -> None:
+        self.clipboard_output.send(text)
+        _send_paste_shortcut(self.typing_output)
 
 
 @dataclass(slots=True)
@@ -155,7 +179,7 @@ def python_module_available(module_name: str) -> bool:
 
 
 def clipboard_backend_available() -> bool:
-    if command_exists("xclip"):
+    if (os.environ.get("WAYLAND_DISPLAY") and command_exists("wl-copy")) or command_exists("xclip"):
         return True
     return python_module_available("pyperclip")
 
@@ -184,17 +208,17 @@ def _build_typing_output(backend: str) -> TextOutput:
 
 
 def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
-    """Pick a typing backend based on session type and availability."""
+    """Pick a backend and paste completed dictations into the focused control."""
     if preferred != "auto":
         if preferred == "pynput":
             if not python_module_available("pynput"):
                 raise BackendUnavailableError("requested typing backend 'pynput' is not installed")
-            return PynputOutput()
+            return PasteOutput(PynputOutput(), ClipboardOutput())
         if not command_exists(preferred):
             raise BackendUnavailableError(
                 f"requested typing backend '{preferred}' is not installed"
             )
-        return _build_typing_output(preferred)
+        return PasteOutput(_build_typing_output(preferred), ClipboardOutput())
 
     session = detect_session_type()
     if session == "windows":
@@ -209,10 +233,46 @@ def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
     for candidate in candidates:
         if candidate == "pynput":
             if python_module_available("pynput"):
-                return PynputOutput()
+                return PasteOutput(PynputOutput(), ClipboardOutput())
         elif command_exists(candidate):
-            return _build_typing_output(candidate)
+            return PasteOutput(_build_typing_output(candidate), ClipboardOutput())
 
     raise BackendUnavailableError(
         "no typing backend found; install one of: xdotool, wtype, ydotool, pynput"
     )
+
+
+def _send_paste_shortcut(output: TextOutput) -> None:
+    try:
+        if isinstance(output, XdotoolOutput):
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=True)
+            return
+        if isinstance(output, WtypeOutput):
+            subprocess.run(
+                ["wtype", "-M", "ctrl", "-P", "v", "-p", "v", "-m", "ctrl"],
+                check=True,
+            )
+            return
+        if isinstance(output, YdotoolOutput):
+            subprocess.run(
+                ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
+                check=True,
+            )
+            return
+        if isinstance(output, PynputOutput):
+            from pynput.keyboard import Controller, Key
+
+            keyboard = Controller()
+            with keyboard.pressed(Key.ctrl):
+                keyboard.press("v")
+                keyboard.release("v")
+            return
+    except FileNotFoundError as exc:
+        raise OutputError(f"{output.name} is not installed") from exc
+    except subprocess.CalledProcessError as exc:
+        raise OutputError(f"{output.name} paste failed: {exc}") from exc
+    except ImportError as exc:
+        raise OutputError("pynput is not installed") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise OutputError(f"{output.name} paste failed: {exc}") from exc
+    raise OutputError(f"typing backend cannot paste: {output.name}")

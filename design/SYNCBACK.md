@@ -25,6 +25,18 @@ Row format (keep it to a few lines):
 
 ## Open
 
+- [ ] 2026-07-13 — Push-to-talk HUD: compact listening indicator (mic + timer) replaces animated waveform
+      code: ui/src/overlays.jsx (ListeningHUD), ui/src/styles.css (.hud-pill) → cloud: needs mapping
+      by: forge build lane · branch/commit: forge/fix-dictation-workflows (uncommitted)
+      why: waveform in the push-to-talk HUD was a visual regression; note capture still uses WaveTimeline in the cradle stack
+      notes: HUD shows reckdot + mic icon + "Listening" + timer + release/tap hint; no `.wave` bars in `.hud`
+
+- [ ] 2026-07-13 — Copy-last preview: ellipsized two-line pill shows exact text that will be copied
+      code: ui/src/App.jsx (CaptureHome copy-last), ui/src/styles.css (.note-copylast-*) → cloud: needs mapping
+      by: forge build lane · branch/commit: forge/fix-dictation-workflows (uncommitted)
+      why: "Copy last dictation" alone was ambiguous; preview clarifies which quick record will be copied
+      notes: label stays "Copy last dictation"; preview ellipsizes at 270px; meetings excluded via mode/segment classification
+
 - [ ] 2026-07-03 — Local engine toggle (Private mode only): "English" ⇄ "Multilingual" segmented control beside the privacy pill
       code: ui/src/App.jsx (LocalEngineToggle, added to HomeBar left next to PrivacyPill), ui/src/store.jsx (MODELS + modelById), ui/src/styles.css (.engine-seg/.engine-opt) → cloud: 2477ec21-a493-41a0-b400-2a65c5bc3bf6 / comp-capture-home.html (needs mapping)
       by: forge build lane (Opus) · branch/commit: master (uncommitted)

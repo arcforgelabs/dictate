@@ -679,11 +679,15 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:11px;color:var(--subtle);text-align:center;}
 /* Copy-last: quiet pill under the cradle once a dictation exists this session. */
-.note-copylast{margin:9px auto 0;height:28px;padding:0 12px;border-radius:var(--r-pill);
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--surface-2);
+.note-copylast{margin:9px auto 0;min-height:38px;max-width:330px;padding:5px 12px;border-radius:14px;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--surface-2);
   border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;
   transition:var(--t-fast);-webkit-app-region:no-drag;cursor:pointer;}
 .note-copylast:hover{color:var(--text);border-color:var(--border-strong,var(--border));}
+.note-copylast-content{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:1px;}
+.note-copylast-label{font-size:11px;color:var(--subtle);}
+.note-copylast-preview{display:block;max-width:270px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:var(--text);font-size:12px;font-weight:550;}
 .meeting-action{height:30px;padding:0 12px;border-radius:var(--r-pill);
   display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--surface-2);
   border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;

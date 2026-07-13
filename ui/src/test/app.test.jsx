@@ -58,6 +58,7 @@ describe("Quiet Console app (mock mode)", () => {
     // Teaching graphic is gone; copy-last is now offered for the recent dictation.
     expect(container.querySelector(".gs-kbd")).not.toBeInTheDocument();
     expect(screen.getByText("Copy last dictation")).toBeInTheDocument();
+    expect(screen.getByText(/capture this as a project note/i)).toBeInTheDocument();
   });
 
   it("copies the most recent quick dictation from the home", async () => {
@@ -916,6 +917,41 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText("Speaker 2")).toBeInTheDocument();
     expect(screen.getByText("0:00-0:02")).toBeInTheDocument();
     expect(screen.getByText(/launch blockers/i)).toBeInTheDocument();
+  });
+
+  it("keeps a completed local meeting accessible in Dictations", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText("Meeting"));
+    fireEvent.click(screen.getByLabelText("Finish meeting"));
+    await waitFor(() => expect(screen.getByLabelText("Close note")).toBeInTheDocument(), { timeout: 2000 });
+    fireEvent.click(screen.getByLabelText("Close note"));
+    fireEvent.click(screen.getByLabelText("Dictations"));
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+
+    expect(screen.getByText(/launch blockers/i)).toBeInTheDocument();
+    expect(screen.getByText(/test the Windows build/i)).toBeInTheDocument();
+  });
+
+  it("uses a compact listening indicator for push-to-talk without the old waveform", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [], prefs: { overlay: true } }),
+    });
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: true }) });
+    });
+
+    expect(screen.getByText("Listening")).toBeInTheDocument();
+    expect(container.querySelector(".hud .wave")).not.toBeInTheDocument();
   });
 
   it("does not return canned transcripts in a shell without an engine bridge", () => {

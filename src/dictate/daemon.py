@@ -11,8 +11,6 @@ from collections import deque
 from collections.abc import Callable
 from typing import Literal
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
 
 from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
@@ -32,6 +30,8 @@ from dictate.lexicon import LexiconMode
 from dictate.outputs import TextOutput
 from dictate.provider_supervisor import ProviderSupervisor
 from dictate.stt import SpeechToText, TranscriptSegment
+
+logger = logging.getLogger(__name__)
 
 # Retry policy for long recordings (note mode) when remote transcription fails.
 # We retry the full chunk up to N times with exponential backoff before degrading.
@@ -1240,14 +1240,22 @@ class Daemon:
         text: str,
         raw_text: str,
         recording_id: int,
+        note_id: str | None = None,
+        created_at: str | None = None,
         segments: list[dict[str, object]] | None = None,
     ) -> None:
+        mode = self._recording_mode(recording_id)
         payload: dict[str, object] = {
             "text": text,
             "raw_text": raw_text,
             "recording_id": recording_id,
             "status": "ok",
+            "mode": mode,
         }
+        if note_id is not None:
+            payload["id"] = note_id
+        if created_at is not None:
+            payload["createdAt"] = created_at
         if segments is not None:
             payload["segments"] = segments
         if self.note_callback is not None:
@@ -1261,7 +1269,7 @@ class Daemon:
             sequence=None,
             recording_id=recording_id,
             stale=False,
-            mode=self._recording_mode(recording_id),
+            mode=mode,
         )
 
     def _surface_note_terminal(self, recording_id: int, status: str) -> None:
@@ -1414,6 +1422,7 @@ class Daemon:
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
         note_id: str | None = None
+        created_at: str | None = None
         segments_payload: list[dict[str, object]] = []
         with self._queue_lock:
             note_id = self._recording_note_ids.pop(recording_id, None)
@@ -1428,6 +1437,9 @@ class Daemon:
             ]
             try:
                 self.note_store.mark_ready(note_id)
+                persisted_note = self.note_store.load_note(note_id)
+                if persisted_note is not None:
+                    created_at = persisted_note.started_at
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not mark note ready: %s", exc)
                 try:
@@ -1453,6 +1465,8 @@ class Daemon:
             text=note_text,
             raw_text=raw_text,
             recording_id=recording_id,
+            note_id=note_id,
+            created_at=created_at,
             segments=segments_payload,
         )
         print(f"\r  Saved note: {note_text}", file=sys.stderr)
