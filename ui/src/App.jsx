@@ -415,13 +415,23 @@ function AccountDialog() {
           ? "Sign-in was declined."
           : reason === "expired_token" || reason === "timeout"
             ? "Sign-in timed out."
-            : "Couldn't reach the sign-in service.";
+            : reason && /secret store|plaintext token|keyring|secret-tool/i.test(String(reason))
+              ? "Couldn't store your sign-in securely on this computer. Install libsecret-tools (secret-tool) and try again."
+              : reason && reason !== "unknown" && reason !== "token_exchange_failed" && reason !== "no_pending_attempt"
+                ? String(reason)
+                : "Couldn't reach the sign-in service.";
         setBrowserSignIn({ status: "error", error: message });
       })
-      .catch(() => {
+      .catch((e) => {
         if (!mountedRef.current) return;
         clearBrowserPoll();
-        setBrowserSignIn({ status: "error", error: "Couldn't reach the sign-in service." });
+        const raw = e && e.message ? String(e.message) : "";
+        const message = /secret store|plaintext token|keyring|secret-tool/i.test(raw)
+          ? "Couldn't store your sign-in securely on this computer. Install libsecret-tools (secret-tool) and try again."
+          : raw && raw !== "Failed to fetch"
+            ? raw
+            : "Couldn't reach the sign-in service.";
+        setBrowserSignIn({ status: "error", error: message });
       });
   };
 

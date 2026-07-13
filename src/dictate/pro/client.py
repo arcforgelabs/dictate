@@ -367,16 +367,18 @@ class ProClient:
                 payload["device_public_key"] = device_public_key
         try:
             response = self._request("POST", self._auth_path("token"), payload)
+            session = self._session_from_token_response(response)
+            if device_public_key and uses_gateway:
+                session = self._register_gateway_device(
+                    session,
+                    device_label=device_label,
+                    device_public_key=device_public_key,
+                )
+            self.save_session(session)
+        except ProClientError as exc:
+            return {"status": "error", "reason": exc.message or "token_exchange_failed"}
         finally:
             self.cancel_browser_sign_in()
-        session = self._session_from_token_response(response)
-        if device_public_key and uses_gateway:
-            session = self._register_gateway_device(
-                session,
-                device_label=device_label,
-                device_public_key=device_public_key,
-            )
-        self.save_session(session)
         return {"status": "complete", "account_id": session.account_id, "device_id": session.device_id}
 
     def _poll_device_code(

@@ -40,7 +40,10 @@
           "libayatana-appindicator3-1",
           "libasound2",
           "libportaudio2",
-          "libpulse0"
+          "libpulse0",
+          "libsecret-tools",
+          "gir1.2-secret-1",
+          "python3-gi"
         ],
         "preInstallScript": "deb/preinst"
       },
@@ -51,7 +54,9 @@
           "libayatana-appindicator-gtk3",
           "alsa-lib",
           "portaudio",
-          "pulseaudio-libs"
+          "pulseaudio-libs",
+          "libsecret",
+          "python3-gobject"
         ]
       }
     },
