@@ -831,6 +831,8 @@ describe("Quiet Console app (mock mode)", () => {
 
     const restartButton = await screen.findByRole("button", { name: /Restart Dictate/i }, { timeout: 4000 });
     expect(restartButton).toBe(preparingButton);
+    expect(screen.queryByRole("button", { name: "Later" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
     fireEvent.click(restartButton);
 
     expect(await screen.findByRole("button", { name: /Restarting/i })).toBe(preparingButton);
@@ -889,6 +891,36 @@ describe("Quiet Console app (mock mode)", () => {
     expect(await screen.findByRole("button", { name: "Check for updates" }, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
     expect(checks).toBe(2);
+  });
+
+  it.each(["Skip", "Later"])("explicit check shows available while %s remains suppressed", async (action) => {
+    const polling = mockPackagePolling([
+      {
+        checked: true,
+        updateAvailable: false,
+        installKind: "linux-package",
+        phase: "current",
+      },
+      {
+        checked: true,
+        updateAvailable: true,
+        latestVersion: "2026.7.5",
+        installKind: "linux-package",
+        phase: "available",
+      },
+    ]);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByRole("button", { name: /Update available/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Check for update" }));
+    await waitFor(() => expect(polling.getChecks()).toBe(3));
+    expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
   });
 
   it("restarts directly from the account update action", async () => {

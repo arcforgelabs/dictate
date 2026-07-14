@@ -310,7 +310,7 @@ function UpdatePill() {
       <div className="upd-more">
         {phase === "error" ? (
           <button className="upd-mini" onClick={s.runUpdate} title="Retry update">Retry</button>
-        ) : !busy ? (
+        ) : !busy && phase !== "restart" ? (
           <>
             <button className="upd-mini" onClick={s.dismissUpdate} title="Remind me on next launch">Later</button>
             <button className="upd-mini" onClick={s.skipUpdate} title="Skip this version">Skip</button>
@@ -2413,6 +2413,7 @@ export default function App() {
           startUpdate();
           return;
         }
+        if (next.updateAvailable) setUpdatePhase("available");
         if (next.updateAvailable && next.latestVersion) toast(`Dictate ${next.latestVersion} is available`);
         else if (next.checked) toast("You're on the latest version");
         else toast("Could not check for updates", { bad: true });
