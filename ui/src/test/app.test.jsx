@@ -906,6 +906,12 @@ describe("Quiet Console app (mock mode)", () => {
   });
 
   it.each(["Skip", "Later"])("explicit check shows available while %s remains suppressed", async (action) => {
+    const stored = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => stored.get(key) ?? null),
+      setItem: vi.fn((key, value) => stored.set(key, value)),
+      removeItem: vi.fn((key) => stored.delete(key)),
+    });
     const polling = mockPackagePolling([
       {
         checked: true,
