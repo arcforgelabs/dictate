@@ -2514,6 +2514,8 @@ export default function App() {
   const dismissUpdate = () => { setUpdateDismissed(true); };
   const runUpdate = () => {
     if (isUpdateBusyPhase(updatePhase)) return;
+    setSkippedVersion("");
+    try { localStorage.removeItem("dictate.skippedVersion"); } catch { /* ignore */ }
     if (updatePhase === "restart" || updatePhase === "restarting") {
       requestUpdateRestart("Restarting Dictate…");
       return;

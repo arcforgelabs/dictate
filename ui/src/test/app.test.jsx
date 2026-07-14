@@ -6,6 +6,7 @@ import { PRODUCT_DESTINATIONS } from "../productDestinations.js";
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   delete window.__DICTATE__;
   delete window.__TAURI__;
   delete window.EventSource;
@@ -732,9 +733,15 @@ describe("Quiet Console app (mock mode)", () => {
     );
   });
 
-  it("turns command-style updates into a same-position restart action", async () => {
+  it("clears a skipped version when account starts a command-style update", async () => {
     const sources = [];
     const invoke = vi.fn().mockResolvedValue(null);
+    const stored = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => stored.get(key) ?? null),
+      setItem: vi.fn((key, value) => stored.set(key, value)),
+      removeItem: vi.fn((key) => stored.delete(key)),
+    });
     let updateStarted = false;
     let commandPolls = 0;
     let releaseStart;
@@ -805,12 +812,14 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
     await screen.findByRole("button", { name: /Update available/i });
-    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(localStorage.getItem("dictate.skippedVersion")).toBe("2026.7.4-unstable.53.1");
     expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
     const accountUpdate = await screen.findByRole("button", { name: "Update" });
     fireEvent.click(accountUpdate);
+    expect(localStorage.getItem("dictate.skippedVersion")).toBeNull();
     const preparingButton = await screen.findByRole("button", { name: /Preparing update/i });
     expect(accountUpdate).toBeDisabled();
     await act(async () => { releaseStart(); });
