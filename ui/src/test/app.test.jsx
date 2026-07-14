@@ -31,6 +31,7 @@ function finishCapture() {
 function mockPackagePolling(statuses) {
   const sources = [];
   let checks = 0;
+  let resolvedChecks = 0;
   window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
   window.__TAURI__ = { core: { invoke: vi.fn() } };
   window.EventSource = class {
@@ -56,11 +57,22 @@ function mockPackagePolling(statuses) {
       const status = statuses[Math.min(checks, statuses.length - 1)];
       checks += 1;
       if (status instanceof Error) throw status;
-      return { ok: true, json: async () => status };
+      return {
+        ok: true,
+        json: async () => {
+          resolvedChecks += 1;
+          return status;
+        },
+      };
     }
     return { ok: true, json: async () => ({}) };
   });
-  return { sources, fetchSpy, getChecks: () => checks };
+  return {
+    sources,
+    fetchSpy,
+    getChecks: () => checks,
+    getResolvedChecks: () => resolvedChecks,
+  };
 }
 
 const ACTIVE_PRO = {
@@ -911,7 +923,8 @@ describe("Quiet Console app (mock mode)", () => {
     ]);
 
     render(<App />);
-    await waitFor(() => expect(polling.getChecks()).toBe(1));
+    await waitFor(() => expect(polling.getResolvedChecks()).toBe(1));
+    await act(async () => {});
     fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
     expect(await screen.findByRole("button", { name: /Update available/i })).toBeInTheDocument();
 
