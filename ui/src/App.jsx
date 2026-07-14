@@ -1631,6 +1631,15 @@ export default function App() {
       stopUpdatePolling();
       return;
     }
+    if (updatePollModeRef.current === "package" && status.checked && !mapped) {
+      setUpdatePhase(status.updateAvailable ? "available" : "idle");
+      setUpdateProgress(null);
+      setUpdateInstallStartedAt(null);
+      setUpdateInstallElapsed(null);
+      setUpdateErrorReason(null);
+      stopUpdatePolling();
+      return;
+    }
     if (updatePollModeRef.current === "command" && status.checked && !status.updateAvailable) {
       setUpdatePhase("restart");
       setUpdateProgress(null);

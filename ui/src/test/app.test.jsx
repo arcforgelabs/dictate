@@ -793,6 +793,60 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
   });
 
+  it("leaves preparing when package reservation resolves current", async () => {
+    const sources = [];
+    let checks = 0;
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        checks += 1;
+        return {
+          ok: true,
+          json: async () => checks === 1
+            ? {
+                checked: true,
+                updateAvailable: true,
+                installKind: "linux-package",
+                phase: "preparing",
+              }
+            : {
+                checked: true,
+                updateAvailable: false,
+                installKind: "linux-package",
+                phase: "current",
+              },
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    expect(await screen.findByRole("button", { name: /Preparing update/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Check for updates" }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
+    expect(checks).toBe(2);
+  });
+
   it("turns an expired command update poll into a retryable failure", async () => {
     const sources = [];
     let started = false;
