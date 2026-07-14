@@ -25,6 +25,12 @@ Row format (keep it to a few lines):
 
 ## Open
 
+- [ ] 2026-07-14 — Update pill: honest download/verify/install phases with persistent failure + Retry
+      code: ui/src/App.jsx (UpdatePill, update polling), ui/src/styles.css (.upd-reason), src/dictate/update_status.py → cloud: needs mapping
+      by: forge build lane · branch/commit: forge/update-progress @ 3e98ae9
+      why: in-app linux-package updates must show real byte progress, verification, install elapsed time, and retryable failures instead of fabricated percentages
+      notes: quiet pill placement unchanged; backend polls phase/progress/installStartedAt from process-local linux-package operation
+
 - [ ] 2026-07-13 — Push-to-talk HUD: compact listening indicator (mic + timer) replaces animated waveform
       code: ui/src/overlays.jsx (ListeningHUD), ui/src/styles.css (.hud-pill) → cloud: needs mapping
       by: forge build lane · branch/commit: forge/fix-dictation-workflows @ 10a50f8

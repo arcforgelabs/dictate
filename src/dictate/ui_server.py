@@ -1516,6 +1516,7 @@ class UiBackend:
             "missingDeps": status.missing_deps or [],
             "errorCode": status.error_code,
             "errorDetail": status.error_detail,
+            "installStartedAt": status.install_started_at,
         }
 
     def start_update(self) -> dict[str, Any]:
@@ -1538,6 +1539,7 @@ class UiBackend:
             "missingDeps": flow.missing_deps or [],
             "errorCode": flow.error_code,
             "errorDetail": flow.error_detail,
+            "installStartedAt": flow.install_started_at,
         }
 
     @staticmethod

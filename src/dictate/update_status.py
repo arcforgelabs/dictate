@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,8 +14,10 @@ from types import SimpleNamespace
 import subprocess
 import tempfile
 import sys
+import threading
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 from dictate.config import load_config
 from dictate.version import RELEASE_VERSION
@@ -49,6 +53,7 @@ class UpdateStatus:
     missing_deps: list[str] | None = None
     error_code: str | None = None
     error_detail: str | None = None
+    install_started_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,32 @@ class UpdateFlow:
     missing_deps: list[str] | None = None
     error_code: str | None = None
     error_detail: str | None = None
+    install_started_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    url: str
+    name: str
+    size: int | None
+    sha256: str | None
+
+
+@dataclass
+class _LinuxPackageOperation:
+    phase: str
+    step: str | None
+    progress: int | None
+    install_started_at: str | None
+    error_code: str | None
+    error_detail: str | None
+    target_version: str
+    thread: threading.Thread
+    lock: threading.Lock = threading.Lock()
+
+
+_linux_package_operation: _LinuxPackageOperation | None = None
+_linux_package_operation_guard = threading.RLock()
 
 
 def parse_calver(value: str | None) -> tuple[int, int, int, int] | None:
@@ -150,7 +181,7 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     try:
         latest, url = _fetch_latest_version(_update_channel_for_context(context), timeout=timeout)
         update_available = is_newer_version(latest, current_version)
-        return UpdateStatus(
+        status = UpdateStatus(
             current_version=current_version,
             latest_version=latest,
             update_available=update_available,
@@ -165,6 +196,7 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
             commands=_commands_for_context(context),
             missing_deps=[],
         )
+        return _apply_linux_package_operation(status)
     except Exception as exc:  # noqa: BLE001
         return UpdateStatus(
             current_version=current_version,
@@ -314,7 +346,8 @@ def _subprocess_env_for_tool(tool_path: str) -> dict[str, str]:
 
 
 def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
-    """Download the channel's .deb and install it via pkexec; the shell restarts."""
+    """Start a background .deb download, verify, and pkexec install."""
+    global _linux_package_operation
     if not shutil.which("pkexec"):
         return _missing_deps_flow(context, ["pkexec"])
     cfg = context["config"]
@@ -323,6 +356,44 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         or context.get("package_version")
         or RELEASE_VERSION
     )
+    with _linux_package_operation_guard:
+        op = _linux_package_operation
+        if op is not None and op.thread.is_alive():
+            snap = _linux_package_operation_snapshot(op)
+            return UpdateFlow(
+                mode="busy",
+                started=False,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase=str(snap["phase"]),
+                step=snap.get("step"),
+                progress=snap.get("progress"),
+                actions=list(snap.get("actions") or []),
+                commands=_commands_for_context(context),
+                missing_deps=[],
+                message="Update already in progress.",
+                error_code=snap.get("error_code"),
+                error_detail=snap.get("error_detail"),
+                install_started_at=snap.get("install_started_at"),
+            )
+        if op is not None and op.phase == "installed":
+            snap = _linux_package_operation_snapshot(op)
+            return UpdateFlow(
+                mode="installed",
+                started=True,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase="installed",
+                step="restart",
+                progress=100,
+                actions=["restart"],
+                commands={},
+                missing_deps=[],
+                message="Update installed — restart Dictate.",
+                install_started_at=snap.get("install_started_at"),
+            )
+        if op is not None and op.phase == "failed":
+            _clear_linux_package_operation()
     try:
         latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
         if not is_newer_version(latest, current_version):
@@ -339,7 +410,7 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
                 missing_deps=[],
                 message="Dictate is up to date.",
             )
-        asset_url, asset_name = _find_release_asset(
+        asset = _find_release_asset(
             DEB_ASSET_SUFFIX,
             release_tag=f"v{latest}",
         )
@@ -347,43 +418,36 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         return _update_failed(
             context, "no_asset", f"Could not find a .deb for this update channel: {exc}"
         )
-    try:
-        deb_path = _download_file(asset_url, asset_name)
-    except Exception as exc:  # noqa: BLE001
-        return _update_failed(context, "download_failed", str(exc))
-    try:
-        result = _install_deb(deb_path)
-    except Exception as exc:  # noqa: BLE001
-        return _update_failed(context, "install_failed", str(exc))
-    finally:
-        try:
-            deb_path.unlink()
-        except OSError:
-            pass
-    if result.returncode != 0:
-        detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
-        # pkexec returns 126 (dialog dismissed) / 127 (auth failed) on cancel.
-        code = "cancelled" if result.returncode in (126, 127) else "install_failed"
-        return _update_failed(context, code, detail)
-    try:
-        from dictate.config import set_installed_package_version
-
-        set_installed_package_version(str(latest))
-    except Exception:  # noqa: BLE001
-        # Install succeeded; version stamp is best-effort for the next check.
-        pass
+    operation = _LinuxPackageOperation(
+        phase="downloading",
+        step="download",
+        progress=0,
+        install_started_at=None,
+        error_code=None,
+        error_detail=None,
+        target_version=str(latest),
+        thread=threading.Thread(
+            target=_linux_package_update_worker,
+            args=(context, str(latest), asset),
+            name="dictate-linux-package-update",
+            daemon=True,
+        ),
+    )
+    with _linux_package_operation_guard:
+        _linux_package_operation = operation
+        operation.thread.start()
     return UpdateFlow(
-        mode="installed",
+        mode="working",
         started=True,
         platform=str(context["platform"]),
-        install_kind=str(context["install_kind"]),
-        phase="installed",
-        step="restart",
-        progress=100,
-        actions=["restart"],
-        commands={},
+        install_kind="linux-package",
+        phase="downloading",
+        step="download",
+        progress=0,
+        actions=["check"],
+        commands=_commands_for_context(context),
         missing_deps=[],
-        message="Update installed — restarting Dictate.",
+        message="Downloading update…",
     )
 
 
@@ -403,11 +467,11 @@ def _run_windows_direct_update(context: dict[str, object]) -> UpdateFlow:
                 phase="current", step="current", progress=100, actions=["check"],
                 commands=_commands_for_context(context), missing_deps=[], message="Dictate is up to date.",
             )
-        asset_url, asset_name = _find_release_asset(
+        asset = _find_release_asset(
             WINDOWS_INSTALLER_SUFFIX,
             release_tag=f"v{latest}",
         )
-        installer = _download_file(asset_url, asset_name)
+        installer = _download_file(asset.url, asset.name)
         subprocess.Popen([str(installer), "/S", "/UPDATE"])  # noqa: S603
     except Exception as exc:  # noqa: BLE001
         return _update_failed(context, "windows_update_failed", str(exc))
@@ -435,7 +499,7 @@ def _open_windows_store_updates(context: dict[str, object]) -> UpdateFlow:
 
 def _find_release_asset(
     suffix: str, *, timeout: float = 10.0, release_tag: str | None = None
-) -> tuple[str, str]:
+) -> ReleaseAsset:
     url = (
         f"https://api.github.com/repos/arcforgelabs/dictate/releases/tags/{release_tag}"
         if release_tag else LATEST_RELEASE_URL
@@ -446,10 +510,27 @@ def _find_release_asset(
         raise RuntimeError("release has no downloadable assets")
     for asset in assets:
         name = str(asset.get("name") or "")
-        url = asset.get("browser_download_url")
-        if name.endswith(suffix) and url:
-            return str(url), name
+        download_url = asset.get("browser_download_url")
+        if name.endswith(suffix) and download_url:
+            size = asset.get("size")
+            parsed_size = int(size) if isinstance(size, int) and size > 0 else None
+            return ReleaseAsset(
+                url=str(download_url),
+                name=name,
+                size=parsed_size,
+                sha256=_parse_github_asset_digest(asset),
+            )
     raise RuntimeError(f"no asset ending in {suffix}")
+
+
+def _parse_github_asset_digest(asset: dict[str, object]) -> str | None:
+    digest = asset.get("digest")
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        return None
+    hex_digest = digest.removeprefix("sha256:").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", hex_digest):
+        return hex_digest
+    return None
 
 
 def _download_file(url: str, name: str, *, timeout: float = _DOWNLOAD_TIMEOUT) -> Path:
@@ -460,6 +541,268 @@ def _download_file(url: str, name: str, *, timeout: float = _DOWNLOAD_TIMEOUT) -
     with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as fh:
         shutil.copyfileobj(response, fh)
     return dest
+
+
+def _download_release_asset_partial(
+    url: str,
+    name: str,
+    *,
+    expected_size: int | None,
+    progress_callback: Callable[[int | None], None] | None = None,
+    timeout: float = _DOWNLOAD_TIMEOUT,
+) -> Path:
+    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    partial = dest_dir / f"{name}.partial"
+    final = dest_dir / name
+    for path in (partial, final):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    request = urllib.request.Request(url, headers={"User-Agent": "Dictate updater"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        header_length = response.headers.get("Content-Length")
+        total = expected_size
+        if header_length:
+            try:
+                header_total = int(header_length)
+            except ValueError:
+                header_total = None
+            else:
+                if total is not None and header_total != total:
+                    raise RuntimeError(
+                        f"Content-Length mismatch: expected {total}, got {header_total}"
+                    )
+                if total is None:
+                    total = header_total
+        received = 0
+        with open(partial, "wb") as fh:
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                received += len(chunk)
+                if progress_callback is not None:
+                    if total and total > 0:
+                        progress_callback(min(99, int(received * 100 / total)))
+                    else:
+                        progress_callback(None)
+        if total is not None and received != total:
+            partial.unlink(missing_ok=True)
+            raise RuntimeError(f"Download incomplete: received {received} of {total} bytes")
+    if progress_callback is not None and total and total > 0:
+        progress_callback(100)
+    return partial
+
+
+def _finalize_verified_download(
+    partial: Path,
+    name: str,
+    *,
+    expected_sha256: str,
+) -> Path:
+    hasher = hashlib.sha256()
+    with open(partial, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 256), b""):
+            hasher.update(chunk)
+    digest_hex = hasher.hexdigest().lower()
+    if digest_hex != expected_sha256.lower():
+        partial.unlink(missing_ok=True)
+        raise RuntimeError("Download checksum mismatch")
+    final = partial.with_name(name)
+    try:
+        final.unlink()
+    except OSError:
+        pass
+    partial.replace(final)
+    return final
+
+
+def _cleanup_download_artifacts(name: str) -> None:
+    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
+    for path in (dest_dir / name, dest_dir / f"{name}.partial"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _linux_package_update_worker(
+    context: dict[str, object],
+    latest: str,
+    asset: ReleaseAsset,
+) -> None:
+    deb_path: Path | None = None
+    try:
+        if not asset.sha256:
+            raise RuntimeError("Release asset has no trusted SHA-256 digest")
+        _linux_package_set_phase("downloading", "download", progress=0)
+
+        def on_progress(progress: int | None) -> None:
+            _linux_package_set_phase("downloading", "download", progress=progress)
+
+        partial = _download_release_asset_partial(
+            asset.url,
+            asset.name,
+            expected_size=asset.size,
+            progress_callback=on_progress,
+        )
+        _linux_package_set_phase("verifying", "verify", progress=None)
+        deb_path = _finalize_verified_download(
+            partial,
+            asset.name,
+            expected_sha256=asset.sha256,
+        )
+        _linux_package_set_phase(
+            "installing",
+            "install",
+            progress=None,
+            install_started_at=datetime.now(timezone.utc).isoformat(),
+            touch_install_started_at=True,
+        )
+        result = _install_deb(deb_path)
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
+            code = "cancelled" if result.returncode in (126, 127) else "install_failed"
+            _linux_package_set_failed(code, detail)
+            return
+        try:
+            from dictate.config import set_installed_package_version
+
+            set_installed_package_version(str(latest))
+        except Exception:  # noqa: BLE001
+            pass
+        _linux_package_set_phase(
+            "installed",
+            "restart",
+            progress=100,
+            install_started_at=None,
+            touch_install_started_at=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        code = "download_failed"
+        message = str(exc)
+        lowered = message.casefold()
+        if "no trusted sha-256" in lowered:
+            code = "no_checksum"
+        elif "checksum" in lowered or "digest" in lowered:
+            code = "checksum_mismatch"
+        elif "incomplete" in lowered or "content-length" in lowered:
+            code = "download_incomplete"
+        _linux_package_set_failed(code, message)
+    finally:
+        if deb_path is not None:
+            try:
+                deb_path.unlink()
+            except OSError:
+                pass
+        _cleanup_download_artifacts(asset.name)
+
+
+def _linux_package_set_phase(
+    phase: str,
+    step: str | None,
+    *,
+    progress: int | None,
+    install_started_at: str | None = None,
+    touch_install_started_at: bool = False,
+) -> None:
+    with _linux_package_operation_guard:
+        op = _linux_package_operation
+        if op is None:
+            return
+        with op.lock:
+            op.phase = phase
+            op.step = step
+            op.progress = progress
+            if touch_install_started_at:
+                op.install_started_at = install_started_at
+            if phase != "failed":
+                op.error_code = None
+                op.error_detail = None
+
+
+def _linux_package_set_failed(code: str, detail: str) -> None:
+    with _linux_package_operation_guard:
+        op = _linux_package_operation
+        if op is None:
+            return
+        with op.lock:
+            op.phase = "failed"
+            op.step = "update"
+            op.progress = 0
+            op.error_code = code
+            op.error_detail = detail
+
+
+def _linux_package_operation_snapshot(
+    op: _LinuxPackageOperation | None = None,
+) -> dict[str, object] | None:
+    with _linux_package_operation_guard:
+        current = op if op is not None else _linux_package_operation
+        if current is None:
+            return None
+        with current.lock:
+            actions = _operation_actions(current.phase)
+            return {
+                "phase": current.phase,
+                "step": current.step,
+                "progress": current.progress,
+                "install_started_at": current.install_started_at,
+                "error_code": current.error_code,
+                "error_detail": current.error_detail,
+                "target_version": current.target_version,
+                "actions": actions,
+            }
+
+
+def _operation_actions(phase: str) -> list[str]:
+    if phase == "installed":
+        return ["restart"]
+    if phase == "failed":
+        return ["retry", "check", "open_release"]
+    if phase in {"downloading", "verifying", "installing"}:
+        return ["check"]
+    return ["check"]
+
+
+def _apply_linux_package_operation(status: UpdateStatus) -> UpdateStatus:
+    if status.install_kind != "linux-package":
+        return status
+    snapshot = _linux_package_operation_snapshot()
+    if snapshot is None:
+        return status
+    phase = str(snapshot["phase"])
+    keep_update_available = bool(status.update_available) or phase in {
+        "downloading",
+        "verifying",
+        "installing",
+        "failed",
+        "installed",
+    }
+    return replace(
+        status,
+        update_available=keep_update_available,
+        phase=phase,
+        step=snapshot.get("step"),
+        progress=snapshot.get("progress"),
+        install_started_at=snapshot.get("install_started_at"),
+        actions=list(snapshot.get("actions") or []),
+        error_code=snapshot.get("error_code"),
+        error_detail=snapshot.get("error_detail"),
+    )
+
+
+def _clear_linux_package_operation() -> None:
+    global _linux_package_operation
+    _linux_package_operation = None
+
+
+def get_linux_package_update_snapshot() -> dict[str, object] | None:
+    """Test hook for the in-process linux-package update operation."""
+    return _linux_package_operation_snapshot()
 
 
 def _install_deb(deb_path: Path) -> "subprocess.CompletedProcess[str]":

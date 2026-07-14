@@ -11,11 +11,15 @@ from unittest.mock import patch
 
 from dictate.config import Config
 from dictate.update_status import (
-    RELEASES_URL,
+    ReleaseAsset,
     check_update_status,
+    get_linux_package_update_snapshot,
     is_newer_version,
     parse_calver,
     start_update_flow,
+    _clear_linux_package_operation,
+    _download_release_asset_partial,
+    _finalize_verified_download,
 )
 from dictate.version import RELEASE_VERSION
 
@@ -34,7 +38,26 @@ class _FakeResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class _ImmediateThread:
+    def __init__(self, target=None, args=(), kwargs=None, **kw):  # noqa: ANN001, ARG001
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self) -> None:
+        if self._target:
+            self._target(*self._args, **self._kwargs)
+
+    def is_alive(self) -> bool:
+        return False
+
+
 class UpdateStatusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _clear_linux_package_operation()
+
+    def tearDown(self) -> None:
+        _clear_linux_package_operation()
     def test_parse_calver_accepts_optional_v_prefix(self) -> None:
         self.assertEqual(parse_calver("2026.5.18"), (2026, 5, 18, 0))
         self.assertEqual(parse_calver("v2026.5.19"), (2026, 5, 19, 0))
@@ -372,6 +395,12 @@ class UpdateStatusTests(unittest.TestCase):
 
     def test_linux_package_update_downloads_and_installs(self) -> None:
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        asset = ReleaseAsset(
+            url="https://example.test/Dictate_2099.1.2_amd64.deb",
+            name="Dictate_2099.1.2_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
         plat, roots, user = self._linux_package()
         with (
             plat,
@@ -386,28 +415,39 @@ class UpdateStatusTests(unittest.TestCase):
                 "dictate.update_status._fetch_latest_version",
                 return_value=("2026.7.4-unstable.2.1", "https://example.test"),
             ),
-            patch(
-                "dictate.update_status._find_release_asset",
-                return_value=("https://example.test/Dictate_2099.1.2_amd64.deb", "Dictate_2099.1.2_amd64.deb"),
-            ) as find,
-            patch("dictate.update_status._download_file", return_value=Path("/tmp/x.deb")) as dl,
+            patch("dictate.update_status._find_release_asset", return_value=asset) as find,
+            patch("dictate.update_status._download_release_asset_partial", return_value=Path("/tmp/x.deb.partial")) as dl,
+            patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")) as finalize,
             patch("dictate.update_status._install_deb", return_value=ok) as install,
+            patch("dictate.update_status._cleanup_download_artifacts"),
             patch("dictate.update_status.Path.unlink"),
             patch("dictate.config.set_installed_package_version") as stamp,
+            patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
             flow = start_update_flow()
+            snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "installed")
+        self.assertEqual(flow.mode, "working")
         self.assertTrue(flow.started)
+        self.assertEqual(flow.phase, "downloading")
         self.assertEqual(flow.install_kind, "linux-package")
-        self.assertIn("restart", flow.actions or [])
         find.assert_called_once_with("_amd64.deb", release_tag="v2026.7.4-unstable.2.1")
         dl.assert_called_once()
+        finalize.assert_called_once()
         install.assert_called_once()
         stamp.assert_called_once_with("2026.7.4-unstable.2.1")
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["phase"], "installed")
+        self.assertIn("restart", snapshot["actions"])
 
     def test_linux_package_update_reports_cancelled(self) -> None:
         cancelled = subprocess.CompletedProcess(args=[], returncode=126, stdout="", stderr="dismissed")
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
         plat, roots, user = self._linux_package()
         with (
             plat,
@@ -422,19 +462,21 @@ class UpdateStatusTests(unittest.TestCase):
                 "dictate.update_status._fetch_latest_version",
                 return_value=("2026.7.5", "https://example.test"),
             ),
-            patch(
-                "dictate.update_status._find_release_asset",
-                return_value=("https://example.test/x_amd64.deb", "x_amd64.deb"),
-            ),
-            patch("dictate.update_status._download_file", return_value=Path("/tmp/x.deb")),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status._download_release_asset_partial", return_value=Path("/tmp/x.deb.partial")),
+            patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")),
             patch("dictate.update_status._install_deb", return_value=cancelled),
+            patch("dictate.update_status._cleanup_download_artifacts"),
             patch("dictate.update_status.Path.unlink"),
+            patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
             flow = start_update_flow()
+            snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "error")
-        self.assertFalse(flow.started)
-        self.assertEqual(flow.error_code, "cancelled")
+        self.assertEqual(flow.mode, "working")
+        self.assertTrue(flow.started)
+        self.assertEqual(snapshot["phase"], "failed")
+        self.assertEqual(snapshot["error_code"], "cancelled")
 
     def test_linux_package_update_requires_pkexec(self) -> None:
         plat, roots, user = self._linux_package()
@@ -471,13 +513,19 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(calls[0][1], str(root))
 
     def test_windows_direct_update_downloads_selected_channel_installer(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/Dictate-setup.exe",
+            name="Dictate-setup.exe",
+            size=None,
+            sha256=None,
+        )
         with (
             patch("dictate.update_status.sys.platform", "win32"),
             patch("dictate.update_status._candidate_source_roots", return_value=[]),
             patch("dictate.update_status._windows_distribution", return_value="direct"),
             patch("dictate.update_status.load_config", return_value=Config(update_channel="unstable", installed_package_version="2026.7.4-unstable.1.1")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.4-unstable.2.1", "https://example.test")),
-            patch("dictate.update_status._find_release_asset", return_value=("https://example.test/Dictate-setup.exe", "Dictate-setup.exe")) as find,
+            patch("dictate.update_status._find_release_asset", return_value=asset) as find,
             patch("dictate.update_status._download_file", return_value=Path("C:/Temp/Dictate-setup.exe")),
             patch("dictate.update_status.subprocess.Popen") as popen,
         ):
@@ -489,6 +537,184 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(flow.install_kind, "windows-direct")
         find.assert_called_once_with("-setup.exe", release_tag="v2026.7.4-unstable.2.1")
         popen.assert_called_once_with([str(Path("C:/Temp/Dictate-setup.exe")), "/S", "/UPDATE"])
+
+    def test_download_progress_uses_content_length(self) -> None:
+        payload = b"abcd"
+        seen: list[int | None] = []
+
+        class _Body:
+            headers = {"Content-Length": str(len(payload))}
+
+            def read(self, size=-1):  # noqa: ANN001
+                if not hasattr(self, "_done"):
+                    self._done = True
+                    return payload
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+                return None
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.update_status.tempfile.gettempdir", return_value=d):
+                with patch("dictate.update_status.urllib.request.urlopen", return_value=_Body()):
+                    partial = _download_release_asset_partial(
+                        "https://example.test/pkg.deb",
+                        "pkg.deb",
+                        expected_size=len(payload),
+                        progress_callback=seen.append,
+                    )
+            self.assertTrue(partial.is_file())
+            self.assertEqual(seen[-1], 100)
+
+    def test_download_rejects_byte_count_mismatch_and_cleans_partial(self) -> None:
+        class _ShortBody:
+            headers = {"Content-Length": "10"}
+
+            def read(self, size=-1):  # noqa: ANN001
+                if not hasattr(self, "_done"):
+                    self._done = True
+                    return b"abc"
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+                return None
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("dictate.update_status.tempfile.gettempdir", return_value=d):
+                with patch("dictate.update_status.urllib.request.urlopen", return_value=_ShortBody()):
+                    with self.assertRaisesRegex(RuntimeError, "Download incomplete"):
+                        _download_release_asset_partial(
+                            "https://example.test/pkg.deb",
+                            "pkg.deb",
+                            expected_size=10,
+                        )
+            partial = Path(d) / "dictate-update" / "pkg.deb.partial"
+            self.assertFalse(partial.exists())
+
+    def test_checksum_mismatch_blocks_installation(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            partial = Path(d) / "pkg.deb.partial"
+            partial.write_bytes(b"abc")
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                _finalize_verified_download(
+                    partial,
+                    "pkg.deb",
+                    expected_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                )
+            self.assertFalse(partial.exists())
+
+    def test_linux_package_update_surfaces_background_phases(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        phases: list[str] = []
+        plat, roots, user = self._linux_package()
+        import dictate.update_status as update_status_mod
+
+        real_set_phase = update_status_mod._linux_package_set_phase
+
+        def record_phase(*args, **kwargs):  # noqa: ANN002
+            phases.append(args[0])
+            return real_set_phase(*args, **kwargs)
+
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
+            patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status._download_release_asset_partial", return_value=Path("/tmp/x.deb.partial")),
+            patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")),
+            patch("dictate.update_status._install_deb", return_value=ok),
+            patch("dictate.update_status._cleanup_download_artifacts"),
+            patch("dictate.update_status.Path.unlink"),
+            patch("dictate.update_status._linux_package_set_phase", side_effect=record_phase),
+            patch("dictate.update_status.threading.Thread", _ImmediateThread),
+        ):
+            start = start_update_flow()
+            status = check_update_status()
+
+        self.assertEqual(start.phase, "downloading")
+        self.assertIn("downloading", phases)
+        self.assertIn("verifying", phases)
+        self.assertIn("installing", phases)
+        self.assertEqual(status.phase, "installed")
+
+    def test_linux_package_duplicate_start_is_rejected(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        plat, roots, user = self._linux_package()
+
+        class _SlowThread:
+            def __init__(self, target=None, args=(), kwargs=None, **kw):  # noqa: ANN001, ARG001
+                self._target = target
+                self._args = args
+
+            def start(self) -> None:
+                return
+
+            def is_alive(self) -> bool:
+                return True
+
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
+            patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status.threading.Thread", _SlowThread),
+        ):
+            first = start_update_flow()
+            second = start_update_flow()
+
+        self.assertEqual(first.mode, "working")
+        self.assertEqual(second.mode, "busy")
+        self.assertFalse(second.started)
+
+    def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=None,
+            sha256=None,
+        )
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
+            patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status.threading.Thread", _ImmediateThread),
+        ):
+            start_update_flow()
+            failed = get_linux_package_update_snapshot()
+            retry = start_update_flow()
+
+        self.assertEqual(failed["phase"], "failed")
+        self.assertEqual(failed["error_code"], "no_checksum")
+        self.assertEqual(retry.mode, "working")
+        self.assertTrue(retry.started)
 
     def test_windows_store_update_opens_store_and_ignores_unstable_channel(self) -> None:
         with (

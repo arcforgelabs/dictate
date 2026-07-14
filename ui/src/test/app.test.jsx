@@ -1774,4 +1774,229 @@ describe("Provider resilience — graceful degradation", () => {
     expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
   });
+
+  it("shows honest linux-package update phases without fake percentages", async () => {
+    const sources = [];
+    let launchChecked = false;
+    let updatePolls = 0;
+    const installStartedAt = new Date(Date.now() - 18_000).toISOString();
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            installedPackageVersion: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        if (!launchChecked) {
+          launchChecked = true;
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "available",
+            }),
+          };
+        }
+        updatePolls += 1;
+        if (updatePolls === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "downloading",
+              progress: 42,
+            }),
+          };
+        }
+        if (updatePolls === 2) {
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "verifying",
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            currentVersion: "2026.7.4",
+            latestVersion: "2026.7.5",
+            updateAvailable: true,
+            checked: true,
+            installKind: "linux-package",
+            phase: "installing",
+            installStartedAt,
+          }),
+        };
+      }
+      if (path === "/api/update" && opts.method === "POST") {
+        updatePolls = 0;
+        return {
+          ok: true,
+          json: async () => ({
+            mode: "working",
+            started: true,
+            installKind: "linux-package",
+            phase: "downloading",
+            progress: 0,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    const updateButton = await screen.findByRole("button", { name: /Update available/i });
+    fireEvent.click(updateButton);
+    expect(await screen.findByRole("button", { name: /Downloading/i })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Downloading… 42%/i })).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(screen.queryByRole("button", { name: /Updating \d+%/i })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Verifying download/i })).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Installing update… \d{2}:\d{2}/i })).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }, 15000);
+
+  it("keeps update failure reason visible and retries from the pill", async () => {
+    const sources = [];
+    let attempts = 0;
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            installedPackageVersion: "2026.7.4",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        if (attempts === 0) {
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "available",
+            }),
+          };
+        }
+        if (attempts === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "failed",
+              errorDetail: "Download checksum mismatch",
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            currentVersion: "2026.7.4",
+            latestVersion: "2026.7.5",
+            updateAvailable: true,
+            checked: true,
+            installKind: "linux-package",
+            phase: "downloading",
+            progress: 0,
+          }),
+        };
+      }
+      if (path === "/api/update" && opts.method === "POST") {
+        attempts += 1;
+        if (attempts === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              mode: "error",
+              started: false,
+              installKind: "linux-package",
+              phase: "failed",
+              errorDetail: "Download checksum mismatch",
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            mode: "working",
+            started: true,
+            installKind: "linux-package",
+            phase: "downloading",
+            progress: 0,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    const updateButton = await screen.findByRole("button", { name: /Update available/i });
+    fireEvent.click(updateButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Download checksum mismatch");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    expect(await screen.findByRole("button", { name: /Downloading/i })).toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
 });

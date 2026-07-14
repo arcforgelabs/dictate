@@ -231,12 +231,45 @@ function PrivacyPill() {
    Skip suppresses until a newer version; Later returns on next launch. ─────── */
 const UPDATE_LABEL = {
   available: "Update available",
-  preparing: "Preparing update…",
-  ready: "Update & restart",
-  installing: "Updating…",
+  downloading: "Downloading…",
+  verifying: "Verifying download…",
+  installing: "Installing update…",
+  working: "Updating…",
   restart: "Restart Dictate",
+  restarting: "Restarting…",
   error: "Update failed",
 };
+
+function formatUpdateElapsed(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function updateLabelForPhase(phase, progress, installElapsed) {
+  if (phase === "downloading") {
+    return Number.isFinite(progress) ? `Downloading… ${Math.round(progress)}%` : "Downloading…";
+  }
+  if (phase === "installing") {
+    return Number.isFinite(installElapsed)
+      ? `Installing update… ${formatUpdateElapsed(installElapsed)}`
+      : "Installing update…";
+  }
+  return UPDATE_LABEL[phase] || "Update available";
+}
+
+function mapBackendUpdatePhase(status) {
+  const phase = status?.phase;
+  if (phase === "downloading") return "downloading";
+  if (phase === "verifying") return "verifying";
+  if (phase === "installing") return "installing";
+  if (phase === "installed" || status?.step === "restart") return "restart";
+  if (phase === "failed") return "error";
+  if (phase === "working") return "working";
+  return null;
+}
+
 function UpdatePill() {
   const s = useStore();
   if (!s.updateVisible) {
@@ -256,25 +289,37 @@ function UpdatePill() {
     );
   }
   const phase = s.updatePhase;
-  const label = phase === "installing" && Number.isFinite(s.updateProgress)
-    ? `Updating ${Math.max(1, Math.min(99, Math.round(s.updateProgress)))}%`
-    : (UPDATE_LABEL[phase] || "Update available");
+  const label = updateLabelForPhase(phase, s.updateProgress, s.updateInstallElapsed);
+  const busy = phase === "downloading" || phase === "verifying" || phase === "installing" || phase === "working";
   return (
     <div className={"updpill phase-" + phase}>
-      {/* Revealed to the LEFT on proximity so the primary button never moves. */}
       <div className="upd-more">
-        <button className="upd-mini" onClick={s.dismissUpdate} title="Remind me on next launch">Later</button>
-        <button className="upd-mini" onClick={s.skipUpdate} title="Skip this version">Skip</button>
+        {phase === "error" ? (
+          <button className="upd-mini" onClick={s.runUpdate} title="Retry update">Retry</button>
+        ) : (
+          <>
+            <button className="upd-mini" onClick={s.dismissUpdate} title="Remind me on next launch">Later</button>
+            <button className="upd-mini" onClick={s.skipUpdate} title="Skip this version">Skip</button>
+          </>
+        )}
       </div>
       <button
         className="upd-main"
         onClick={s.runUpdate}
-        disabled={phase === "installing"}
-        title={phase === "restart" ? "Restart Dictate" : phase === "ready" ? "Install the update and restart" : "Update Dictate"}
+        disabled={busy}
+        title={
+          phase === "restart" ? "Restart Dictate"
+            : phase === "error" ? "Retry update"
+              : busy ? label
+                : "Update Dictate"
+        }
       >
         <span className="upd-dot" aria-hidden="true" />
         <span className="upd-label">{label}</span>
       </button>
+      {phase === "error" && s.updateErrorReason ? (
+        <span className="upd-reason" role="status">{s.updateErrorReason}</span>
+      ) : null}
     </div>
   );
 }
@@ -1406,6 +1451,9 @@ export default function App() {
   // The update prepares in the background so the click is instant once "ready".
   const [updatePhase, setUpdatePhase] = useState("idle");
   const [updateProgress, setUpdateProgress] = useState(null);
+  const [updateInstallStartedAt, setUpdateInstallStartedAt] = useState(null);
+  const [updateInstallElapsed, setUpdateInstallElapsed] = useState(null);
+  const [updateErrorReason, setUpdateErrorReason] = useState(null);
   // Skip persists across launches (suppress until a newer version); Dismiss is session-only.
   const [skippedVersion, setSkippedVersion] = useState(() => {
     try { return (typeof localStorage !== "undefined" && localStorage.getItem("dictate.skippedVersion")) || null; }
@@ -1491,9 +1539,90 @@ export default function App() {
   const archiveTimersRef = useRef(new Map());
   const currentNoteRef = useRef(null); currentNoteRef.current = currentNote;
   const expandedFromRef = useRef("capture"); expandedFromRef.current = expandedFrom;
+  const updatePollRef = useRef(null);
+  const updatePollModeRef = useRef(null);
+
+  const stopUpdatePolling = () => {
+    if (updatePollRef.current) {
+      clearInterval(updatePollRef.current);
+      updatePollRef.current = null;
+    }
+    updatePollModeRef.current = null;
+  };
+
+  const applyPolledUpdateStatus = (status) => {
+    if (!status) return;
+    setUpdateStatus((u) => ({ ...u, ...status, checking: false, updating: false }));
+    const mapped = mapBackendUpdatePhase(status);
+    if (mapped === "downloading") {
+      setUpdatePhase("downloading");
+      setUpdateProgress(Number.isFinite(status.progress) ? status.progress : null);
+      setUpdateErrorReason(null);
+      return;
+    }
+    if (mapped === "verifying") {
+      setUpdatePhase("verifying");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      return;
+    }
+    if (mapped === "installing") {
+      setUpdatePhase("installing");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      if (status.installStartedAt) setUpdateInstallStartedAt(status.installStartedAt);
+      return;
+    }
+    if (mapped === "restart") {
+      setUpdatePhase("restart");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      stopUpdatePolling();
+      return;
+    }
+    if (mapped === "error") {
+      setUpdatePhase("error");
+      setUpdateProgress(null);
+      setUpdateErrorReason(status.errorDetail || status.error || "Update failed");
+      stopUpdatePolling();
+      return;
+    }
+    if (updatePollModeRef.current === "command" && status.checked && !status.updateAvailable) {
+      setUpdatePhase("restart");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      stopUpdatePolling();
+    }
+  };
+
+  const startUpdatePolling = (mode = "package") => {
+    stopUpdatePolling();
+    updatePollModeRef.current = mode;
+    updatePollRef.current = setInterval(() => {
+      if (!ipc.isLive()) return;
+      ipc.checkUpdates().then(applyPolledUpdateStatus).catch(() => {});
+    }, 1000);
+  };
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.setAttribute("data-ambient", ambient ? "on" : "off"); }, [ambient]);
+
+  useEffect(() => {
+    if (updatePhase !== "installing" || !updateInstallStartedAt) {
+      if (updatePhase !== "installing") setUpdateInstallElapsed(null);
+      return;
+    }
+    const started = Date.parse(updateInstallStartedAt);
+    const tick = () => {
+      if (!Number.isFinite(started)) return;
+      setUpdateInstallElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [updatePhase, updateInstallStartedAt]);
+
+  useEffect(() => () => stopUpdatePolling(), []);
 
   // ---- note-recording elapsed timer ----
   useEffect(() => {
@@ -2172,6 +2301,7 @@ export default function App() {
   };
   const startUpdate = () => {
     setUpdateStatus((u) => ({ ...u, updating: true, error: null }));
+    setUpdateErrorReason(null);
     if (!ipc.isLive()) {
       window.open("https://github.com/arcforgelabs/dictate/releases", "_blank", "noopener,noreferrer");
       setUpdateStatus((u) => ({ ...u, updating: false }));
@@ -2181,77 +2311,49 @@ export default function App() {
     ipc.startUpdate()
       .then((flow) => {
         setUpdateStatus((u) => ({ ...u, updating: false }));
-        // Installed in-app: bring the new shell + engine up together.
         if (flow?.mode === "installed" || (flow?.actions || []).includes("restart")) {
+          setUpdatePhase("restarting");
           toast(flow?.message || "Update installed — restarting…");
           ipc.restartApp();
           return;
         }
-        if (flow?.mode === "error") {
+        if (flow?.mode === "error" || flow?.phase === "failed") {
           const detail = flow.errorDetail || flow.message || "Could not complete the update";
           setUpdateStatus((u) => ({ ...u, error: detail }));
           setUpdatePhase("error");
+          setUpdateErrorReason(detail);
           toast(flow?.message || "Could not complete the update", { bad: true });
           return;
         }
+        if (flow?.mode === "busy") {
+          applyPolledUpdateStatus(flow);
+          startUpdatePolling(flow?.installKind === "linux-package" ? "package" : "command");
+          return;
+        }
+        if (flow?.started && flow?.installKind === "linux-package") {
+          applyPolledUpdateStatus(flow);
+          startUpdatePolling("package");
+          return;
+        }
         if (flow?.mode === "command" && flow?.started) {
-          waitForUpdateReady();
+          setUpdatePhase("working");
+          setUpdateProgress(null);
+          startUpdatePolling("command");
         } else {
           setUpdatePhase(flow?.started ? "available" : "idle");
         }
         if (flow?.url) {
           window.open(flow.url, "_blank", "noopener,noreferrer");
         }
-        toast(flow?.message || (flow?.started ? "Update started" : "Opened latest release"));
+        if (flow?.started) toast(flow?.message || "Update started");
+        else toast(flow?.message || "Opened latest release");
       })
       .catch((e) => {
         setUpdateStatus((u) => ({ ...u, updating: false, error: e.message || "Could not start update" }));
         setUpdatePhase("error");
+        setUpdateErrorReason(e.message || "Could not start update");
         toast("Could not start update", { bad: true });
       });
-  };
-  const waitForUpdateReady = (attempt = 0) => {
-    const maxAttempts = 300;
-    const progress = Math.min(99, 5 + Math.floor((attempt / maxAttempts) * 94));
-    setUpdatePhase("installing");
-    setUpdateProgress(progress);
-    setTimeout(() => {
-      if (!ipc.isLive()) {
-        if (attempt < maxAttempts) waitForUpdateReady(attempt + 1);
-        else {
-          setUpdatePhase("available");
-          setUpdateProgress(null);
-          toast("Update is still running");
-        }
-        return;
-      }
-      ipc.checkUpdates()
-        .then((status) => {
-          const next = { ...(status || {}), updating: false, checking: false };
-          setUpdateStatus(next);
-          if (next.checked && !next.updateAvailable) {
-            setUpdateProgress(100);
-            setUpdatePhase("restart");
-            toast("Update ready — restart Dictate");
-            return;
-          }
-          if (attempt < maxAttempts) {
-            waitForUpdateReady(attempt + 1);
-          } else {
-            setUpdatePhase(next.updateAvailable ? "available" : "restart");
-            setUpdateProgress(next.updateAvailable ? null : 100);
-            toast(next.updateAvailable ? "Update is still running" : "Update ready — restart Dictate");
-          }
-        })
-        .catch(() => {
-          if (attempt < maxAttempts) waitForUpdateReady(attempt + 1);
-          else {
-            setUpdatePhase("available");
-            setUpdateProgress(null);
-            toast("Could not confirm the update finished", { bad: true });
-          }
-        });
-    }, attempt === 0 ? 2500 : 2000);
   };
   const mockDoctor = () => ({
     ok: true,
@@ -2279,51 +2381,69 @@ export default function App() {
   const skipUpdate = () => {
     const v = updateStatus.latestVersion;
     if (v) { setSkippedVersion(v); try { localStorage.setItem("dictate.skippedVersion", v); } catch { /* ignore */ } }
+    stopUpdatePolling();
     setUpdatePhase("idle");
     setUpdateProgress(null);
+    setUpdateErrorReason(null);
     toast("Skipped this version");
   };
   const dismissUpdate = () => { setUpdateDismissed(true); };
   const runUpdate = () => {
-    if (updatePhase === "installing") return;
-    if (updatePhase === "restart") {
+    if (updatePhase === "downloading" || updatePhase === "verifying" || updatePhase === "installing" || updatePhase === "working") return;
+    if (updatePhase === "restart" || updatePhase === "restarting") {
+      setUpdatePhase("restarting");
       toast("Restarting Dictate…");
       ipc.restartApp();
       return;
     }
-    setUpdatePhase("installing");
-    setUpdateProgress(1);
     if (!ipc.isLive()) {
-      // Mock: can't actually restart a browser tab — simulate the install + handoff.
-      setTimeout(() => { toast("Updated — restarting…"); setUpdateDismissed(true); setUpdatePhase("idle"); setUpdateProgress(null); }, 1600);
+      setUpdatePhase("working");
+      setTimeout(() => {
+        toast("Updated — restarting…");
+        setUpdateDismissed(true);
+        setUpdatePhase("idle");
+        setUpdateProgress(null);
+      }, 1600);
       return;
     }
-    startUpdate(); // download (if not prepared) → pkexec install → restart_app
+    setUpdateProgress(null);
+    setUpdateInstallStartedAt(null);
+    setUpdateInstallElapsed(null);
+    setUpdateErrorReason(null);
+    startUpdate();
   };
 
   // ---- launch-time update flow: silent check, prepare in the background ----
   useEffect(() => {
     if (!ipc.isLive()) {
-      // Mock so the affordance is reviewable on the dev server: available → preparing → ready.
       const t1 = setTimeout(() => {
         setUpdateStatus((u) => ({ ...u, updateAvailable: true, latestVersion: "2026.7.1", checked: true }));
         setUpdatePhase((p) => (p === "idle" ? "available" : p));
       }, 900);
-      const t2 = setTimeout(() => setUpdatePhase((p) => (p === "available" ? "preparing" : p)), 2600);
-      const t3 = setTimeout(() => setUpdatePhase((p) => (p === "preparing" ? "ready" : p)), 5200);
-      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+      return () => { clearTimeout(t1); };
     }
-    // Live: silent check (no toast); surface the pill if an update exists.
     let cancelled = false;
     ipc.checkUpdates().then((st) => {
       if (cancelled || !st) return;
       setUpdateStatus((u) => ({ ...u, ...st }));
       if (st.installKind === "windows-store") setUpdateChannel("stable");
+      const mapped = mapBackendUpdatePhase(st);
+      if (mapped === "error") {
+        setUpdatePhase("error");
+        setUpdateErrorReason(st.errorDetail || st.error || "Update failed");
+        return;
+      }
+      if (mapped === "downloading" || mapped === "verifying" || mapped === "installing") {
+        applyPolledUpdateStatus(st);
+        startUpdatePolling("package");
+        return;
+      }
+      if (mapped === "restart") {
+        setUpdatePhase("restart");
+        return;
+      }
       if (!st.updateAvailable) return;
       setUpdatePhase("available");
-      // TODO(backend): a /api/update/prepare endpoint can pre-download in the
-      // background and flip the phase to "ready"; until then the Update click
-      // runs prepare+install in one step via startUpdate().
     }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2402,7 +2522,15 @@ export default function App() {
   // The pill shows while an update exists or while a completed update is waiting
   // for a clean shell+engine restart.
   const updateVisible = updatePhase !== "idle" && !updateDismissed
-    && (!!updateStatus.updateAvailable || updatePhase === "restart")
+    && (
+      !!updateStatus.updateAvailable
+      || updatePhase === "restart"
+      || updatePhase === "error"
+      || updatePhase === "downloading"
+      || updatePhase === "verifying"
+      || updatePhase === "installing"
+      || updatePhase === "working"
+    )
     && (!skippedVersion || updateStatus.latestVersion !== skippedVersion);
 
   const store = {
@@ -2417,7 +2545,7 @@ export default function App() {
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
     runDoctor, version, updateChannel, setUpdateChannel, installedPackageVersion, setInstalledPackageVersion, updateStatus, checkUpdates, startUpdate, platform,
     // Update affordance
-    updatePhase, updateProgress, updateVisible, runUpdate, skipUpdate, dismissUpdate,
+    updatePhase, updateProgress, updateInstallElapsed, updateErrorReason, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
     noteElapsed, reduced, audioLevel, live,
     noteView, setNoteView, currentNote, setCurrentNote,
