@@ -834,6 +834,35 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(retry.started)
         self.assertEqual(attempts, 2)
 
+    def test_linux_package_asset_failure_keeps_target_version_and_retry_action(self) -> None:
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.5", "https://example.test"),
+            ),
+            patch(
+                "dictate.update_status._find_release_asset",
+                side_effect=RuntimeError("asset missing"),
+            ),
+        ):
+            flow = start_update_flow()
+            status = check_update_status()
+
+        self.assertEqual(flow.phase, "failed")
+        self.assertIn("retry", flow.actions)
+        self.assertEqual(status.phase, "failed")
+        self.assertEqual(status.latest_version, "2026.7.5")
+        self.assertIn("retry", status.actions)
+
     def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",

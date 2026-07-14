@@ -265,6 +265,7 @@ function mapBackendUpdatePhase(status) {
   if (phase === "verifying") return "verifying";
   if (phase === "installing") return "installing";
   if (phase === "installed" || status?.step === "restart") return "restart";
+  if (phase === "failed" && status?.errorCode === "check_failed") return "check-error";
   if (phase === "failed") return "error";
   if (phase === "working") return "working";
   return null;
@@ -296,12 +297,12 @@ function UpdatePill() {
       <div className="upd-more">
         {phase === "error" ? (
           <button className="upd-mini" onClick={s.runUpdate} title="Retry update">Retry</button>
-        ) : (
+        ) : !busy ? (
           <>
             <button className="upd-mini" onClick={s.dismissUpdate} title="Remind me on next launch">Later</button>
             <button className="upd-mini" onClick={s.skipUpdate} title="Skip this version">Skip</button>
           </>
-        )}
+        ) : null}
       </div>
       <button
         className="upd-main"
@@ -1541,11 +1542,13 @@ export default function App() {
   const expandedFromRef = useRef("capture"); expandedFromRef.current = expandedFrom;
   const updatePollRef = useRef(null);
   const updatePollModeRef = useRef(null);
+  const updatePollGenerationRef = useRef(0);
   const updateRestartRequestedRef = useRef(false);
 
   const stopUpdatePolling = () => {
+    updatePollGenerationRef.current += 1;
     if (updatePollRef.current) {
-      clearInterval(updatePollRef.current);
+      clearTimeout(updatePollRef.current);
       updatePollRef.current = null;
     }
     updatePollModeRef.current = null;
@@ -1572,9 +1575,10 @@ export default function App() {
   };
 
   const applyPolledUpdateStatus = (status) => {
-    if (!status) return;
+    if (!status || updateRestartRequestedRef.current) return;
     setUpdateStatus((u) => ({ ...u, ...status, checking: false, updating: false }));
     const mapped = mapBackendUpdatePhase(status);
+    if (mapped === "check-error") return;
     if (mapped === "downloading") {
       setUpdatePhase("downloading");
       setUpdateProgress(Number.isFinite(status.progress) ? status.progress : null);
@@ -1616,10 +1620,23 @@ export default function App() {
   const startUpdatePolling = (mode = "package") => {
     stopUpdatePolling();
     updatePollModeRef.current = mode;
-    updatePollRef.current = setInterval(() => {
-      if (!ipc.isLive()) return;
-      ipc.checkUpdates().then(applyPolledUpdateStatus).catch(() => {});
-    }, 1000);
+    const generation = updatePollGenerationRef.current;
+    const poll = async () => {
+      if (generation !== updatePollGenerationRef.current || updateRestartRequestedRef.current) return;
+      if (ipc.isLive()) {
+        try {
+          const status = await ipc.checkUpdates();
+          if (generation !== updatePollGenerationRef.current || updateRestartRequestedRef.current) return;
+          applyPolledUpdateStatus(status);
+        } catch {
+          // Transient discovery failures do not end an active polling loop.
+        }
+      }
+      if (generation === updatePollGenerationRef.current && updatePollModeRef.current) {
+        updatePollRef.current = setTimeout(poll, 1000);
+      }
+    };
+    updatePollRef.current = setTimeout(poll, 1000);
   };
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
@@ -2442,6 +2459,7 @@ export default function App() {
       setUpdateStatus((u) => ({ ...u, ...st }));
       if (st.installKind === "windows-store") setUpdateChannel("stable");
       const mapped = mapBackendUpdatePhase(st);
+      if (mapped === "check-error") return;
       if (mapped === "error") {
         setUpdatePhase("error");
         setUpdateErrorReason(st.errorDetail || st.error || "Update failed");

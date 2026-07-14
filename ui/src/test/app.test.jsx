@@ -701,6 +701,7 @@ describe("Quiet Console app (mock mode)", () => {
     const sources = [];
     const invoke = vi.fn().mockResolvedValue(null);
     let updateStarted = false;
+    let commandPolls = 0;
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.__TAURI__ = { core: { invoke } };
     window.EventSource = class {
@@ -724,6 +725,21 @@ describe("Quiet Console app (mock mode)", () => {
         };
       }
       if (path === "/api/update-status") {
+        if (updateStarted) {
+          commandPolls += 1;
+          if (commandPolls === 1) {
+            return {
+              ok: true,
+              json: async () => ({
+                checked: false,
+                updateAvailable: false,
+                phase: "failed",
+                errorCode: "check_failed",
+                errorDetail: "temporary registry failure",
+              }),
+            };
+          }
+        }
         return {
           ok: true,
           json: async () => ({
@@ -754,6 +770,8 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(updateButton);
     expect(await screen.findByRole("button", { name: /Updating/i })).toBe(updateButton);
     expect(screen.queryByRole("button", { name: /Restart Dictate/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
 
     const restartButton = await screen.findByRole("button", { name: /Restart Dictate/i }, { timeout: 4000 });
     expect(restartButton).toBe(updateButton);
@@ -761,6 +779,51 @@ describe("Quiet Console app (mock mode)", () => {
 
     expect(await screen.findByRole("button", { name: /Restarting/i })).toBe(updateButton);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
+  });
+
+  it("keeps launch discovery failures out of the active-update failure pill", async () => {
+    const sources = [];
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2026.7.4",
+            updateChannel: "stable",
+            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+            history: [],
+            dictatePro: { signedIn: false, account: null },
+            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+          }),
+        };
+      }
+      if (path === "/api/update-status") {
+        return {
+          ok: true,
+          json: async () => ({
+            checked: false,
+            updateAvailable: false,
+            phase: "failed",
+            errorCode: "check_failed",
+            errorDetail: "offline",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
+    expect(screen.queryByText("Update failed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
   it("lets Dictate Pro users switch to Beta updates", async () => {
@@ -1895,6 +1958,8 @@ describe("Provider resilience — graceful degradation", () => {
     const updateButton = await screen.findByRole("button", { name: /Update available/i });
     fireEvent.click(updateButton);
     expect(await screen.findByRole("button", { name: /Downloading/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Downloading… 42%/i })).toBeInTheDocument();

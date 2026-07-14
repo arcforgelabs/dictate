@@ -439,6 +439,8 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         _linux_package_operation = operation
     try:
         latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
+        with operation.lock:
+            operation.target_version = str(latest)
         if not is_newer_version(latest, current_version):
             with _linux_package_operation_guard:
                 if _linux_package_operation is operation:
@@ -872,7 +874,7 @@ def _update_failed(context: dict[str, object], code: str, detail: str) -> Update
         phase="failed",
         step="update",
         progress=0,
-        actions=["check", "open_release"],
+        actions=["retry", "check", "open_release"],
         commands={"release": RELEASES_URL},
         missing_deps=[],
         message="Could not complete the update.",
