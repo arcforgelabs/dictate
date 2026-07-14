@@ -789,6 +789,63 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.progress, 0)
         self.assertEqual(status.latest_version, "2026.7.5")
 
+    def test_failed_status_lookup_rechecks_new_linux_package_operation(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        lookup_entered = threading.Event()
+        release_lookup = threading.Event()
+        release_worker = threading.Event()
+        call_lock = threading.Lock()
+        calls = 0
+        statuses = []
+
+        def fetch_latest(*args, **kwargs):  # noqa: ANN002, ANN003
+            nonlocal calls
+            with call_lock:
+                calls += 1
+                call = calls
+            if call == 1:
+                lookup_entered.set()
+                self.assertTrue(release_lookup.wait(timeout=2))
+                raise urllib.error.URLError("offline")
+            return "2026.7.5", "https://example.test"
+
+        def worker(*args, **kwargs):  # noqa: ANN002, ANN003
+            release_worker.wait(timeout=2)
+
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch("dictate.update_status._fetch_latest_version", side_effect=fetch_latest),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status._linux_package_update_worker", side_effect=worker),
+        ):
+            checker = threading.Thread(target=lambda: statuses.append(check_update_status()))
+            checker.start()
+            self.assertTrue(lookup_entered.wait(timeout=2))
+            flow = start_update_flow()
+            release_lookup.set()
+            checker.join(timeout=2)
+            release_worker.set()
+
+        self.assertFalse(checker.is_alive())
+        self.assertEqual(flow.phase, "downloading")
+        self.assertEqual(len(statuses), 1)
+        self.assertEqual(statuses[0].phase, "downloading")
+        self.assertEqual(statuses[0].latest_version, "2026.7.5")
+        self.assertIsNone(statuses[0].error_code)
+
     def test_linux_package_thread_start_failure_is_retryable(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",
@@ -953,7 +1010,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertIn("retry", flow.actions)
         self.assertEqual(status.error_code, "lookup_failed")
 
-    def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
+    def test_linux_package_missing_checksum_fails_before_worker_start_and_retries(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",
             name="x_amd64.deb",
@@ -969,16 +1026,22 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
             patch("dictate.update_status._find_release_asset", return_value=asset),
-            patch("dictate.update_status.threading.Thread", _ImmediateThread),
+            patch("dictate.update_status.threading.Thread") as worker,
         ):
-            start_update_flow()
+            first = start_update_flow()
             failed = get_linux_package_update_snapshot()
             retry = start_update_flow()
 
+        worker.assert_not_called()
+        self.assertEqual(first.mode, "error")
+        self.assertFalse(first.started)
+        self.assertEqual(first.phase, "failed")
+        self.assertEqual(first.error_code, "no_checksum")
         self.assertEqual(failed["phase"], "failed")
         self.assertEqual(failed["error_code"], "no_checksum")
         self.assertEqual(retry.mode, "error")
         self.assertFalse(retry.started)
+        self.assertEqual(retry.error_code, "no_checksum")
 
     def test_windows_store_update_opens_store_and_ignores_unstable_channel(self) -> None:
         with (

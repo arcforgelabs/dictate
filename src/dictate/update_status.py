@@ -164,6 +164,39 @@ def is_newer_version(latest: str | None, current: str | None = RELEASE_VERSION) 
     return _compare_prerelease(latest_prerelease, current_prerelease) > 0
 
 
+def _current_linux_package_status(
+    context: dict[str, object],
+    current_version: str,
+) -> UpdateStatus | None:
+    snapshot = _linux_package_operation_snapshot()
+    if snapshot is None or snapshot["phase"] not in {
+        "preparing",
+        "downloading",
+        "verifying",
+        "installing",
+        "failed",
+        "installed",
+    }:
+        return None
+    return UpdateStatus(
+        current_version=current_version,
+        latest_version=str(snapshot["target_version"]) or None,
+        update_available=True,
+        checked=True,
+        platform="linux",
+        install_kind="linux-package",
+        phase=str(snapshot["phase"]),
+        step=snapshot.get("step"),
+        progress=snapshot.get("progress"),
+        actions=list(snapshot.get("actions") or []),
+        commands=_commands_for_context(context),
+        missing_deps=[],
+        error_code=snapshot.get("error_code"),
+        error_detail=snapshot.get("error_detail"),
+        install_started_at=snapshot.get("install_started_at"),
+    )
+
+
 def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     context = _update_context()
     cfg = context["config"]
@@ -172,33 +205,9 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     else:
         current_version = cfg.installed_package_version or context.get("package_version") or RELEASE_VERSION
     if context["install_kind"] == "linux-package":
-        snapshot = _linux_package_operation_snapshot()
-        if snapshot is not None and snapshot["phase"] in {
-            "preparing",
-            "downloading",
-            "verifying",
-            "installing",
-            "failed",
-            "installed",
-        }:
-            phase = str(snapshot["phase"])
-            return UpdateStatus(
-                current_version=str(current_version),
-                latest_version=str(snapshot["target_version"]) or None,
-                update_available=True,
-                checked=True,
-                platform="linux",
-                install_kind="linux-package",
-                phase=phase,
-                step=snapshot.get("step"),
-                progress=snapshot.get("progress"),
-                actions=list(snapshot.get("actions") or []),
-                commands=_commands_for_context(context),
-                missing_deps=[],
-                error_code=snapshot.get("error_code"),
-                error_detail=snapshot.get("error_detail"),
-                install_started_at=snapshot.get("install_started_at"),
-            )
+        operation_status = _current_linux_package_status(context, str(current_version))
+        if operation_status is not None:
+            return operation_status
     if context["install_kind"] == "windows-store":
         return UpdateStatus(
             current_version=str(current_version), checked=True, platform="windows",
@@ -226,6 +235,10 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
         )
         return _apply_linux_package_operation(status)
     except Exception as exc:  # noqa: BLE001
+        if context["install_kind"] == "linux-package":
+            operation_status = _current_linux_package_status(context, str(current_version))
+            if operation_status is not None:
+                return operation_status
         return UpdateStatus(
             current_version=current_version,
             checked=False,
@@ -474,6 +487,10 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         detail = f"Could not find a .deb for this update channel: {exc}"
         _linux_package_set_failed("no_asset", detail)
         return _update_failed(context, "no_asset", detail)
+    if not asset.sha256:
+        detail = "Release asset has no trusted SHA-256 digest"
+        _linux_package_set_failed("no_checksum", detail)
+        return _update_failed(context, "no_checksum", detail)
     try:
         worker = threading.Thread(
             target=_linux_package_update_worker,
