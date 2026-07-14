@@ -911,6 +911,7 @@ describe("Quiet Console app (mock mode)", () => {
     ]);
 
     render(<App />);
+    await waitFor(() => expect(polling.getChecks()).toBe(1));
     fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
     expect(await screen.findByRole("button", { name: /Update available/i })).toBeInTheDocument();
 

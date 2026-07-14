@@ -642,6 +642,7 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status._install_deb", return_value=ok),
             patch("dictate.update_status._cleanup_download_artifacts"),
             patch("dictate.update_status.Path.unlink"),
+            patch("dictate.config.set_installed_package_version"),
             patch("dictate.update_status._linux_package_set_phase", side_effect=record_phase),
             patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
