@@ -240,6 +240,7 @@ const UPDATE_LABEL = {
   restarting: "Restarting…",
   error: "Update failed",
 };
+const COMMAND_UPDATE_POLL_LIMIT = 300;
 
 function formatUpdateElapsed(totalSeconds) {
   const seconds = Math.max(0, Number(totalSeconds) || 0);
@@ -1642,8 +1643,10 @@ export default function App() {
     stopUpdatePolling();
     updatePollModeRef.current = mode;
     const generation = updatePollGenerationRef.current;
+    let attempts = 0;
     const poll = async () => {
       if (generation !== updatePollGenerationRef.current || updateRestartRequestedRef.current) return;
+      if (mode === "command") attempts += 1;
       if (ipc.isLive()) {
         try {
           const status = await ipc.checkUpdates();
@@ -1652,6 +1655,19 @@ export default function App() {
         } catch {
           // Transient discovery failures do not end an active polling loop.
         }
+      }
+      if (
+        mode === "command"
+        && attempts >= COMMAND_UPDATE_POLL_LIMIT
+        && generation === updatePollGenerationRef.current
+      ) {
+        const detail = "Update status timed out. Retry the update.";
+        setUpdateStatus((u) => ({ ...u, updating: false, error: detail }));
+        setUpdatePhase("error");
+        setUpdateProgress(null);
+        setUpdateErrorReason(detail);
+        stopUpdatePolling();
+        return;
       }
       if (generation === updatePollGenerationRef.current && updatePollModeRef.current) {
         updatePollRef.current = setTimeout(poll, 1000);

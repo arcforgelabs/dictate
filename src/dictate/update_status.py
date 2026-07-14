@@ -440,6 +440,11 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         _linux_package_operation = operation
     try:
         latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Could not look up the latest update: {exc}"
+        _linux_package_set_failed("lookup_failed", detail)
+        return _update_failed(context, "lookup_failed", detail)
+    try:
         with operation.lock:
             operation.target_version = str(latest)
         if not is_newer_version(latest, current_version):
@@ -459,10 +464,12 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
                 missing_deps=[],
                 message="Dictate is up to date.",
             )
-        asset = _find_release_asset(
-            DEB_ASSET_SUFFIX,
-            release_tag=f"v{latest}",
-        )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Could not evaluate the latest update: {exc}"
+        _linux_package_set_failed("lookup_failed", detail)
+        return _update_failed(context, "lookup_failed", detail)
+    try:
+        asset = _find_release_asset(DEB_ASSET_SUFFIX, release_tag=f"v{latest}")
     except Exception as exc:  # noqa: BLE001
         detail = f"Could not find a .deb for this update channel: {exc}"
         _linux_package_set_failed("no_asset", detail)
@@ -486,18 +493,30 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         detail = f"Could not start the update worker: {exc}"
         _linux_package_set_failed("worker_start_failed", detail)
         return _update_failed(context, "worker_start_failed", detail)
+    snapshot = _linux_package_operation_snapshot(operation)
+    phase = str(snapshot["phase"])
+    mode = "installed" if phase == "installed" else "error" if phase == "failed" else "working"
     return UpdateFlow(
-        mode="working",
-        started=True,
+        mode=mode,
+        started=phase != "failed",
         platform=str(context["platform"]),
         install_kind="linux-package",
-        phase="downloading",
-        step="download",
-        progress=0,
-        actions=["check"],
+        phase=phase,
+        step=snapshot.get("step"),
+        progress=snapshot.get("progress"),
+        actions=list(snapshot.get("actions") or []),
         commands=_commands_for_context(context),
         missing_deps=[],
-        message="Downloading update…",
+        message=(
+            "Update installed — restart Dictate."
+            if phase == "installed"
+            else "Could not complete the update."
+            if phase == "failed"
+            else "Downloading update…"
+        ),
+        error_code=snapshot.get("error_code"),
+        error_detail=snapshot.get("error_detail"),
+        install_started_at=snapshot.get("install_started_at"),
     )
 
 
@@ -685,6 +704,7 @@ def _linux_package_update_worker(
     asset: ReleaseAsset,
 ) -> None:
     deb_path: Path | None = None
+    failure: tuple[str, str] | None = None
     try:
         if not asset.sha256:
             raise RuntimeError("Release asset has no trusted SHA-256 digest")
@@ -716,21 +736,21 @@ def _linux_package_update_worker(
         if result.returncode != 0:
             detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
             code = "cancelled" if result.returncode in (126, 127) else "install_failed"
-            _linux_package_set_failed(code, detail)
-            return
-        try:
-            from dictate.config import set_installed_package_version
+            failure = (code, detail)
+        else:
+            try:
+                from dictate.config import set_installed_package_version
 
-            set_installed_package_version(str(latest))
-        except Exception:  # noqa: BLE001
-            pass
-        _linux_package_set_phase(
-            "installed",
-            "restart",
-            progress=100,
-            install_started_at=None,
-            touch_install_started_at=True,
-        )
+                set_installed_package_version(str(latest))
+            except Exception:  # noqa: BLE001
+                pass
+            _linux_package_set_phase(
+                "installed",
+                "restart",
+                progress=100,
+                install_started_at=None,
+                touch_install_started_at=True,
+            )
     except Exception as exc:  # noqa: BLE001
         code = "download_failed"
         message = str(exc)
@@ -741,7 +761,7 @@ def _linux_package_update_worker(
             code = "checksum_mismatch"
         elif "incomplete" in lowered or "content-length" in lowered:
             code = "download_incomplete"
-        _linux_package_set_failed(code, message)
+        failure = (code, message)
     finally:
         if deb_path is not None:
             try:
@@ -749,6 +769,8 @@ def _linux_package_update_worker(
             except OSError:
                 pass
         _cleanup_download_artifacts(asset.name)
+        if failure is not None:
+            _linux_package_set_failed(*failure)
 
 
 def _linux_package_set_phase(

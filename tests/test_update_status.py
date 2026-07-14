@@ -428,9 +428,9 @@ class UpdateStatusTests(unittest.TestCase):
             flow = start_update_flow()
             snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "working")
+        self.assertEqual(flow.mode, "installed")
         self.assertTrue(flow.started)
-        self.assertEqual(flow.phase, "downloading")
+        self.assertEqual(flow.phase, "installed")
         self.assertEqual(flow.install_kind, "linux-package")
         find.assert_called_once_with("_amd64.deb", release_tag="v2026.7.4-unstable.2.1")
         dl.assert_called_once()
@@ -474,8 +474,9 @@ class UpdateStatusTests(unittest.TestCase):
             flow = start_update_flow()
             snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "working")
-        self.assertTrue(flow.started)
+        self.assertEqual(flow.mode, "error")
+        self.assertFalse(flow.started)
+        self.assertEqual(flow.error_code, "cancelled")
         self.assertEqual(snapshot["phase"], "failed")
         self.assertEqual(snapshot["error_code"], "cancelled")
 
@@ -647,7 +648,7 @@ class UpdateStatusTests(unittest.TestCase):
             start = start_update_flow()
             status = check_update_status()
 
-        self.assertEqual(start.phase, "downloading")
+        self.assertEqual(start.phase, "installed")
         self.assertIn("downloading", phases)
         self.assertIn("verifying", phases)
         self.assertIn("installing", phases)
@@ -837,6 +838,66 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(retry.started)
         self.assertEqual(attempts, 2)
 
+    def test_linux_package_failure_is_published_after_cleanup(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        cleanup_entered = threading.Event()
+        release_cleanup = threading.Event()
+        failed_published = threading.Event()
+        import dictate.update_status as update_status_mod
+
+        real_set_failed = update_status_mod._linux_package_set_failed
+
+        def cleanup(name):  # noqa: ANN001
+            cleanup_entered.set()
+            release_cleanup.wait(timeout=2)
+
+        def publish_failed(code, detail):  # noqa: ANN001
+            real_set_failed(code, detail)
+            failed_published.set()
+
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.5", "https://example.test"),
+            ),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch(
+                "dictate.update_status._download_release_asset_partial",
+                side_effect=RuntimeError("network lost"),
+            ),
+            patch("dictate.update_status._cleanup_download_artifacts", side_effect=cleanup),
+            patch("dictate.update_status._linux_package_set_failed", side_effect=publish_failed),
+        ):
+            started = start_update_flow()
+            self.assertTrue(cleanup_entered.wait(timeout=2))
+            before_cleanup = check_update_status()
+            busy_retry = start_update_flow()
+            release_cleanup.set()
+            self.assertTrue(failed_published.wait(timeout=2))
+            failed = check_update_status()
+            retry = start_update_flow()
+
+        self.assertEqual(started.mode, "working")
+        self.assertEqual(before_cleanup.phase, "downloading")
+        self.assertEqual(busy_retry.mode, "busy")
+        self.assertEqual(failed.phase, "failed")
+        self.assertEqual(failed.error_code, "download_failed")
+        self.assertNotEqual(retry.mode, "busy")
+
     def test_linux_package_asset_failure_keeps_target_version_and_retry_action(self) -> None:
         plat, roots, user = self._linux_package()
         with (
@@ -866,6 +927,32 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.latest_version, "2026.7.5")
         self.assertIn("retry", status.actions)
 
+    def test_linux_package_version_lookup_failure_has_distinct_code(self) -> None:
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                side_effect=urllib.error.URLError("offline"),
+            ),
+            patch("dictate.update_status._find_release_asset") as find_asset,
+        ):
+            flow = start_update_flow()
+            status = check_update_status()
+
+        find_asset.assert_not_called()
+        self.assertEqual(flow.error_code, "lookup_failed")
+        self.assertIn("look up", flow.error_detail)
+        self.assertIn("retry", flow.actions)
+        self.assertEqual(status.error_code, "lookup_failed")
+
     def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",
@@ -890,8 +977,8 @@ class UpdateStatusTests(unittest.TestCase):
 
         self.assertEqual(failed["phase"], "failed")
         self.assertEqual(failed["error_code"], "no_checksum")
-        self.assertEqual(retry.mode, "working")
-        self.assertTrue(retry.started)
+        self.assertEqual(retry.mode, "error")
+        self.assertFalse(retry.started)
 
     def test_windows_store_update_opens_store_and_ignores_unstable_channel(self) -> None:
         with (
