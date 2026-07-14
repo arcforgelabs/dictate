@@ -869,7 +869,7 @@ function AccountDialog() {
             <span>{s.updateStatus?.checking ? "Checking" : "Check for update"}</span>
           </button>
           {s.updateStatus?.updateAvailable && (
-            <button type="button" className="account-primary" disabled={updateBusy} onClick={s.startUpdate}>
+            <button type="button" className="account-primary" disabled={updateBusy} onClick={s.runUpdate}>
               <Icon name="download" size={14} />
               <span>{s.updateStatus?.updating ? "Updating" : "Update"}</span>
             </button>
@@ -2390,6 +2390,23 @@ export default function App() {
       .then((status) => {
         const next = { ...(status || {}), checking: false };
         setUpdateStatus(next);
+        const mapped = mapBackendUpdatePhase(next);
+        if (mapped === "preparing" || mapped === "downloading" || mapped === "verifying" || mapped === "installing") {
+          setUpdateDismissed(false);
+          applyPolledUpdateStatus(next);
+          startUpdatePolling("package");
+          return;
+        }
+        if (mapped === "error") {
+          setUpdateDismissed(false);
+          applyPolledUpdateStatus(next);
+          return;
+        }
+        if (mapped === "restart") {
+          setUpdateDismissed(false);
+          requestUpdateRestart("Update installed — restarting…");
+          return;
+        }
         if (next.installKind === "windows-store") {
           setUpdateChannel("stable");
           toast("Checking for updates in Microsoft Store");

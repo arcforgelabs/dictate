@@ -36,7 +36,7 @@ function mockPackagePolling(statuses) {
     constructor() { sources.push(this); }
     close() {}
   };
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
     const path = String(url).replace("http://127.0.0.1:1", "");
     if (path === "/api/state") {
       return {
@@ -59,7 +59,7 @@ function mockPackagePolling(statuses) {
     }
     return { ok: true, json: async () => ({}) };
   });
-  return { sources, getChecks: () => checks };
+  return { sources, fetchSpy, getChecks: () => checks };
 }
 
 const ACTIVE_PRO = {
@@ -880,6 +880,85 @@ describe("Quiet Console app (mock mode)", () => {
     expect(await screen.findByRole("button", { name: "Check for updates" }, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
     expect(checks).toBe(2);
+  });
+
+  it("restarts directly from the account update action", async () => {
+    const invoke = vi.fn().mockResolvedValue(true);
+    const polling = mockPackagePolling([
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "installed",
+        actions: ["restart"],
+      },
+    ]);
+    window.__TAURI__ = { core: { invoke } };
+
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /Restart Dictate/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
+    expect(polling.fetchSpy.mock.calls.some(([url, options]) => (
+      String(url).endsWith("/api/update") && options?.method === "POST"
+    ))).toBe(false);
+  });
+
+  it("re-adopts active package progress from an explicit check", async () => {
+    const polling = mockPackagePolling([
+      {
+        checked: false,
+        updateAvailable: false,
+        phase: "failed",
+        errorCode: "check_failed",
+      },
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "downloading",
+        progress: 42,
+      },
+    ]);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    expect(await screen.findByRole("button", { name: /Downloading… 42%/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(polling.getChecks()).toBe(2);
+  });
+
+  it("restarts from an installed package found by explicit check", async () => {
+    const invoke = vi.fn().mockResolvedValue(true);
+    const polling = mockPackagePolling([
+      {
+        checked: false,
+        updateAvailable: false,
+        phase: "failed",
+        errorCode: "check_failed",
+      },
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "installed",
+        actions: ["restart"],
+      },
+    ]);
+    window.__TAURI__ = { core: { invoke } };
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    expect(invoke).toHaveBeenCalledWith("restart_app");
+    expect(polling.getChecks()).toBe(2);
   });
 
   it("recovers package polling after a transient status failure", async () => {
