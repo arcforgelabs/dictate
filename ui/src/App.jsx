@@ -1541,6 +1541,7 @@ export default function App() {
   const expandedFromRef = useRef("capture"); expandedFromRef.current = expandedFrom;
   const updatePollRef = useRef(null);
   const updatePollModeRef = useRef(null);
+  const updateRestartRequestedRef = useRef(false);
 
   const stopUpdatePolling = () => {
     if (updatePollRef.current) {
@@ -1548,6 +1549,26 @@ export default function App() {
       updatePollRef.current = null;
     }
     updatePollModeRef.current = null;
+  };
+
+  const requestUpdateRestart = (message) => {
+    if (updateRestartRequestedRef.current) return;
+    updateRestartRequestedRef.current = true;
+    setUpdatePhase("restarting");
+    setUpdateProgress(null);
+    setUpdateErrorReason(null);
+    stopUpdatePolling();
+    if (message) toast(message);
+    Promise.resolve(ipc.restartApp()).then((restarted) => {
+      if (restarted) return;
+      updateRestartRequestedRef.current = false;
+      setUpdatePhase("restart");
+      toast("Restart Dictate to finish the update", { bad: true });
+    }).catch(() => {
+      updateRestartRequestedRef.current = false;
+      setUpdatePhase("restart");
+      toast("Restart Dictate to finish the update", { bad: true });
+    });
   };
 
   const applyPolledUpdateStatus = (status) => {
@@ -1574,10 +1595,7 @@ export default function App() {
       return;
     }
     if (mapped === "restart") {
-      setUpdatePhase("restart");
-      setUpdateProgress(null);
-      setUpdateErrorReason(null);
-      stopUpdatePolling();
+      requestUpdateRestart("Update installed — restarting…");
       return;
     }
     if (mapped === "error") {
@@ -2312,9 +2330,7 @@ export default function App() {
       .then((flow) => {
         setUpdateStatus((u) => ({ ...u, updating: false }));
         if (flow?.mode === "installed" || (flow?.actions || []).includes("restart")) {
-          setUpdatePhase("restarting");
-          toast(flow?.message || "Update installed — restarting…");
-          ipc.restartApp();
+          requestUpdateRestart(flow?.message || "Update installed — restarting…");
           return;
         }
         if (flow?.mode === "error" || flow?.phase === "failed") {
@@ -2391,9 +2407,7 @@ export default function App() {
   const runUpdate = () => {
     if (updatePhase === "downloading" || updatePhase === "verifying" || updatePhase === "installing" || updatePhase === "working") return;
     if (updatePhase === "restart" || updatePhase === "restarting") {
-      setUpdatePhase("restarting");
-      toast("Restarting Dictate…");
-      ipc.restartApp();
+      requestUpdateRestart("Restarting Dictate…");
       return;
     }
     if (!ipc.isLive()) {

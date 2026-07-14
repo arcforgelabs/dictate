@@ -1780,9 +1780,10 @@ describe("Provider resilience — graceful degradation", () => {
     const sources = [];
     let launchChecked = false;
     let updatePolls = 0;
+    const invoke = vi.fn().mockResolvedValue(null);
     const installStartedAt = new Date(Date.now() - 18_000).toISOString();
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.__TAURI__ = { core: { invoke } };
     window.EventSource = class {
       constructor() { sources.push(this); }
       close() {}
@@ -1846,6 +1847,20 @@ describe("Provider resilience — graceful degradation", () => {
             }),
           };
         }
+        if (updatePolls === 3) {
+          return {
+            ok: true,
+            json: async () => ({
+              currentVersion: "2026.7.4",
+              latestVersion: "2026.7.5",
+              updateAvailable: true,
+              checked: true,
+              installKind: "linux-package",
+              phase: "installing",
+              installStartedAt,
+            }),
+          };
+        }
         return {
           ok: true,
           json: async () => ({
@@ -1854,8 +1869,8 @@ describe("Provider resilience — graceful degradation", () => {
             updateAvailable: true,
             checked: true,
             installKind: "linux-package",
-            phase: "installing",
-            installStartedAt,
+            phase: "installed",
+            step: "restart",
           }),
         };
       }
@@ -1893,6 +1908,9 @@ describe("Provider resilience — graceful degradation", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Installing update… \d{2}:\d{2}/i })).toBeInTheDocument();
     }, { timeout: 5000 });
+    expect(await screen.findByRole("button", { name: /Restarting/i }, { timeout: 3000 })).toBeInTheDocument();
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
+    expect(invoke).toHaveBeenCalledTimes(1);
   }, 15000);
 
   it("keeps update failure reason visible and retries from the pill", async () => {

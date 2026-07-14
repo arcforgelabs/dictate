@@ -464,20 +464,25 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         detail = f"Could not find a .deb for this update channel: {exc}"
         _linux_package_set_failed("no_asset", detail)
         return _update_failed(context, "no_asset", detail)
-    worker = threading.Thread(
+    try:
+        worker = threading.Thread(
             target=_linux_package_update_worker,
             args=(context, str(latest), asset),
             name="dictate-linux-package-update",
             daemon=True,
-    )
-    with _linux_package_operation_guard:
-        with operation.lock:
-            operation.phase = "downloading"
-            operation.step = "download"
-            operation.progress = 0
-            operation.target_version = str(latest)
-            operation.thread = worker
-        worker.start()
+        )
+        with _linux_package_operation_guard:
+            with operation.lock:
+                operation.phase = "downloading"
+                operation.step = "download"
+                operation.progress = 0
+                operation.target_version = str(latest)
+                operation.thread = worker
+            worker.start()
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Could not start the update worker: {exc}"
+        _linux_package_set_failed("worker_start_failed", detail)
+        return _update_failed(context, "worker_start_failed", detail)
     return UpdateFlow(
         mode="working",
         started=True,

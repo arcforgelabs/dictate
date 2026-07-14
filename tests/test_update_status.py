@@ -785,6 +785,55 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.progress, 0)
         self.assertEqual(status.latest_version, "2026.7.5")
 
+    def test_linux_package_thread_start_failure_is_retryable(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        attempts = 0
+
+        class _StoppedThread:
+            def start(self) -> None:
+                return
+
+        def make_thread(*args, **kwargs):  # noqa: ANN002, ANN003
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("thread unavailable")
+            return _StoppedThread()
+
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.5", "https://example.test"),
+            ),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status.threading.Thread", side_effect=make_thread),
+        ):
+            failed_flow = start_update_flow()
+            failed = get_linux_package_update_snapshot()
+            retry = start_update_flow()
+
+        self.assertEqual(failed_flow.phase, "failed")
+        self.assertEqual(failed_flow.error_code, "worker_start_failed")
+        self.assertEqual(failed["phase"], "failed")
+        self.assertIn("thread unavailable", failed["error_detail"])
+        self.assertEqual(retry.mode, "working")
+        self.assertTrue(retry.started)
+        self.assertEqual(attempts, 2)
+
     def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",
