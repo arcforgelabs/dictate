@@ -123,7 +123,7 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
 
     report = run_preflight(
         require_typing=True,
-        require_clipboard=False,
+        require_clipboard=True,
         typing_backend=args.type_backend,
         push_to_talk_combo=args.push_to_talk_combo,
         stt_backend=args.stt_backend,

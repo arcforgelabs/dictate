@@ -32,6 +32,7 @@ class PasteOutputTests(unittest.TestCase):
         self.assertIsInstance(output, PasteOutput)
         self.assertIsInstance(output.typing_output, XdotoolOutput)
         self.assertIsInstance(output.clipboard_output, ClipboardOutput)
+        self.assertEqual(output.name, "paste/xdotool")
 
     def test_wtype_paste_uses_control_v_key_chord(self) -> None:
         with patch("dictate.outputs.subprocess.run") as run:

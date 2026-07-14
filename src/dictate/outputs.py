@@ -106,7 +106,10 @@ class PasteOutput:
 
     typing_output: TextOutput
     clipboard_output: TextOutput
-    name: str = "paste"
+
+    @property
+    def name(self) -> str:
+        return f"paste/{self.typing_output.name}"
 
     def send(self, text: str) -> None:
         self.clipboard_output.send(text)

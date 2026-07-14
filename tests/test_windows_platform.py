@@ -17,6 +17,7 @@ from dictate.doctor import (
     _install_linux_desktop_entry,
     _update_paths,
     build_parser,
+    run_doctor,
 )
 from dictate.outputs import PasteOutput, PynputOutput, detect_session_type, resolve_typing_backend
 from dictate.startup import set_startup_enabled, startup_enabled, startup_entry_path
@@ -70,6 +71,24 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertTrue(args.quick)
         self.assertTrue(args.fix)
         self.assertTrue(args.update_paths)
+
+    def test_doctor_requires_daemon_clipboard_preflight(self) -> None:
+        report = types.SimpleNamespace(ok=True, notes=[], warnings=[], errors=[])
+        config = types.SimpleNamespace(
+            openai_api_key_command=None,
+            xai_api_key_command=None,
+            gemini_api_key_command=None,
+        )
+        with (
+            patch("dictate.doctor.load_config", return_value=config),
+            patch("dictate.doctor.run_preflight", return_value=report) as preflight,
+            patch("dictate.doctor._check_runtime_paths"),
+            patch("dictate.doctor._print_report"),
+        ):
+            result = run_doctor(["--quick"])
+
+        self.assertEqual(result, 0)
+        self.assertTrue(preflight.call_args.kwargs["require_clipboard"])
 
     def test_windows_doctor_update_paths_label_hosted_installer_as_developer_bootstrap(self) -> None:
         with patch("dictate.doctor.sys.platform", "win32"):
