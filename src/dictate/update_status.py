@@ -865,6 +865,7 @@ def _apply_linux_package_operation(status: UpdateStatus) -> UpdateStatus:
         return status
     phase = str(snapshot["phase"])
     keep_update_available = bool(status.update_available) or phase in {
+        "preparing",
         "downloading",
         "verifying",
         "installing",

@@ -1065,6 +1065,41 @@ describe("Quiet Console app (mock mode)", () => {
     expect(polling.getChecks()).toBe(4);
   });
 
+  it("clears a stale polling failure after a healthy explicit check", async () => {
+    vi.useFakeTimers();
+    const polling = mockPackagePolling([
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "preparing",
+      },
+      new Error("status transport unavailable"),
+      new Error("status transport unavailable"),
+      new Error("status transport unavailable"),
+      {
+        checked: true,
+        updateAvailable: false,
+        installKind: "linux-package",
+        phase: "current",
+      },
+    ]);
+
+    render(<App />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+    await act(async () => {});
+
+    expect(polling.getChecks()).toBe(5);
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Lost contact with updater. Retry the update.")).not.toBeInTheDocument();
+  });
+
   it("turns an expired command update poll into a retryable failure", async () => {
     const sources = [];
     let started = false;

@@ -2413,7 +2413,16 @@ export default function App() {
           startUpdate();
           return;
         }
-        if (next.updateAvailable) setUpdatePhase("available");
+        if (next.updateAvailable) {
+          setUpdatePhase("available");
+        } else if (next.checked) {
+          stopUpdatePolling();
+          setUpdatePhase("idle");
+          setUpdateProgress(null);
+          setUpdateInstallStartedAt(null);
+          setUpdateInstallElapsed(null);
+          setUpdateErrorReason(null);
+        }
         if (next.updateAvailable && next.latestVersion) toast(`Dictate ${next.latestVersion} is available`);
         else if (next.checked) toast("You're on the latest version");
         else toast("Could not check for updates", { bad: true });

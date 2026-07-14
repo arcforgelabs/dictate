@@ -741,6 +741,7 @@ class UpdateStatusTests(unittest.TestCase):
 
         self.assertEqual(len(results), 2)
         self.assertEqual(preparing.phase, "preparing")
+        self.assertTrue(preparing.update_available)
         self.assertIsNone(preparing.progress)
         self.assertEqual(sum(result.started for result in results), 1)
         self.assertEqual({result.mode for result in results}, {"working", "busy"})
