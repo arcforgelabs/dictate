@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import os
@@ -92,8 +92,8 @@ class _LinuxPackageOperation:
     error_code: str | None
     error_detail: str | None
     target_version: str
-    thread: threading.Thread
-    lock: threading.Lock = threading.Lock()
+    thread: threading.Thread | None
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 _linux_package_operation: _LinuxPackageOperation | None = None
@@ -171,6 +171,33 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
         current_version = context.get("package_version") or RELEASE_VERSION
     else:
         current_version = cfg.installed_package_version or context.get("package_version") or RELEASE_VERSION
+    if context["install_kind"] == "linux-package":
+        snapshot = _linux_package_operation_snapshot()
+        if snapshot is not None and snapshot["phase"] in {
+            "downloading",
+            "verifying",
+            "installing",
+            "failed",
+            "installed",
+        }:
+            phase = str(snapshot["phase"])
+            return UpdateStatus(
+                current_version=str(current_version),
+                latest_version=str(snapshot["target_version"]) or None,
+                update_available=True,
+                checked=True,
+                platform="linux",
+                install_kind="linux-package",
+                phase=phase,
+                step=snapshot.get("step"),
+                progress=snapshot.get("progress"),
+                actions=list(snapshot.get("actions") or []),
+                commands=_commands_for_context(context),
+                missing_deps=[],
+                error_code=snapshot.get("error_code"),
+                error_detail=snapshot.get("error_detail"),
+                install_started_at=snapshot.get("install_started_at"),
+            )
     if context["install_kind"] == "windows-store":
         return UpdateStatus(
             current_version=str(current_version), checked=True, platform="windows",
@@ -358,7 +385,12 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
     )
     with _linux_package_operation_guard:
         op = _linux_package_operation
-        if op is not None and op.thread.is_alive():
+        if op is not None and op.phase in {
+            "preparing",
+            "downloading",
+            "verifying",
+            "installing",
+        }:
             snap = _linux_package_operation_snapshot(op)
             return UpdateFlow(
                 mode="busy",
@@ -394,9 +426,23 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
             )
         if op is not None and op.phase == "failed":
             _clear_linux_package_operation()
+        operation = _LinuxPackageOperation(
+            phase="preparing",
+            step="lookup",
+            progress=None,
+            install_started_at=None,
+            error_code=None,
+            error_detail=None,
+            target_version="",
+            thread=None,
+        )
+        _linux_package_operation = operation
     try:
         latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
         if not is_newer_version(latest, current_version):
+            with _linux_package_operation_guard:
+                if _linux_package_operation is operation:
+                    _clear_linux_package_operation()
             return UpdateFlow(
                 mode="current",
                 started=False,
@@ -415,27 +461,23 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
             release_tag=f"v{latest}",
         )
     except Exception as exc:  # noqa: BLE001
-        return _update_failed(
-            context, "no_asset", f"Could not find a .deb for this update channel: {exc}"
-        )
-    operation = _LinuxPackageOperation(
-        phase="downloading",
-        step="download",
-        progress=0,
-        install_started_at=None,
-        error_code=None,
-        error_detail=None,
-        target_version=str(latest),
-        thread=threading.Thread(
+        detail = f"Could not find a .deb for this update channel: {exc}"
+        _linux_package_set_failed("no_asset", detail)
+        return _update_failed(context, "no_asset", detail)
+    worker = threading.Thread(
             target=_linux_package_update_worker,
             args=(context, str(latest), asset),
             name="dictate-linux-package-update",
             daemon=True,
-        ),
     )
     with _linux_package_operation_guard:
-        _linux_package_operation = operation
-        operation.thread.start()
+        with operation.lock:
+            operation.phase = "downloading"
+            operation.step = "download"
+            operation.progress = 0
+            operation.target_version = str(latest)
+            operation.thread = worker
+        worker.start()
     return UpdateFlow(
         mode="working",
         started=True,

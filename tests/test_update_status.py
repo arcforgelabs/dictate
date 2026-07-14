@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -688,6 +689,101 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(first.mode, "working")
         self.assertEqual(second.mode, "busy")
         self.assertFalse(second.started)
+
+    def test_linux_package_concurrent_starts_launch_one_worker(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        lookup_entered = threading.Event()
+        release_lookup = threading.Event()
+        release_worker = threading.Event()
+        worker_started = threading.Event()
+        results = []
+
+        def fetch_latest(channel, *, timeout):  # noqa: ANN001, ARG001
+            lookup_entered.set()
+            self.assertTrue(release_lookup.wait(timeout=2))
+            return "2026.7.5", "https://example.test"
+
+        def worker(*args):  # noqa: ANN002
+            worker_started.set()
+            release_worker.wait(timeout=2)
+
+        plat, roots, user = self._linux_package()
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch("dictate.update_status._fetch_latest_version", side_effect=fetch_latest),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status._linux_package_update_worker", side_effect=worker),
+        ):
+            first = threading.Thread(target=lambda: results.append(start_update_flow()))
+            first.start()
+            self.assertTrue(lookup_entered.wait(timeout=2))
+            second = threading.Thread(target=lambda: results.append(start_update_flow()))
+            second.start()
+            second.join(timeout=2)
+            release_lookup.set()
+            first.join(timeout=2)
+            self.assertTrue(worker_started.wait(timeout=2))
+            release_worker.set()
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(sum(result.started for result in results), 1)
+        self.assertEqual({result.mode for result in results}, {"working", "busy"})
+
+    def test_active_linux_package_status_does_not_require_remote_lookup(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/x_amd64.deb",
+            name="x_amd64.deb",
+            size=4,
+            sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        plat, roots, user = self._linux_package()
+
+        class _SlowThread:
+            def __init__(self, target=None, args=(), kwargs=None, **kw):  # noqa: ANN001, ARG001
+                pass
+
+            def start(self) -> None:
+                return
+
+        with (
+            plat,
+            roots,
+            user,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.4"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.7.5", "https://example.test"),
+            ),
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+            patch("dictate.update_status.threading.Thread", _SlowThread),
+        ):
+            start_update_flow()
+            with patch(
+                "dictate.update_status._fetch_latest_version",
+                side_effect=urllib.error.URLError("offline"),
+            ) as fetch:
+                status = check_update_status()
+
+        fetch.assert_not_called()
+        self.assertEqual(status.phase, "downloading")
+        self.assertEqual(status.progress, 0)
+        self.assertEqual(status.latest_version, "2026.7.5")
 
     def test_linux_package_retry_after_failure_starts_fresh_attempt(self) -> None:
         asset = ReleaseAsset(

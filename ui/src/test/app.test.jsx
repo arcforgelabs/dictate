@@ -759,6 +759,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(restartButton).toBe(updateButton);
     fireEvent.click(restartButton);
 
+    expect(await screen.findByRole("button", { name: /Restarting/i })).toBe(updateButton);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
   });
 

@@ -2525,6 +2525,7 @@ export default function App() {
     && (
       !!updateStatus.updateAvailable
       || updatePhase === "restart"
+      || updatePhase === "restarting"
       || updatePhase === "error"
       || updatePhase === "downloading"
       || updatePhase === "verifying"
