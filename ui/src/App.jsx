@@ -231,6 +231,7 @@ function PrivacyPill() {
    Skip suppresses until a newer version; Later returns on next launch. ─────── */
 const UPDATE_LABEL = {
   available: "Update available",
+  preparing: "Preparing update…",
   downloading: "Downloading…",
   verifying: "Verifying download…",
   installing: "Installing update…",
@@ -261,6 +262,7 @@ function updateLabelForPhase(phase, progress, installElapsed) {
 
 function mapBackendUpdatePhase(status) {
   const phase = status?.phase;
+  if (phase === "preparing") return "preparing";
   if (phase === "downloading") return "downloading";
   if (phase === "verifying") return "verifying";
   if (phase === "installing") return "installing";
@@ -269,6 +271,15 @@ function mapBackendUpdatePhase(status) {
   if (phase === "failed") return "error";
   if (phase === "working") return "working";
   return null;
+}
+
+function isUpdateBusyPhase(phase) {
+  return phase === "preparing"
+    || phase === "downloading"
+    || phase === "verifying"
+    || phase === "installing"
+    || phase === "working"
+    || phase === "restarting";
 }
 
 function UpdatePill() {
@@ -291,7 +302,7 @@ function UpdatePill() {
   }
   const phase = s.updatePhase;
   const label = updateLabelForPhase(phase, s.updateProgress, s.updateInstallElapsed);
-  const busy = phase === "downloading" || phase === "verifying" || phase === "installing" || phase === "working";
+  const busy = isUpdateBusyPhase(phase);
   return (
     <div className={"updpill phase-" + phase}>
       <div className="upd-more">
@@ -382,7 +393,11 @@ function AccountDialog() {
   const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
   const betaSelected = s.updateChannel === "unstable";
   const storeInstall = s.updateStatus?.installKind === "windows-store";
-  const updateBusy = !!(s.updateStatus?.checking || s.updateStatus?.updating);
+  const updateBusy = !!(
+    s.updateStatus?.checking
+    || s.updateStatus?.updating
+    || isUpdateBusyPhase(s.updatePhase)
+  );
   const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
   const syncedLabel = !sync.enabled
     ? "Off"
@@ -1579,6 +1594,12 @@ export default function App() {
     setUpdateStatus((u) => ({ ...u, ...status, checking: false, updating: false }));
     const mapped = mapBackendUpdatePhase(status);
     if (mapped === "check-error") return;
+    if (mapped === "preparing") {
+      setUpdatePhase("preparing");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      return;
+    }
     if (mapped === "downloading") {
       setUpdatePhase("downloading");
       setUpdateProgress(Number.isFinite(status.progress) ? status.progress : null);
@@ -2343,6 +2364,9 @@ export default function App() {
       toast("Opened latest release");
       return;
     }
+    setUpdateDismissed(false);
+    setUpdatePhase("preparing");
+    setUpdateProgress(null);
     ipc.startUpdate()
       .then((flow) => {
         setUpdateStatus((u) => ({ ...u, updating: false }));
@@ -2422,7 +2446,7 @@ export default function App() {
   };
   const dismissUpdate = () => { setUpdateDismissed(true); };
   const runUpdate = () => {
-    if (updatePhase === "downloading" || updatePhase === "verifying" || updatePhase === "installing" || updatePhase === "working") return;
+    if (isUpdateBusyPhase(updatePhase)) return;
     if (updatePhase === "restart" || updatePhase === "restarting") {
       requestUpdateRestart("Restarting Dictate…");
       return;
@@ -2465,7 +2489,7 @@ export default function App() {
         setUpdateErrorReason(st.errorDetail || st.error || "Update failed");
         return;
       }
-      if (mapped === "downloading" || mapped === "verifying" || mapped === "installing") {
+      if (mapped === "preparing" || mapped === "downloading" || mapped === "verifying" || mapped === "installing") {
         applyPolledUpdateStatus(st);
         startUpdatePolling("package");
         return;
@@ -2558,6 +2582,7 @@ export default function App() {
       !!updateStatus.updateAvailable
       || updatePhase === "restart"
       || updatePhase === "restarting"
+      || updatePhase === "preparing"
       || updatePhase === "error"
       || updatePhase === "downloading"
       || updatePhase === "verifying"

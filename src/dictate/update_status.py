@@ -174,6 +174,7 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     if context["install_kind"] == "linux-package":
         snapshot = _linux_package_operation_snapshot()
         if snapshot is not None and snapshot["phase"] in {
+            "preparing",
             "downloading",
             "verifying",
             "installing",

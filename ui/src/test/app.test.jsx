@@ -702,6 +702,8 @@ describe("Quiet Console app (mock mode)", () => {
     const invoke = vi.fn().mockResolvedValue(null);
     let updateStarted = false;
     let commandPolls = 0;
+    let releaseStart;
+    const startResponse = new Promise((resolve) => { releaseStart = resolve; });
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.__TAURI__ = { core: { invoke } };
     window.EventSource = class {
@@ -752,6 +754,7 @@ describe("Quiet Console app (mock mode)", () => {
       }
       if (path === "/api/update" && opts.method === "POST") {
         updateStarted = true;
+        await startResponse;
         return {
           ok: true,
           json: async () => ({
@@ -766,18 +769,27 @@ describe("Quiet Console app (mock mode)", () => {
 
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
-    const updateButton = await screen.findByRole("button", { name: /Update available/i });
-    fireEvent.click(updateButton);
-    expect(await screen.findByRole("button", { name: /Updating/i })).toBe(updateButton);
+    await screen.findByRole("button", { name: /Update available/i });
+    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    const accountUpdate = await screen.findByRole("button", { name: "Update" });
+    fireEvent.click(accountUpdate);
+    const preparingButton = await screen.findByRole("button", { name: /Preparing update/i });
+    expect(accountUpdate).toBeDisabled();
+    await act(async () => { releaseStart(); });
+
+    expect(await screen.findByRole("button", { name: /Updating/i })).toBe(preparingButton);
     expect(screen.queryByRole("button", { name: /Restart Dictate/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Later" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
 
     const restartButton = await screen.findByRole("button", { name: /Restart Dictate/i }, { timeout: 4000 });
-    expect(restartButton).toBe(updateButton);
+    expect(restartButton).toBe(preparingButton);
     fireEvent.click(restartButton);
 
-    expect(await screen.findByRole("button", { name: /Restarting/i })).toBe(updateButton);
+    expect(await screen.findByRole("button", { name: /Restarting/i })).toBe(preparingButton);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
   });
 

@@ -729,6 +729,7 @@ class UpdateStatusTests(unittest.TestCase):
             first = threading.Thread(target=lambda: results.append(start_update_flow()))
             first.start()
             self.assertTrue(lookup_entered.wait(timeout=2))
+            preparing = check_update_status()
             second = threading.Thread(target=lambda: results.append(start_update_flow()))
             second.start()
             second.join(timeout=2)
@@ -738,6 +739,8 @@ class UpdateStatusTests(unittest.TestCase):
             release_worker.set()
 
         self.assertEqual(len(results), 2)
+        self.assertEqual(preparing.phase, "preparing")
+        self.assertIsNone(preparing.progress)
         self.assertEqual(sum(result.started for result in results), 1)
         self.assertEqual({result.mode for result in results}, {"working", "busy"})
 
