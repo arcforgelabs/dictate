@@ -107,6 +107,57 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(exactText));
   });
 
+  it("trusts explicit note mode while retaining legacy segment meeting fallback", async () => {
+    const sources = [];
+    const writeText = vi.fn().mockResolvedValue();
+    Object.assign(navigator, { clipboard: { writeText } });
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        history: [
+          {
+            id: "segmented_note",
+            text: "Explicit segmented conversation note",
+            createdAt: "2026-07-14T00:00:00+00:00",
+            mode: "note",
+            segments: [{ seq: 0, text: "Explicit segmented conversation note" }],
+          },
+          {
+            id: "legacy_segmented_meeting",
+            text: "Legacy segmented meeting",
+            createdAt: "2026-07-13T00:00:00+00:00",
+            segments: [{ seq: 0, speaker_label: "Speaker 1", text: "Legacy segmented meeting" }],
+          },
+        ],
+      }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: true }) });
+      sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: false }) });
+    });
+
+    await screen.findByText("Copy last dictation");
+    fireEvent.click(screen.getByText("Copy last dictation"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Explicit segmented conversation note"));
+
+    navTo("Notes");
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+    expect(screen.getByText(/Legacy segmented meeting/)).toBeInTheDocument();
+    expect(screen.queryByText("Explicit segmented conversation note")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick" }));
+    expect(screen.getByText("Explicit segmented conversation note")).toBeInTheDocument();
+    expect(screen.queryByText(/Legacy segmented meeting/)).not.toBeInTheDocument();
+  });
+
   it("uses native Windows chrome without the inner mock titlebar", () => {
     window.__DICTATE__ = { platform: "win11" };
     const { container } = render(<App />);

@@ -165,7 +165,8 @@ function HistoryView() {
 
   const all = s.history || [];
   // Prefer the persisted mode; segments remain a compatibility fallback for older records.
-  const isMeeting = (n) => n?.mode === "meeting" || (Array.isArray(n?.segments) && n.segments.length > 0);
+  const isMeeting = (n) => n?.mode === "meeting"
+    || (n?.mode == null && Array.isArray(n?.segments) && n.segments.length > 0);
   const byCat = useMemo(() => {
     if (cat === "meetings") return all.filter(isMeeting);
     if (cat === "quick") return all.filter((n) => !isMeeting(n));

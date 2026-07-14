@@ -1107,7 +1107,8 @@ function CaptureHome() {
   // fresh launch (even with saved notes) and hides once capture begins this run.
   const gettingStarted = !s.noteRecording && !s.sessionStarted;
   // Copy-last: the most recent quick record (a dictation, not a diarized meeting).
-  const isMeeting = (n) => n?.mode === "meeting" || (Array.isArray(n?.segments) && n.segments.length > 0);
+  const isMeeting = (n) => n?.mode === "meeting"
+    || (n?.mode == null && Array.isArray(n?.segments) && n.segments.length > 0);
   const recentQuick = (s.history || []).find((n) => !isMeeting(n));
   const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
   const recentQuickPreview = recentQuickText;
