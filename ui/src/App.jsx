@@ -241,6 +241,7 @@ const UPDATE_LABEL = {
   error: "Update failed",
 };
 const COMMAND_UPDATE_POLL_LIMIT = 300;
+const PACKAGE_UPDATE_FAILURE_LIMIT = 3;
 
 function formatUpdateElapsed(totalSeconds) {
   const seconds = Math.max(0, Number(totalSeconds) || 0);
@@ -1653,6 +1654,22 @@ export default function App() {
     updatePollModeRef.current = mode;
     const generation = updatePollGenerationRef.current;
     let attempts = 0;
+    let consecutiveFailures = 0;
+    const recordPackageFailure = () => {
+      if (mode !== "package") return false;
+      consecutiveFailures += 1;
+      if (
+        consecutiveFailures < PACKAGE_UPDATE_FAILURE_LIMIT
+        || generation !== updatePollGenerationRef.current
+      ) return false;
+      const detail = "Lost contact with updater. Retry the update.";
+      setUpdateStatus((u) => ({ ...u, updating: false, error: detail }));
+      setUpdatePhase("error");
+      setUpdateProgress(null);
+      setUpdateErrorReason(detail);
+      stopUpdatePolling();
+      return true;
+    };
     const poll = async () => {
       if (generation !== updatePollGenerationRef.current || updateRestartRequestedRef.current) return;
       if (mode === "command") attempts += 1;
@@ -1660,9 +1677,17 @@ export default function App() {
         try {
           const status = await ipc.checkUpdates();
           if (generation !== updatePollGenerationRef.current || updateRestartRequestedRef.current) return;
+          const mapped = mapBackendUpdatePhase(status);
+          if (mode === "package" && mapped === "check-error") {
+            if (recordPackageFailure()) return;
+          } else if (mode === "package" && (mapped || status?.checked)) {
+            consecutiveFailures = 0;
+          } else if (recordPackageFailure()) {
+            return;
+          }
           applyPolledUpdateStatus(status);
         } catch {
-          // Transient discovery failures do not end an active polling loop.
+          if (recordPackageFailure()) return;
         }
       }
       if (

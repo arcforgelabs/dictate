@@ -27,6 +27,41 @@ function finishCapture() {
   fireEvent.click(screen.getByText("Finish note"));
 }
 
+function mockPackagePolling(statuses) {
+  const sources = [];
+  let checks = 0;
+  window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+  window.__TAURI__ = { core: { invoke: vi.fn() } };
+  window.EventSource = class {
+    constructor() { sources.push(this); }
+    close() {}
+  };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const path = String(url).replace("http://127.0.0.1:1", "");
+    if (path === "/api/state") {
+      return {
+        ok: true,
+        json: async () => ({
+          version: "2026.7.4",
+          updateChannel: "stable",
+          model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
+          history: [],
+          dictatePro: { signedIn: false, account: null },
+          sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
+        }),
+      };
+    }
+    if (path === "/api/update-status") {
+      const status = statuses[Math.min(checks, statuses.length - 1)];
+      checks += 1;
+      if (status instanceof Error) throw status;
+      return { ok: true, json: async () => status };
+    }
+    return { ok: true, json: async () => ({}) };
+  });
+  return { sources, getChecks: () => checks };
+}
+
 const ACTIVE_PRO = {
   signedIn: true,
   account: { email: "samuel@example.test" },
@@ -845,6 +880,69 @@ describe("Quiet Console app (mock mode)", () => {
     expect(await screen.findByRole("button", { name: "Check for updates" }, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
     expect(checks).toBe(2);
+  });
+
+  it("recovers package polling after a transient status failure", async () => {
+    vi.useFakeTimers();
+    const polling = mockPackagePolling([
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "preparing",
+      },
+      {
+        checked: false,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "failed",
+        errorCode: "check_failed",
+      },
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "downloading",
+        progress: 42,
+      },
+    ]);
+
+    render(<App />);
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: /Preparing update/i })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByRole("button", { name: /Preparing update/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByRole("button", { name: /Downloading… 42%/i })).toBeInTheDocument();
+    expect(polling.getChecks()).toBe(3);
+  });
+
+  it("makes repeated package polling failures retryable", async () => {
+    vi.useFakeTimers();
+    const polling = mockPackagePolling([
+      {
+        checked: true,
+        updateAvailable: true,
+        installKind: "linux-package",
+        phase: "preparing",
+      },
+      new Error("status transport unavailable"),
+    ]);
+
+    render(<App />);
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: /Preparing update/i })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText("Lost contact with updater. Retry the update.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(polling.getChecks()).toBe(4);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(polling.getChecks()).toBe(4);
   });
 
   it("turns an expired command update poll into a retryable failure", async () => {
