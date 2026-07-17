@@ -134,9 +134,9 @@
       "dictate_hosted_jobs_and_results": {
         "proposed_authority": "arc_forge_shared_dictate_hosted_backend",
         "owner_role": "external shared backend owner",
-        "source_status": "candidate_source_present_at_pinned_revision",
+        "source_status": "candidate_source_present_at_pinned_revision; dedicated_worker_transport_blocked",
         "deployment_verification": "unknown",
-        "disposition": "Canonical owner for durable jobs, uploads, worker handoff, artifact retrieval/ack/deletion, and owner isolation."
+        "disposition": "Canonical owner for durable jobs, uploads, worker handoff, artifact retrieval/ack/deletion, and owner isolation. Dedicated worker execution must consume the normalized shared-service transport; it is not deployed."
       },
       "dictate_usage": {
         "proposed_authority": "arc_forge_shared_dictate_usage_ledger",
@@ -146,11 +146,11 @@
         "disposition": "Canonical audio-second ledger for Dictate; Deck usage is a separate product ledger."
       },
       "governed_provider_neutral_stt_gateway": {
-        "proposed_authority": "arc_forge_shared_provider_gateway",
+        "proposed_authority": "arc_forge_litellm_dictate_worker",
         "owner_role": "external shared backend owner",
-        "source_status": "direct_provider_source_present; shared_Dictate_STT_contract_not_proven",
+        "source_status": "proposed_code_substrate; normalized_shared_service_transport_blocked",
         "deployment_verification": "unknown",
-        "disposition": "One governed server-side provider boundary; provider/model aliases and credentials never become client authority."
+        "disposition": "Proposed LiteLLM-backed Dictate worker authority uses independent audio.transcription (/v1/audio/transcriptions) and audio.tts (/v1/audio/speech) credentials with separate lifecycle and hard budgets. TTS is synthetic proof only. No chat, cross-capability, direct-provider, OAuth, or BYOK fallback. Local/private customer-key STT is unchanged."
       },
       "dictate_product_surface": {
         "proposed_authority": "dictate_desktop_and_dictate_product_ui",
@@ -177,8 +177,8 @@
       {"flow_id": "commerce_checkout", "source_refs": ["src/dictate/pro/server.py:442-480", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1228-1365", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:13125-13127"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_product_checkout_and_read", "operation_ids": ["commerce.checkout", "commerce.read", "entitlement.read"]},
       {"flow_id": "commerce_webhook", "source_refs": ["src/dictate/pro/server.py:439-440,601-634", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/main.py:160-200"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_stripe_dispatch", "operation_ids": ["commerce.webhook"]},
       {"flow_id": "encrypted_sync", "source_refs": ["src/dictate/pro/store.py:353-400,459-705", "src/dictate/pro/service.py:204-308", "src/dictate/pro/server.py:529-558", "src/dictate/sync.py:76-89,166-278,627-638", "src/dictate/pro/client.py:619-633"], "proposed_authority": "arc_forge_shared_backend_with_dictate_client_encryption", "source_status": "local_source_present_contract_locked", "deployment_verification": "unknown", "disposition": "canonical_sync_protocol", "key_envelope_authority": "dictate_client_encryption_with_arc_forge_envelope_storage", "operation_ids": ["sync.push", "sync.pull", "sync.cursor", "sync.key_envelopes.write", "sync.key_envelopes.read", "sync.export", "sync.delete"]},
-      {"flow_id": "hosted_job_and_result", "source_refs": ["src/dictate/pro/service.py:431-607", "src/dictate/pro/server.py:559-582", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1402-1637"], "proposed_authority": "arc_forge_shared_dictate_hosted_backend", "source_status": "candidate_source_present_at_pinned_revision", "deployment_verification": "unknown", "disposition": "canonical_durable_hosted_flow", "operation_ids": ["hosted.create", "hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]},
-      {"flow_id": "governed_stt_provider_request", "source_refs": ["src/dictate/pro/relay.py:27-92", "src/dictate/pro/service.py:41-44,512-563", "arc-forge-deck@2ee29c9:src/arc_forge_console/provider_gateway.py:61-71,239-282"], "proposed_authority": "arc_forge_shared_provider_gateway", "source_status": "direct_provider_source_present_shared_contract_not_proven", "deployment_verification": "unknown", "disposition": "migration_required_before_hosted_release", "operation_ids": ["gateway.invoke"]}
+      {"flow_id": "hosted_job_and_result", "source_refs": ["src/dictate/pro/service.py:431-607", "src/dictate/pro/server.py:559-582", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1402-1637"], "proposed_authority": "arc_forge_shared_dictate_hosted_backend", "source_status": "candidate_source_present_at_pinned_revision_dedicated_worker_transport_blocked_not_deployed", "deployment_verification": "unknown", "disposition": "canonical_durable_hosted_flow_preserves_encrypted_result_and_ack_contract", "operation_ids": ["hosted.create", "hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]},
+      {"flow_id": "governed_stt_provider_request", "source_refs": ["src/dictate/pro/relay.py:27-92", "src/dictate/pro/service.py:41-44,512-563", "arc-forge-deck@2ee29c9:src/arc_forge_console/provider_gateway.py:61-71,239-282"], "proposed_authority": "arc_forge_litellm_dictate_worker", "source_status": "proposed_code_substrate_normalized_shared_service_transport_blocked_not_deployed", "deployment_verification": "unknown", "disposition": "two_independent_litellm_capabilities_no_fallback_local_private_unchanged", "operation_ids": ["gateway.invoke"]}
     ]
   },
   "operations": {
