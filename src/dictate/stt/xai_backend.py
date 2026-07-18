@@ -55,19 +55,16 @@ class XAISpeechToText(SpeechToText):
     ) -> str:
         del prompt_context
         preference = load_config().cloud_provider_preference or "pro-first"
-        routes = (self._transcribe_pro, self._transcribe_personal)
         if preference == "personal-first":
-            routes = tuple(reversed(routes))
-        errors: list[str] = []
-        for route in routes:
-            try:
-                return route(audio, language=language, hotwords=hotwords)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(str(exc))
-        raise RuntimeError("Cloud transcription unavailable: " + "; ".join(errors))
+            return self._transcribe_personal(audio, language=language, hotwords=hotwords)
+        return self._transcribe_pro(audio, language=language, hotwords=hotwords)
 
     def _transcribe_personal(
-        self, audio: np.ndarray, *, language: str | None, hotwords: str | None
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None,
+        hotwords: str | None,
     ) -> str:
         if not self.api_key:
             raise RuntimeError("no personal xAI API key is configured")
@@ -90,13 +87,19 @@ class XAISpeechToText(SpeechToText):
         return _extract_text(response)
 
     def _transcribe_pro(
-        self, audio: np.ndarray, *, language: str | None, hotwords: str | None
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None,
+        hotwords: str | None,
+        requested_diarization: bool = False,
     ) -> str:
         del hotwords
         client = ProClient()
         state = client.get_state()
         if not state.get("signedIn") or not (state.get("entitlements") or {}).get("active"):
             raise RuntimeError("no active Dictate Pro subscription is available")
+        client.ensure_hosted_result_key()
         duration = audio.size / 16000.0
         with tempfile.TemporaryDirectory(prefix="dictate-pro-") as temp_dir:
             wav_path = Path(temp_dir) / "audio.wav"
@@ -105,23 +108,33 @@ class XAISpeechToText(SpeechToText):
                 language=language,
                 audio_duration_seconds=duration,
                 mode="dictation",
+                requested_diarization=requested_diarization,
             )
-            job_id = str(job.get("job_id") or "")
-            if not job_id:
-                raise RuntimeError("Dictate Pro did not create a transcription job")
+            job_record = _hosted_job_record(job)
+            job_id = _required_job_field(job_record, "job_id")
+            request_id = _required_job_field(job_record, "request_id")
+            correlation_id = _required_job_field(job_record, "correlation_id")
             client.upload_meeting_audio(job_id, wav_path)
             deadline = time.monotonic() + _timeout_seconds(audio)
             while time.monotonic() < deadline:
                 status = client.get_meeting(job_id)
-                phase = str(status.get("status") or "")
-                if phase == "completed":
-                    transcript = client.get_transcript(job_id)
+                status_record = _hosted_job_record(status)
+                phase = str(status_record.get("state") or status_record.get("status") or "")
+                if phase in {"completed", "ready"}:
+                    transcript = client.consume_hosted_result(
+                        job_id,
+                        request_id=request_id,
+                        correlation_id=correlation_id,
+                    )
                     text = str(transcript.get("text") or "").strip()
                     if text:
+                        client.accept_hosted_result(job_id)
                         return text
                     raise RuntimeError("Dictate Pro returned an empty transcript")
                 if phase in {"failed", "cancelled"}:
-                    raise RuntimeError(str(status.get("error") or f"Dictate Pro job {phase}"))
+                    raise RuntimeError(
+                        str(status_record.get("error") or f"Dictate Pro job {phase}")
+                    )
                 time.sleep(0.5)
         raise RuntimeError("Dictate Pro transcription timed out")
 
@@ -132,6 +145,25 @@ class XAISpeechToText(SpeechToText):
         hotwords: str | None = None,
     ) -> str:
         """Transcribe with xAI speaker diarization and return speaker-labelled text."""
+        preference = load_config().cloud_provider_preference or "pro-first"
+        if preference != "personal-first":
+            return self._transcribe_pro(
+                audio,
+                language=language,
+                hotwords=hotwords,
+                requested_diarization=True,
+            )
+        return self._transcribe_personal_diarized(audio, language=language, hotwords=hotwords)
+
+    def _transcribe_personal_diarized(
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None,
+        hotwords: str | None,
+    ) -> str:
+        if not self.api_key:
+            raise RuntimeError("no personal xAI API key is configured")
         with tempfile.TemporaryDirectory(prefix="dictate-xai-") as temp_dir:
             wav_path = Path(temp_dir) / "audio.wav"
             _write_wav(wav_path, audio)
@@ -149,6 +181,18 @@ class XAISpeechToText(SpeechToText):
                 timeout=_timeout_seconds(audio),
             )
         return _extract_diarized_text(response)
+
+
+def _hosted_job_record(response: dict[str, object]) -> dict[str, object]:
+    nested = response.get("job")
+    return nested if isinstance(nested, dict) else response
+
+
+def _required_job_field(job: dict[str, object], field: str) -> str:
+    value = str(job.get(field) or "").strip()
+    if not value:
+        raise RuntimeError(f"Dictate Pro job response did not include {field}")
+    return value
 
 
 def _api_key() -> str:

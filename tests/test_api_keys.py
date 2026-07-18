@@ -255,6 +255,102 @@ class ApiKeysTests(unittest.TestCase):
         read_secret.assert_called_once_with(target)
         clear_secret.assert_called_once_with(target, "sync device private key")
 
+    def test_hosted_result_private_key_refuses_private_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fallback = Path(tmp) / "api-keys.json"
+            with (
+                patch("dictate.api_keys._is_windows", return_value=False),
+                patch("dictate.api_keys.shutil.which", return_value=None),
+                patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+                patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+                patch("dictate.api_keys.LOCAL_API_KEYS_PATH", fallback),
+            ):
+                with self.assertRaisesRegex(api_keys.ApiKeyStorageError, "private-file fallback is disabled"):
+                    api_keys.save_hosted_result_private_key("result_key_1", 2, "encoded-private-key")
+                self.assertIsNone(api_keys.read_hosted_result_private_key("result_key_1", 2))
+                api_keys.clear_hosted_result_private_key("result_key_1", 2)
+                self.assertFalse(fallback.exists())
+
+    def test_secret_tool_stores_hosted_result_private_key_with_key_and_version_scope(self) -> None:
+        calls = []
+
+        def fake_run(args, **kwargs):  # noqa: ANN001
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="encoded-private-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value="/usr/bin/secret-tool"),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+            patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            api_keys.save_hosted_result_private_key("result_key_1", 2, "encoded-private-key")
+            self.assertEqual(api_keys.read_hosted_result_private_key("result_key_1", 2), "encoded-private-key")
+            api_keys.clear_hosted_result_private_key("result_key_1", 2)
+
+        args, kwargs = calls[0]
+        self.assertEqual(kwargs["input"], "encoded-private-key")
+        joined_args = " ".join(args)
+        self.assertIn("hosted-result-private-key", joined_args)
+        self.assertIn("result_key_1", joined_args)
+        self.assertIn("2", joined_args)
+        self.assertNotIn("encoded-private-key", joined_args)
+
+    def test_hosted_result_private_key_requires_valid_reference(self) -> None:
+        with self.assertRaises(api_keys.ApiKeyStorageError):
+            api_keys.save_hosted_result_private_key("", 1, "encoded-private-key")
+        with self.assertRaises(api_keys.ApiKeyStorageError):
+            api_keys.save_hosted_result_private_key("result_key_1", 0, "encoded-private-key")
+        with self.assertRaises(api_keys.ApiKeyStorageError):
+            api_keys.save_hosted_result_private_key("result_key_1", 1, "")
+
+    def test_hosted_result_private_key_fails_closed_on_macos(self) -> None:
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.sys.platform", "darwin"),
+            patch("dictate.api_keys._linux_save_secret") as save_secret,
+        ):
+            with self.assertRaisesRegex(api_keys.ApiKeyStorageError, "macOS Keychain support"):
+                api_keys.save_hosted_result_private_key("result_key_1", 1, "encoded-private-key")
+            self.assertIsNone(api_keys.read_hosted_result_private_key("result_key_1", 1))
+            api_keys.clear_hosted_result_private_key("result_key_1", 1)
+        save_secret.assert_not_called()
+
+    def test_libsecret_gi_round_trips_and_rotates_hosted_result_keys_by_exact_version(self) -> None:
+        stored: dict[tuple[str, str], str] = {}
+
+        def exact(attrs: dict[str, str]) -> tuple[str, str]:
+            return attrs["recipient-key"], attrs["version"]
+
+        def fake_store(_label: str, attrs: dict[str, str], value: str) -> None:
+            stored[exact(attrs)] = value
+
+        def fake_lookup(attrs: dict[str, str]) -> str | None:
+            return stored.get(exact(attrs))
+
+        def fake_clear(attrs: dict[str, str]) -> None:
+            stored.pop(exact(attrs), None)
+
+        with (
+            patch("dictate.api_keys._is_windows", return_value=False),
+            patch("dictate.api_keys.shutil.which", return_value=None),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=True),
+            patch("dictate.api_keys._libsecret_gi_store", side_effect=fake_store),
+            patch("dictate.api_keys._libsecret_gi_lookup", side_effect=fake_lookup),
+            patch("dictate.api_keys._libsecret_gi_clear", side_effect=fake_clear),
+            patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
+        ):
+            api_keys.save_hosted_result_private_key("result_key_1", 1, "private-v1")
+            api_keys.save_hosted_result_private_key("result_key_1", 2, "private-v2")
+            self.assertEqual(api_keys.read_hosted_result_private_key("result_key_1", 1), "private-v1")
+            self.assertEqual(api_keys.read_hosted_result_private_key("result_key_1", 2), "private-v2")
+            api_keys.clear_hosted_result_private_key("result_key_1", 1)
+            self.assertIsNone(api_keys.read_hosted_result_private_key("result_key_1", 1))
+            self.assertEqual(api_keys.read_hosted_result_private_key("result_key_1", 2), "private-v2")
+            api_keys.clear_hosted_result_private_key("result_key_1", 2)
+        self.assertEqual(stored, {})
+
     def test_backend_rejects_unknown_provider(self) -> None:
         with self.assertRaises(api_keys.ApiKeyStorageError):
             api_keys.save_api_key("not-a-provider", "secret")

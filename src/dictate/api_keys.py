@@ -48,6 +48,7 @@ class ApiKeyStatus:
 PRO_REFRESH_TOKEN_BACKEND = "dictate-pro-refresh"
 SYNC_ACCOUNT_KEY_BACKEND = "dictate-sync-account-key"
 SYNC_DEVICE_PRIVATE_KEY_BACKEND = "dictate-sync-device-private-key"
+HOSTED_RESULT_PRIVATE_KEY_BACKEND = "dictate-hosted-result-private-key"
 
 
 def save_pro_refresh_token(token: str) -> None:
@@ -172,6 +173,73 @@ def clear_sync_device_private_key(device_id: str) -> None:
     _linux_clear_secret(
         attrs=_sync_device_secret_attrs(device),
         local_key=f"sync-device:{device}",
+    )
+
+
+def save_hosted_result_private_key(recipient_key_id: str, version: int, encoded_key: str) -> None:
+    """Persist one hosted-result decryption key in the OS secret store."""
+    key_id = recipient_key_id.strip()
+    key = encoded_key.strip()
+    if not key_id or version < 1 or not key:
+        raise ApiKeyStorageError("Hosted result key id, version, and private key are required.")
+    if _is_windows():
+        _windows_save_secret(
+            _windows_hosted_result_private_key_target_name(key_id, version),
+            key,
+            "hosted result private key",
+        )
+        return
+    if sys.platform == "darwin":
+        raise ApiKeyStorageError(
+            "Hosted result private keys require macOS Keychain support, which is not implemented; fallback is disabled."
+        )
+    if _linux_secret_backend() == "local-file":
+        raise ApiKeyStorageError(
+            "Hosted result private keys require Secret Service; private-file fallback is disabled."
+        )
+    _linux_save_secret(
+        label="Dictate hosted result private key",
+        attrs=_hosted_result_secret_attrs(key_id, version),
+        value=key,
+        local_key=f"hosted-result:{key_id}:{version}",
+    )
+
+
+def read_hosted_result_private_key(recipient_key_id: str, version: int) -> str | None:
+    """Read one hosted-result decryption key from the OS secret store."""
+    key_id = recipient_key_id.strip()
+    if not key_id or version < 1:
+        return None
+    if _is_windows():
+        return _windows_read_secret(_windows_hosted_result_private_key_target_name(key_id, version))
+    if sys.platform == "darwin":
+        return None
+    if _linux_secret_backend() == "local-file":
+        return None
+    return _linux_read_secret(
+        attrs=_hosted_result_secret_attrs(key_id, version),
+        local_key=f"hosted-result:{key_id}:{version}",
+    )
+
+
+def clear_hosted_result_private_key(recipient_key_id: str, version: int) -> None:
+    """Remove one hosted-result decryption key from the OS secret store."""
+    key_id = recipient_key_id.strip()
+    if not key_id or version < 1:
+        return
+    if _is_windows():
+        _windows_clear_secret(
+            _windows_hosted_result_private_key_target_name(key_id, version),
+            "hosted result private key",
+        )
+        return
+    if sys.platform == "darwin":
+        return
+    if _linux_secret_backend() == "local-file":
+        return
+    _linux_clear_secret(
+        attrs=_hosted_result_secret_attrs(key_id, version),
+        local_key=f"hosted-result:{key_id}:{version}",
     )
 
 
@@ -407,6 +475,16 @@ def _sync_device_secret_attrs(device_id: str) -> dict[str, str]:
     }
 
 
+def _hosted_result_secret_attrs(recipient_key_id: str, version: int) -> dict[str, str]:
+    return {
+        "application": "dictate",
+        "backend": HOSTED_RESULT_PRIVATE_KEY_BACKEND,
+        "kind": "hosted-result-private-key",
+        "recipient-key": recipient_key_id,
+        "version": str(version),
+    }
+
+
 def _linux_secret_backend() -> str:
     """Prefer secret-tool, then libsecret GI (Ubuntu 25/26 desktop), else local file."""
     if shutil.which("secret-tool") is not None:
@@ -523,6 +601,8 @@ def _libsecret_schema(Secret: Any) -> Any:
             "kind": Secret.SchemaAttributeType.STRING,
             "account": Secret.SchemaAttributeType.STRING,
             "device": Secret.SchemaAttributeType.STRING,
+            "recipient-key": Secret.SchemaAttributeType.STRING,
+            "version": Secret.SchemaAttributeType.STRING,
         },
     )
 
@@ -637,6 +717,8 @@ schema = Secret.Schema.new(
         "kind": Secret.SchemaAttributeType.STRING,
         "account": Secret.SchemaAttributeType.STRING,
         "device": Secret.SchemaAttributeType.STRING,
+        "recipient-key": Secret.SchemaAttributeType.STRING,
+        "version": Secret.SchemaAttributeType.STRING,
     },
 )
 if action == "store":
@@ -828,6 +910,10 @@ def _windows_sync_account_key_target_name(account_id: str) -> str:
 
 def _windows_sync_device_private_key_target_name(device_id: str) -> str:
     return f"Dictate:{SYNC_DEVICE_PRIVATE_KEY_BACKEND}:{device_id}:sync-device-private-key"
+
+
+def _windows_hosted_result_private_key_target_name(recipient_key_id: str, version: int) -> str:
+    return f"Dictate:{HOSTED_RESULT_PRIVATE_KEY_BACKEND}:{recipient_key_id}:{version}:hosted-result-private-key"
 
 
 def _windows_error(action: str, *, code: int | None = None) -> str:

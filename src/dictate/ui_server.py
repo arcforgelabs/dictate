@@ -935,6 +935,7 @@ class UiBackend:
     ) -> dict[str, Any]:
         client = self._require_pro_client()
         self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
+        client.ensure_hosted_result_key()
         return client.create_meeting(
             language=language,
             audio_duration_seconds=audio_duration_seconds,
@@ -953,7 +954,20 @@ class UiBackend:
     def get_pro_meeting_transcript(self, job_id: str) -> dict[str, Any]:
         client = self._require_pro_client()
         self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
-        return client.get_transcript(job_id)
+        response = client.get_meeting(job_id)
+        nested = response.get("job")
+        job = nested if isinstance(nested, dict) else response
+        request_id = str(job.get("request_id") or "").strip()
+        correlation_id = str(job.get("correlation_id") or "").strip()
+        if not request_id or not correlation_id:
+            raise ApiError(502, "Hosted meeting identity correlation is unavailable.")
+        result = client.consume_hosted_result(
+            job_id,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        client.accept_hosted_result(job_id)
+        return result
 
     def _require_pro_client(self) -> ProClient:
         if self.pro_client is None:

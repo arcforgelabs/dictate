@@ -98,7 +98,13 @@ class XAIBackendTests(unittest.TestCase):
             clear=False,
         ):
             stt = XAISpeechToText(model_name="grok-speech-to-text")
-            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with (
+                patch("urllib.request.urlopen", side_effect=fake_urlopen),
+                patch(
+                    "dictate.stt.xai_backend.load_config",
+                    return_value=Config(cloud_provider_preference="personal-first"),
+                ),
+            ):
                 text = stt.transcribe(audio, language="en", hotwords="AcmeWidget\nProjectNova")
 
         self.assertEqual(text, "hello world")
@@ -130,7 +136,13 @@ class XAIBackendTests(unittest.TestCase):
             clear=False,
         ):
             stt = XAISpeechToText(model_name="grok-speech-to-text")
-            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with (
+                patch("urllib.request.urlopen", side_effect=fake_urlopen),
+                patch(
+                    "dictate.stt.xai_backend.load_config",
+                    return_value=Config(cloud_provider_preference="personal-first"),
+                ),
+            ):
                 text = stt.transcribe_diarized(audio, language="en", hotwords="AcmeWidget")
 
         self.assertEqual(text, "Speaker 1: hello there\nSpeaker 2: yes")
@@ -198,17 +210,22 @@ class XAIBackendTests(unittest.TestCase):
         self.assertEqual(captured["argv"], [r"C:\Program Files\getkey.exe", "--arg"])
         self.assertEqual(result, "command-key")
 
-    def test_cloud_router_prefers_pro_and_falls_back_to_personal_key(self) -> None:
+    def test_cloud_router_never_falls_back_from_pro_to_personal_key(self) -> None:
         stt = XAISpeechToText()
         with (
-            patch("dictate.stt.xai_backend.load_config", return_value=Config(cloud_provider_preference="pro-first")),
-            patch.object(stt, "_transcribe_pro", side_effect=RuntimeError("Pro unavailable")) as pro,
+            patch(
+                "dictate.stt.xai_backend.load_config",
+                return_value=Config(cloud_provider_preference="pro-first"),
+            ),
+            patch.object(
+                stt, "_transcribe_pro", side_effect=RuntimeError("Pro unavailable")
+            ) as pro,
             patch.object(stt, "_transcribe_personal", return_value="personal result") as personal,
         ):
-            result = stt.transcribe(np.zeros(1600, dtype=np.float32))
-        self.assertEqual(result, "personal result")
+            with self.assertRaisesRegex(RuntimeError, "Pro unavailable"):
+                stt.transcribe(np.zeros(1600, dtype=np.float32))
         pro.assert_called_once()
-        personal.assert_called_once()
+        personal.assert_not_called()
 
     def test_cloud_router_can_prefer_personal_key(self) -> None:
         stt = XAISpeechToText()
@@ -221,6 +238,85 @@ class XAIBackendTests(unittest.TestCase):
         self.assertEqual(result, "personal result")
         personal.assert_called_once()
         pro.assert_not_called()
+
+    def test_hosted_pro_consumes_encrypted_result_without_plaintext_route(self) -> None:
+        class FakeProClient:
+            def __init__(self) -> None:
+                self.key_registered = False
+                self.created: dict[str, object] | None = None
+                self.consumed: dict[str, str] | None = None
+                self.accepted: list[str] = []
+
+            def get_state(self):  # noqa: ANN201
+                return {"signedIn": True, "entitlements": {"active": True}}
+
+            def ensure_hosted_result_key(self) -> None:
+                self.key_registered = True
+
+            def create_meeting(self, **kwargs):  # noqa: ANN003, ANN201
+                self.created = kwargs
+                return {
+                    "job": {
+                        "job_id": "job_1",
+                        "request_id": "request_1",
+                        "correlation_id": "correlation_1",
+                    }
+                }
+
+            def upload_meeting_audio(self, job_id, path):  # noqa: ANN001, ANN201
+                return {"job_id": job_id, "path": str(path)}
+
+            def get_meeting(self, job_id):  # noqa: ANN001, ANN201
+                return {"job": {"job_id": job_id, "state": "completed"}}
+
+            def consume_hosted_result(self, job_id, *, request_id, correlation_id):  # noqa: ANN001, ANN201
+                self.consumed = {
+                    "job_id": job_id,
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                }
+                return {"text": "encrypted transcript"}
+
+            def get_transcript(self, job_id):  # noqa: ANN001, ANN201
+                raise AssertionError(f"plaintext transcript route called for {job_id}")
+
+            def accept_hosted_result(self, job_id: str) -> None:
+                self.accepted.append(job_id)
+
+        client = FakeProClient()
+        stt = XAISpeechToText()
+        with (
+            patch("dictate.stt.xai_backend.ProClient", return_value=client),
+            patch(
+                "dictate.stt.xai_backend.load_config",
+                return_value=Config(cloud_provider_preference="pro-first"),
+            ),
+        ):
+            result = stt.transcribe(np.zeros(1600, dtype=np.float32), language="en")
+
+        self.assertEqual(result, "encrypted transcript")
+        self.assertTrue(client.key_registered)
+        self.assertEqual(client.created["requested_diarization"], False)
+        self.assertEqual(
+            client.consumed,
+            {"job_id": "job_1", "request_id": "request_1", "correlation_id": "correlation_1"},
+        )
+        self.assertEqual(client.accepted, ["job_1"])
+
+    def test_default_diarized_route_is_managed_and_has_no_personal_fallback(self) -> None:
+        stt = XAISpeechToText()
+        with (
+            patch(
+                "dictate.stt.xai_backend.load_config",
+                return_value=Config(cloud_provider_preference="pro-first"),
+            ),
+            patch.object(stt, "_transcribe_pro", return_value="managed diarized") as pro,
+            patch.object(stt, "_transcribe_personal_diarized") as personal,
+        ):
+            result = stt.transcribe_diarized(np.zeros(1600, dtype=np.float32))
+        self.assertEqual(result, "managed diarized")
+        self.assertTrue(pro.call_args.kwargs["requested_diarization"])
+        personal.assert_not_called()
 
 
 if __name__ == "__main__":

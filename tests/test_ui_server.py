@@ -173,6 +173,9 @@ class _FakeProClient:
     def __init__(self) -> None:
         self.current_device_keys = generate_device_key_pair()
         self.create_calls: list[dict[str, object]] = []
+        self.result_key_registrations = 0
+        self.result_consumptions: list[dict[str, str]] = []
+        self.accepted_results: list[str] = []
         self.sync_drains = 0
         self.sync_pulls: list[dict[str, int]] = []
         self.drained_sync_records = []
@@ -206,7 +209,43 @@ class _FakeProClient:
     ) -> dict[str, object]:
         call = {"language": language, "audio_duration_seconds": audio_duration_seconds}
         self.create_calls.append(call)
-        return {"job_id": "job_test", **call}
+        return {
+            "job_id": "job_test",
+            "request_id": "request_test",
+            "correlation_id": "correlation_test",
+            **call,
+        }
+
+    def ensure_hosted_result_key(self):  # noqa: ANN201
+        self.result_key_registrations += 1
+
+    def get_meeting(self, job_id: str) -> dict[str, object]:
+        return {
+            "job": {
+                "job_id": job_id,
+                "request_id": "request_test",
+                "correlation_id": "correlation_test",
+                "state": "completed",
+            }
+        }
+
+    def consume_hosted_result(
+        self,
+        job_id: str,
+        *,
+        request_id: str,
+        correlation_id: str,
+    ) -> dict[str, object]:
+        self.result_consumptions.append(
+            {"job_id": job_id, "request_id": request_id, "correlation_id": correlation_id}
+        )
+        return {"text": "encrypted hosted transcript"}
+
+    def get_transcript(self, job_id: str) -> dict[str, object]:
+        raise AssertionError(f"plaintext transcript route called for {job_id}")
+
+    def accept_hosted_result(self, job_id: str) -> None:
+        self.accepted_results.append(job_id)
 
     def refresh_if_needed(self) -> ProSession:
         return self.session
@@ -654,6 +693,28 @@ class UiBackendStateTests(unittest.TestCase):
             pro_client.create_calls,
             [{"language": "en", "audio_duration_seconds": 12.5}],
         )
+        self.assertEqual(pro_client.result_key_registrations, 1)
+
+    def test_get_pro_meeting_transcript_consumes_encrypted_result_without_plaintext_route(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pro_client = _FakeProClient()
+            backend = _backend(d, pro_client=pro_client)
+            result = backend.get_pro_meeting_transcript("job_test")
+
+        self.assertEqual(result["text"], "encrypted hosted transcript")
+        self.assertEqual(
+            pro_client.result_consumptions,
+            [
+                {
+                    "job_id": "job_test",
+                    "request_id": "request_test",
+                    "correlation_id": "correlation_test",
+                }
+            ],
+        )
+        self.assertEqual(pro_client.accepted_results, ["job_test"])
 
     def test_state_includes_disabled_sync_status(self) -> None:
         with tempfile.TemporaryDirectory() as d:

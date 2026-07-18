@@ -375,6 +375,7 @@ class ProClientTests(unittest.TestCase):
                 artifact_id="artifact_1",
                 acknowledgement_id="ack_1",
                 idempotency_key="idem_1",
+                correlation_id="correlation_1",
             )
             client.cancel_job("job_1")
 
@@ -386,10 +387,154 @@ class ProClientTests(unittest.TestCase):
                 "artifact_id": "artifact_1",
                 "acknowledgement_id": "ack_1",
                 "idempotency_key": "idem_1",
+                "correlation_id": "correlation_1",
             },
         )
         self.assertEqual(client.calls[1]["headers"], {"Idempotency-Key": "idem_1"})
         self.assertEqual(client.calls[2]["path"], "/api/dictate/jobs/job_1/cancel")
+
+    def test_arc_forge_gateway_registers_result_key_for_bound_device(self) -> None:
+        class FakeKeys:
+            def active(self):
+                from dictate.pro.hosted_result import HostedResultKey
+
+                return HostedResultKey(
+                    recipient_key_id="result_key_1",
+                    version=2,
+                    public_key="public_key_1",
+                    status="active",
+                    created_at="2026-07-18T00:00:00+00:00",
+                )
+
+        client = CapturingProClient(
+            base_url="https://arcforge.au",
+            session_path=self.session_path,
+            hosted_result_keys=FakeKeys(),
+        )
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        with patch.object(client, "load_session", return_value=session):
+            key = client.ensure_hosted_result_key()
+
+        self.assertEqual(key.recipient_key_id, "result_key_1")
+        self.assertEqual(client.calls[0]["path"], "/api/dictate/devices/device_1/result-key")
+        self.assertEqual(
+            client.calls[0]["payload"],
+            {
+                "recipient_key_id": "result_key_1",
+                "recipient_key_version": 2,
+                "public_key": "public_key_1",
+            },
+        )
+        self.assertNotIn("private", json.dumps(client.calls[0]))
+
+    def test_consume_hosted_result_acknowledges_with_stable_correlation_bound_id(self) -> None:
+        class FakePending:
+            def __init__(self) -> None:
+                self.acknowledged: list[tuple[str, str]] = []
+
+            def mark_acknowledged(self, job_id: str, acknowledgement_id: str) -> None:
+                self.acknowledged.append((job_id, acknowledgement_id))
+
+            def purge_recipient(self, _recipient_key_id: str, _version: int) -> None:
+                pass
+
+        pending = FakePending()
+        client = CapturingProClient(
+            base_url="https://arcforge.au",
+            session_path=self.session_path,
+            hosted_result_pending=pending,
+        )
+        session = ProSession(
+            account_id="arc_account_1",
+            device_id="device_1",
+            access_token="access",
+            refresh_token="refresh",
+            access_expires_at="2027-01-01T00:00:00+00:00",
+            refresh_expires_at="2028-01-01T00:00:00+00:00",
+        )
+        decrypted = {
+            "result": {"text": "private transcript"},
+            "artifact_id": "artifact_1",
+            "request_id": "request_1",
+            "correlation_id": "correlation_1",
+        }
+        with (
+            patch.object(client, "load_session", return_value=session),
+            patch.object(client, "get_decrypted_result", return_value=decrypted),
+        ):
+            first = client.consume_hosted_result(
+                "job_1", request_id="request_1", correlation_id="correlation_1"
+            )
+            first_ack = client.calls[-1]
+            client.calls.clear()
+            second = client.consume_hosted_result(
+                "job_1", request_id="request_1", correlation_id="correlation_1"
+            )
+            second_ack = client.calls[-1]
+
+        self.assertEqual(first, second)
+        self.assertEqual(first_ack["payload"], second_ack["payload"])
+        self.assertEqual(first_ack["payload"]["correlation_id"], "correlation_1")
+        self.assertEqual(
+            first_ack["payload"]["acknowledgement_id"],
+            first_ack["payload"]["idempotency_key"],
+        )
+
+    def test_ack_response_loss_keeps_replay_journal_and_retries_same_ack(self) -> None:
+        class FakePending:
+            def __init__(self) -> None:
+                self.marked = False
+
+            def mark_acknowledged(self, _job_id: str, _acknowledgement_id: str) -> None:
+                self.marked = True
+
+            def purge_recipient(self, _recipient_key_id: str, _version: int) -> None:
+                pass
+
+        pending = FakePending()
+        client = ProClient(
+            base_url="https://arcforge.au",
+            session_path=self.session_path,
+            hosted_result_pending=pending,
+        )
+        decrypted = {
+            "result": {"text": "private transcript"},
+            "artifact_id": "artifact_1",
+            "request_id": "request_1",
+            "correlation_id": "correlation_1",
+            "acknowledged": False,
+        }
+        calls: list[dict[str, object]] = []
+
+        def ambiguous_ack(_job_id: str, **kwargs):  # noqa: ANN003, ANN202
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise ProClientError(503, "ack response lost after server apply")
+            return {"status": "acknowledged"}
+
+        with (
+            patch.object(client, "get_decrypted_result", return_value=decrypted),
+            patch.object(client, "ack_result", side_effect=ambiguous_ack),
+        ):
+            with self.assertRaises(ProClientError):
+                client.consume_hosted_result(
+                    "job_1", request_id="request_1", correlation_id="correlation_1"
+                )
+            self.assertFalse(pending.marked)
+            result = client.consume_hosted_result(
+                "job_1", request_id="request_1", correlation_id="correlation_1"
+            )
+
+        self.assertEqual(result["text"], "private transcript")
+        self.assertTrue(pending.marked)
+        self.assertEqual(calls[0], calls[1])
 
     def test_arc_forge_gateway_routes_sync_under_api_dictate(self) -> None:
         client = CapturingProClient(base_url="https://arcforge.au", session_path=self.session_path)

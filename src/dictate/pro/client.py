@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import secrets
+import hashlib
 import time
 import urllib.error
 import urllib.parse
@@ -23,7 +24,19 @@ from dictate.api_keys import (
     save_pro_refresh_token,
 )
 from dictate.platform_paths import user_data_dir
-from dictate.pro.platform_state import build_convergence_state, classify_pro_client_error, should_clear_session_on_error
+from dictate.pro.hosted_result import (
+    ExpectedHostedResult,
+    HostedResultError,
+    HostedResultKey,
+    HostedResultKeyStore,
+    HostedResultPendingStore,
+    decrypt_hosted_result,
+)
+from dictate.pro.platform_state import (
+    build_convergence_state,
+    classify_pro_client_error,
+    should_clear_session_on_error,
+)
 from dictate.pro.browser_auth import (
     DEVICE_CODE_GRANT_TYPE,
     BrowserAuthAttempt,
@@ -82,9 +95,17 @@ class ProClient:
         *,
         base_url: str | None = None,
         session_path: Path = SESSION_PATH,
+        hosted_result_keys: HostedResultKeyStore | None = None,
+        hosted_result_pending: HostedResultPendingStore | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("DICTATE_PRO_API_URL") or DEFAULT_API_URL).rstrip("/")
+        self.base_url = (
+            base_url or os.environ.get("DICTATE_PRO_API_URL") or DEFAULT_API_URL
+        ).rstrip("/")
         self.session_path = session_path
+        self.hosted_result_pending = hosted_result_pending or HostedResultPendingStore()
+        self.hosted_result_keys = hosted_result_keys or HostedResultKeyStore(
+            purge_pending=self.hosted_result_pending.purge_recipient
+        )
         self._pending_email: str = ""
         self._desktop_capabilities: dict[str, Any] | None = None
         self._desktop_capabilities_probed: bool = False
@@ -662,6 +683,146 @@ class ProClient:
         session = self._require_session()
         return self._request("GET", self._dictate_job_path(job_id, suffix="/result"), auth=session.access_token)
 
+    def ensure_hosted_result_key(self, *, rotate: bool = False) -> HostedResultKey:
+        """Register the device's active result key without exposing its private half."""
+        if not self._uses_arcforge_gateway():
+            raise ProClientError(400, "hosted result keys are only available through the Arc Forge gateway")
+        session = self._require_session()
+        try:
+            key = None if rotate else self.hosted_result_keys.active()
+            if key is None:
+                key = self.hosted_result_keys.create_or_rotate()
+        except (HostedResultError, ApiKeyStorageError) as exc:
+            raise ProClientError(503, str(exc)) from exc
+        self._request(
+            "POST",
+            f"/api/dictate/devices/{session.device_id}/result-key",
+            {
+                "recipient_key_id": key.recipient_key_id,
+                "recipient_key_version": key.version,
+                "public_key": key.public_key,
+            },
+            auth=session.access_token,
+        )
+        return key
+
+    def get_decrypted_result(
+        self,
+        job_id: str,
+        *,
+        request_id: str,
+        correlation_id: str,
+        artifact_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and strictly decrypt a managed result; there is no plaintext fallback."""
+        session = self._require_session()
+        try:
+            pending = self.hosted_result_pending.get(job_id)
+        except HostedResultError as exc:
+            raise ProClientError(503, str(exc)) from exc
+        if pending is not None:
+            if (
+                pending.get("request_id") != request_id
+                or pending.get("correlation_id") != correlation_id
+            ):
+                raise ProClientError(
+                    422, "Hosted result pending journal identity does not match the request"
+                )
+            envelope = pending.get("envelope")
+        else:
+            response = self._request(
+                "GET",
+                self._dictate_job_path(job_id, suffix="/result"),
+                auth=session.access_token,
+            )
+            envelope = response.get("artifact")
+            if isinstance(envelope, dict):
+                try:
+                    self.hosted_result_pending.put(
+                        job_id=job_id,
+                        request_id=request_id,
+                        correlation_id=correlation_id,
+                        envelope=envelope,
+                    )
+                except HostedResultError as exc:
+                    raise ProClientError(503, str(exc)) from exc
+        if not isinstance(envelope, dict):
+            raise ProClientError(
+                502, "Arc Forge hosted result response did not contain an encrypted artifact"
+            )
+        key_id = envelope.get("recipient_key_id")
+        key_version = envelope.get("recipient_key_version")
+        if not isinstance(key_id, str) or type(key_version) is not int:
+            raise ProClientError(502, "Arc Forge hosted result recipient key reference was invalid")
+        resolved_artifact_id = str(artifact_id or envelope.get("artifact_id") or "").strip()
+        if not resolved_artifact_id:
+            raise ProClientError(502, "Arc Forge hosted result artifact id was missing")
+        try:
+            _metadata, private_key = self.hosted_result_keys.resolve(key_id, key_version)
+            payload = decrypt_hosted_result(
+                envelope,
+                expected=ExpectedHostedResult(
+                    account_id=session.account_id,
+                    device_id=session.device_id,
+                    job_id=job_id,
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                    artifact_id=resolved_artifact_id,
+                ),
+                private_key=private_key,
+            )
+            return {
+                "result": payload,
+                "artifact_id": resolved_artifact_id,
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "acknowledged": bool(pending and pending.get("acknowledged")),
+            }
+        except HostedResultError as exc:
+            raise ProClientError(422, str(exc)) from exc
+
+    def consume_hosted_result(
+        self,
+        job_id: str,
+        *,
+        request_id: str,
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        """Decrypt and acknowledge one managed result without any plaintext route fallback."""
+        decrypted = self.get_decrypted_result(
+            job_id,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        artifact_id = str(decrypted["artifact_id"])
+        digest = hashlib.sha256(
+            f"{job_id}|{artifact_id}|{correlation_id}".encode("utf-8")
+        ).hexdigest()[:32]
+        acknowledgement_id = f"dictate_ack_{digest}"
+        if not decrypted.get("acknowledged"):
+            self.ack_result(
+                job_id,
+                artifact_id=artifact_id,
+                acknowledgement_id=acknowledgement_id,
+                idempotency_key=acknowledgement_id,
+                correlation_id=correlation_id,
+            )
+            try:
+                self.hosted_result_pending.mark_acknowledged(job_id, acknowledgement_id)
+            except HostedResultError as exc:
+                raise ProClientError(503, str(exc)) from exc
+        result = decrypted.get("result")
+        if not isinstance(result, dict):
+            raise ProClientError(502, "Decrypted Dictate result was invalid")
+        return result
+
+    def accept_hosted_result(self, job_id: str) -> None:
+        """Remove the encrypted replay journal only after application-level acceptance."""
+        try:
+            self.hosted_result_pending.accept(job_id)
+        except HostedResultError as exc:
+            raise ProClientError(503, str(exc)) from exc
+
     def ack_result(
         self,
         job_id: str,
@@ -669,12 +830,14 @@ class ProClient:
         artifact_id: str,
         acknowledgement_id: str,
         idempotency_key: str,
+        correlation_id: str,
     ) -> dict[str, Any]:
         session = self._require_session()
         payload = {
             "artifact_id": artifact_id,
             "acknowledgement_id": acknowledgement_id,
             "idempotency_key": idempotency_key,
+            "correlation_id": correlation_id,
         }
         return self._request(
             "POST",
