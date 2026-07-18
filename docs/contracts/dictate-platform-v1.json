@@ -9,10 +9,10 @@
     "status": "p1_offline_candidate_implementation_not_deployed",
     "owner_confirmation": "p1_contract_locked; offline_candidate_implementation_in_progress; deployment_confirmation_later",
     "deployment_verification": "unknown",
-    "implementation_claim": "The Dictate branch implements device-local hosted-result key custody, strict dictate_litellm_worker_v1 encrypted-result consumption, durable ciphertext-only acknowledgement replay, and correlation-bound acknowledgement. The Deck and infrastructure repositories contain offline P1 candidates. No deployment, live credential, canary, or production conformance is claimed.",
+    "implementation_claim": "The Dictate branch implements device-local hosted-result key custody, strict dictate_litellm_worker_v1 device-recipient encrypted-result consumption, durable ciphertext-only acknowledgement replay, correlation-bound acknowledgement, and application acceptance/expiry/revocation purge. The Deck and infrastructure repositories contain offline P1 candidates. No deployment, live credential, canary, or production conformance is claimed.",
     "p1_source_evidence": {
       "canonical_goal": "arc-forge-deck@46c02e65855f1393d58bbf1c70b971565de58806:docs/goal-per-capability-managed-usage.md",
-      "infrastructure_candidate": "arc-forge-infrastructure@a4ea387:disabled Dictate LiteLLM worker topology",
+      "infrastructure_candidate": "arc-forge-infrastructure@476d70a:disabled Dictate LiteLLM worker topology with pinned-stock speech cost/scope proof",
       "dictate_client": [
         "src/dictate/pro/hosted_result.py",
         "src/dictate/pro/client.py",
@@ -187,8 +187,8 @@
       {"flow_id": "commerce_checkout", "source_refs": ["src/dictate/pro/server.py:442-480", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1228-1365", "arc-forge-deck@2ee29c9:src/arc_forge_console/dashboard.py:13125-13127"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_product_checkout_and_read", "operation_ids": ["commerce.checkout", "commerce.read", "entitlement.read"]},
       {"flow_id": "commerce_webhook", "source_refs": ["src/dictate/pro/server.py:439-440,601-634", "src/dictate/pro/stripe_handler.py:61-189", "arc-forge-deck@2ee29c9:src/arc_forge_console/main.py:160-200"], "proposed_authority": "arc_forge_shared_commerce_backend", "source_status": "source_present", "deployment_verification": "unknown", "disposition": "canonical_stripe_dispatch", "operation_ids": ["commerce.webhook"]},
       {"flow_id": "encrypted_sync", "source_refs": ["src/dictate/pro/store.py:353-400,459-705", "src/dictate/pro/service.py:204-308", "src/dictate/pro/server.py:529-558", "src/dictate/sync.py:76-89,166-278,627-638", "src/dictate/pro/client.py:619-633"], "proposed_authority": "arc_forge_shared_backend_with_dictate_client_encryption", "source_status": "local_source_present_contract_locked", "deployment_verification": "unknown", "disposition": "canonical_sync_protocol", "key_envelope_authority": "dictate_client_encryption_with_arc_forge_envelope_storage", "operation_ids": ["sync.push", "sync.pull", "sync.cursor", "sync.key_envelopes.write", "sync.key_envelopes.read", "sync.export", "sync.delete"]},
-      {"flow_id": "hosted_job_and_result", "source_refs": ["src/dictate/pro/service.py:431-607", "src/dictate/pro/server.py:559-582", "src/dictate/pro/hosted_result.py", "src/dictate/pro/client.py", "arc-forge-deck@2ee29c9:src/arc_forge_console/dictate.py:1402-1637"], "proposed_authority": "arc_forge_shared_dictate_hosted_backend", "source_status": "p1_offline_candidate_source_present_not_deployed", "deployment_verification": "unknown", "disposition": "canonical_durable_hosted_flow_preserves_encrypted_result_and_ack_contract", "operation_ids": ["hosted.create", "hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]},
-      {"flow_id": "governed_stt_provider_request", "source_refs": ["src/dictate/pro/hosted_result.py", "src/dictate/pro/client.py", "arc-forge-deck@2ee29c9:src/arc_forge_console/provider_gateway.py:61-71,239-282", "arc-forge-infrastructure@a4ea387:servers/prod-forge-gateway/docs/dictate-litellm-worker-v1.md"], "proposed_authority": "arc_forge_litellm_dictate_worker", "source_status": "p1_offline_candidate_source_present_not_deployed", "deployment_verification": "unknown", "disposition": "two_independent_litellm_capabilities_no_fallback_local_private_unchanged", "operation_ids": ["gateway.invoke"]}
+      {"flow_id": "hosted_job_and_result", "source_refs": ["src/dictate/pro/client.py", "src/dictate/pro/hosted_result.py", "src/dictate/stt/xai_backend.py", "arc-forge-deck@46c02e6:src/arc_forge_console/dictate.py", "arc-forge-deck@46c02e6:src/arc_forge_console/dictate_worker.py"], "proposed_authority": "arc_forge_shared_dictate_hosted_backend", "source_status": "p1_offline_candidate_source_present_not_deployed", "deployment_verification": "unknown", "disposition": "canonical_durable_hosted_flow_preserves_device_recipient_encrypted_result_and_ack_contract", "operation_ids": ["hosted.create", "hosted.upload", "hosted.signed_upload_url", "hosted.signed_upload", "hosted.signed_upload_complete", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel", "hosted.result_key.register", "hosted.result_key.rotate", "hosted.result_key.revoke"]},
+      {"flow_id": "governed_stt_provider_request", "source_refs": ["src/dictate/pro/hosted_result.py", "src/dictate/pro/client.py", "arc-forge-deck@46c02e6:src/arc_forge_console/dictate_worker.py", "arc-forge-infrastructure@476d70a:servers/prod-forge-gateway/docs/dictate-litellm-worker-v1.md"], "proposed_authority": "arc_forge_litellm_dictate_worker", "source_status": "p1_offline_candidate_source_present_not_deployed", "deployment_verification": "unknown", "disposition": "two_independent_litellm_capabilities_no_fallback_local_private_unchanged", "operation_ids": ["gateway.invoke"]}
     ]
   },
   "operations": {
@@ -544,24 +544,67 @@
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
       "request_schema": "#/schemas/HostedCreateRequest",
-      "response_schema": "#/schemas/HostedJob",
+      "response_schema": "#/schemas/HostedCreateResponse",
       "state_refs": ["#/enums/hosted_job_state", "#/enums/usage_event_lifecycle"],
-      "idempotency": {"required": true, "header": "Idempotency-Key", "scope": "account_and_request"},
+      "idempotency": {"required": false, "header": "server_derived", "scope": "account_device_job", "authority": "server"},
       "account_scope": "account_id"
     },
     "hosted.upload": {
       "operation_id": "hosted.upload",
       "method": "POST",
-      "route": "/api/dictate/jobs/{job_id}/upload",
-      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/upload",
+      "route": "/api/dictate/jobs/{job_id}/audio",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/audio",
       "transport": "public_https",
       "status": "proposed_not_deployed",
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
       "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
-      "request_schema": "#/schemas/HostedUploadRequest",
-      "response_schema": "#/schemas/HostedUpload",
+      "request_schema": "#/schemas/HostedAudioBody",
+      "response_schema": "#/schemas/HostedJobResponse",
       "state_refs": ["#/enums/hosted_upload_state", "#/enums/hosted_job_state"],
-      "idempotency": {"required": true, "header": "Idempotency-Key", "scope": "account_and_job"},
+      "idempotency": {"required": false, "header": "server_derived", "scope": "account_and_job_audio", "authority": "server"},
+      "account_scope": "account_id"
+    },
+    "hosted.signed_upload_url": {
+      "operation_id": "hosted.signed_upload_url",
+      "method": "POST",
+      "route": "/api/dictate/jobs/{job_id}/audio-upload-url",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/audio-upload-url",
+      "transport": "public_https",
+      "status": "p1_offline_candidate_not_deployed",
+      "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+      "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
+      "request_schema": "#/schemas/HostedSignedUploadRequest",
+      "response_schema": "#/schemas/HostedSignedUploadResponse",
+      "idempotency": {"required": false, "header": "server_derived", "scope": "account_and_job_upload", "authority": "server"},
+      "account_scope": "account_id"
+    },
+    "hosted.signed_upload": {
+      "operation_id": "hosted.signed_upload",
+      "method": "PUT",
+      "route": "{signed_upload_url}",
+      "url_template": "server_returned_signed_upload_url",
+      "transport": "bounded_signed_object_upload",
+      "public_client_access": true,
+      "status": "p1_offline_candidate_not_deployed",
+      "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+      "capability_authorization": {"mode": "signed_url_inherited", "source": "HostedSignedUploadResponse.url"},
+      "request_schema": "#/schemas/HostedAudioBody",
+      "response_schema": "#/schemas/EmptyResponse",
+      "idempotency": {"required": false, "header": "signed_object_store_semantics"},
+      "account_scope": "signed_job_upload"
+    },
+    "hosted.signed_upload_complete": {
+      "operation_id": "hosted.signed_upload_complete",
+      "method": "POST",
+      "route": "/api/dictate/jobs/{job_id}/audio-upload-complete",
+      "url_template": "https://console.arcforge.au/api/dictate/jobs/{job_id}/audio-upload-complete",
+      "transport": "public_https",
+      "status": "p1_offline_candidate_not_deployed",
+      "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
+      "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
+      "request_schema": "#/schemas/HostedSignedUploadCompleteRequest",
+      "response_schema": "#/schemas/HostedJobResponse",
+      "idempotency": {"required": false, "header": "server_derived", "scope": "account_job_upload", "authority": "server"},
       "account_scope": "account_id"
     },
     "hosted.status": {
@@ -574,7 +617,7 @@
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
       "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
       "request_schema": "#/schemas/HostedJobRequest",
-      "response_schema": "#/schemas/HostedJob",
+      "response_schema": "#/schemas/HostedJobResponse",
       "state_refs": ["#/enums/hosted_job_state"],
       "idempotency": {"required": false, "header": "not_applicable"},
       "account_scope": "account_id"
@@ -589,10 +632,49 @@
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
       "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
       "request_schema": "#/schemas/HostedJobRequest",
-      "response_schema": "#/schemas/HostedResultArtifact",
+      "response_schema": "#/schemas/HostedResultResponse",
       "state_refs": ["#/enums/hosted_job_state"],
-      "idempotency": {"required": false, "header": "not_applicable", "replay": "same server-managed encrypted artifact"},
+      "idempotency": {"required": false, "header": "not_applicable", "replay": "same device-recipient encrypted artifact"},
       "account_scope": "account_id"
+    },
+    "hosted.result_key.register": {
+      "operation_id": "hosted.result_key.register",
+      "method": "POST",
+      "route": "/api/dictate/devices/{device_id}/result-key",
+      "url_template": "https://console.arcforge.au/api/dictate/devices/{device_id}/result-key",
+      "transport": "public_https",
+      "status": "p1_offline_candidate_not_deployed",
+      "capabilities": ["dictate.devices.manage", "dictate.transcribe"],
+      "request_schema": "#/schemas/HostedResultKeyRegistration",
+      "response_schema": "#/schemas/HostedResultKeyRegistrationResponse",
+      "idempotency": {"required": false, "header": "server_version_binding", "scope": "account_device_recipient_version"},
+      "account_scope": "account_id_and_authenticated_device"
+    },
+    "hosted.result_key.rotate": {
+      "operation_id": "hosted.result_key.rotate",
+      "method": "CLIENT_ACTION_THEN_POST",
+      "route": "HostedResultKeyStore.create_or_rotate -> /api/dictate/devices/{device_id}/result-key",
+      "transport": "device_local_secret_store_then_public_https",
+      "public_client_access": true,
+      "status": "p1_offline_candidate_not_deployed",
+      "capabilities": ["dictate.devices.manage"],
+      "request_schema": "#/schemas/HostedResultKeyRegistration",
+      "response_schema": "#/schemas/HostedResultKeyRegistrationResponse",
+      "idempotency": {"required": false, "header": "server_version_binding", "scope": "account_device_recipient_version"},
+      "account_scope": "account_id_and_authenticated_device"
+    },
+    "hosted.result_key.revoke": {
+      "operation_id": "hosted.result_key.revoke",
+      "method": "CLIENT_ACTION",
+      "route": "HostedResultKeyStore.revoke",
+      "transport": "device_local_secret_store",
+      "public_client_access": false,
+      "status": "client_implemented_server_revocation_not_implemented",
+      "capabilities": ["dictate.devices.manage"],
+      "request_schema": "#/schemas/HostedResultKeyReference",
+      "response_schema": "#/schemas/EmptyResponse",
+      "idempotency": {"required": false, "header": "not_applicable", "scope": "recipient_version"},
+      "account_scope": "authenticated_device_local"
     },
     "hosted.ack": {
       "operation_id": "hosted.ack",
@@ -618,9 +700,9 @@
       "capabilities": ["dictate.transcribe", "dictate.transcribe_diarized"],
       "capability_authorization": {"mode": "job_inherited", "source": "HostedJob.capability"},
       "request_schema": "#/schemas/HostedJobRequest",
-      "response_schema": "#/schemas/HostedJob",
+      "response_schema": "#/schemas/HostedJobResponse",
       "state_refs": ["#/enums/hosted_job_state", "#/enums/usage_event_lifecycle"],
-      "idempotency": {"required": true, "header": "Idempotency-Key", "scope": "account_and_job"},
+      "idempotency": {"required": false, "header": "server_derived", "scope": "account_and_job_cancel", "authority": "server"},
       "account_scope": "account_id"
     },
     "gateway.invoke": {
@@ -1196,20 +1278,33 @@
     },
     "HostedCreateRequest": {
       "type": "object",
-      "required": ["request_id", "idempotency_key", "audio_duration_seconds", "capability"],
+      "additionalProperties": false,
+      "required": ["device_id", "audio_duration_seconds"],
       "properties": {
-        "request_id": {"type": "string"},
-        "idempotency_key": {"type": "string"},
-        "device_id": {"type": "string"},
+        "device_id": {"type": "string", "minLength": 1},
         "audio_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
         "language": {"type": "string"},
-        "capability": {"enum": ["dictate.transcribe", "dictate.transcribe_diarized"]}
+        "mode": {"enum": ["batch_meeting", "dictation"]},
+        "capability": {"enum": ["dictate.transcribe", "dictate.transcribe_diarized"]},
+        "requested_diarization": {"type": "boolean"}
       }
     },
-    "HostedUploadRequest": {
+    "HostedAudioBody": {
+      "type": "string",
+      "contentMediaType": "audio/wav",
+      "description": "Raw request body bytes; not JSON and never a normal sync payload."
+    },
+    "HostedSignedUploadRequest": {
       "type": "object",
-      "required": ["upload_id", "content_type", "idempotency_key"],
-      "properties": {"upload_id": {"type": "string"}, "content_type": {"type": "string"}, "byte_size": {"type": "integer", "minimum": 1}, "idempotency_key": {"type": "string"}}
+      "additionalProperties": false,
+      "required": ["byte_size"],
+      "properties": {"byte_size": {"type": "integer", "minimum": 1}}
+    },
+    "HostedSignedUploadCompleteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upload_id", "byte_size"],
+      "properties": {"upload_id": {"type": "string", "minLength": 1}, "byte_size": {"type": "integer", "minimum": 1}}
     },
     "HostedJobRequest": {
       "type": "object",
@@ -1218,7 +1313,7 @@
     },
     "HostedJob": {
       "type": "object",
-      "required": ["job_id", "account_id", "device_id", "product", "entitlement", "capability", "state", "result_contract", "created_at"],
+      "required": ["job_id", "account_id", "device_id", "product", "entitlement", "capability", "state", "result_contract", "request_id", "correlation_id", "created_at"],
       "properties": {
         "job_id": {"type": "string"},
         "account_id": {"type": "string"},
@@ -1227,12 +1322,23 @@
         "entitlement": {"const": "dictate_pro"},
         "capability": {"enum": ["dictate.transcribe", "dictate.transcribe_diarized"]},
         "state": {"$ref": "#/enums/hosted_job_state"},
-        "result_contract": {"const": "server_managed_encrypted_artifact"},
-        "request_id": {"type": "string"},
+        "result_contract": {"const": "server_managed_encrypted_artifact", "description": "Current job-payload compatibility label only; the P1 artifact itself is device-recipient encrypted and server_managed=false."},
+        "request_id": {"type": "string", "minLength": 1, "authority": "server_derived"},
+        "correlation_id": {"type": "string", "minLength": 1, "authority": "server_derived"},
         "usage_event_id": {"type": "string"},
         "created_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": "string"}
       }
+    },
+    "HostedCreateResponse": {
+      "type": "object",
+      "required": ["job", "usage"],
+      "properties": {"job": {"$ref": "#/schemas/HostedJob"}, "usage": {"type": ["object", "null"]}}
+    },
+    "HostedJobResponse": {
+      "type": "object",
+      "required": ["job"],
+      "properties": {"job": {"$ref": "#/schemas/HostedJob"}, "usage": {"type": ["object", "null"]}, "upload": {"type": ["object", "null"]}}
     },
     "HostedUpload": {
       "type": "object",
@@ -1246,52 +1352,93 @@
         "expires_at": {"type": "string"}
       }
     },
+    "HostedSignedUploadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upload", "method", "url", "expires_at", "max_bytes"],
+      "properties": {
+        "upload": {"$ref": "#/schemas/HostedUpload"},
+        "method": {"const": "PUT"},
+        "url": {"type": "string", "minLength": 1},
+        "expires_at": {"type": "string"},
+        "max_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "EmptyResponse": {"type": "object", "additionalProperties": false},
     "HostedArtifactAAD": {
       "type": "object",
-      "required": ["account_id", "device_id", "job_id", "artifact_id"],
-      "properties": {"account_id": {"type": "string"}, "device_id": {"type": "string"}, "job_id": {"type": "string"}, "artifact_id": {"type": "string"}}
-    },
-    "HostedArtifactReference": {
-      "type": "object",
-      "required": ["reference_id", "expires_at", "max_bytes", "retrieval_mode"],
+      "additionalProperties": false,
+      "required": ["contract_version", "crypto_format", "account_id", "device_id", "job_id", "request_id", "correlation_id", "artifact_id", "recipient_key_id", "recipient_key_version", "ephemeral_public_key"],
       "properties": {
-        "reference_id": {"type": "string"},
-        "expires_at": {"type": "string", "format": "date-time"},
-        "max_bytes": {"type": "integer", "minimum": 1},
-        "retrieval_mode": {"const": "authenticated_bounded_fetch"}
+        "contract_version": {"const": "dictate_litellm_worker_v1"},
+        "crypto_format": {"const": "dictate_result_x25519_hkdf_aes256gcm_v1"},
+        "account_id": {"type": "string", "minLength": 1},
+        "device_id": {"type": "string", "minLength": 1},
+        "job_id": {"type": "string", "minLength": 1},
+        "request_id": {"type": "string", "minLength": 1},
+        "correlation_id": {"type": "string", "minLength": 1},
+        "artifact_id": {"type": "string", "minLength": 1},
+        "recipient_key_id": {"type": "string", "minLength": 1},
+        "recipient_key_version": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "ephemeral_public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"}
       }
     },
     "HostedResultArtifact": {
       "type": "object",
-      "required": ["artifact_id", "job_id", "account_id", "device_id", "version", "algorithm", "recipient_key_id", "nonce", "aad", "integrity_binding", "expires_at", "delete_after_ack", "ack_state"],
-      "oneOf": [
-        {"required": ["ciphertext"], "not": {"required": ["artifact_reference"]}},
-        {"required": ["artifact_reference"], "not": {"required": ["ciphertext"]}}
-      ],
+      "additionalProperties": false,
+      "required": ["contract_version", "crypto_format", "crypto_version", "algorithm", "kdf", "kdf_salt", "kdf_info", "ephemeral_public_key", "nonce", "aad", "ciphertext", "integrity_binding", "recipient_key_id", "recipient_key_version", "job_id", "request_id", "correlation_id", "artifact_id", "expires_at", "ack_state"],
       "properties": {
-        "artifact_id": {"type": "string"},
-        "job_id": {"type": "string"},
-        "account_id": {"type": "string"},
-        "device_id": {"type": "string"},
-        "encryption": {"const": "server_managed_encrypted_artifact"},
-        "version": {"const": "dictate_result_artifact_v1"},
-        "algorithm": {"enum": ["AES-256-GCM"]},
-        "recipient_key_id": {"type": "string"},
-        "nonce": {"type": "string"},
+        "contract_version": {"const": "dictate_litellm_worker_v1"},
+        "crypto_format": {"const": "dictate_result_x25519_hkdf_aes256gcm_v1"},
+        "crypto_version": {"const": 1},
+        "algorithm": {"const": "X25519+AES-256-GCM"},
+        "kdf": {"const": "HKDF-SHA256"},
+        "kdf_salt": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "kdf_info": {"type": "string", "pattern": "^dictate-result\\|dictate_litellm_worker_v1\\|dictate_result_x25519_hkdf_aes256gcm_v1\\|[^|]+\\|[^|]+\\|[1-9][0-9]*$"},
+        "ephemeral_public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "nonce": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
         "aad": {"$ref": "#/schemas/HostedArtifactAAD"},
-        "integrity_binding": {"type": "string"},
-        "ciphertext": {"type": "string", "minLength": 1},
-        "artifact_reference": {"$ref": "#/schemas/HostedArtifactReference"},
+        "ciphertext": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "integrity_binding": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "recipient_key_id": {"type": "string", "minLength": 1},
+        "recipient_key_version": {"type": "integer", "minimum": 1},
+        "job_id": {"type": "string", "minLength": 1},
+        "request_id": {"type": "string", "minLength": 1},
+        "correlation_id": {"type": "string", "minLength": 1},
+        "artifact_id": {"type": "string", "minLength": 1},
         "expires_at": {"type": "string", "format": "date-time"},
-        "delete_after_ack": {"const": true},
-        "ack_state": {"$ref": "#/enums/hosted_result_ack_state"}
+        "ack_state": {"const": "pending"}
       }
     },
     "ResultArtifact": {"$ref": "#/schemas/HostedResultArtifact"},
+    "HostedResultResponse": {
+      "type": "object",
+      "required": ["artifact", "job"],
+      "properties": {"artifact": {"$ref": "#/schemas/HostedResultArtifact"}, "job": {"$ref": "#/schemas/HostedJob"}}
+    },
+    "HostedResultKeyReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recipient_key_id", "recipient_key_version"],
+      "properties": {"recipient_key_id": {"type": "string", "minLength": 1}, "recipient_key_version": {"type": "integer", "minimum": 1}}
+    },
+    "HostedResultKeyRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recipient_key_id", "recipient_key_version", "public_key"],
+      "properties": {"recipient_key_id": {"type": "string", "minLength": 1}, "recipient_key_version": {"type": "integer", "minimum": 1}, "public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"}}
+    },
+    "HostedResultKeyRegistrationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "recipient_key_id", "recipient_key_version", "status", "contract_version"],
+      "properties": {"device_id": {"type": "string", "minLength": 1}, "recipient_key_id": {"type": "string", "minLength": 1}, "recipient_key_version": {"type": "integer", "minimum": 1}, "status": {"enum": ["active", "decrypt_only", "revoked"]}, "contract_version": {"const": "dictate_litellm_worker_v1"}}
+    },
     "ResultAckRequest": {
       "type": "object",
-      "required": ["artifact_id", "acknowledgement_id", "idempotency_key"],
-      "properties": {"artifact_id": {"type": "string"}, "acknowledgement_id": {"type": "string"}, "idempotency_key": {"type": "string"}}
+      "additionalProperties": false,
+      "required": ["artifact_id", "acknowledgement_id", "idempotency_key", "correlation_id"],
+      "properties": {"artifact_id": {"type": "string", "minLength": 1}, "acknowledgement_id": {"type": "string", "minLength": 1}, "idempotency_key": {"type": "string", "minLength": 1}, "correlation_id": {"type": "string", "minLength": 1}}
     },
     "ResultAckResponse": {
       "type": "object",
@@ -1441,11 +1588,11 @@
     },
     "GatewayProviderResponseProcessing": {
       "type": "object",
-      "required": ["mode", "memory_only", "immediate_server_managed_encryption", "persisted", "deleted_after_encryption"],
+      "required": ["mode", "memory_only", "immediate_device_recipient_encryption", "persisted", "deleted_after_encryption"],
       "properties": {
         "mode": {"const": "memory_only_immediate_encryption"},
         "memory_only": {"const": true},
-        "immediate_server_managed_encryption": {"const": true},
+        "immediate_device_recipient_encryption": {"const": true},
         "persisted": {"const": false},
         "deleted_after_encryption": {"const": true}
       }
@@ -1597,18 +1744,18 @@
       {
         "surface": "governed_provider_response_processing",
         "data": ["provider_response_transcript", "provider_response_segments"],
-        "allowed_surfaces": ["bounded_memory_gateway_worker", "immediate_server_managed_encryption"],
+        "allowed_surfaces": ["bounded_memory_gateway_worker", "immediate_device_recipient_encryption"],
         "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync", "sync"],
         "retention": "request-scoped memory only; encrypt immediately into the server-managed artifact, then delete readable provider response data",
-        "proof": "The governed worker may process a provider response in bounded memory solely to produce the authenticated server-managed encrypted handoff; no response persistence or telemetry surface is permitted."
+        "proof": "The governed worker may process a provider response in bounded memory solely to produce the authenticated device-recipient encrypted handoff; no response persistence or telemetry surface is permitted."
       },
       {
         "surface": "readable_transcript",
         "data": ["readable_transcript_text", "transcript_segments"],
-        "allowed_surfaces": ["authenticated_client_delivery", "server_managed_encrypted_result_artifact"],
+        "allowed_surfaces": ["authenticated_client_delivery", "device_recipient_encrypted_result_artifact"],
         "forbidden_surfaces": ["logs", "analytics", "support_exports", "normal_sync"],
         "retention": "bounded artifact lifetime; delete after acknowledgement or TTL",
-        "proof": "Readable transcript exists only for client delivery or the encrypted result handoff, then is deleted after ack/TTL."
+        "proof": "Readable transcript exists only in bounded worker/client memory around the encrypted result handoff; durable server and replay storage contain ciphertext only."
       }
     ]
   },
@@ -1630,10 +1777,7 @@
         "sync.cursor",
         "sync.key_envelopes.write",
         "sync.delete",
-        "hosted.create",
-        "hosted.upload",
         "hosted.ack",
-        "hosted.cancel",
         "gateway.invoke",
         "commerce.checkout",
         "commerce.webhook"
@@ -1663,26 +1807,38 @@
       "result_handoff": "worker completion is separate from client delivery and acknowledgement"
     },
     "hosted_result_handoff": {
-      "artifact": "server_managed_encrypted_result_artifact",
+      "contract_version": "dictate_litellm_worker_v1",
+      "artifact": "device_recipient_encrypted_result_artifact",
       "artifact_schema_ref": "#/schemas/HostedResultArtifact",
-      "artifact_payload_one_of": ["ciphertext", "artifact_reference"],
+      "crypto_format": "dictate_result_x25519_hkdf_aes256gcm_v1",
+      "algorithm": "X25519+AES-256-GCM",
+      "kdf": "HKDF-SHA256",
+      "kdf_info_template": "dictate-result|dictate_litellm_worker_v1|dictate_result_x25519_hkdf_aes256gcm_v1|{artifact_id}|{recipient_key_id}|{recipient_key_version}",
       "authenticated_encryption_required": true,
-      "aad_binding": ["account_id", "device_id", "job_id", "artifact_id"],
-      "delete_after_ack": true,
+      "aad_binding": ["contract_version", "crypto_format", "account_id", "device_id", "job_id", "request_id", "correlation_id", "artifact_id", "recipient_key_id", "recipient_key_version", "ephemeral_public_key"],
+      "outer_to_aad_binding": ["job_id", "request_id", "correlation_id", "artifact_id", "recipient_key_id", "recipient_key_version", "ephemeral_public_key"],
+      "server_managed": false,
+      "device_key_wrapping": true,
+      "private_key_custody": "os_secret_store_only",
+      "client_decrypt": true,
+      "durable_replay": "ciphertext_only_pending_journal",
+      "application_acceptance": "consumer_validates_result_then_purges_pending_ciphertext",
+      "revocation_cleanup": "exact_recipient_key_id_and_version",
+      "expiry_cleanup": "authoritative_envelope_expires_at",
       "ack_state_ref": "#/enums/hosted_result_ack_state",
       "retrieval_idempotent": true,
       "acknowledgement_idempotent": true,
-      "server_managed": true,
-      "device_key_wrapping": false,
+      "ack_correlation_required": true,
       "expiry_required": true,
       "deletion_required": true,
       "plaintext_lifetime_bounded": true,
       "proofs_required": [
         "worker completion survives a lost client response",
         "client polling survives worker restart",
-        "duplicate retrieval returns the same server-managed artifact",
-        "acknowledgement is safe to retry",
-        "expiry and deletion remove raw audio and readable result material",
+        "duplicate retrieval returns the same device-recipient encrypted artifact",
+        "acknowledgement retries use the same correlation-bound acknowledgement id",
+        "ciphertext remains replayable after ambiguous acknowledgement until application acceptance",
+        "application acceptance, expiry, and exact key revocation purge retained ciphertext",
         "cross-account retrieval is denied",
         "support/log/analytics surfaces contain no readable transcript"
       ]
@@ -1695,7 +1851,7 @@
       "readable_transcript_only_client_delivery_or_encrypted_artifact": true,
       "provider_response_processing": {
         "memory_only": true,
-        "immediate_server_managed_encryption": true,
+        "immediate_device_recipient_encryption": true,
         "delete_after_encryption": true,
         "forbidden_surfaces": ["persistence", "logs", "analytics", "support_exports", "normal_sync"]
       }
@@ -1724,23 +1880,40 @@
   "contract_fixtures": {
     "hosted_result_artifact": {
       "valid": {
-        "artifact_id": "artifact_1",
-        "job_id": "job_1",
-        "account_id": "acct_1",
-        "device_id": "device_1",
-        "encryption": "server_managed_encrypted_artifact",
-        "version": "dictate_result_artifact_v1",
-        "algorithm": "AES-256-GCM",
+        "contract_version": "dictate_litellm_worker_v1",
+        "crypto_format": "dictate_result_x25519_hkdf_aes256gcm_v1",
+        "crypto_version": 1,
+        "algorithm": "X25519+AES-256-GCM",
+        "kdf": "HKDF-SHA256",
+        "kdf_salt": "c2FsdF8x",
+        "kdf_info": "dictate-result|dictate_litellm_worker_v1|dictate_result_x25519_hkdf_aes256gcm_v1|artifact_1|key_1|3",
+        "ephemeral_public_key": "ZXBoZW1lcmFsX3B1YmxpY19rZXlfMQ",
+        "nonce": "bm9uY2VfMQ",
+        "aad": {
+          "contract_version": "dictate_litellm_worker_v1",
+          "crypto_format": "dictate_result_x25519_hkdf_aes256gcm_v1",
+          "account_id": "acct_1",
+          "device_id": "device_1",
+          "job_id": "job_1",
+          "request_id": "request_1",
+          "correlation_id": "correlation_1",
+          "artifact_id": "artifact_1",
+          "recipient_key_id": "key_1",
+          "recipient_key_version": "3",
+          "ephemeral_public_key": "ZXBoZW1lcmFsX3B1YmxpY19rZXlfMQ"
+        },
+        "ciphertext": "Y2lwaGVydGV4dF8x",
+        "integrity_binding": "YmluZGluZ18x",
         "recipient_key_id": "key_1",
-        "nonce": "nonce_1",
-        "aad": {"account_id": "acct_1", "device_id": "device_1", "job_id": "job_1", "artifact_id": "artifact_1"},
-        "integrity_binding": "binding_1",
-        "ciphertext": "ciphertext_1",
-        "expires_at": "2026-07-13T00:00:00Z",
-        "delete_after_ack": true,
+        "recipient_key_version": 3,
+        "job_id": "job_1",
+        "request_id": "request_1",
+        "correlation_id": "correlation_1",
+        "artifact_id": "artifact_1",
+        "expires_at": "2099-07-19T00:00:00Z",
         "ack_state": "pending"
       },
-      "wrong_owner": {"mutation": {"account_id": "acct_2"}, "expected_rejection": "account_scope_mismatch"},
+      "wrong_owner": {"mutation": {"aad": {"account_id": "acct_2"}}, "expected_rejection": "account_scope_mismatch"},
       "tampered": {"mutation": {"integrity_binding": "tampered"}, "expected_rejection": "authenticated_integrity_mismatch"}
     },
     "usage_events": {

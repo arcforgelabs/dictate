@@ -10,6 +10,14 @@ from urllib.parse import urlsplit
 
 from cryptography.exceptions import InvalidTag
 
+from dictate.pro.hosted_result import (
+    ALGORITHM as HOSTED_RESULT_ALGORITHM,
+    CONTRACT_VERSION as HOSTED_RESULT_CONTRACT_VERSION,
+    CRYPTO_FORMAT as HOSTED_RESULT_CRYPTO_FORMAT,
+    KDF_NAME as HOSTED_RESULT_KDF,
+    _AAD_FIELDS,
+    _ENVELOPE_FIELDS,
+)
 from dictate.sync import (
     create_recovery_envelope,
     generate_account_key,
@@ -355,13 +363,20 @@ class DictatePlatformContractTests(unittest.TestCase):
             manifest_operation_ids.update(flow.get("operation_ids", []))
             for source_ref in flow["source_refs"]:
                 if source_ref.startswith("arc-forge-deck@"):
-                    self.assertIn("arc-forge-deck@2ee29c9:", source_ref)
+                    self.assertRegex(source_ref, r"^arc-forge-deck@[0-9a-f]{7,40}:")
                     self.assertIn("src/arc_forge_console/", source_ref)
 
         self.assertEqual(set(operations), manifest_operation_ids)
         for operation_name, operation in operations.items():
             self.assertEqual(operation_name, operation["operation_id"])
-            self.assertEqual(operation["status"], "proposed_not_deployed")
+            self.assertIn(
+                operation["status"],
+                {
+                    "proposed_not_deployed",
+                    "p1_offline_candidate_not_deployed",
+                    "client_implemented_server_revocation_not_implemented",
+                },
+            )
             self.assertIn("request_schema", operation)
             self.assertIn("response_schema", operation)
             self.assertTrue(operation["idempotency"]["header"])
@@ -384,6 +399,14 @@ class DictatePlatformContractTests(unittest.TestCase):
                 self.assertTrue(rendered_url.startswith(origin + "/"))
                 self.assertNotIn("://", operation["route"])
                 self.assertNotIn("{canonical_arc_forge_origin}", rendered_url)
+            elif operation.get("public_client_access"):
+                self.assertTrue(operation["public_client_access"])
+                self.assertIn(
+                    operation["transport"],
+                    {"bounded_signed_object_upload", "device_local_secret_store_then_public_https"},
+                )
+                if operation["transport"] == "bounded_signed_object_upload":
+                    self.assertEqual(operation["url_template"], "server_returned_signed_upload_url")
             else:
                 self.assertFalse(operation["public_client_access"])
 
@@ -681,37 +704,36 @@ class DictatePlatformContractTests(unittest.TestCase):
             )
         )
 
-    def test_hosted_result_artifact_has_authenticated_one_of_and_scope_fixtures(self) -> None:
+    def test_hosted_result_artifact_matches_exact_device_recipient_contract(self) -> None:
         artifact = self.contract["schemas"]["HostedResultArtifact"]
-        self.assertTrue(
-            {
-                "account_id",
-                "device_id",
-                "job_id",
-                "version",
-                "algorithm",
-                "recipient_key_id",
-                "nonce",
-                "aad",
-                "integrity_binding",
-                "expires_at",
-                "delete_after_ack",
-                "ack_state",
-            }.issubset(set(artifact["required"]))
+        self.assertEqual(set(artifact["required"]), _ENVELOPE_FIELDS)
+        self.assertEqual(
+            set(self.contract["schemas"]["HostedArtifactAAD"]["required"]),
+            _AAD_FIELDS,
         )
-        self.assertEqual(len(artifact["oneOf"]), 2)
-        payload_options = [set(entry["required"]) for entry in artifact["oneOf"]]
-        self.assertEqual(payload_options, [{"ciphertext"}, {"artifact_reference"}])
+        self.assertFalse(artifact["additionalProperties"])
+        self.assertEqual(
+            artifact["properties"]["contract_version"]["const"],
+            HOSTED_RESULT_CONTRACT_VERSION,
+        )
+        self.assertEqual(
+            artifact["properties"]["crypto_format"]["const"],
+            HOSTED_RESULT_CRYPTO_FORMAT,
+        )
+        self.assertEqual(artifact["properties"]["algorithm"]["const"], HOSTED_RESULT_ALGORITHM)
+        self.assertEqual(artifact["properties"]["kdf"]["const"], HOSTED_RESULT_KDF)
         self.assertEqual(artifact["properties"]["aad"]["$ref"], "#/schemas/HostedArtifactAAD")
-        self.assertEqual(artifact["properties"]["delete_after_ack"]["const"], True)
 
         fixtures = self.contract["contract_fixtures"]["hosted_result_artifact"]
         valid = fixtures["valid"]
-        self.assertEqual(valid["account_id"], valid["aad"]["account_id"])
-        self.assertEqual(valid["device_id"], valid["aad"]["device_id"])
-        wrong_owner = dict(valid)
-        wrong_owner.update(fixtures["wrong_owner"]["mutation"])
-        self.assertNotEqual(wrong_owner["account_id"], wrong_owner["aad"]["account_id"])
+        self.assertTrue(_schema_matches(self.contract, "#/schemas/HostedResultArtifact", valid))
+        self.assertEqual(valid["job_id"], valid["aad"]["job_id"])
+        self.assertEqual(valid["request_id"], valid["aad"]["request_id"])
+        self.assertEqual(valid["correlation_id"], valid["aad"]["correlation_id"])
+        self.assertEqual(str(valid["recipient_key_version"]), valid["aad"]["recipient_key_version"])
+        wrong_owner = json.loads(json.dumps(valid))
+        wrong_owner["aad"]["account_id"] = "acct_2"
+        self.assertNotEqual(wrong_owner["aad"]["account_id"], "acct_1")
         self.assertEqual(fixtures["wrong_owner"]["expected_rejection"], "account_scope_mismatch")
         tampered = dict(valid)
         tampered.update(fixtures["tampered"]["mutation"])
@@ -724,8 +746,37 @@ class DictatePlatformContractTests(unittest.TestCase):
         handoff = self.contract["requirements"]["hosted_result_handoff"]
         self.assertTrue(handoff["retrieval_idempotent"])
         self.assertTrue(handoff["acknowledgement_idempotent"])
+        self.assertFalse(handoff["server_managed"])
+        self.assertTrue(handoff["device_key_wrapping"])
+        self.assertTrue(handoff["client_decrypt"])
+        self.assertEqual(handoff["durable_replay"], "ciphertext_only_pending_journal")
         self.assertTrue(handoff["expiry_required"])
         self.assertTrue(handoff["deletion_required"])
+
+    def test_hosted_operations_match_current_client_routes_and_server_derived_identity(self) -> None:
+        operations = self.contract["operations"]
+        self.assertEqual(operations["hosted.create"]["route"], "/api/dictate/jobs")
+        self.assertEqual(operations["hosted.upload"]["route"], "/api/dictate/jobs/{job_id}/audio")
+        self.assertEqual(
+            operations["hosted.signed_upload_url"]["route"],
+            "/api/dictate/jobs/{job_id}/audio-upload-url",
+        )
+        self.assertEqual(
+            operations["hosted.signed_upload_complete"]["route"],
+            "/api/dictate/jobs/{job_id}/audio-upload-complete",
+        )
+        self.assertEqual(operations["hosted.result"]["route"], "/api/dictate/jobs/{job_id}/result")
+        self.assertEqual(operations["hosted.ack"]["route"], "/api/dictate/jobs/{job_id}/result/ack")
+        self.assertEqual(
+            operations["hosted.result_key.register"]["route"],
+            "/api/dictate/devices/{device_id}/result-key",
+        )
+        create = self.contract["schemas"]["HostedCreateRequest"]
+        self.assertNotIn("request_id", create["properties"])
+        self.assertNotIn("idempotency_key", create["properties"])
+        self.assertEqual(operations["hosted.create"]["idempotency"]["authority"], "server")
+        ack = self.contract["schemas"]["ResultAckRequest"]
+        self.assertIn("correlation_id", ack["required"])
 
     def test_gateway_is_governed_provider_neutral_and_audio_scoped(self) -> None:
         invocation = self.contract["schemas"]["GatewayInvocation"]
@@ -982,11 +1033,27 @@ class DictatePlatformContractTests(unittest.TestCase):
             rollback_then_reject.apply(rejection)
 
     def test_diarized_authorization_survives_hosted_lifecycle(self) -> None:
-        for operation_id in ["hosted.upload", "hosted.status", "hosted.result", "hosted.ack", "hosted.cancel"]:
+        for operation_id in [
+            "hosted.upload",
+            "hosted.signed_upload_url",
+            "hosted.signed_upload",
+            "hosted.signed_upload_complete",
+            "hosted.status",
+            "hosted.result",
+            "hosted.ack",
+            "hosted.cancel",
+        ]:
             operation = self.contract["operations"][operation_id]
             self.assertIn("dictate.transcribe_diarized", operation["capabilities"])
-            self.assertEqual(operation["capability_authorization"]["mode"], "job_inherited")
-            self.assertEqual(operation["capability_authorization"]["source"], "HostedJob.capability")
+            if operation_id == "hosted.signed_upload":
+                self.assertEqual(operation["capability_authorization"]["mode"], "signed_url_inherited")
+                self.assertEqual(
+                    operation["capability_authorization"]["source"],
+                    "HostedSignedUploadResponse.url",
+                )
+            else:
+                self.assertEqual(operation["capability_authorization"]["mode"], "job_inherited")
+                self.assertEqual(operation["capability_authorization"]["source"], "HostedJob.capability")
 
     def test_commerce_canceled_spelling_and_source_mappings_are_explicit(self) -> None:
         self.assertNotIn("cancelled", self.contract["enums"]["commerce_state"]["enum"])
@@ -1011,13 +1078,13 @@ class DictatePlatformContractTests(unittest.TestCase):
         self.assertIn("ack", transcript["retention"])
         self.assertIn("TTL", transcript["retention"])
         provider_response = rows["governed_provider_response_processing"]
-        self.assertTrue({"bounded_memory_gateway_worker", "immediate_server_managed_encryption"}.issubset(provider_response["allowed_surfaces"]))
+        self.assertTrue({"bounded_memory_gateway_worker", "immediate_device_recipient_encryption"}.issubset(provider_response["allowed_surfaces"]))
         self.assertTrue({"persistence", "logs", "analytics", "support_exports", "normal_sync"}.issubset(provider_response["forbidden_surfaces"]))
         self.assertIn("memory only", provider_response["retention"])
         self.assertIn("delete readable provider response", provider_response["retention"])
         response_processing = self.contract["requirements"]["privacy"]["provider_response_processing"]
         self.assertTrue(response_processing["memory_only"])
-        self.assertTrue(response_processing["immediate_server_managed_encryption"])
+        self.assertTrue(response_processing["immediate_device_recipient_encryption"])
         self.assertTrue(response_processing["delete_after_encryption"])
         self.assertTrue(set(response_processing["forbidden_surfaces"]).issubset(provider_response["forbidden_surfaces"]))
         self.assertTrue(self.contract["schemas"]["GatewayProviderResponseProcessing"]["properties"]["persisted"]["const"] is False)

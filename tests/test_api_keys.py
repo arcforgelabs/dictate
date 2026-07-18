@@ -24,6 +24,8 @@ class ApiKeysTests(unittest.TestCase):
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value="/usr/bin/secret-tool"),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+            patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
             patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
         ):
             api_keys.save_api_key("openai", " secret-value ")
@@ -160,6 +162,8 @@ class ApiKeysTests(unittest.TestCase):
         with (
             patch("dictate.api_keys._is_windows", return_value=False),
             patch("dictate.api_keys.shutil.which", return_value="/usr/bin/secret-tool"),
+            patch("dictate.api_keys._libsecret_gi_available", return_value=False),
+            patch("dictate.api_keys._libsecret_host_python_available", return_value=False),
             patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
         ):
             api_keys.save_sync_account_key("acct_1", "encoded-key")
