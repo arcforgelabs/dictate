@@ -148,6 +148,24 @@ class NoteStoreTests(unittest.TestCase):
             outside = Path(tmp) / "evil"
             self.assertFalse(outside.exists())
 
+    def test_note_dir_raises_on_unsafe_id_as_a_structural_backstop(self) -> None:
+        """_note_dir is the single chokepoint every method joins note_id through.
+
+        All 5 external boundaries (apply_synced_note, apply_synced_segment,
+        delete_note, archive_note, unarchive_note) already validate and return
+        early before reaching _note_dir. This test guards the chokepoint
+        itself, so a FUTURE caller that forgets to validate a wire-sourced id
+        can't silently reopen the path-traversal hole.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                with self.subTest(unsafe_id=unsafe_id):
+                    with self.assertRaises(ValueError):
+                        store._note_dir(unsafe_id)
+            self.assertFalse(notes_root.exists())
+
     def test_archive_and_unarchive_still_work_for_legitimate_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")

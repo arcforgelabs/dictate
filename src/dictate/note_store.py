@@ -390,6 +390,17 @@ class NoteStore:
             self._enqueue_note(record)
 
     def _note_dir(self, note_id: str) -> Path:
+        # Defense-in-depth backstop: every external boundary (apply_synced_note,
+        # apply_synced_segment, delete_note, archive_note, unarchive_note)
+        # already validates note_id and returns early before reaching here, and
+        # every internal caller only ever passes a locally-generated
+        # `note_<uuid4 hex>` id or one round-tripped from a disk-enumerated,
+        # already-validated note directory. This raise should never fire in
+        # normal operation -- it exists so a FUTURE caller that forgets to
+        # validate a wire-sourced id can't silently reopen the path-traversal
+        # hole by joining it straight into a filesystem path here.
+        if not _is_safe_note_id(note_id):
+            raise ValueError(f"unsafe note id: {note_id!r}")
         return self._root / note_id
 
     def _next_timestamp(self) -> datetime:
