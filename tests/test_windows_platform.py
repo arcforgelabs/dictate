@@ -3,11 +3,12 @@ from __future__ import annotations
 import ast
 import ctypes
 import os
+import subprocess
 import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dictate import platform_paths
 from dictate.config import Config
@@ -523,6 +524,46 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("*dictate.exe* --type-backend pynput*", source)
         self.assertIn("*pythonw.exe* -m dictate --type-backend pynput*", source)
+
+    def test_restart_daemon_launches_via_python_module_not_bare_cmd(self) -> None:
+        """Save & Restart must not hand CreateProcessW a bare .cmd as argv[0].
+
+        subprocess uses CreateProcessW, which cannot execute a .cmd/.bat directly
+        (WinError 193). Regression guard for that: the relaunch command must be a
+        form CreateProcessW can execute, e.g. [sys.executable, "-m", "dictate", ...].
+        """
+        from dictate import windows_control
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir = Path(tmp) / "Scripts"
+            scripts_dir.mkdir()
+            (scripts_dir / "dictate-daemon.cmd").write_text("@echo off\n", encoding="utf-8")
+            fake_python = scripts_dir / "python.exe"
+            fake_python.write_text("", encoding="utf-8")
+
+            captured: dict[str, object] = {}
+
+            def fake_popen(argv, **kwargs):
+                captured["argv"] = argv
+                captured["kwargs"] = kwargs
+                return MagicMock()
+
+            with (
+                patch("dictate.windows_control.sys.executable", str(fake_python)),
+                patch("dictate.windows_control.subprocess.run") as run,
+                patch("dictate.windows_control.subprocess.Popen", side_effect=fake_popen),
+            ):
+                windows_control._restart_daemon()
+
+            run.assert_called_once()
+            argv = captured["argv"]
+            self.assertEqual(argv[0], str(fake_python))
+            self.assertTrue(
+                all(not str(part).lower().endswith((".cmd", ".bat")) for part in argv),
+                f"argv must not contain a bare .cmd/.bat entry: {argv}",
+            )
+            self.assertEqual(argv[1:], ["-m", "dictate", "--no-tray", "--type-backend", "pynput"])
+            self.assertEqual(captured["kwargs"]["creationflags"], subprocess.CREATE_NEW_PROCESS_GROUP)
 
     def test_control_panel_exposes_launch_on_startup_setting(self) -> None:
         source = (

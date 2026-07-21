@@ -644,8 +644,13 @@ foreach ($match in $matches) {
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", stop_script],
         check=True,
     )
+    # dictate-daemon.cmd just runs `dictate.exe --no-tray --type-backend pynput`.
+    # Launch that same command directly via sys.executable rather than the .cmd
+    # itself: CreateProcessW (what subprocess uses) cannot execute a .cmd/.bat as
+    # argv[0] without going through cmd.exe, so Popen([str(launcher)], ...) fails
+    # with WinError 193 and the daemon never restarts.
     subprocess.Popen(
-        [str(launcher)],
+        [sys.executable, "-m", "dictate", "--no-tray", "--type-backend", "pynput"],
         cwd=str(scripts_dir.parents[1]),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
