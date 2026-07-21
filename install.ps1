@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $DictateVersion = "2026.7.4"
 
 if (-not $ArchiveUrl) {
