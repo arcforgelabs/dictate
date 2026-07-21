@@ -164,6 +164,8 @@ class NoteStore:
         return notes[: max(0, limit)]
 
     def archive_note(self, note_id: str) -> bool:
+        if not _is_safe_note_id(note_id):
+            return False
         record = self.load_note(note_id)
         if record is None:
             return False
@@ -172,6 +174,8 @@ class NoteStore:
         return True
 
     def unarchive_note(self, note_id: str) -> bool:
+        if not _is_safe_note_id(note_id):
+            return False
         record = self.load_note(note_id)
         if record is None:
             return False

@@ -137,6 +137,33 @@ class NoteStoreTests(unittest.TestCase):
             assert note is not None
             self.assertFalse(note.archived)
 
+    def test_archive_and_unarchive_reject_unsafe_ids_without_touching_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                self.assertFalse(store.archive_note(unsafe_id), unsafe_id)
+                self.assertFalse(store.unarchive_note(unsafe_id), unsafe_id)
+            self.assertFalse(notes_root.exists())
+            outside = Path(tmp) / "evil"
+            self.assertFalse(outside.exists())
+
+    def test_archive_and_unarchive_still_work_for_legitimate_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            store.mark_ready(note_id, duration_s=1.0)
+
+            self.assertTrue(store.archive_note(note_id))
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertTrue(note.archived)
+
+            self.assertTrue(store.unarchive_note(note_id))
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertFalse(note.archived)
+
     def test_delete_note_removes_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
