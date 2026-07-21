@@ -334,6 +334,39 @@ class ApiKeysTests(unittest.TestCase):
         self.assertEqual(status.status, "Ready")
         self.assertEqual(status.source, "secret-store")
 
+    def test_api_key_command_uses_non_posix_split_on_windows(self) -> None:
+        """On Windows, backslash paths in the command must survive shlex.split intact."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="secret-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            result = api_keys._api_key_from_command(r"C:\Tools\getkey.exe --arg", backend="xai")
+
+        self.assertEqual(captured["argv"], [r"C:\Tools\getkey.exe", "--arg"])
+        self.assertEqual(result, "secret-key")
+
+    def test_api_key_command_uses_posix_split_on_non_windows(self) -> None:
+        """On POSIX, the split behavior is unchanged (backslash is an escape char)."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="secret-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys.os.name", "posix"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            api_keys._api_key_from_command("/usr/bin/getkey --arg", backend="xai")
+
+        self.assertEqual(captured["argv"], ["/usr/bin/getkey", "--arg"])
+
     def test_openai_remote_validation_uses_transcription_endpoint(self) -> None:
         captured = {}
 

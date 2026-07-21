@@ -100,7 +100,7 @@ def _api_key_from_command() -> str | None:
         return None
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            shlex.split(command, posix=(os.name != "nt")),
             check=True,
             capture_output=True,
             text=True,

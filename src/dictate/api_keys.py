@@ -924,7 +924,7 @@ def _custom_base_url_configured(backend: str) -> bool:
 def _api_key_from_command(command: str, *, backend: str) -> str | None:
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            shlex.split(command, posix=(os.name != "nt")),
             check=True,
             capture_output=True,
             text=True,
