@@ -6,9 +6,23 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dictate.platform_paths import user_data_dir
+from dictate.platform_paths import is_windows, user_data_dir
 
-STATE_PATH = user_data_dir() / "model-state.json"
+# The exact pre-fix path used on ALL platforms, including Windows. Non-Windows
+# platforms must keep writing here forever -- zero Linux/macOS behavior change
+# is required, so this is NOT derived from user_data_dir() (which would move
+# for anyone with XDG_DATA_HOME set). On Windows it's kept only as a one-time
+# migration source, see load_model_state().
+LEGACY_STATE_PATH = Path.home() / ".local" / "share" / "dictate" / "model-state.json"
+
+
+def _resolve_state_path() -> Path:
+    if is_windows():
+        return user_data_dir() / "model-state.json"
+    return LEGACY_STATE_PATH
+
+
+STATE_PATH = _resolve_state_path()
 
 
 @dataclass(slots=True)
@@ -23,7 +37,16 @@ def model_key(backend: str, model: str, device: str, compute_type: str) -> str:
 
 def load_model_state(path: Path = STATE_PATH) -> ModelState:
     if not path.is_file():
-        return ModelState()
+        # One-time Windows migration: if the real default (%LOCALAPPDATA%-based)
+        # path has never been written yet, fall back to reading the legacy
+        # path so existing Windows users don't lose their prepared-model cache
+        # and trigger a surprise re-prep/re-download. Read-only -- the legacy
+        # file is never deleted -- and scoped to the real default STATE_PATH
+        # only, not caller-supplied override paths (e.g. tests).
+        if is_windows() and path == STATE_PATH and LEGACY_STATE_PATH.is_file():
+            path = LEGACY_STATE_PATH
+        else:
+            return ModelState()
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
