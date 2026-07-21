@@ -525,19 +525,28 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("*dictate.exe* --type-backend pynput*", source)
         self.assertIn("*pythonw.exe* -m dictate --type-backend pynput*", source)
 
-    def test_restart_daemon_launches_via_python_module_not_bare_cmd(self) -> None:
+    def test_restart_daemon_launches_daemon_cmd_via_cmd_wrapper(self) -> None:
         """Save & Restart must not hand CreateProcessW a bare .cmd as argv[0].
 
         subprocess uses CreateProcessW, which cannot execute a .cmd/.bat directly
-        (WinError 193). Regression guard for that: the relaunch command must be a
-        form CreateProcessW can execute, e.g. [sys.executable, "-m", "dictate", ...].
+        (WinError 193). Regression guard for that: argv[0] (what CreateProcessW
+        actually executes) must be the cmd.exe interpreter, not the .cmd itself.
+
+        It must ALSO keep relaunching the *same* dictate-daemon.cmd (rather than,
+        say, `sys.executable -m dictate ...`): the daemon process this ultimately
+        spawns is `dictate.exe --no-tray --type-backend pynput`, which is the
+        command line the stop_script's Get-CimInstance patterns above match on
+        the *next* Save & Restart. A form that changes that command line (e.g.
+        routing through pythonw.exe -m dictate) would go unmatched by those
+        patterns and leave a second daemon running after two restarts.
         """
         from dictate import windows_control
 
         with tempfile.TemporaryDirectory() as tmp:
             scripts_dir = Path(tmp) / "Scripts"
             scripts_dir.mkdir()
-            (scripts_dir / "dictate-daemon.cmd").write_text("@echo off\n", encoding="utf-8")
+            daemon_cmd = scripts_dir / "dictate-daemon.cmd"
+            daemon_cmd.write_text("@echo off\n", encoding="utf-8")
             fake_python = scripts_dir / "python.exe"
             fake_python.write_text("", encoding="utf-8")
 
@@ -557,12 +566,14 @@ class WindowsPlatformTests(unittest.TestCase):
 
             run.assert_called_once()
             argv = captured["argv"]
-            self.assertEqual(argv[0], str(fake_python))
-            self.assertTrue(
-                all(not str(part).lower().endswith((".cmd", ".bat")) for part in argv),
-                f"argv must not contain a bare .cmd/.bat entry: {argv}",
-            )
-            self.assertEqual(argv[1:], ["-m", "dictate", "--no-tray", "--type-backend", "pynput"])
+            # argv[0] is what CreateProcessW actually executes -- must not be a
+            # bare .cmd/.bat.
+            self.assertFalse(str(argv[0]).lower().endswith((".cmd", ".bat")))
+            self.assertTrue(str(argv[0]).lower().endswith(("cmd", "cmd.exe")))
+            self.assertEqual(argv[1], "/c")
+            self.assertTrue(str(argv[2]).lower().endswith("dictate-daemon.cmd"))
+            self.assertEqual(argv[2], str(daemon_cmd))
+            self.assertEqual(captured["kwargs"]["creationflags"], subprocess.CREATE_NEW_PROCESS_GROUP)
             self.assertEqual(captured["kwargs"]["creationflags"], subprocess.CREATE_NEW_PROCESS_GROUP)
 
     def test_control_panel_exposes_launch_on_startup_setting(self) -> None:

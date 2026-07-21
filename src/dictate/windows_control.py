@@ -644,13 +644,21 @@ foreach ($match in $matches) {
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", stop_script],
         check=True,
     )
-    # dictate-daemon.cmd just runs `dictate.exe --no-tray --type-backend pynput`.
-    # Launch that same command directly via sys.executable rather than the .cmd
-    # itself: CreateProcessW (what subprocess uses) cannot execute a .cmd/.bat as
+    # CreateProcessW (what subprocess uses) cannot execute a .cmd/.bat directly as
     # argv[0] without going through cmd.exe, so Popen([str(launcher)], ...) fails
-    # with WinError 193 and the daemon never restarts.
+    # with WinError 193 and the daemon never restarts. Route through cmd.exe /c
+    # instead: the actual daemon process this spawns is still
+    # `dictate.exe --no-tray --type-backend pynput` (dictate-daemon.cmd's contents,
+    # args unchanged), which matches the `*dictate.exe* --no-tray*` stop_script
+    # pattern above on the *next* Save & Restart. Launching via
+    # [sys.executable, "-m", "dictate", ...] instead would produce a
+    # `pythonw.exe -m dictate --no-tray --type-backend pynput` command line that
+    # none of the stop_script patterns match (the `--no-tray ` breaks the
+    # contiguous "-m dictate --type-backend pynput" substring), so the second
+    # restart would fail to kill the first daemon and end up racing it.
+    comspec = os.environ.get("ComSpec", "cmd.exe")
     subprocess.Popen(
-        [sys.executable, "-m", "dictate", "--no-tray", "--type-backend", "pynput"],
+        [comspec, "/c", str(launcher)],
         cwd=str(scripts_dir.parents[1]),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
