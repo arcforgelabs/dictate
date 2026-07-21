@@ -39,7 +39,7 @@ x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]
 windows = ["pynput>=1.7.0", "pyperclip>=1.9.0"]
 # Brand-icon generation + the icon regression guard (tests/test_brand_icon.py).
-dev = ["pillow>=10", "cairosvg>=2.7"]
+dev = ["pillow>=12.3.0", "cairosvg>=2.7"]
 
 [project.scripts]
 dictate = "dictate.__main__:main_with_logging"
