@@ -165,12 +165,37 @@ class XAIBackendTests(unittest.TestCase):
                 {"DICTATE_XAI_API_KEY_COMMAND": r"C:\Tools\getkey.exe --arg"},
                 clear=True,
             ),
-            patch("dictate.stt.xai_backend.os.name", "nt"),
+            # The split now happens inside dictate.api_keys.split_api_key_command,
+            # so os.name is read from that module, not xai_backend's.
+            patch("dictate.api_keys.os.name", "nt"),
             patch("dictate.stt.xai_backend.subprocess.run", side_effect=fake_run),
         ):
             result = _api_key_from_command()
 
         self.assertEqual(captured["argv"], [r"C:\Tools\getkey.exe", "--arg"])
+        self.assertEqual(result, "command-key")
+
+    def test_api_key_command_strips_quotes_on_windows(self) -> None:
+        """A quoted command (that worked under the old posix=True split) must
+        still work now that Windows uses posix=False for backslash paths."""
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="command-key\n", stderr="")
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_XAI_API_KEY_COMMAND": r'"C:\Program Files\getkey.exe" --arg'},
+                clear=True,
+            ),
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.stt.xai_backend.subprocess.run", side_effect=fake_run),
+        ):
+            result = _api_key_from_command()
+
+        self.assertEqual(captured["argv"], [r"C:\Program Files\getkey.exe", "--arg"])
         self.assertEqual(result, "command-key")
 
     def test_cloud_router_prefers_pro_and_falls_back_to_personal_key(self) -> None:

@@ -921,10 +921,36 @@ def _custom_base_url_configured(backend: str) -> bool:
     return bool(os.environ.get(env_name))
 
 
+def split_api_key_command(command: str) -> list[str]:
+    """Split an api_key_command string into argv, handling Windows paths and quotes.
+
+    On POSIX, this is a plain `shlex.split(command)`: backslashes are escape
+    characters and quotes are stripped normally.
+
+    On Windows, `shlex.split(command, posix=False)` is used so that backslash
+    path separators (e.g. `C:\\Tools\\getkey.exe`) survive intact instead of
+    being consumed as escapes. But posix=False also leaves any surrounding
+    quote characters literally in the token instead of stripping them, which
+    would break quoted forms that worked before this Windows fix (a quoted exe
+    path like `"C:\\Program Files\\tool.exe" --arg`, or a command with a quoted
+    argument like `op read "op://vault/item"`). Strip one matched pair of
+    surrounding quotes from each token to restore that behavior.
+    """
+    parts = shlex.split(command, posix=(os.name != "nt"))
+    if os.name != "nt":
+        return parts
+    cleaned = []
+    for part in parts:
+        if len(part) >= 2 and part[0] == part[-1] and part[0] in ('"', "'"):
+            part = part[1:-1]
+        cleaned.append(part)
+    return cleaned
+
+
 def _api_key_from_command(command: str, *, backend: str) -> str | None:
     try:
         completed = subprocess.run(
-            shlex.split(command, posix=(os.name != "nt")),
+            split_api_key_command(command),
             check=True,
             capture_output=True,
             text=True,
