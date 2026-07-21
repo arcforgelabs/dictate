@@ -644,8 +644,44 @@ foreach ($match in $matches) {
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", stop_script],
         check=True,
     )
+    # CreateProcessW (what subprocess uses) cannot execute a .cmd/.bat directly as
+    # argv[0] without going through cmd.exe, so Popen([str(launcher)], ...) fails
+    # with WinError 193 and the daemon never restarts. Route through cmd.exe /c
+    # instead: the actual daemon process this spawns is still
+    # `dictate.exe --no-tray --type-backend pynput` (dictate-daemon.cmd's contents,
+    # args unchanged), which matches the `*dictate.exe* --no-tray*` stop_script
+    # pattern above on the *next* Save & Restart. Launching via
+    # [sys.executable, "-m", "dictate", ...] instead would produce a
+    # `pythonw.exe -m dictate --no-tray --type-backend pynput` command line that
+    # none of the stop_script patterns match (the `--no-tray ` breaks the
+    # contiguous "-m dictate --type-backend pynput" substring), so the second
+    # restart would fail to kill the first daemon and end up racing it.
+    # KNOWN LIMITATION (accepted tradeoff, not fixed): subprocess.Popen with a
+    # list uses list2cmdline() to build the actual command line, which only
+    # adds quotes around a token containing whitespace -- it does not quote
+    # for cmd.exe-specific metacharacters (& ^ ( ) etc). So if the install/
+    # profile path contains one of those characters with NO surrounding
+    # whitespace, cmd.exe's own parser (separate from CreateProcessW's own
+    # argv parsing) can mis-tokenize the launcher path -- e.g. an unescaped
+    # "&" is a command separator to cmd.exe. This is still strictly better
+    # than master, which failed unconditionally with WinError 193.
+    #
+    # The seemingly-more-robust alternative -- passing a pre-built STRING
+    # `f'"{comspec}" /d /s /c "{launcher}"'` instead of a list, relying on
+    # cmd's /s flag to strip exactly the outer quote pair -- was evaluated
+    # empirically on a real Windows box and rejected: it does NOT fix the
+    # metacharacter case (an unquoted "&" in the path still splits the
+    # command line, identically to the list form) AND it actively broke the
+    # common, already-working space-containing-path case (returned exit code
+    # 1, "not recognized as an internal or external command", where the list
+    # form correctly returns 0). Since it is not regression-free, it was not
+    # adopted. A real install path containing an unescaped cmd metacharacter
+    # with no adjacent whitespace is exceedingly unlikely in practice
+    # (Windows usernames/install pickers don't produce that shape), so this
+    # is accepted as a documented limitation rather than chased further.
+    comspec = os.environ.get("ComSpec", "cmd.exe")
     subprocess.Popen(
-        [str(launcher)],
+        [comspec, "/c", str(launcher)],
         cwd=str(scripts_dir.parents[1]),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )

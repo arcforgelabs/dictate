@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import tempfile
 import time
@@ -15,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dictate.api_keys import read_api_key
+from dictate.api_keys import read_api_key, split_api_key_command
 from dictate.stt.base import ComputeDevice, SpeechToText, SttCapabilities
 
 
@@ -100,7 +99,7 @@ def _api_key_from_command() -> str | None:
         return None
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            split_api_key_command(command),
             check=True,
             capture_output=True,
             text=True,

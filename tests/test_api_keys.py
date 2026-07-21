@@ -334,6 +334,90 @@ class ApiKeysTests(unittest.TestCase):
         self.assertEqual(status.status, "Ready")
         self.assertEqual(status.source, "secret-store")
 
+    def test_api_key_command_uses_non_posix_split_on_windows(self) -> None:
+        """On Windows, backslash paths in the command must survive shlex.split intact."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="secret-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            result = api_keys._api_key_from_command(r"C:\Tools\getkey.exe --arg", backend="xai")
+
+        self.assertEqual(captured["argv"], [r"C:\Tools\getkey.exe", "--arg"])
+        self.assertEqual(result, "secret-key")
+
+    def test_api_key_command_uses_posix_split_on_non_windows(self) -> None:
+        """On POSIX, the split behavior is unchanged (backslash is an escape char)."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="secret-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys.os.name", "posix"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            api_keys._api_key_from_command("/usr/bin/getkey --arg", backend="xai")
+
+        self.assertEqual(captured["argv"], ["/usr/bin/getkey", "--arg"])
+
+    def test_api_key_command_strips_quotes_on_windows(self) -> None:
+        """A quoted command (that worked under the old posix=True split) must
+        still work now that Windows uses posix=False for backslash paths.
+
+        shlex.split(..., posix=False) doesn't strip surrounding quote chars, so
+        without split_api_key_command's cleanup step a quoted exe path or a
+        command like `op read "op://vault/item"` would break on Windows.
+        """
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="secret-key\n", stderr="")
+
+        with (
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.api_keys.subprocess.run", side_effect=fake_run),
+        ):
+            result = api_keys._api_key_from_command(
+                r'"C:\Program Files\getkey.exe" --arg', backend="xai"
+            )
+
+        self.assertEqual(captured["argv"], [r"C:\Program Files\getkey.exe", "--arg"])
+        self.assertEqual(result, "secret-key")
+
+    def test_split_api_key_command_windows_strips_matched_quotes_only(self) -> None:
+        with patch("dictate.api_keys.os.name", "nt"):
+            self.assertEqual(
+                api_keys.split_api_key_command(r'"C:\Program Files\getkey.exe" --arg'),
+                [r"C:\Program Files\getkey.exe", "--arg"],
+            )
+            self.assertEqual(
+                api_keys.split_api_key_command(r"C:\Tools\getkey.exe --arg"),
+                [r"C:\Tools\getkey.exe", "--arg"],
+            )
+            self.assertEqual(
+                api_keys.split_api_key_command('op read "op://vault/item"'),
+                ["op", "read", "op://vault/item"],
+            )
+
+    def test_split_api_key_command_posix_unchanged(self) -> None:
+        with patch("dictate.api_keys.os.name", "posix"):
+            self.assertEqual(
+                api_keys.split_api_key_command('op read "op://vault/item"'),
+                ["op", "read", "op://vault/item"],
+            )
+            self.assertEqual(
+                api_keys.split_api_key_command("/usr/bin/getkey --arg"),
+                ["/usr/bin/getkey", "--arg"],
+            )
+
     def test_openai_remote_validation_uses_transcription_endpoint(self) -> None:
         captured = {}
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 import uuid
@@ -16,6 +17,32 @@ from dictate.sync import SyncOutbox
 
 NOTES_ROOT = user_data_dir() / "notes"
 NoteStatus = Literal["recording", "processing", "ready", "failed", "interrupted"]
+
+# Locally generated ids are always `note_<uuid4 hex>` (see NoteStore.create_note),
+# but synced note ids arrive from peers over the wire and are joined directly into
+# a filesystem path. Restrict them to a conservative "plain filename" character
+# class and reject Windows reserved device names, before the id ever reaches disk.
+# This rules out path traversal (`note_..\..\evil`, `../x`), Windows reserved
+# device names (`CON`, `NUL`), and separator injection (`a/b`, `a:b`).
+_NOTE_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _is_safe_note_id(note_id: str) -> bool:
+    """True if note_id is safe to join into a filesystem path unescaped."""
+    if not _NOTE_ID_PATTERN.fullmatch(note_id):
+        return False
+    # _NOTE_ID_PATTERN already excludes "." entirely, so note_id can never
+    # actually contain a dot here -- this split is a no-op today. It's kept as
+    # belt-and-braces in case the character class is ever loosened to allow
+    # dots, since Windows reserved device names are reserved even with a
+    # trailing extension (e.g. "CON.txt").
+    stem = note_id.split(".", 1)[0]
+    return stem.upper() not in _WINDOWS_RESERVED_NAMES
 
 
 @dataclass(slots=True)
@@ -140,6 +167,8 @@ class NoteStore:
         return notes[: max(0, limit)]
 
     def archive_note(self, note_id: str) -> bool:
+        if not _is_safe_note_id(note_id):
+            return False
         record = self.load_note(note_id)
         if record is None:
             return False
@@ -148,6 +177,8 @@ class NoteStore:
         return True
 
     def unarchive_note(self, note_id: str) -> bool:
+        if not _is_safe_note_id(note_id):
+            return False
         record = self.load_note(note_id)
         if record is None:
             return False
@@ -156,6 +187,8 @@ class NoteStore:
         return True
 
     def delete_note(self, note_id: str) -> bool:
+        if not _is_safe_note_id(note_id):
+            return False
         note_dir = self._note_dir(note_id)
         if not note_dir.is_dir():
             return False
@@ -270,6 +303,8 @@ class NoteStore:
         note_id = payload.get("note_id")
         if not isinstance(note_id, str) or not note_id.strip():
             return False
+        if not _is_safe_note_id(note_id):
+            return False
         if deleted:
             shutil.rmtree(self._note_dir(note_id), ignore_errors=True)
             return True
@@ -285,6 +320,8 @@ class NoteStore:
     def apply_synced_segment(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
         note_id = payload.get("note_id")
         if not isinstance(note_id, str) or not note_id.strip():
+            return False
+        if not _is_safe_note_id(note_id):
             return False
         try:
             seq = int(payload.get("seq"))
@@ -353,6 +390,17 @@ class NoteStore:
             self._enqueue_note(record)
 
     def _note_dir(self, note_id: str) -> Path:
+        # Defense-in-depth backstop: every external boundary (apply_synced_note,
+        # apply_synced_segment, delete_note, archive_note, unarchive_note)
+        # already validates note_id and returns early before reaching here, and
+        # every internal caller only ever passes a locally-generated
+        # `note_<uuid4 hex>` id or one round-tripped from a disk-enumerated,
+        # already-validated note directory. This raise should never fire in
+        # normal operation -- it exists so a FUTURE caller that forgets to
+        # validate a wire-sourced id can't silently reopen the path-traversal
+        # hole by joining it straight into a filesystem path here.
+        if not _is_safe_note_id(note_id):
+            raise ValueError(f"unsafe note id: {note_id!r}")
         return self._root / note_id
 
     def _next_timestamp(self) -> datetime:

@@ -921,10 +921,46 @@ def _custom_base_url_configured(backend: str) -> bool:
     return bool(os.environ.get(env_name))
 
 
+def split_api_key_command(command: str) -> list[str]:
+    """Split an api_key_command string into argv, handling Windows paths and quotes.
+
+    On POSIX, this is a plain `shlex.split(command)`: backslashes are escape
+    characters and quotes are stripped normally.
+
+    On Windows, `shlex.split(command, posix=False)` is used so that backslash
+    path separators (e.g. `C:\\Tools\\getkey.exe`) survive intact instead of
+    being consumed as escapes. But posix=False also leaves any surrounding
+    quote characters literally in the token instead of stripping them, which
+    would break quoted forms that worked before this Windows fix (a quoted exe
+    path like `"C:\\Program Files\\tool.exe" --arg`, or a command with a quoted
+    argument like `op read "op://vault/item"`). Strip one matched pair of
+    surrounding quotes from each token to restore that behavior.
+
+    Known/accepted limitation: only a WHOLE-TOKEN surrounding quote pair is
+    stripped (the two documented/supported forms above -- a quoted exe path,
+    or a quoted argument that is the entire token). A MID-token quoted form
+    like `--path="C:\\x"` is left with its literal embedded quotes, since
+    that would require a real shell-quote parser rather than a single
+    strip-if-whole-token-is-quoted pass. This is intentional: a general
+    mid-token quote parser is exactly the kind of fragile, hard-to-verify
+    logic this function is trying to avoid. Prefer one of the two supported
+    forms in an api_key_command instead of mid-token quoting.
+    """
+    parts = shlex.split(command, posix=(os.name != "nt"))
+    if os.name != "nt":
+        return parts
+    cleaned = []
+    for part in parts:
+        if len(part) >= 2 and part[0] == part[-1] and part[0] in ('"', "'"):
+            part = part[1:-1]
+        cleaned.append(part)
+    return cleaned
+
+
 def _api_key_from_command(command: str, *, backend: str) -> str | None:
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            split_api_key_command(command),
             check=True,
             capture_output=True,
             text=True,

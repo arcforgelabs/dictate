@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import locale
 import logging
 import re
 from dataclasses import dataclass, field
@@ -15,6 +16,23 @@ from dictate.platform_paths import user_config_dir
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = user_config_dir() / "config.yaml"
+
+
+def _read_config_yaml(path: Path) -> dict:
+    """Read and parse config.yaml, tolerating a pre-existing non-UTF-8 file.
+
+    New writes always use UTF-8 (see _save_raw), but a config file that
+    predates that fix -- or one hand-edited with a non-UTF-8 editor on
+    Windows -- may still be in the platform's legacy ANSI encoding (cp1252).
+    Retry once with the locale's preferred encoding before giving up, so a
+    non-ASCII hotword/lexicon term in such a file doesn't silently reset the
+    whole config to defaults.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = path.read_text(encoding=locale.getpreferredencoding(False))
+    return yaml.safe_load(text) or {}
 
 
 @dataclass(slots=True)
@@ -60,7 +78,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         return Config()
 
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = _read_config_yaml(path)
     except Exception:
         logger.warning(f"Failed to parse {path}, using defaults")
         return Config()
@@ -160,7 +178,7 @@ def _load_raw(path: Path = CONFIG_PATH) -> dict:
     if not path.is_file():
         return {}
     try:
-        return yaml.safe_load(path.read_text()) or {}
+        return _read_config_yaml(path)
     except Exception:
         return {}
 
@@ -168,7 +186,10 @@ def _load_raw(path: Path = CONFIG_PATH) -> dict:
 def _save_raw(data: dict, path: Path = CONFIG_PATH) -> None:
     """Write dict back to YAML, creating parent dirs if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(data, default_flow_style=False))
+    path.write_text(
+        yaml.dump(data, default_flow_style=False, allow_unicode=True),
+        encoding="utf-8",
+    )
 
 
 def add_hotwords(words: list[str], path: Path = CONFIG_PATH) -> list[str]:

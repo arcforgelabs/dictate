@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ import numpy as np
 from dictate.stt.openai_backend import (
     OpenAISpeechToText,
     _api_key,
+    _api_key_from_command,
     _extract_text,
     openai_api_key_available,
 )
@@ -73,6 +75,10 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn(b"Use AcmeWidget terms.", body)
 
     def test_api_key_can_come_from_command(self) -> None:
+        # _print_command builds a quoted `python -c "..."` command. Real Windows
+        # command splitting (dictate.api_keys.split_api_key_command) strips one
+        # matched pair of surrounding quotes per token, so this works whether the
+        # host OS is posix or nt -- no os.name patching needed here.
         with (
             patch.dict(
                 "os.environ",
@@ -104,6 +110,53 @@ class OpenAIBackendTests(unittest.TestCase):
             patch("dictate.stt.openai_backend.read_api_key", return_value="stored-key"),
         ):
             self.assertEqual(_api_key(), "command-key")
+
+    def test_api_key_command_uses_non_posix_split_on_windows(self) -> None:
+        """On Windows, backslash paths in the command must survive shlex.split intact."""
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="command-key\n", stderr="")
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_OPENAI_API_KEY_COMMAND": r"C:\Tools\getkey.exe --arg"},
+                clear=True,
+            ),
+            # The split now happens inside dictate.api_keys.split_api_key_command,
+            # so os.name is read from that module, not openai_backend's.
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.stt.openai_backend.subprocess.run", side_effect=fake_run),
+        ):
+            result = _api_key_from_command()
+
+        self.assertEqual(captured["argv"], [r"C:\Tools\getkey.exe", "--arg"])
+        self.assertEqual(result, "command-key")
+
+    def test_api_key_command_strips_quotes_on_windows(self) -> None:
+        """A quoted command (that worked under the old posix=True split) must
+        still work now that Windows uses posix=False for backslash paths."""
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="command-key\n", stderr="")
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"DICTATE_OPENAI_API_KEY_COMMAND": r'"C:\Program Files\getkey.exe" --arg'},
+                clear=True,
+            ),
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.stt.openai_backend.subprocess.run", side_effect=fake_run),
+        ):
+            result = _api_key_from_command()
+
+        self.assertEqual(captured["argv"], [r"C:\Program Files\getkey.exe", "--arg"])
+        self.assertEqual(result, "command-key")
 
 
 if __name__ == "__main__":

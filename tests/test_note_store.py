@@ -7,6 +7,17 @@ from pathlib import Path
 from dictate.note_store import NoteSegment, NoteStore
 from dictate.sync import SyncOutbox, decrypt_record, generate_account_key
 
+UNSAFE_NOTE_IDS = [
+    "note_..\\..\\evil",
+    "../x",
+    "CON",
+    "con.txt",
+    "NUL",
+    "a/b",
+    "a:b",
+    "",
+]
+
 
 class NoteStoreTests(unittest.TestCase):
     def test_append_and_assemble_segments(self) -> None:
@@ -126,6 +137,51 @@ class NoteStoreTests(unittest.TestCase):
             assert note is not None
             self.assertFalse(note.archived)
 
+    def test_archive_and_unarchive_reject_unsafe_ids_without_touching_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                self.assertFalse(store.archive_note(unsafe_id), unsafe_id)
+                self.assertFalse(store.unarchive_note(unsafe_id), unsafe_id)
+            self.assertFalse(notes_root.exists())
+            outside = Path(tmp) / "evil"
+            self.assertFalse(outside.exists())
+
+    def test_note_dir_raises_on_unsafe_id_as_a_structural_backstop(self) -> None:
+        """_note_dir is the single chokepoint every method joins note_id through.
+
+        All 5 external boundaries (apply_synced_note, apply_synced_segment,
+        delete_note, archive_note, unarchive_note) already validate and return
+        early before reaching _note_dir. This test guards the chokepoint
+        itself, so a FUTURE caller that forgets to validate a wire-sourced id
+        can't silently reopen the path-traversal hole.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                with self.subTest(unsafe_id=unsafe_id):
+                    with self.assertRaises(ValueError):
+                        store._note_dir(unsafe_id)
+            self.assertFalse(notes_root.exists())
+
+    def test_archive_and_unarchive_still_work_for_legitimate_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            store.mark_ready(note_id, duration_s=1.0)
+
+            self.assertTrue(store.archive_note(note_id))
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertTrue(note.archived)
+
+            self.assertTrue(store.unarchive_note(note_id))
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertFalse(note.archived)
+
     def test_delete_note_removes_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
@@ -133,6 +189,89 @@ class NoteStoreTests(unittest.TestCase):
             self.assertTrue(store.delete_note(note_id))
             self.assertIsNone(store.load_note(note_id))
             self.assertFalse(store.delete_note(note_id))
+
+    def test_delete_note_rejects_unsafe_ids_without_touching_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                self.assertFalse(store.delete_note(unsafe_id), unsafe_id)
+            # Nothing should have been created outside (or inside) the store root.
+            self.assertFalse(notes_root.exists())
+            outside = Path(tmp) / "evil"
+            self.assertFalse(outside.exists())
+
+    def test_apply_synced_note_rejects_unsafe_ids_without_touching_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                if not unsafe_id:
+                    continue  # empty note_id is already rejected before path validation
+                result = store.apply_synced_note(
+                    {
+                        "note_id": unsafe_id,
+                        "mode": "note",
+                        "provider": "faster-whisper",
+                        "model": "turbo",
+                        "started_at": "2026-01-01T00:00:00+00:00",
+                        "status": "ready",
+                    }
+                )
+                self.assertFalse(result, unsafe_id)
+            self.assertFalse(notes_root.exists())
+            outside = Path(tmp) / "evil"
+            self.assertFalse(outside.exists())
+
+    def test_apply_synced_segment_rejects_unsafe_ids_without_touching_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_root = Path(tmp) / "notes"
+            store = NoteStore(root=notes_root)
+            for unsafe_id in UNSAFE_NOTE_IDS:
+                if not unsafe_id:
+                    continue  # empty note_id is already rejected before path validation
+                result = store.apply_synced_segment(
+                    {
+                        "note_id": unsafe_id,
+                        "seq": 0,
+                        "text": "hello",
+                    }
+                )
+                self.assertFalse(result, unsafe_id)
+            self.assertFalse(notes_root.exists())
+            outside = Path(tmp) / "evil"
+            self.assertFalse(outside.exists())
+
+    def test_apply_synced_note_and_delete_still_work_for_legitimate_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = NoteStore(root=Path(tmp) / "notes")
+            note_id = store.create_note(provider="faster-whisper", model="turbo")
+
+            applied = store.apply_synced_note(
+                {
+                    "note_id": note_id,
+                    "mode": "note",
+                    "provider": "faster-whisper",
+                    "model": "turbo",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                    "status": "ready",
+                    "rev": 2,
+                    "updated_at": "2026-01-01T00:01:00+00:00",
+                }
+            )
+            self.assertTrue(applied)
+            note = store.load_note(note_id)
+            assert note is not None
+            self.assertEqual(note.status, "ready")
+
+            segment_applied = store.apply_synced_segment(
+                {"note_id": note_id, "seq": 0, "text": "hello from peer"}
+            )
+            self.assertTrue(segment_applied)
+            self.assertEqual(store.assembled_text(note_id), "hello from peer")
+
+            self.assertTrue(store.delete_note(note_id))
+            self.assertIsNone(store.load_note(note_id))
 
     def test_note_and_segment_mutations_enqueue_encrypted_sync_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

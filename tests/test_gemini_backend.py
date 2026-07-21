@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -9,7 +10,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from dictate.stt.gemini_backend import GeminiSpeechToText, _extract_text, gemini_api_key_available
+from dictate.stt.gemini_backend import (
+    GeminiSpeechToText,
+    _api_key_from_command,
+    _extract_text,
+    gemini_api_key_available,
+)
 
 
 def _print_command(value: str) -> str:
@@ -73,6 +79,10 @@ class GeminiBackendTests(unittest.TestCase):
         self.assertTrue(parts[1]["inlineData"]["data"])
 
     def test_api_key_can_come_from_command(self) -> None:
+        # _print_command builds a quoted `python -c "..."` command. Real Windows
+        # command splitting (dictate.api_keys.split_api_key_command) strips one
+        # matched pair of surrounding quotes per token, so this works whether the
+        # host OS is posix or nt -- no os.name patching needed here.
         with (
             patch.dict(
                 os.environ,
@@ -93,6 +103,53 @@ class GeminiBackendTests(unittest.TestCase):
         )
 
         self.assertEqual(_extract_text(response), "first\nsecond")
+
+    def test_api_key_command_uses_non_posix_split_on_windows(self) -> None:
+        """On Windows, backslash paths in the command must survive shlex.split intact."""
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="command-key\n", stderr="")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"DICTATE_GEMINI_API_KEY_COMMAND": r"C:\Tools\getkey.exe --arg"},
+                clear=True,
+            ),
+            # The split now happens inside dictate.api_keys.split_api_key_command,
+            # so os.name is read from that module, not gemini_backend's.
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.stt.gemini_backend.subprocess.run", side_effect=fake_run),
+        ):
+            result = _api_key_from_command()
+
+        self.assertEqual(captured["argv"], [r"C:\Tools\getkey.exe", "--arg"])
+        self.assertEqual(result, "command-key")
+
+    def test_api_key_command_strips_quotes_on_windows(self) -> None:
+        """A quoted command (that worked under the old posix=True split) must
+        still work now that Windows uses posix=False for backslash paths."""
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="command-key\n", stderr="")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"DICTATE_GEMINI_API_KEY_COMMAND": r'"C:\Program Files\getkey.exe" --arg'},
+                clear=True,
+            ),
+            patch("dictate.api_keys.os.name", "nt"),
+            patch("dictate.stt.gemini_backend.subprocess.run", side_effect=fake_run),
+        ):
+            result = _api_key_from_command()
+
+        self.assertEqual(captured["argv"], [r"C:\Program Files\getkey.exe", "--arg"])
+        self.assertEqual(result, "command-key")
 
 
 if __name__ == "__main__":

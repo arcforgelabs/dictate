@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import locale
 import tempfile
 import unittest
 from pathlib import Path
@@ -152,6 +153,54 @@ class ConfigSelectionTests(unittest.TestCase):
                 load_config(path=config_path).installed_package_version,
                 "2026.7.4-unstable.123.1",
             )
+
+    def test_non_ascii_hotwords_and_lexicon_round_trip(self) -> None:
+        """A UTF-8 config with accented/non-Latin terms must not fall back to defaults."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            add_hotwords(["café", "naïve", "北京"], path=config_path)
+            add_lexicon_replacements(
+                {"kinneri": "café", "naiv": "naïve"},
+                path=config_path,
+            )
+
+            # The file on disk must actually be UTF-8, not escaped ASCII.
+            raw_bytes = config_path.read_bytes()
+            raw_bytes.decode("utf-8")  # must not raise
+            self.assertIn("café".encode("utf-8"), raw_bytes)
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.hotwords, ["café", "naïve", "北京"])
+            self.assertEqual(
+                config.lexicon_replacements,
+                {"kinneri": "café", "naiv": "naïve"},
+            )
+
+    def test_load_config_recovers_pre_existing_non_utf8_config(self) -> None:
+        """A hand-edited or pre-fix config written in the locale's ANSI encoding
+        (e.g. cp1252 on Windows) must not silently reset to defaults."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            encoding = locale.getpreferredencoding(False)
+            yaml_text = "hotwords:\n  - café\npush_to_talk_combo: ctrl+space\n"
+            config_path.write_bytes(yaml_text.encode(encoding))
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.hotwords, ["café"])
+            self.assertEqual(config.push_to_talk_combo, "ctrl+space")
+
+    def test_add_hotwords_recovers_pre_existing_non_utf8_config(self) -> None:
+        """_load_raw (used by every setter) gets the same tolerant retry."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            encoding = locale.getpreferredencoding(False)
+            config_path.write_bytes("hotwords:\n  - café\n".encode(encoding))
+
+            added = add_hotwords(["naïve"], path=config_path)
+            self.assertEqual(added, ["naïve"])
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.hotwords, ["café", "naïve"])
 
     def test_lexicon_replacements_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
