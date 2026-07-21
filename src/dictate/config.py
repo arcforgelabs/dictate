@@ -60,7 +60,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         return Config()
 
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
         logger.warning(f"Failed to parse {path}, using defaults")
         return Config()
@@ -160,7 +160,7 @@ def _load_raw(path: Path = CONFIG_PATH) -> dict:
     if not path.is_file():
         return {}
     try:
-        return yaml.safe_load(path.read_text()) or {}
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
 
@@ -168,7 +168,10 @@ def _load_raw(path: Path = CONFIG_PATH) -> dict:
 def _save_raw(data: dict, path: Path = CONFIG_PATH) -> None:
     """Write dict back to YAML, creating parent dirs if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(data, default_flow_style=False))
+    path.write_text(
+        yaml.dump(data, default_flow_style=False, allow_unicode=True),
+        encoding="utf-8",
+    )
 
 
 def add_hotwords(words: list[str], path: Path = CONFIG_PATH) -> list[str]:

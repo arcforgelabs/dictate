@@ -153,6 +153,28 @@ class ConfigSelectionTests(unittest.TestCase):
                 "2026.7.4-unstable.123.1",
             )
 
+    def test_non_ascii_hotwords_and_lexicon_round_trip(self) -> None:
+        """A UTF-8 config with accented/non-Latin terms must not fall back to defaults."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            add_hotwords(["café", "naïve", "北京"], path=config_path)
+            add_lexicon_replacements(
+                {"kinneri": "café", "naiv": "naïve"},
+                path=config_path,
+            )
+
+            # The file on disk must actually be UTF-8, not escaped ASCII.
+            raw_bytes = config_path.read_bytes()
+            raw_bytes.decode("utf-8")  # must not raise
+            self.assertIn("café".encode("utf-8"), raw_bytes)
+
+            config = load_config(path=config_path)
+            self.assertEqual(config.hotwords, ["café", "naïve", "北京"])
+            self.assertEqual(
+                config.lexicon_replacements,
+                {"kinneri": "café", "naiv": "naïve"},
+            )
+
     def test_lexicon_replacements_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
