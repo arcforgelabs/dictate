@@ -935,6 +935,16 @@ def split_api_key_command(command: str) -> list[str]:
     path like `"C:\\Program Files\\tool.exe" --arg`, or a command with a quoted
     argument like `op read "op://vault/item"`). Strip one matched pair of
     surrounding quotes from each token to restore that behavior.
+
+    Known/accepted limitation: only a WHOLE-TOKEN surrounding quote pair is
+    stripped (the two documented/supported forms above -- a quoted exe path,
+    or a quoted argument that is the entire token). A MID-token quoted form
+    like `--path="C:\\x"` is left with its literal embedded quotes, since
+    that would require a real shell-quote parser rather than a single
+    strip-if-whole-token-is-quoted pass. This is intentional: a general
+    mid-token quote parser is exactly the kind of fragile, hard-to-verify
+    logic this function is trying to avoid. Prefer one of the two supported
+    forms in an api_key_command instead of mid-token quoting.
     """
     parts = shlex.split(command, posix=(os.name != "nt"))
     if os.name != "nt":

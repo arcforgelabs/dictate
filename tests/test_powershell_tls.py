@@ -8,6 +8,7 @@ the explicit SecurityProtocol directive instead.
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,14 @@ BOOTSTRAP_SCRIPTS = [
     "install-windows-wizard.ps1",
 ]
 
+# Word-boundary matches, not bare substrings: a loose `in` check on short
+# aliases like "iex"/"iwr" risks matching inside an unrelated identifier a
+# future edit introduces rather than the actual cmdlet/alias invocation. \b
+# anchors this to real tokens instead of arbitrary substrings.
+WEB_REQUEST_PATTERN = re.compile(
+    r"\b(?:Invoke-WebRequest|Invoke-RestMethod|WebClient|Start-BitsTransfer|iwr|iex)\b"
+)
+
 
 class PowershellTlsBootstrapTests(unittest.TestCase):
     def test_bootstrap_scripts_force_tls12_before_first_web_request(self) -> None:
@@ -40,27 +49,11 @@ class PowershellTlsBootstrapTests(unittest.TestCase):
                 )
 
                 tls_index = source.index(TLS12_DIRECTIVE)
-                web_request_names = (
-                    "Invoke-WebRequest",
-                    "iwr ",
-                    "iwr\t",
-                    "iex",
-                    "Invoke-RestMethod",
-                    "WebClient",
-                    "Start-BitsTransfer",
-                )
-                first_web_request_index = min(
-                    (
-                        source.index(marker)
-                        for marker in web_request_names
-                        if marker in source
-                    ),
-                    default=None,
-                )
-                if first_web_request_index is not None:
+                first_web_request = WEB_REQUEST_PATTERN.search(source)
+                if first_web_request is not None:
                     self.assertLess(
                         tls_index,
-                        first_web_request_index,
+                        first_web_request.start(),
                         f"{name} must set TLS 1.2 before its first web request",
                     )
 
