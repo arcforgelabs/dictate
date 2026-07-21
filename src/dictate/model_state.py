@@ -6,7 +6,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-STATE_PATH = Path.home() / ".local" / "share" / "dictate" / "model-state.json"
+from dictate.platform_paths import user_data_dir
+
+STATE_PATH = user_data_dir() / "model-state.json"
 
 
 @dataclass(slots=True)
@@ -24,7 +26,7 @@ def load_model_state(path: Path = STATE_PATH) -> ModelState:
         return ModelState()
 
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return ModelState()
 
@@ -52,7 +54,7 @@ def save_model_state(state: ModelState, path: Path = STATE_PATH) -> None:
         "prepared": sorted(state.prepared),
         "errors": state.errors,
     }
-    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def is_model_prepared(
