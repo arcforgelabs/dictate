@@ -36,8 +36,11 @@ def _is_safe_note_id(note_id: str) -> bool:
     """True if note_id is safe to join into a filesystem path unescaped."""
     if not _NOTE_ID_PATTERN.fullmatch(note_id):
         return False
-    # Windows reserved device names are reserved even with a trailing extension
-    # (e.g. "CON.txt"), so compare against the pre-dot stem.
+    # _NOTE_ID_PATTERN already excludes "." entirely, so note_id can never
+    # actually contain a dot here -- this split is a no-op today. It's kept as
+    # belt-and-braces in case the character class is ever loosened to allow
+    # dots, since Windows reserved device names are reserved even with a
+    # trailing extension (e.g. "CON.txt").
     stem = note_id.split(".", 1)[0]
     return stem.upper() not in _WINDOWS_RESERVED_NAMES
 

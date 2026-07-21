@@ -40,7 +40,15 @@ class PowershellTlsBootstrapTests(unittest.TestCase):
                 )
 
                 tls_index = source.index(TLS12_DIRECTIVE)
-                web_request_names = ("Invoke-WebRequest", "iwr ", "iwr\t", "iex")
+                web_request_names = (
+                    "Invoke-WebRequest",
+                    "iwr ",
+                    "iwr\t",
+                    "iex",
+                    "Invoke-RestMethod",
+                    "WebClient",
+                    "Start-BitsTransfer",
+                )
                 first_web_request_index = min(
                     (
                         source.index(marker)
