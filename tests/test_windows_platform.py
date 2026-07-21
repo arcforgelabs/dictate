@@ -573,7 +573,7 @@ class WindowsPlatformTests(unittest.TestCase):
             self.assertTrue(str(argv[0]).lower().endswith(("cmd", "cmd.exe")))
             self.assertEqual(argv[1], "/c")
             self.assertTrue(str(argv[2]).lower().endswith("dictate-daemon.cmd"))
-            self.assertEqual(argv[2], str(daemon_cmd))
+            self.assertEqual(Path(argv[2]).resolve(), daemon_cmd.resolve())
             self.assertEqual(captured["kwargs"]["creationflags"], subprocess.CREATE_NEW_PROCESS_GROUP)
 
     def test_control_panel_exposes_launch_on_startup_setting(self) -> None:
