@@ -13,21 +13,18 @@ from dictate.model_state import (
     mark_model_failed,
     mark_model_prepared,
 )
-from dictate.platform_paths import user_data_dir
 
 
 class ModelStateTests(unittest.TestCase):
-    def test_state_path_uses_platform_data_dir(self) -> None:
-        """STATE_PATH must go through platform_paths, not a hardcoded POSIX path.
-
-        Previously it was Path.home() / ".local" / "share" / "dictate", which on
-        Windows lands in a hidden non-standard directory instead of
-        %LOCALAPPDATA%.
-        """
-        self.assertEqual(model_state.STATE_PATH, user_data_dir() / "model-state.json")
-        self.assertNotIn(".local", model_state.STATE_PATH.parts)
-        self.assertNotIn("share", model_state.STATE_PATH.parts)
-
+    # NOTE: there used to be a test_state_path_uses_platform_data_dir here that
+    # asserted STATE_PATH unconditionally (regardless of host platform) equals
+    # user_data_dir()/"model-state.json" and contains neither ".local" nor
+    # "share". That was a leftover from the round-1 version of this fix and
+    # contradicted the round-3 platform-conditional contract: on non-Windows,
+    # STATE_PATH is deliberately LEGACY_STATE_PATH
+    # (~/.local/share/dictate/model-state.json), so it failed deterministically
+    # on Linux CI. Superseded by the two tests below, which correctly assert
+    # each platform's resolution under an explicit sys.platform patch.
     def test_resolve_state_path_windows_uses_user_data_dir(self) -> None:
         with patch("dictate.platform_paths.sys.platform", "win32"):
             with patch.dict("os.environ", {"LOCALAPPDATA": r"C:\Users\sam\AppData\Local"}):

@@ -525,6 +525,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("*dictate.exe* --type-backend pynput*", source)
         self.assertIn("*pythonw.exe* -m dictate --type-backend pynput*", source)
 
+    @unittest.skipUnless(os.name == "nt", "Windows-only Save & Restart path")
     def test_restart_daemon_launches_daemon_cmd_via_cmd_wrapper(self) -> None:
         """Save & Restart must not hand CreateProcessW a bare .cmd as argv[0].
 
