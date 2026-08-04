@@ -138,6 +138,14 @@ class UpdateStatusTests(unittest.TestCase):
         # npm must be consulted first, so a private repo never gates the check.
         self.assertTrue(seen and "registry.npmjs.org" in seen[0], seen)
 
+    def test_user_facing_release_url_is_not_the_private_repository(self) -> None:
+        """The repository is private, so any GitHub URL we hand the UI 404s for
+        users. The open_release action must point at a public page."""
+        from dictate.update_status import RELEASES_URL
+
+        self.assertNotIn("github.com/arcforgelabs/dictate", RELEASES_URL)
+        self.assertTrue(RELEASES_URL.startswith("https://"), RELEASES_URL)
+
     def test_check_update_status_uses_npm_unstable_dist_tag(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
