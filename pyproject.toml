@@ -9,7 +9,7 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "numpy>=1.26.0",
     "PyYAML>=6.0.0",
-    "cryptography>=42.0.0",
+    "cryptography>=50.0.0",
     "sounddevice>=0.5.0",
     # AGC + noise suppression (WebRTC APM) on the capture stream. Linux-only wheels;
     # the code degrades to raw capture where it is unavailable.
@@ -39,7 +39,7 @@ x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]
 windows = ["pynput>=1.7.0", "pyperclip>=1.9.0"]
 # Brand-icon generation + the icon regression guard (tests/test_brand_icon.py).
-dev = ["pillow>=10", "cairosvg>=2.7"]
+dev = ["pillow>=12.3.0", "cairosvg>=2.7"]
 
 [project.scripts]
 dictate = "dictate.__main__:main_with_logging"
