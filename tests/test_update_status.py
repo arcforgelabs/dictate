@@ -108,6 +108,36 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertIn("update", status.actions or [])
         self.assertEqual(status.current_version, RELEASE_VERSION)
 
+    def test_stable_channel_resolves_via_npm_when_github_repo_is_private(self) -> None:
+        """A private GitHub repo 404s its API. Stable update checks must still
+        succeed from the npm registry, which stays public, and must not surface
+        an error to the user."""
+        seen = []
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            url = str(request.full_url)
+            seen.append(url)
+            if "api.github.com" in url:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return _FakeResponse({"dist-tags": {"latest": "2099.1.2"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=False),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch("dictate.update_status.load_config", return_value=Config(update_channel="stable")),
+        ):
+            status = check_update_status()
+
+        self.assertTrue(status.checked)
+        self.assertEqual(status.latest_version, "2099.1.2")
+        self.assertTrue(status.update_available)
+        self.assertIsNone(status.error)
+        self.assertNotEqual(status.phase, "failed")
+        # npm must be consulted first, so a private repo never gates the check.
+        self.assertTrue(seen and "registry.npmjs.org" in seen[0], seen)
+
     def test_check_update_status_uses_npm_unstable_dist_tag(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")

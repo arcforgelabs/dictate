@@ -1213,6 +1213,20 @@ def _is_source_root(root: Path) -> bool:
 
 
 def _fetch_latest_release(*, timeout: float) -> tuple[str, str | None]:
+    # The npm registry is the primary stable feed because it stays public even when
+    # the GitHub repository is private. The GitHub endpoints below are fallbacks and
+    # return 404 for private repos, so they must never be the only source.
+    try:
+        return _fetch_npm_dist_tag("latest", timeout=timeout)
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        RuntimeError,
+    ):
+        pass
+
     try:
         payload = _fetch_json(LATEST_RELEASE_URL, timeout=timeout)
         tag = str(payload.get("tag_name") or payload.get("name") or "")
