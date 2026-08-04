@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-04
+
+### Changed
+
+- The repository is now private. Update checks no longer depend on repository
+  visibility: the `stable` channel resolves the latest version from the npm
+  registry's `latest` dist-tag first, falling back to the GitHub API. Previously
+  a private repository would have put every install into a visible
+  `check_failed` state showing a raw HTTP 404.
+
+### Known issues
+
+- Linux `stable` install/update via npm fails until a new self-contained stable
+  release is published. See `KNOWN_ISSUES.md`.
+
 ## 2026-07-13
 
 ### Fixed
