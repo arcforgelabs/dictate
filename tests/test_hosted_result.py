@@ -6,6 +6,7 @@ import base64
 import copy
 import hashlib
 import json
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -210,6 +211,13 @@ class HostedResultKeyStoreTests(unittest.TestCase):
         key = self.store.create_or_rotate()
         text = self.store.path.read_text(encoding="utf-8")
         self.assertNotIn(self.secrets[(key.recipient_key_id, key.version)], text)
+        if sys.platform.startswith("win"):
+            # os.chmod only toggles the read-only bit on Windows, so the store's
+            # chmod(0o600) cannot produce a POSIX mode there and st_mode reads
+            # back as 0o666. Confidentiality comes from the user-profile ACL
+            # instead. The leak assertion above is what matters and runs
+            # everywhere; only the POSIX mode check is skipped.
+            return
         self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
 
 
