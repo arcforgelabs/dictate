@@ -25,7 +25,9 @@ from dictate.version import RELEASE_VERSION
 LATEST_RELEASE_URL = "https://api.github.com/repos/arcforgelabs/dictate/releases/latest"
 LATEST_TAGS_URL = "https://api.github.com/repos/arcforgelabs/dictate/tags?per_page=1"
 NPM_PACKAGE_URL = "https://registry.npmjs.org/@arcforgelabs%2fdictate"
-RELEASES_URL = "https://github.com/arcforgelabs/dictate/releases"
+# The repository is private, so its releases page 404s for users. Point the
+# in-app "open release" action at the public download page instead.
+RELEASES_URL = "https://arcforge.au/download/dictate"
 DOCUMENTATION_URL = "https://github.com/arcforgelabs/dictate#readme"
 TERMS_URL = "https://arcforge.au/terms"
 STORE_UPDATES_URL = "ms-windows-store://downloadsandupdates"

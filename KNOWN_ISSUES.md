@@ -3,6 +3,29 @@
 Open defects we have accepted for now, with enough detail to fix them later
 without re-deriving the diagnosis. Remove an entry when it is resolved.
 
+## User-facing links still point at the private repository (open 2026-08-04)
+
+**Symptom.** Links shipped to users resolve to a GitHub 404 now that the
+repository is private.
+
+| Location                        | Link                                    | Status                                       |
+| ------------------------------- | --------------------------------------- | -------------------------------------------- |
+| `update_status.py` `RELEASES_URL`     | releases page                     | **fixed** — now `arcforge.au/download/dictate` |
+| `update_status.py` `DOCUMENTATION_URL` | `#readme`, shown as `open_docs`  | open — no docs page exists yet                 |
+| `install-windows-wizard.ps1:8`  | `$DocumentationUrl`                     | open — same missing docs page                  |
+| `docs/msstore-listing.md:33`    | Support URL on the Store listing        | open — also needs updating in Partner Center   |
+| `package.json` homepage/repository/bugs | shown on the public npm page    | open — needs a support destination             |
+
+**Blocked on.** `arcforge.au/dictate`, `/docs/dictate` and `/support` all return
+404 today. `arcforge.au/download/dictate`, `/privacy/dictate`, `/terms` and
+`deck.arcforge.au/dictate` are live, which is why the releases link could be
+repointed and the rest could not.
+
+**Fix.** Publish a docs page and a support destination, then repoint the four
+remaining references. The Microsoft Store support URL must also be changed in
+Partner Center — editing the listing document alone does not update the live
+listing.
+
 ## Linux `stable` install/update via npm fails (accepted 2026-08-04)
 
 **Symptom.** On Linux, `npx @arcforgelabs/dictate install` (and the equivalent
