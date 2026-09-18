@@ -64,6 +64,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-store-msix
+          retention-days: 14
           path: packaging/msix/out/*.msix
           if-no-files-found: error
 
@@ -72,5 +73,6 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-msix-log
+          retention-days: 7
           path: ${{ runner.temp }}\windows-msix.log
           if-no-files-found: ignore

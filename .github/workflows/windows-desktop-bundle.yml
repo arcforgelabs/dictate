@@ -50,6 +50,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-desktop-bundle
+          retention-days: 14
           path: |
             ui-shell/src-tauri/target/release/bundle/msi/*.msi
             ui-shell/src-tauri/target/release/bundle/nsis/*.exe
@@ -60,5 +61,6 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-bundle-log
+          retention-days: 7
           path: ${{ runner.temp }}\windows-bundle.log
           if-no-files-found: warn
