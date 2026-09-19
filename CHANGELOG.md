@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-09-19
+
+### Removed
+
+- Dictate is now local-only. Accounts, subscriptions, encrypted cloud sync,
+  hosted transcription and API-key configuration are gone, along with the
+  remote-provider fallback machinery. 27,064 lines across 107 files were
+  deleted. See `docs/local-only-audit.md`.
+- The `dictate pro` command tree, and the `dictate config set-key`,
+  `set-provider` and `set-cloud-preference` subcommands.
+- The hosted OpenAI, xAI and Gemini transcription backends. Only local
+  engines remain: Parakeet (with its diarisation variants), faster-whisper
+  and WhisperX.
+- The `cryptography` runtime dependency, which existed only to encrypt sync
+  records.
+
+### Changed
+
+- `dictate config show` reports the local backend instead of a private/online
+  provider mode, and no longer prints key or secret-store status.
+- The desktop UI's account dialog is replaced by a smaller About dialog. The
+  version rows, the Stable/Beta update channel selector and the update actions
+  are unchanged and live there now.
+- The privacy policy is rewritten: with no account and no network
+  transcription path, the only things that reach the network are model
+  downloads, update checks and Microsoft Store install telemetry, none of
+  which carry dictation content.
+
+### Upgrade notes
+
+- No migration is required. Transcription, dictation history, notes, hotwords
+  and preferences are unaffected, and all local data stays where it is.
+- A saved `stt_backend` of `openai`, `xai` or `gemini` is no longer valid.
+  Startup already rejects an unknown backend and falls back to the
+  hardware-appropriate local default, so no action is needed.
+
 ## 2026-08-04
 
 ### Changed
