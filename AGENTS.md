@@ -1,15 +1,24 @@
 # Dictate
 
-Use the Arc Forge `atlassian` skill before planning or changing product
+Local-only desktop dictation. Read `VISION.md` before changing product
 behaviour.
 
-- Product Vision: https://arcforgelabs.atlassian.net/wiki/spaces/ARC/pages/426085
-- Executable work: Jira `OPS`, under epic `OPS-27`. Arc Forge products use
-  `OPS`; `DEL` is for client-commissioned work (`OPS-24`).
-- Product object: Assets Software Registry (`A_SR`), object type
-  `a_applications`. Its `vision_url` attribute resolves to the page above.
+## Direction
 
-Confluence owns product vision and Jira owns executable work. Do not recreate
-either in this repository. Code, configuration, tests, and implementation
-contracts remain repository truth. `VISION.md` is a derived read-only snapshot;
-where it disagrees with the Confluence page, that page wins.
+Transcription runs on the user's machine. No accounts, no subscriptions, no API
+keys, no hosted models, no network call in the transcription path.
+
+Account, subscription, cloud sync and hosted-transcription code is being removed
+rather than maintained. Do not add to it, and do not reintroduce a cloud path.
+The removal plan is `docs/local-only-audit.md`.
+
+## Where things are recorded
+
+GitHub is the record. Product direction lives in `VISION.md`, work in GitHub
+issues, and code, configuration, tests and implementation contracts are
+repository truth.
+
+Atlassian is legacy. Confluence no longer owns the vision and Jira no longer
+owns the work. Any remaining pointer to a Confluence space, a Jira project
+(`OPS`, `DEL`), or the Assets registry is stale — strip it when you touch the
+file rather than following it.
