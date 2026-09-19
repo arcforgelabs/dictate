@@ -49,9 +49,6 @@ DEFAULT_MODELS = {
     "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
     "faster-whisper": "small",
     "whisperx": "large-v3",
-    "openai": "gpt-4o-mini-transcribe",
-    "xai": "grok-speech-to-text",
-    "gemini": "gemini-3-flash-preview",
 }
 LOCAL_RUNTIME_CHOICES = ("CPU", "GPU")
 HISTORY_PAGE_SIZE = 5

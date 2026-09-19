@@ -222,54 +222,6 @@ class TrayIcon:
             self._profile_items[(device, compute_type)] = item
             submenu.append(item)
 
-    def _on_installable_model_selected(self, _item, backend: str, model: str) -> None:
-        if self._prepare_in_progress:
-            self._set_switch_status("Model preparation already in progress. Please wait.")
-            return
-        if self._switch_in_progress:
-            return
-        if (backend, model) == (self._active_backend, self._active_model):
-            return
-
-        self._start_switch(
-            backend=backend,
-            model=model,
-            device=_device_for_backend(backend, self._stt_device),
-            compute_type=_compute_type_for_backend(backend, self._stt_compute_type),
-        )
-
-    def _build_runtime_submenu(self) -> Gtk.Menu:
-        submenu = Gtk.Menu()
-        profiles = list(LOCAL_RUNTIME_PROFILES)
-        active_key = (self._stt_device, self._stt_compute_type)
-        known_profiles = {
-            (device, compute_type)
-            for device, compute_type, _label in LOCAL_RUNTIME_PROFILES
-        }
-        if active_key not in known_profiles:
-            profiles.insert(
-                0,
-                (
-                    self._stt_device,
-                    self._stt_compute_type,
-                    f"current / {self._stt_device} / {self._stt_compute_type}",
-                ),
-            )
-
-        radio_group: Gtk.RadioMenuItem | None = None
-        for device, compute_type, label in profiles:
-            if radio_group is None:
-                item = Gtk.RadioMenuItem.new_with_label(None, label)
-                radio_group = item
-            else:
-                item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, label)
-            item.connect("toggled", self._on_profile_selected, device, compute_type)
-            self._profile_items[(device, compute_type)] = item
-            submenu.append(item)
-
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
-        return submenu
-
     def _on_toggle(self, item):
         if item.get_active():
             self.daemon.resume()
