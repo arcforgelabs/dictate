@@ -19,11 +19,12 @@ edit / insert — and its **core is now merged to production** (`../ui/src/`).
 ## What's here
 | Path | What it is |
 |---|---|
-| **`locks/note-capture-core/`** | **The canonical freeze** of the shipped core (capture + notes + chrome): `LOCK.md` + baseline/implementation captures + the parity verdict. The convergence target the production port was measured against. |
+| **`locks/note-capture-core/`** | **The canonical freeze** of the shipped core (capture + notes + chrome): `LOCK.md` + `captures/` (eight states × light/dark, re-frozen 2026-09-20 after the design-system alignment). Re-render with `tools/capture-lock.mjs`. |
 | `review/` | Forge + Claude Design review findings from the port. |
 | `platforms/` | Cross-platform chrome study (macOS / Win11 / Win10 / GNOME / KDE). |
 | `logos.html`, `logo-marks.jsx` | Brand-mark exploration history. The chosen **cradle-mic** mark is shipped (`../assets/dictate.svg`) and used in the app. |
 | `fonts/` | Hanken Grotesk + JetBrains Mono. |
+| `tools/capture-lock.mjs` | Playwright script that renders the lock captures from the mock-mode dev server. |
 | `WORK-BRIEF.md` | Remaining follow-ups. |
 
 ## Status

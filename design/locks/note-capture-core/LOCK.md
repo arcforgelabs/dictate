@@ -1,63 +1,71 @@
 # Note Capture — Core Design Lock
 
-**Frozen:** 2026-06-22 · **Branch under test:** `forge/notecapture-shell`
+**Frozen:** 2026-09-20 · **Branch under test:** `stt-model-refresh-2026-09` · supersedes the
+2026-06-22 freeze (prototype baseline + gear-wheel chrome + xAI provider toggle).
 
 ## Source of truth
-Claude Design cloud project **"Dictate Design System"** (`2477ec21-a493-41a0-b400-2a65c5bc3bf6`),
-ui-kit `ui_kits/dictate-note-capture` — the Breath Cradle Note Capture app.
-The **cloud project is the source of truth**; `.claude-design-ds/` is a disposable,
-gitignored cache (re-exportable anytime), not a durable mirror. **This lock is the
-deliberate freeze** of the core direction that the production port is measured against.
+Tokens and brand-book rules: the **Dictate design system artifact**
+<https://claude.ai/artifact/2kMgmfMmYfH5xDuBxKye7D> (`project/README.md`, `project/tokens.json`).
+Implementation: `ui/src/` (`styles.css` + `App.jsx` / `views.jsx` / `overlays.jsx` /
+`platform/TitleBar.jsx`). This lock is the deliberate freeze of the shipped views after the
+design-system alignment (PR #50); `captures/` are the reference renders the next change is
+measured against. There is no separate prototype baseline any more — the shipped app *is* the
+baseline, and the artifact is the spec it must keep satisfying.
 
-## Implementation target
-`ui/src/` (production Tauri app). Rendered for review at the local dev server.
+## Locked scope — capture + notes + chrome
+1. **Capture home** — the Breath Cradle: the cradle-mic mark (`assets/dictate-mark-ink.svg`
+   geometry, `currentColor`) IS the button. Under it: `Click to dictate` (UI face, muted),
+   then on a fresh launch the hint `or hold` + the shortcut as `kbd` caps (`Right Ctrl`) and
+   the keyboard graphic pointing at that key. Once capture has begun this session, the
+   `Copy last dictation` pill (fg label, muted preview) replaces the hint. Home bar: update
+   pill (amber when an update is ready / restart pending; danger only on failure), About,
+   `Meeting` and the Dictations toggle. **No gear, no settings menu, no provider names.**
+2. **Recording** — `Recording` / `Meeting` in `live`, mono timer, wave timeline or the live
+   transcript preview. Reduced-motion: halo static at 50 %, never invisible.
+3. **Paused** — `Paused` / `Paused — no speech detected` in muted, timer, `Finish note`
+   (or `Finish meeting`) + a danger-on-hover discard button → alertdialog (`Discard note?`,
+   `Cancel` + danger `Confirm`).
+4. **Transcribing** — indeterminate ink bar, prose sub in the UI face.
+5. **Dictations** — search row (`Search dictations`, All / Meetings / Quick segment, toggle),
+   rows with fg text + mono meta line, archive / copy / export on hover; empty and
+   no-results states in fg title + muted sub.
+6. **Expanded note** — `Note · time · ago` title, copy + export, back column. Meeting notes
+   render the **segment grid**: speaker label full-width (12.5px, 700), then a
+   `minmax(96px,120px)` gutter holding the mono `t-mono` timestamp on a 26px line box so it
+   sits on the first prose line, then the 15px/1.75 text. Quick notes render one prose
+   block at the 65ch measure.
+7. **About** — mark + `Dictate` + version/channel, Model / Updates rows, `Check for update`
+   secondary + **one** primary `Update` (ink on paper), privacy note in muted 12.5px.
+8. **Command palette** — `Esc` cap, `Go to` / `Actions` groups at t-label metrics.
+9. **Chrome** — one title bar: mark at 16px, drag region, per-OS window controls. Nothing
+   else in it. System-theme default; light and dark both locked.
 
-## Locked scope — the "core" (capture + notes + chrome)
-1. **Capture home** — the Breath Cradle: the cradle-mic mark (= `assets/dictate.svg`, no
-   stem/base) IS the button; amplitude breath, blooms on emphasis, silence recedes,
-   reduced-motion → static state-color. States: Ready (idle), Recording (living green +
-   timer + transcript preview, label stays "Recording"), Silence-mid-recording.
-2. **Note flow** — Transcribing (calm, indeterminate; short captures skip it) → Note-ready
-   (real `{id,text,createdAt}` text; **Insert** single filled primary + **Open note** +
-   overflow Copy/Export; New note) → Expanded (full text + copy/export + back). Terminal
-   note outcomes resolve deterministically (`ok`/`empty`/`failed` signal + 60s watchdog).
-3. **Chrome** — ONE quiet titlebar (drag region + ⌘K + **gear-wheel** + per-OS window
-   controls); **no "Dictate" wordmark, no "Settings" label**. Gear opens the settings menu
-   (Always-on-device toggle, Appearance, all settings reachable). **System-theme default.**
-4. **Provider** — automatic (xAI online / on-device offline) + a single "Always on-device
-   (private)" toggle. No capability matrix.
+## Rules that gate this lock (from the brand book)
+- One `primary` per view; never primary for cancel / dismiss.
+- `live` = listening only; `amber` = attention that can wait; `danger` = destructive /
+  failed, always with a word or icon.
+- `muted` never below 12.5px and never for instructions; anything actionable is `fg`.
+- JetBrains Mono only for counted things (timers, timestamps, key caps, counts).
+- Every shortcut mention is a `kbd`. No emoji, no vendor names, sentence case except
+  `t-label` / `chip`.
 
-## Explicitly OUT of this lock (allowed to differ — named follow-ups)
-- **Settings detail surfaces** (Model · Push-to-talk · Hotwords · Recent history · App update
-  · Startup · Advanced) — production still renders the old dense console views behind the
-  gear. Their Note-Capture-style redesign is a separate **cloud-design → port** effort.
-- **Real `/api/insert`** — Insert currently copies to clipboard + a `TODO(backend)`; wiring
-  `POST /api/insert` → typing backend is a backend follow-up.
-- **Tauri window resize** — the window is still console-sized, so the surface renders larger
-  than the 460×700 design frame. Per-OS titlebar polish + resize are follow-ups.
+## Captures
+`captures/<state>-win-<theme>.png` at 1200×820, both themes, states: `ready`, `recording`,
+`paused`, `dictations`, `meeting-note`, `quick-note`, `about`, `palette`. `manifest.json`
+lists them. Rendered from the mock-mode dev server (`XDG_DATA_HOME` pointed at an empty
+dir so the bridge plugin does not attach to a running engine) with
+`design/tools/capture-lock.mjs`:
 
-## Baseline
-`baseline/` holds captures of the locked **prototype** (the source). `implementation/` holds
-matching **production** captures. Compare structure/layout/copy/state — not window dimensions
-(the resize is out-of-lock above).
+    XDG_DATA_HOME=/tmp/empty ui/node_modules/.bin/vite ui --port 5179 &
+    PLAYWRIGHT=<path>/node_modules/playwright/index.mjs CHROME=/usr/bin/google-chrome \
+      node design/tools/capture-lock.mjs design/locks/note-capture-core/captures
 
-## Parity result (2026-06-22)
-- **Ready** state: production matches the prototype (cradle-mic, copy, single quiet
-  titlebar, gear-wheel). Out-of-lock differences only (window size; ⌘K bar in titlebar).
-- **Both themes verified working** — light + dark both render correctly (light confirmed
-  via the in-app Appearance toggle on a clean tab; dark is the system default here).
-  Note: `implementation/ready-win-light.png` came out dark — that's a **capture-helper
-  `prefers-color-scheme` emulation artifact**, not a real bug; disregard that one image.
-- Gate: `cd ui && npm run build` ✓ + 38 tests ✓.
-- **Verdict: VISUAL CLEAN for the locked scope.**
+## Explicitly OUT of this lock
+- Window size / per-OS title-bar polish (the Tauri window is larger than the design frame).
+- `Microsoft Store · Stable` in About on Store installs — a distribution channel, allowed.
+- The 11px compact chrome pills (`engine-opt`, `upd-main`, `upd-mini`, `about-channel`).
 
 ## Gate rule
-For the **locked scope**, any visible extra / missing / changed element, label, or state in
-the implementation vs the baseline is **VISUAL NOT CLEAN** unless explicitly allowed here.
-The out-of-lock items above are permitted to differ.
-
-## Note on policy
-This lock supersedes the loose `design/dictate-note-capture/` working copy as the durable
-freeze. `design/dictate-note-capture/` should be reconciled (folded into this lock or dropped
-as re-exportable cache) during the deferred cleanup, per the updated claude-design/forge
-"disposable cache + design/locks freeze" policy.
+For the locked scope, any visible extra / missing / changed element, label, state or colour
+role in the implementation vs `captures/` is **VISUAL NOT CLEAN** unless a design-system
+change (artifact republished) explains it and this lock is re-frozen alongside.

@@ -776,9 +776,12 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-exp-text{max-width:var(--prose-width);margin:0;font-size:15px;line-height:1.75;color:var(--fg);
   white-space:pre-wrap;word-break:break-word;text-wrap:pretty;}
 .note-segments{width:100%;display:flex;flex-direction:column;gap:18px;}
-.note-segment{display:grid;grid-template-columns:minmax(116px,150px) minmax(0,1fr);gap:18px;align-items:start;}
-.note-segment-speaker{grid-column:1/-1;font-size:12px;line-height:1.35;font-weight:700;color:var(--fg);overflow-wrap:anywhere;}
-.note-segment-time{font-size:15px;line-height:1.75;font-variant-numeric:tabular-nums;color:var(--subtle);}
+/* Gutter is sized for the mono timestamp ("1:02:03-1:05:00" at 11.5px ≈ 104px);
+   the time shares the prose line box so its cap height sits on the first line. */
+.note-segment{display:grid;grid-template-columns:minmax(96px,120px) minmax(0,1fr);gap:16px;align-items:start;}
+.note-segment-speaker{grid-column:1/-1;font-size:12.5px;line-height:1.35;font-weight:700;color:var(--fg);overflow-wrap:anywhere;}
+.note-segment-time{font-family:var(--font-mono);font-size:11.5px;font-weight:500;letter-spacing:.02em;line-height:26px;
+  font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;}
 .note-segment-text{min-width:0;margin:0;font-size:15px;line-height:1.75;color:var(--fg);overflow-wrap:anywhere;}
 @media (max-width:640px){
   .note-segment{grid-template-columns:auto 1fr;gap:6px 10px;}
