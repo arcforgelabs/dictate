@@ -71,7 +71,7 @@ export function CommandPalette() {
           <Icon name="search" size={18} style={{ color: "var(--muted)" }} />
           <input ref={inputRef} placeholder="Search notes, run an action…" value={q}
             onChange={(e) => { setQ(e.target.value); setCur(0); }} onKeyDown={onKey} />
-          <Kbd>esc</Kbd>
+          <Kbd>Esc</Kbd>
         </div>
         <div className="cmd-list">
           {items.length === 0 && <div className="cmd-grp" style={{ padding: "16px 12px" }}>No matches</div>}

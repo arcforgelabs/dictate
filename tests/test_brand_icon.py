@@ -8,7 +8,7 @@ and drifted — a different smile with round-cap "knobs" and the glyph shoved
 `dictate-brand-mark-canonical` note.
 
 Two checks:
-- centered: the white glyph must sit centered in the tile (Pillow only, so it
+- centered: the bone glyph must sit centered in the tile (Pillow only, so it
   runs in CI).
 - matches SVG: the committed PNG must equal a fresh render of the SVG (needs
   cairosvg; skipped where it is unavailable, e.g. minimal CI images).
@@ -37,13 +37,13 @@ try:
 except Exception:  # noqa: BLE001
     _HAVE_CAIROSVG = False
 
-# The glyph is white on a near-black (#050505) tile; normalise so the tile maps
-# to 0 and the glyph to full coverage while keeping anti-aliased edges.
-_LUT = [max(0, min(255, int((v - 5) * 255 / 250))) for v in range(256)]
+# The glyph is bone (#f3f0e8, L≈240) on a navy-ink gradient tile (L≈60 at its
+# lightest corner); anything brighter than the midpoint is glyph coverage.
+_LUT = [max(0, min(255, int((v - 60) * 255 / 180))) for v in range(256)]
 
 
 def _glyph_margins(img):
-    """Return (size, top, bottom, left, right) margins of the white glyph."""
+    """Return (size, top, bottom, left, right) margins of the bone glyph."""
     im = img.convert("RGBA")
     size = im.size[0]
     cov = ImageChops.multiply(im.convert("L").point(_LUT), im.split()[3])

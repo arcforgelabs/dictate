@@ -242,8 +242,9 @@ builds set `DICTATE_ONEFILE=1` and stage one self-extracting ELF instead.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if
-any configured icon isn't RGBA. `assets/dictate.png` is mode `LA` (grey+alpha);
-regenerate `ui-shell/src-tauri/icons/*.png` as RGBA (Pillow: `.convert("RGBA")`).
+any configured icon isn't RGBA. `scripts/render_brand_icons.py` renders every icon
+(`assets/*.png|ico` and `ui-shell/src-tauri/icons/*`) from the SVGs as RGBA — never
+hand-export one.
 
 ### Keep optional Linux formats out of the release gate until timed
 The public release workflow currently publishes the `.deb` only. RPM/AppImage

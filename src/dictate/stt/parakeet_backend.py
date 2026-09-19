@@ -153,7 +153,9 @@ def _providers_for_device(device: ComputeDevice) -> list[str] | None:
     if device == "cuda":
         if "CUDAExecutionProvider" not in available:
             raise RuntimeError(
-                "Parakeet CUDA requested but ONNX Runtime does not expose CUDAExecutionProvider."
+                "Parakeet CUDA requested but ONNX Runtime does not expose CUDAExecutionProvider. "
+                "Install the gpu extra (onnxruntime-gpu with CUDA 13 runtime wheels) and make "
+                "sure the NVIDIA driver is 580 or newer."
             )
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
 

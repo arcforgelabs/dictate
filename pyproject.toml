@@ -13,18 +13,23 @@ dependencies = [
     # AGC + noise suppression (WebRTC APM) on the capture stream. Linux-only wheels;
     # the code degrades to raw capture where it is unavailable.
     "webrtc-noise-gain>=1.3.0; sys_platform == 'linux'",
-    # NVIDIA Parakeet English backend (ONNX, CPU-friendly). onnxruntime is pinned
-    # below 1.24 to avoid the external-data path check that rejects the model.
-    "onnx-asr>=0.11.0",
-    "onnxruntime>=1.19,<1.24",
+    # NVIDIA Parakeet English backend (ONNX, CPU-friendly). Parakeet model files
+    # are staged as flat real files so onnxruntime's external-data path check
+    # (1.24+) resolves them; keep onnxruntime and onnxruntime-gpu on the same
+    # minor so the CPU and CUDA lanes share one runtime.
+    "onnx-asr>=0.12.0",
+    "onnxruntime>=1.30,<1.31",
 ]
 
 [project.optional-dependencies]
 gpu = [
-    "onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and (sys_platform == 'linux' or sys_platform == 'win32')",
+    # onnxruntime-gpu 1.27+ ships CUDA 13 runtime wheels, which need NVIDIA
+    # driver 580 or newer. The last CUDA 12 build is 1.26.
+    "onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and (sys_platform == 'linux' or sys_platform == 'win32')",
 ]
 amd = [
-    "onnxruntime-directml>=1.19,<1.24; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and sys_platform == 'win32'",
+    # Microsoft stopped publishing onnxruntime-directml after 1.24.x.
+    "onnxruntime-directml>=1.24,<1.25; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and sys_platform == 'win32'",
 ]
 whisperx = ["whisperx>=3.8.6"]
 meeting = ["pyannote.audio>=4.0.0", "torch>=2.4.0"]
@@ -75,6 +80,8 @@ line-length = 100
 
 [dependency-groups]
 dev = [
+    "cairosvg>=2.7",
+    "pillow",
     "pytest>=9.1.1",
     "ruff>=0.15.21",
 ]

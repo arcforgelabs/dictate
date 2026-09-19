@@ -5,7 +5,7 @@
 // lives in the `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
-import { Kbd, Tooltip } from "./primitives.jsx";
+import { Combo, Tooltip } from "./primitives.jsx";
 import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
@@ -521,18 +521,18 @@ function CaptureHome() {
               </>
             ) : (
               <>
-                <div className="note-status-sub t-mono">Click to dictate</div>
+                <div className="note-status-sub">Click to dictate</div>
                 {/* Getting started (per-session): teach the key on a fresh launch. */}
                 {gettingStarted && (
                   <>
-                    <div className="note-status-hint t-mono">or hold {s.shortcut.join(" + ")}</div>
+                    <div className="note-status-hint">or hold <Combo keys={s.shortcut.map(shortcutKeyLabel)} /></div>
                     <GsKeyboard />
                   </>
                 )}
                 {/* Once capture has begun this session, offer a one-click copy of the
                     most recent quick dictation (older ones live in the notes list). */}
                 {s.sessionStarted && recentQuickText && (
-                  <button type="button" className="note-copylast t-mono" onClick={copyLast}>
+                  <button type="button" className="note-copylast" onClick={copyLast}>
                     <Icon name="copy" size={13} />
                     <span className="note-copylast-content">
                       <span className="note-copylast-label">Copy last dictation</span>
@@ -576,7 +576,7 @@ function NoteProcessing() {
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
-        <div className="note-status-sub t-mono">
+        <div className="note-status-sub">
           {meeting ? "Separating speakers and preparing the transcript." : "Turning your words into a note."}
         </div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
@@ -1859,6 +1859,11 @@ export default function App() {
       </div>
     </StoreCtx.Provider>
   );
+}
+
+// Key caps read as the brand book spells them: "Right Ctrl", not "Ctrl (R)".
+function shortcutKeyLabel(k) {
+  return { "Ctrl (R)": "Right Ctrl", "Ctrl (L)": "Left Ctrl" }[k] || k;
 }
 
 // Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) → engine combo token.

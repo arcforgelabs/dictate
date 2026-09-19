@@ -249,7 +249,7 @@ export function WaveTimeline({ active = true, reduced = false, level = null, liv
 
     const cs = getComputedStyle(canvas);
     const liveColor = cs.getPropertyValue("--live").trim() || "#2f8f63";
-    const subtleColor = cs.getPropertyValue("--subtle").trim() || "rgba(27,26,22,.4)";
+    const subtleColor = cs.getPropertyValue("--subtle").trim() || "rgba(27,31,39,.4)";
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     let W = 0, H = 0, capacity = 0;
 

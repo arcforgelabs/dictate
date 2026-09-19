@@ -208,5 +208,24 @@ class ConfigSelectionTests(unittest.TestCase):
             )
 
 
+class DistilWhisperModelNameTests(unittest.TestCase):
+    def test_distil_large_v35_is_resolved_by_faster_whisper(self) -> None:
+        # faster-whisper >= 1.2 maps this alias to the official CTranslate2
+        # conversion itself, so the backend passes the name through untouched.
+        # (CI stubs faster_whisper, so the alias table is not inspected here.)
+        from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
+
+        backend = FasterWhisperSpeechToText(model_name="distil-large-v3.5")
+        self.assertEqual(backend.model_name, "distil-large-v3.5")
+
+    def test_distil_large_v35_is_a_listed_faster_whisper_model(self) -> None:
+        from dictate.stt.factory import FASTER_WHISPER_MODELS, resolve_model_name
+
+        self.assertIn("distil-large-v3.5", FASTER_WHISPER_MODELS)
+        self.assertEqual(
+            resolve_model_name("faster-whisper", "distil-large-v3.5"), "distil-large-v3.5"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

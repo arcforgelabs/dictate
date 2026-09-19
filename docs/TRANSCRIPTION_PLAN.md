@@ -121,7 +121,6 @@ or similar engine terms.
 | Multilingual CPU | Parakeet v3 | Feasibility benchmark | Use only if CPU latency is acceptable. |
 | English AMD GPU | Parakeet v2 through AMD runtime | Fresh default when Parakeet is available; explicit provider readiness wired | First-class AMD lane. |
 | Multilingual AMD GPU | Parakeet v3 through AMD runtime | Model wired, representative AMD validation still required | First-class AMD lane. |
-| Hosted high-quality ASR | Cohere Labs Transcribe | Benchmark candidate | Keep on table for high-quality hosted comparison. |
 
 Current `faster-whisper/large-v3` support is a bridge for this workstation, not
 the product direction.
@@ -140,7 +139,9 @@ GPU lane: representative NVIDIA/AMD hardware benchmarks, package/provider
 coverage, and failure-mode testing remain before claiming CUDA or AMD speed
 targets.
 
-NVIDIA CUDA evidence on Samuel's workstation:
+NVIDIA CUDA evidence on Samuel's workstation (recorded on the CUDA 12 lane,
+`onnxruntime-gpu` 1.23.2; the pin moved to 1.30 / CUDA 13 on 2026-09-20 and
+this list must be re-run before the GPU lane is called re-validated):
 
 1. `onnxruntime-gpu==1.23.2` exposes `CUDAExecutionProvider` after
    `onnxruntime.preload_dlls()` loads the CUDA/cuDNN libraries from the venv.
@@ -188,9 +189,10 @@ Windows CUDA packaging status:
    `Win32_VideoController`, or PCI vendor `VEN_10DE`.
 2. On detected NVIDIA hardware, or when called with `-ForceCuda`, the installer
    replaces the CPU-only `onnxruntime` wheel with
-   `onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24`. This follows ONNX Runtime's
+   `onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31`. This follows ONNX Runtime's
    documented CUDA/cuDNN site-package preload path and avoids requiring a manual
-   CUDA Toolkit install for the Parakeet ONNX CUDA lane.
+   CUDA Toolkit install for the Parakeet ONNX CUDA lane. The 1.30 wheels bundle
+   the CUDA 13 runtime, so the machine needs NVIDIA driver 580 or newer.
 3. `-NoCuda` suppresses CUDA package installation for CI, constrained machines,
    and user support cases.
 4. The hosted npm install/update wrappers pass `-ForceCuda` and `-NoCuda`
@@ -379,8 +381,8 @@ Current foundation:
 
 1. `SttCapabilities.supports_speaker_attribution` marks backends that can return
    speaker-attributed output.
-2. xAI and WhisperX declare speaker-attribution support because they already
-   expose `transcribe_diarized(...)`.
+2. WhisperX and the Parakeet speaker backends declare speaker-attribution
+   support because they expose `transcribe_diarized(...)`.
 3. `DictationEngine.transcribe(..., require_speaker_attribution=True)` fails
    closed instead of falling back to plain ASR.
 4. `Daemon.start_meeting_recording()` and `stop_meeting_recording()` route
@@ -482,9 +484,8 @@ Remaining app-level gates:
 4. Persistent skipped update versions are deferred with the staged update UX.
    The current UI-only `localStorage` skip remains a non-authoritative preview
    behavior until staged updates are promoted.
-5. Dictate Pro/subscription UX is out of scope for this local transcription
-   deployment unless a hosted provider lane is promoted. Do not expose Arc
-   Forge provider keys or a primary switchable-backend workflow in the Pro UI.
+5. Dictate is local-only (`VISION.md`); there is no hosted provider lane to
+   promote and no provider-key or switchable-backend UI.
 
 ## Speaker Attribution Lanes
 
@@ -494,7 +495,6 @@ Remaining app-level gates:
 | Local GPU live/speed | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. |
 | Local AMD GPU | Parakeet v2/v3 on AMD runtime | DiariZen / Sortformer if supported, otherwise pyannote fallback | Required benchmark lane. |
 | Local CPU/offline fallback | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; ship after packaging/licensing and benchmark gates pass. |
-| Hosted meeting comparison | Provider ASR | Provider speaker attribution or separate diarization | Benchmark xAI, OpenAI diarize, Google Chirp 3, and Cohere plus separate speaker attribution. |
 
 WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
 useful, but do not build the product dependency around WhisperX.
@@ -1112,10 +1112,84 @@ src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
      AMD, multilingual, timestamp, and packaging gates pass.
    - Keep benchmark comparison rows as historical evidence only.
 
-5. **Hosted comparison**
-   - Benchmark xAI, OpenAI diarize, Google Chirp 3, and Cohere Labs Transcribe.
-   - Only use a hosted meeting provider if it returns structured
-     speaker-attributed transcript data, not just prose labels.
+## Model Landscape Review (2026-09-20)
+
+Periodic check of the open STT landscape against the lanes above. Numbers are
+from the Open ASR Leaderboard English short-form track (cleaned datasets, so
+they are not comparable to pre-2026 snapshots). RTFx is the leaderboard's GPU
+figure and only useful as a relative ordering.
+
+| Model | WER | RTFx | Params | License | Relevance to Dictate |
+| --- | --- | --- | --- | --- | --- |
+| Qwen/Qwen3-ASR-1.7B | 4.31 | 820 | 1.7B | Apache-2.0 | 52 languages, LLM decoder. GPU-class accuracy option only. |
+| nvidia/canary-qwen-2.5b | 4.43 | 867 | 2.5B | CC-BY-4.0 | GPU-class. |
+| ibm-granite/granite-speech-4.1-2b | 4.62 | 546 | 2B | Apache-2.0 | `-plus` variant does speaker-attributed ASR with word timestamps; Meeting prototype candidate. |
+| CohereLabs/cohere-transcribe-03-2026 | 4.67 | 907 | 2B | Apache-2.0 | Open weights now; community ONNX exists. GPU-class. |
+| **nvidia/parakeet-tdt-0.6b-v2 (shipped default)** | **4.70** | **6025** | 0.6B | CC-BY-4.0 | Best accuracy-per-speed of any open model. Keep. |
+| nvidia/parakeet-tdt-0.6b-v3 (shipped multilingual) | 4.86 | 6076 | 0.6B | CC-BY-4.0 | Keep. |
+| ibm-granite/granite-speech-5.0-470m-turboctc | 5.04 | 12946 | 0.47B | Apache-2.0 | Released 2026-08-25. 2x Parakeet throughput, English only, CTC with no timestamps, needs transformers>=5.16 or community ONNX. Watch. |
+| nvidia/nemotron-speech-streaming-en-0.6b | 5.25 | 1167 | 0.6B | NVIDIA Open | Cache-aware streaming, 80 ms-1.1 s chunks. Streaming candidate. |
+| distil-whisper/distil-large-v3.5 | 5.40 | 879 | 0.8B | MIT | Better than our faster-whisper `turbo` (6.36) at the same speed, English only. Added as a selectable bridge model (`distil-large-v3.5`), not the default. |
+| openai/whisper-large-v3-turbo (faster-whisper `turbo`) | 6.36 | 797 | 0.8B | MIT | Bridge lane only. |
+| nvidia/nemotron-3.5-asr-streaming-0.6b | 7.88 | 1345 | 0.6B | OpenMDW-1.1 | 40 locales, streaming. Multilingual streaming candidate; accuracy below v3. |
+
+### Parakeet Unified 0.6b evaluation
+
+`nvidia/parakeet-unified-en-0.6b` (2026-04-07) is a FastConformer-RNNT that
+runs offline and streaming (down to 160 ms) from one checkpoint. NVIDIA claims
+it beats `parakeet-tdt-0.6b-v2` offline. It was evaluated on 2026-09-20 on a
+16-core CPU workstation, int8, as a possible v2 successor, using two community
+ONNX exports (an onnx-asr layout and the k2/sherpa-onnx maintainer's export)
+so the export was not the variable. Fixtures: 8 LibriSpeech test-clean clips
+(216 reference words, 79 s) and the repo's `open-speech-harvard` fixture
+(`scripts/generate-curated-human-asr-fixture.sh`, 80 words, peak level 0.34).
+
+| Fixture | v2 int8 (onnx-asr) | unified int8 (onnx-asr) | unified int8 (sherpa-onnx) |
+| --- | --- | --- | --- |
+| LibriSpeech, 16 kHz, clean | 0.46% | 0.46% | 0.46% |
+| LibriSpeech through an 8 kHz round-trip | 0.46% | 0.46% | - |
+| LibriSpeech + white noise, 20 / 10 / 5 dB SNR | 0.46 / 0.46 / 0.46% | 0.93 / 1.39 / 1.39% | - |
+| Harvard fixture, native level (peak 0.34) | 3.75% | 23.75% | 47.50% |
+| Harvard fixture, peak-normalised to 0.90 | 5.00% | 8.75% | - |
+| Harvard fixture, attenuated to peak 0.09 | 6.25% | 28.75% | - |
+| CPU RTFx on LibriSpeech (same loaded machine) | 4.5 | 3.2 | 3.5 |
+
+Findings:
+
+1. On clean, well-levelled audio unified matches v2 exactly.
+2. Unified is strongly input-level sensitive; v2 is not. Peak-normalising the
+   Harvard fixture takes unified from 23.75% to 8.75%, still more than twice
+   v2. Dictate's always-on AGC (`audio_preprocess.py`, target -18 dBFS RMS)
+   would narrow but not close that gap.
+3. Unified degrades under additive noise where v2 does not.
+4. Unified is roughly 30% slower than v2 on CPU int8 with no accuracy gain.
+5. Streaming needs the sherpa-onnx runtime; onnx-asr has no streaming path.
+
+Decision: `parakeet-tdt-0.6b-v2` stays the English default. Unified is a
+streaming-lane candidate only, to be revisited if live-text-while-holding-key
+becomes a product goal, and then together with `nemotron-speech-streaming` and a
+sherpa-onnx backend decision. Any such evaluation must include quiet-input and
+noisy-input fixtures, not only clean read speech.
+
+### Runtime notes
+
+1. `onnx-asr` 0.12.0 (2026-07-15) adds convolution-based ONNX preprocessors for
+   the GPU path.
+2. ONNX Runtime is now pinned to `1.30.x` for both the CPU and CUDA lanes.
+   `onnxruntime-gpu` 1.27+ ships CUDA 13 runtime wheels (`nvidia-cuda-runtime`,
+   `nvidia-cudnn-cu13`), which need NVIDIA driver 580 or newer; 1.26 was the
+   last CUDA 12 build. The old `<1.24` pin existed for the external-data path
+   check; Dictate stages Parakeet as flat real files, and an external-data
+   model loads on 1.30 (verified 2026-09-20 on CPU). CUDA execution on 1.30
+   still needs a `dictate doctor --stt-backend parakeet --device cuda` pass
+   on NVIDIA hardware before the GPU lane is called re-validated.
+3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra is capped at
+   `<1.25`. Microsoft has retired that wheel, so the Windows AMD lane needs a
+   replacement runtime decision (ORT's WinML/DirectML EP plugin or ROCm).
+4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
+   Nemotron streaming, Moonshine, Qwen3-ASR, and Cohere Transcribe. It is the
+   runtime to evaluate if a streaming lane is opened.
+5. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
 
 ## Archived Notes
 

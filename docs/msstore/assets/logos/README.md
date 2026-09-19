@@ -1,7 +1,7 @@
 # Microsoft Store Logos
 
-These PNGs are prepared from `ui-shell/src-tauri/icons/icon.png`, the current
-packaged Dictate app icon.
+These PNGs are rendered from `assets/dictate.svg` (the brand tile) by
+`python scripts/render_brand_icons.py`; do not edit them by hand.
 
 Upload candidates:
 
