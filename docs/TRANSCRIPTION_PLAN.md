@@ -139,7 +139,9 @@ GPU lane: representative NVIDIA/AMD hardware benchmarks, package/provider
 coverage, and failure-mode testing remain before claiming CUDA or AMD speed
 targets.
 
-NVIDIA CUDA evidence on Samuel's workstation:
+NVIDIA CUDA evidence on Samuel's workstation (recorded on the CUDA 12 lane,
+`onnxruntime-gpu` 1.23.2; the pin moved to 1.30 / CUDA 13 on 2026-09-20 and
+this list must be re-run before the GPU lane is called re-validated):
 
 1. `onnxruntime-gpu==1.23.2` exposes `CUDAExecutionProvider` after
    `onnxruntime.preload_dlls()` loads the CUDA/cuDNN libraries from the venv.
@@ -187,9 +189,10 @@ Windows CUDA packaging status:
    `Win32_VideoController`, or PCI vendor `VEN_10DE`.
 2. On detected NVIDIA hardware, or when called with `-ForceCuda`, the installer
    replaces the CPU-only `onnxruntime` wheel with
-   `onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24`. This follows ONNX Runtime's
+   `onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31`. This follows ONNX Runtime's
    documented CUDA/cuDNN site-package preload path and avoids requiring a manual
-   CUDA Toolkit install for the Parakeet ONNX CUDA lane.
+   CUDA Toolkit install for the Parakeet ONNX CUDA lane. The 1.30 wheels bundle
+   the CUDA 13 runtime, so the machine needs NVIDIA driver 580 or newer.
 3. `-NoCuda` suppresses CUDA package installation for CI, constrained machines,
    and user support cases.
 4. The hosted npm install/update wrappers pass `-ForceCuda` and `-NoCuda`
@@ -1171,13 +1174,22 @@ noisy-input fixtures, not only clean read speech.
 ### Runtime notes
 
 1. `onnx-asr` 0.12.0 (2026-07-15) adds convolution-based ONNX preprocessors for
-   the GPU path. Current `onnxruntime-gpu` wheels target CUDA 13; the
-   `<1.24` pin keeps the CUDA 12 lane until it is re-validated on NVIDIA
-   hardware.
-2. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
+   the GPU path.
+2. ONNX Runtime is now pinned to `1.30.x` for both the CPU and CUDA lanes.
+   `onnxruntime-gpu` 1.27+ ships CUDA 13 runtime wheels (`nvidia-cuda-runtime`,
+   `nvidia-cudnn-cu13`), which need NVIDIA driver 580 or newer; 1.26 was the
+   last CUDA 12 build. The old `<1.24` pin existed for the external-data path
+   check; Dictate stages Parakeet as flat real files, and an external-data
+   model loads on 1.30 (verified 2026-09-20 on CPU). CUDA execution on 1.30
+   still needs a `dictate doctor --stt-backend parakeet --device cuda` pass
+   on NVIDIA hardware before the GPU lane is called re-validated.
+3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra is capped at
+   `<1.25`. Microsoft has retired that wheel, so the Windows AMD lane needs a
+   replacement runtime decision (ORT's WinML/DirectML EP plugin or ROCm).
+4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
    Nemotron streaming, Moonshine, Qwen3-ASR, and Cohere Transcribe. It is the
    runtime to evaluate if a streaming lane is opened.
-3. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
+5. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
 
 ## Archived Notes
 

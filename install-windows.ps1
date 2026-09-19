@@ -125,9 +125,11 @@ function Test-NvidiaGpu {
 function Ensure-OnnxCudaRuntime {
     param([string]$PythonExe)
 
-    Write-Host "==> Installing ONNX Runtime CUDA provider"
+    # onnxruntime-gpu 1.27+ bundles CUDA 13 runtime DLLs, which need NVIDIA
+    # driver 580 or newer. Older drivers fall back to CPU at model load.
+    Write-Host "==> Installing ONNX Runtime CUDA provider (CUDA 13; NVIDIA driver 580+)"
     Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "uninstall", "-y", "onnxruntime") -Description "Removing CPU-only ONNX Runtime"
-    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "install", "--upgrade", "onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24") -Description "Installing ONNX Runtime GPU with CUDA/cuDNN DLLs"
+    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "install", "--upgrade", "onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31") -Description "Installing ONNX Runtime GPU with CUDA/cuDNN DLLs"
 }
 
 function Get-AppDataConfigPath {

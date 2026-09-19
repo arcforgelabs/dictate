@@ -214,7 +214,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('$installTarget = "${PSScriptRoot}[$($installExtras -join', script)
         self.assertIn("function Test-NvidiaGpu", script)
         self.assertIn("function Ensure-OnnxCudaRuntime", script)
-        self.assertIn('onnxruntime-gpu[cuda,cudnn]>=1.23,<1.24', script)
+        self.assertIn('onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31', script)
         self.assertIn('$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))', script)
         self.assertIn('"dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
