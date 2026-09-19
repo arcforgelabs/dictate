@@ -52,6 +52,8 @@ FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "large-v3",
     "turbo",
     "large-v3-turbo",
+    # English-only distil model: ~1 WER point better than turbo at the same speed.
+    "distil-large-v3.5",
 )
 PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
 PARAKEET_PYANNOTE_MODELS: tuple[str, ...] = PARAKEET_MODELS

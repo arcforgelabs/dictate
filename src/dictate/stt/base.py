@@ -15,6 +15,7 @@ FasterWhisperModel = Literal[
     "large-v3",
     "turbo",
     "large-v3-turbo",
+    "distil-large-v3.5",
 ]
 WhisperCppModel = Literal[
     "base",

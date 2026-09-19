@@ -241,7 +241,16 @@ class UiBackendStateTests(unittest.TestCase):
             ]
             self.assertEqual(
                 local_models,
-                ["tiny", "base", "small", "medium", "large-v3", "turbo", "large-v3-turbo"],
+                [
+                    "tiny",
+                    "base",
+                    "small",
+                    "medium",
+                    "large-v3",
+                    "turbo",
+                    "large-v3-turbo",
+                    "distil-large-v3.5",
+                ],
             )
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(
