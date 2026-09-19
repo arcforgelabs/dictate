@@ -36,8 +36,8 @@ Dictate is not a commercial product. It was retired as one on 2026-08-25 and is
 now worked on when there is time. Features are judged by whether they make local
 dictation better, not by whether they would sell.
 
-The account, subscription, cloud sync and hosted-transcription code is being
-removed rather than maintained. See `docs/local-only-audit.md`.
+The account, subscription, cloud sync and hosted-transcription code was
+removed on 2026-09-19. See `docs/local-only-audit.md`.
 
 ---
 
