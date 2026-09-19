@@ -284,6 +284,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-desktop-prebuild-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 3
           path: |
             ui-shell/src-tauri/target/release/bundle/msi/*.msi
             ui-shell/src-tauri/target/release/bundle/nsis/*.exe
@@ -294,6 +295,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: windows-desktop-prebuild-log-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 7
           path: ${{ runner.temp }}\windows-desktop-prebuild.log
           if-no-files-found: warn
 
@@ -338,6 +340,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: linux-desktop-prebuild-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 3
           path: ui-shell/src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
@@ -380,6 +383,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: linux-desktop-prebuild-log-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 7
           path: /tmp/linux-desktop-prebuild.log
           if-no-files-found: warn
 
