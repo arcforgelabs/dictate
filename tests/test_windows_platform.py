@@ -729,13 +729,9 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         # The package job gates on the core suites plus platform install smokes.
-        self.assertIn("needs: [tests, windows-user-smoke, linux-user-sync-smoke, npm, ui]", workflow)
+        self.assertIn("needs: [tests, windows-user-smoke, npm, ui]", workflow)
         self.assertIn("windows-user-smoke", workflow)
-        self.assertIn("linux-user-sync-smoke", workflow)
 
     def test_npm_package_exposes_public_installer_shim(self) -> None:
         package_json = (Path(__file__).resolve().parents[1] / "package.json").read_text(
@@ -758,14 +754,10 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("UNSTABLE_VERSION", workflow)
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts\\cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
-            "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
+            "needs: [tests, windows-user-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
             workflow,
         )
-        self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
         self.assertIn("needs.linux-desktop-bundle.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
         self.assertIn("Publish durable unstable Windows installers", workflow)
@@ -786,11 +778,8 @@ class WindowsPlatformTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
-            "needs: [validate-release-ref, tests, windows-user-smoke, linux-user-sync-smoke]",
+            "needs: [validate-release-ref, tests, windows-user-smoke]",
             workflow,
         )
 

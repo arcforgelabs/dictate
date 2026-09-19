@@ -2521,20 +2521,6 @@ class DaemonHistoryTests(unittest.TestCase):
         self.assertEqual(seen[0].recording_id, 7)
         self.assertEqual(seen[1].recording_id, 7)
 
-    def test_clear_active_api_key_removes_key_from_loaded_backend(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            from dictate.daemon import Daemon
-
-            store = HistoryStore(path=Path(tmp) / "h.json")
-            output = MagicMock()
-            output.name = "mock"
-            stt = _FakeApiStt()
-            daemon = Daemon(stt, output=output, history_store=store)
-
-            daemon.clear_active_api_key("openai")
-
-            self.assertEqual(stt.api_key, "")
-
 
 if __name__ == "__main__":
     unittest.main()

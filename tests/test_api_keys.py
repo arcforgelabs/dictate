@@ -656,40 +656,6 @@ class ApiKeysTests(unittest.TestCase):
                 api_keys.clear_api_key("openai")
 
 
-class BackendStoredKeyTests(unittest.TestCase):
-    def test_openai_backend_reads_os_stored_key(self) -> None:
-        from dictate.stt.openai_backend import OpenAISpeechToText
-
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch("dictate.stt.openai_backend.read_api_key", return_value="stored-openai"),
-        ):
-            stt = OpenAISpeechToText()
-
-        self.assertEqual(stt.api_key, "stored-openai")
-
-    def test_xai_backend_reads_os_stored_key(self) -> None:
-        from dictate.stt.xai_backend import XAISpeechToText
-
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch("dictate.stt.xai_backend.read_api_key", return_value="stored-xai"),
-        ):
-            stt = XAISpeechToText()
-
-        self.assertEqual(stt.api_key, "stored-xai")
-
-    def test_gemini_backend_reads_os_stored_key(self) -> None:
-        from dictate.stt.gemini_backend import GeminiSpeechToText
-
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch("dictate.stt.gemini_backend.read_api_key", return_value="stored-gemini"),
-        ):
-            stt = GeminiSpeechToText()
-
-        self.assertEqual(stt.api_key, "stored-gemini")
-
 
 class ApiKeyStatusLoggingTests(unittest.TestCase):
     def test_invalid_format_logs_by_default(self) -> None:

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from dictate.platform_paths import user_data_dir
-from dictate.sync import SyncOutbox
 
 MAX_ENTRIES = 20
 HISTORY_PATH = user_data_dir() / "recent-history.json"
@@ -30,12 +29,8 @@ class HistoryEntry:
 class HistoryStore:
     """Thread-safe rolling buffer of recent dictation texts, persisted to JSON."""
 
-    def __init__(self, path: Path = HISTORY_PATH, sync_outbox: SyncOutbox | None = None) -> None:
+    def __init__(self, path: Path = HISTORY_PATH) -> None:
         self._path = path
-        self._sync_outbox = sync_outbox
-
-    def attach_sync_outbox(self, sync_outbox: SyncOutbox | None) -> None:
-        self._sync_outbox = sync_outbox
 
     def load(self, *, include_archived: bool = False) -> list[HistoryEntry]:
         if not self._path.is_file():
@@ -93,7 +88,6 @@ class HistoryStore:
         if not found:
             return False
         self._save(updated)
-        self._enqueue_entry(next(entry for entry in updated if entry.id == entry_id))
         return True
 
     def unarchive(self, entry_id: str) -> bool:
@@ -118,7 +112,6 @@ class HistoryStore:
         if not found:
             return False
         self._save(updated)
-        self._enqueue_entry(next(entry for entry in updated if entry.id == entry_id))
         return True
 
     def append(self, text: str) -> HistoryEntry:
@@ -131,47 +124,7 @@ class HistoryStore:
         )
         entries = [entry, *self.load(include_archived=True)][:MAX_ENTRIES]
         self._save(entries)
-        self._enqueue_entry(entry)
         return entry
-
-    def enqueue_sync_snapshot(self) -> int:
-        """Queue current local history for first encrypted sync opt-in."""
-        if self._sync_outbox is None:
-            return 0
-        count = 0
-        for entry in self.load(include_archived=True):
-            self._enqueue_entry(entry)
-            count += 1
-        return count
-
-    def apply_synced_entry(self, payload: dict[str, Any], *, deleted: bool = False) -> bool:
-        entry_id = payload.get("id")
-        created_at = payload.get("created_at")
-        text = payload.get("text")
-        if not isinstance(entry_id, str) or not isinstance(created_at, str) or not isinstance(text, str):
-            return False
-        incoming = HistoryEntry(
-            id=entry_id,
-            created_at=created_at,
-            text=text,
-            archived=bool(payload.get("archived", False) or deleted),
-            rev=_positive_int(payload.get("rev"), 1),
-            updated_at=_optional_str(payload.get("updated_at")) or created_at,
-        )
-        entries = self.load(include_archived=True)
-        replaced = False
-        merged: list[HistoryEntry] = []
-        for entry in entries:
-            if entry.id != incoming.id:
-                merged.append(entry)
-                continue
-            replaced = True
-            merged.append(_newer_history_entry(incoming, entry))
-        if not replaced:
-            merged.insert(0, incoming)
-        merged.sort(key=lambda item: item.created_at, reverse=True)
-        self._save(merged[:MAX_ENTRIES])
-        return True
 
     def _save(self, entries: list[HistoryEntry]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,18 +152,6 @@ class HistoryStore:
                 pass
             raise
 
-    def _enqueue_entry(self, entry: HistoryEntry) -> None:
-        if self._sync_outbox is None:
-            return
-        self._sync_outbox.enqueue(
-            collection="history",
-            record_id=entry.id,
-            rev=entry.rev,
-            updated_at=entry.updated_at or entry.created_at,
-            content_type="application/vnd.dictate.history+json;v=1",
-            payload=asdict(entry),
-        )
-
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
@@ -222,9 +163,3 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
-
-
-def _newer_history_entry(left: HistoryEntry, right: HistoryEntry) -> HistoryEntry:
-    left_key = (left.rev, left.updated_at or left.created_at, left.id)
-    right_key = (right.rev, right.updated_at or right.created_at, right.id)
-    return left if left_key >= right_key else right

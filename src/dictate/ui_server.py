@@ -25,7 +25,6 @@ import os
 import secrets
 import tempfile
 import threading
-import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,14 +33,12 @@ from queue import Empty, Queue
 from typing import Any, Callable
 from urllib.parse import urlparse, parse_qs
 
-from cryptography.exceptions import InvalidTag
 
 from dictate import api_keys as api_keys_mod
 from dictate import config as config_mod
 from dictate import startup as startup_mod
 from dictate import update_status as update_status_mod
 from dictate.history import HistoryStore
-from dictate.provider_supervisor import ProviderSupervisor
 from dictate.hotkey import (
     DEFAULT_PUSH_TO_TALK_COMBO,
     format_hotkey_combo,
@@ -58,32 +55,12 @@ from dictate.stt.factory import (
     resolve_default_local_model,
     resolve_model_name,
 )
-from dictate.pro.platform_state import build_convergence_state
-from dictate.pro.client import ProClient, ProClientError
-from dictate.pro.product_destinations import PRODUCT_DESTINATIONS
-from dictate.sync import (
-    SYNC_SETTINGS_CONTENT_TYPE,
-    SYNCED_PREF_KEYS,
-    SyncSettingsStore,
-    compute_account_key_commitment,
-    create_recovery_envelope,
-    enqueue_lexicon_hotwords,
-    enqueue_lexicon_replacements,
-    generate_device_key_pair,
-    generate_recovery_key,
-    recover_account_key,
-    recovery_envelope_from_dict,
-    unwrap_account_key_for_device,
-    wrap_account_key_for_device,
-)
-from dictate.sync_engine import SyncEngine
 from dictate.version import RELEASE_VERSION
 
 logger = logging.getLogger(__name__)
 
 RUNTIME_HANDSHAKE_PATH = user_data_dir() / "ui-server.json"
 UI_PREFS_PATH = user_data_dir() / "ui-prefs.json"
-UI_PREFS_SYNC_META_PATH = user_data_dir() / "ui-prefs-sync-meta.json"
 
 # Default UI-only preferences (things the engine does not already persist).
 DEFAULT_PREFS: dict[str, Any] = {
@@ -95,34 +72,6 @@ DEFAULT_PREFS: dict[str, Any] = {
     "ambient": True,
     "outputFormat": "plain",     # "plain" | "markdown"
 }
-_VALID_THEMES = ("light", "dark", "system")
-_VALID_ACTIVATIONS = ("hold", "toggle")
-_VALID_OUTPUT_FORMATS = ("plain", "markdown")
-_PRIVATE_DICTATION_BACKEND = "parakeet"
-_PRIVATE_DICTATION_MODEL = "parakeet-tdt-0.6b-v2"
-_LEGACY_REGULAR_BACKENDS = {"faster-whisper", "whisperx"}
-
-
-def _pro_state_active(pro: dict[str, Any] | None) -> bool:
-    if not isinstance(pro, dict):
-        return False
-    if not bool(pro.get("signedIn")):
-        return False
-    entitlements = pro.get("entitlements")
-    return bool(isinstance(entitlements, dict) and entitlements.get("active"))
-
-
-def _browser_signin_enabled_default() -> bool:
-    """Default gate for the browser sign-in affordance: off unless explicitly opted in.
-
-    Kept as an injectable UiBackend field (like startup_enabled/check_update_status)
-    rather than read inline, so tests can flip it without touching the environment.
-    """
-    return os.environ.get("DICTATE_PRO_BROWSER_SIGNIN", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-# Provider display metadata. Backend ids / models are grounded in stt.factory;
-# only the human-facing bits (brand glyph, key shape, blurb) live here.
 PROVIDER_META: dict[str, dict[str, Any]] = {
     "faster-whisper": {
         "provider": "Local",
@@ -164,32 +113,8 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "experimental": True,
         "desc": "Experimental local meeting diarization with WhisperX and pyannote.",
     },
-    "openai": {
-        "provider": "OpenAI",
-        "brand": "openai",
-        "local": False,
-        "desc": "Fast, accurate hosted transcription.",
-        "keyName": "OpenAI API key",
-        "keyPrefix": "sk-",
-    },
-    "xai": {
-        "provider": "xAI",
-        "brand": "xai",
-        "local": False,
-        "desc": "Grok speech-to-text, hosted.",
-        "keyName": "xAI API key",
-        "keyPrefix": "xai-",
-    },
-    "gemini": {
-        "provider": "Google",
-        "brand": "gemini",
-        "local": False,
-        "desc": "Gemini multimodal, hosted.",
-        "keyName": "Gemini API key",
-        "keyPrefix": "AIza",
-    },
 }
-# Order shown in the Model view (local first, matching the design).
+
 PROVIDER_ORDER = (
     "parakeet",
     "parakeet-pyannote",
@@ -197,10 +122,14 @@ PROVIDER_ORDER = (
     "parakeet-sortformer",
     "faster-whisper",
     "whisperx",
-    "openai",
-    "xai",
-    "gemini",
 )
+
+_VALID_THEMES = ("light", "dark", "system")
+_VALID_ACTIVATIONS = ("hold", "toggle")
+_VALID_OUTPUT_FORMATS = ("plain", "markdown")
+_PRIVATE_DICTATION_BACKEND = "parakeet"
+_PRIVATE_DICTATION_MODEL = "parakeet-tdt-0.6b-v2"
+_LEGACY_REGULAR_BACKENDS = {"faster-whisper", "whisperx"}
 
 
 class ApiError(Exception):
@@ -210,30 +139,6 @@ class ApiError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
-
-
-def _optional_positive_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ApiError(400, "audioDurationSeconds must be a positive number") from exc
-    if parsed <= 0:
-        raise ApiError(400, "audioDurationSeconds must be a positive number")
-    return parsed
-
-
-def _first_recovery_envelope(envelopes: Any) -> dict[str, Any] | None:
-    if not isinstance(envelopes, list):
-        return None
-    for item in envelopes:
-        if not isinstance(item, dict):
-            continue
-        envelope = item.get("envelope")
-        if isinstance(envelope, dict):
-            return envelope
-    return None
 
 
 def _dedupe_text(text: str) -> str:
@@ -300,7 +205,7 @@ class UiPrefsStore:
                     prefs[key] = raw[key]
         return self._coerce(prefs)
 
-    def update(self, changes: dict[str, Any], *, updated_at: str | None = None) -> dict[str, Any]:
+    def update(self, changes: dict[str, Any]) -> dict[str, Any]:
         prefs = self.load()
         accepted: set[str] = set()
         for key, value in changes.items():
@@ -310,68 +215,7 @@ class UiPrefsStore:
         prefs = self._coerce(prefs)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(prefs, indent=2))
-        if updated_at:
-            self.mark_synced(*(key for key in accepted if key in SYNCED_PREF_KEYS), updated_at=updated_at)
         return prefs
-
-    def load_sync_meta(self) -> dict[str, str]:
-        if not self._meta_path.is_file():
-            return {}
-        try:
-            raw = json.loads(self._meta_path.read_text())
-        except Exception:  # noqa: BLE001
-            return {}
-        if not isinstance(raw, dict):
-            return {}
-        return {
-            str(key): str(value)
-            for key, value in raw.items()
-            if key in SYNCED_PREF_KEYS and isinstance(value, str)
-        }
-
-    def mark_synced(self, *keys: str, updated_at: str) -> None:
-        clean_keys = [key for key in keys if key in SYNCED_PREF_KEYS]
-        if not clean_keys:
-            return
-        meta = self.load_sync_meta()
-        for key in clean_keys:
-            meta[key] = updated_at
-        self._meta_path.parent.mkdir(parents=True, exist_ok=True)
-        self._meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
-
-    def sync_updated_at(self, key: str) -> str | None:
-        return self.load_sync_meta().get(key)
-
-    def apply_synced_setting(self, key: str, value: Any, *, updated_at: str | None, deleted: bool = False) -> bool:
-        if key not in SYNCED_PREF_KEYS:
-            return False
-        if not self._incoming_setting_wins(self.sync_updated_at(key), updated_at):
-            return False
-        next_value = DEFAULT_PREFS[key] if deleted else value
-        self.update({key: next_value}, updated_at=updated_at)
-        return True
-
-    @classmethod
-    def _incoming_setting_wins(cls, local: str | None, incoming: str | None) -> bool:
-        if local is None:
-            return True
-        if incoming is None:
-            return False
-        local_ts = cls._timestamp_value(local)
-        incoming_ts = cls._timestamp_value(incoming)
-        if local_ts is None or incoming_ts is None:
-            return incoming > local
-        return incoming_ts > local_ts
-
-    @staticmethod
-    def _timestamp_value(value: str) -> float | None:
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.timestamp()
 
     @staticmethod
     def _coerce(prefs: dict[str, Any]) -> dict[str, Any]:
@@ -434,20 +278,9 @@ class UiBackend:
     history_store: HistoryStore | None = None
     note_store: NoteStore | None = None
     prefs_store: UiPrefsStore | None = None
-    sync_settings: SyncSettingsStore | None = None
     broker: EventBroker | None = None
-    pro_client: ProClient | None = None
     daemon: Any | None = None
     provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
-    # Optional supervisor wired at runtime by connect_supervisor().
-    # When present, providerHealth returns richer state; SSE events are emitted
-    # as provider-degraded / provider-recovered rather than provider-health.
-    _supervisor: ProviderSupervisor | None = field(default=None, repr=False)
-    # Device keypair generated at start_pro_browser_sign_in() time, persisted to the
-    # OS secret store once poll_pro_browser_sign_in() reports "complete" -- mirrors
-    # complete_pro_sign_in's generate-up-front / save-on-complete handling.
-    _pending_browser_device_key: Any | None = field(default=None, repr=False)
-
     # Injectable hooks (default to the real implementations).
     save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
     clear_api_key: Callable[[str], None] = api_keys_mod.clear_api_key
@@ -466,12 +299,6 @@ class UiBackend:
     startup_enabled: Callable[[], bool] = startup_mod.startup_enabled
     set_startup_enabled: Callable[[bool], None] = startup_mod.set_startup_enabled
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
-    # Browser sign-in (Episodes 1-2's ProClient methods) is opt-in behind an env flag
-    # until the UI ships it broadly; tests override this instead of the environment.
-    browser_signin_enabled: Callable[[], bool] = _browser_signin_enabled_default
-    # webbrowser.open is best-effort (loopback flow only) -- injectable so tests never
-    # actually spawn a system browser.
-    open_browser: Callable[[str], bool] = webbrowser.open
 
     def __post_init__(self) -> None:
         if self.history_store is None:
@@ -480,11 +307,6 @@ class UiBackend:
             self.note_store = NoteStore()
         if self.prefs_store is None:
             self.prefs_store = UiPrefsStore()
-        if self.sync_settings is None:
-            self.sync_settings = SyncSettingsStore()
-        if self.pro_client is None:
-            self.pro_client = ProClient()
-        self._sync_engine().attach_outbox()
 
     # ----- read ----------------------------------------------------------- #
     def _effective_model(self, cfg: config_mod.Config, backend: str) -> str:
@@ -526,12 +348,6 @@ class UiBackend:
         model = self._effective_model(cfg, backend)
         meeting_backend, meeting_model = self._meeting_selection(cfg)
         meeting_readiness = self._meeting_readiness(cfg)
-        pro_state = self._dictate_pro_state()
-        if not _pro_state_active(pro_state) and self.sync_settings is not None:
-            sync_state = self.sync_settings.load()
-            if sync_state.enabled:
-                self.sync_settings.disable(clear_key=False)
-                self._sync_engine().attach_outbox()
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
@@ -552,7 +368,6 @@ class UiBackend:
             },
             "updateChannel": cfg.update_channel or "stable",
             "installedPackageVersion": cfg.installed_package_version,
-            "providers": self._providers(cfg),
             "prefs": prefs,
             "notes": self._notes_payload(),
             "startup": bool(self._safe(self.startup_enabled, False)),
@@ -560,490 +375,7 @@ class UiBackend:
             "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
             "micConnected": True,
             "providerHealth": self._compute_provider_health(cfg),
-            "dictatePro": pro_state,
-            "sync": self._sync_state(),
-            # Lets the UI show honest idle-state copy ("browser" vs. "email code") instead
-            # of promising a browser it won't open when the flag is off.
-            "browserSigninEnabled": bool(self._safe(self.browser_signin_enabled, False)),
-            "productDestinations": PRODUCT_DESTINATIONS,
         }
-
-    def _dictate_pro_state(self) -> dict[str, Any]:
-        client = self.pro_client
-        if client is None:
-            return {"signedIn": False, "entitlements": None, "usage": None, "account": None, "commerce": None}
-        return self._safe(client.get_state, {
-            "signedIn": False,
-            "entitlements": None,
-            "usage": None,
-            "account": None,
-            "commerce": None,
-        })
-
-    def start_pro_sign_in(self, email: str) -> dict[str, Any]:
-        client = self._require_pro_client()
-        return client.start_sign_in(email)
-
-    def complete_pro_sign_in(self, *, challenge_id: str, code: str, device_label: str = "Desktop") -> dict[str, Any]:
-        client = self._require_pro_client()
-        device_key_pair = generate_device_key_pair()
-        session = client.complete_sign_in(
-            challenge_id=challenge_id,
-            code=code,
-            device_label=device_label,
-            device_public_key=device_key_pair.public_key,
-        )
-        try:
-            api_keys_mod.save_sync_device_private_key(session.device_id, device_key_pair.private_key)
-        except (api_keys_mod.ApiKeyStorageError, OSError) as exc:
-            logger.warning("could not persist Dictate sync device private key: %s", exc)
-        return {
-            "account_id": session.account_id,
-            "device_id": session.device_id,
-            "signedIn": True,
-            "dictatePro": client.get_state(),
-        }
-
-    def start_pro_browser_sign_in(self, *, flow: str = "auto", device_label: str = "Desktop") -> dict[str, Any]:
-        """Start loopback/device-code sign-in, or signal the UI to fall back to email.
-
-        Gated on browser_signin_enabled(); when off, or when the gateway doesn't
-        advertise browser sign-in (ProClient raises 501), returns {"flow": "email"}
-        rather than an error -- the UI reads that as "use the email-code form", not
-        an apology.
-        """
-        if not self.browser_signin_enabled():
-            self._pending_browser_device_key = None
-            return {"flow": "email"}
-        client = self._require_pro_client()
-        try:
-            result = client.start_browser_sign_in(device_label=device_label, prefer=flow)
-        except ProClientError as exc:
-            if exc.status in {404, 405, 501}:
-                # No attempt is pending on this branch -- keep the "pending key iff
-                # pending attempt" invariant so poll/cancel never persist a stray key
-                # left over from an earlier attempt.
-                self._pending_browser_device_key = None
-                return {"flow": "email"}
-            raise ApiError(exc.status, exc.message) from exc
-        # Generated up front (like complete_pro_sign_in), persisted once poll reports
-        # "complete" -- this is the same device key threaded into the token exchange
-        # via poll_browser_sign_in(device_public_key=...).
-        self._pending_browser_device_key = generate_device_key_pair()
-        if result.get("flow") == "loopback" and result.get("authorize_url"):
-            try:
-                self.open_browser(result["authorize_url"])
-            except Exception as exc:  # noqa: BLE001
-                logger.info("could not open the system browser for sign-in: %s", exc)
-        return result
-
-    def poll_pro_browser_sign_in(self) -> dict[str, Any]:
-        if not self.browser_signin_enabled():
-            return {"status": "error", "reason": "disabled"}
-        client = self._require_pro_client()
-        device_key_pair = self._pending_browser_device_key
-        result = client.poll_browser_sign_in(
-            device_public_key=device_key_pair.public_key if device_key_pair else None,
-        )
-        status = result.get("status")
-        if status == "complete":
-            device_id = str(result.get("device_id") or "")
-            if device_id and device_key_pair is not None:
-                try:
-                    api_keys_mod.save_sync_device_private_key(device_id, device_key_pair.private_key)
-                except (api_keys_mod.ApiKeyStorageError, OSError) as exc:
-                    logger.warning("could not persist Dictate sync device private key: %s", exc)
-            self._pending_browser_device_key = None
-            return {**result, "dictatePro": client.get_state()}
-        if status == "error":
-            self._pending_browser_device_key = None
-        return result
-
-    def cancel_pro_browser_sign_in(self) -> dict[str, Any]:
-        self._pending_browser_device_key = None
-        if not self.browser_signin_enabled():
-            return {"status": "cancelled"}
-        self._require_pro_client().cancel_browser_sign_in()
-        return {"status": "cancelled"}
-
-    def sign_out_pro(self) -> dict[str, Any]:
-        client = self._require_pro_client()
-        client.clear_session()
-        if self.sync_settings is not None:
-            self.sync_settings.disable(clear_key=False)
-        self._sync_engine().attach_outbox()
-        return {"signedIn": False}
-
-    def _sync_state(self, *, last_result: dict[str, Any] | None = None) -> dict[str, Any]:
-        settings = self._require_sync_settings()
-        state = settings.load()
-        has_key = False
-        if state.enabled:
-            has_key = bool(self._safe(lambda: settings.account_key() is not None, False))
-        pro_state = self._dictate_pro_state()
-        pro_active = _pro_state_active(pro_state)
-        sync_state = "disabled"
-        if not pro_active:
-            sync_state = "disabled"
-        elif state.enabled and has_key:
-            sync_state = "enabled"
-        elif state.enabled:
-            sync_state = "paused"
-        elif pro_state.get("lastError") == "device_revoked":
-            sync_state = "revoked"
-        convergence = pro_state.get("convergence")
-        if not isinstance(convergence, dict):
-            convergence = build_convergence_state(
-                signed_in=bool(pro_state.get("signedIn")),
-                entitlements=pro_state.get("entitlements") if isinstance(pro_state.get("entitlements"), dict) else None,
-                provider_mode="online" if pro_active else "private",
-                sync_enabled=state.enabled and pro_active,
-                sync_state=sync_state,
-                last_error=pro_state.get("lastError"),
-            )
-        else:
-            convergence = {
-                **convergence,
-                "sync": {
-                    **(convergence.get("sync") if isinstance(convergence.get("sync"), dict) else {}),
-                    "state": sync_state,
-                    "enabled": state.enabled and pro_active,
-                },
-                "lastError": pro_state.get("lastError") or convergence.get("lastError"),
-            }
-        return {
-            "enabled": state.enabled,
-            "accountId": state.account_id or None,
-            "deviceId": state.device_id or None,
-            "enabledAt": state.enabled_at,
-            "lastSeq": state.last_seq,
-            "keyAvailable": has_key,
-            "lastResult": last_result,
-            "scope": config_mod.load_config(self.config_path).sync_scope or "everything",
-            "state": sync_state,
-            "convergence": convergence,
-        }
-
-    def set_sync_scope(self, scope: str) -> dict[str, Any]:
-        """Set which record categories sync ("meetings" | "everything") and re-attach
-        so the history outbox reflects the new scope immediately."""
-        config_mod.set_sync_scope(scope, self.config_path)
-        self._safe(lambda: self._sync_engine().attach_outbox(), None)
-        return self._sync_state()
-
-    def enable_sync(self, *, recovery_key: str | None = None) -> dict[str, Any]:
-        client = self._require_pro_client()
-        session = client.refresh_if_needed()
-        if session is None:
-            raise ApiError(401, "Sign in to Dictate Pro before enabling sync.")
-        self._require_active_pro_state("Active Dictate Pro access is required before enabling sync.")
-        settings = self._require_sync_settings()
-        recovery = recovery_key.strip() if isinstance(recovery_key, str) and recovery_key.strip() else None
-        returned_recovery_key = None
-        if recovery:
-            envelopes = client.list_key_envelopes(envelope_kind="recovery").get("envelopes", [])
-            envelope_payload = _first_recovery_envelope(envelopes)
-            if envelope_payload is None:
-                raise ApiError(409, "No recovery key is set up for this Dictate Pro account.")
-            try:
-                account_key = recover_account_key(
-                    account_id=session.account_id,
-                    recovery_key=recovery,
-                    envelope=recovery_envelope_from_dict(envelope_payload),
-                )
-            except (InvalidTag, ValueError) as exc:
-                raise ApiError(400, "Recovery key could not unlock Dictate Pro sync for this account.") from exc
-            try:
-                client.approve_current_device_with_recovery(
-                    recovery_key_envelope=envelope_payload,
-                    account_key_commitment=compute_account_key_commitment(account_key),
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise ApiError(403, "Recovery key unlocked sync, but this device could not be trusted.") from exc
-            state, account_key = settings.enable(session.account_id, account_key=account_key, device_id=session.device_id)
-            self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
-        else:
-            try:
-                device_envelopes = client.list_key_envelopes(envelope_kind="device").get("envelopes", [])
-            except ProClientError as exc:
-                if exc.status not in {404, 405, 501}:
-                    raise
-                device_envelopes = []
-            device_envelope = next(
-                (
-                    item for item in device_envelopes
-                    if isinstance(item, dict) and str(item.get("device_id") or item.get("deviceId") or "") == session.device_id
-                ),
-                None,
-            )
-            if isinstance(device_envelope, dict):
-                private_key = api_keys_mod.read_sync_device_private_key(session.device_id)
-                if not private_key:
-                    raise ApiError(409, "This device was approved, but its local sync device key is missing.")
-                try:
-                    account_key = unwrap_account_key_for_device(
-                        account_id=session.account_id,
-                        private_key=private_key,
-                        envelope=device_envelope.get("envelope"),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    raise ApiError(400, "This device could not unlock its approved sync key.") from exc
-                state, account_key = settings.enable(
-                    session.account_id,
-                    account_key=account_key,
-                    device_id=session.device_id,
-                )
-            else:
-                state, account_key = settings.enable(session.account_id, device_id=session.device_id)
-                returned_recovery_key = generate_recovery_key()
-                recovery_envelope = create_recovery_envelope(
-                    account_id=session.account_id,
-                    account_key=account_key,
-                    recovery_key=returned_recovery_key,
-                )
-                self._save_current_device_key_envelope(client, session.account_id, session.device_id, account_key)
-                client.save_key_envelope(
-                    envelope_kind="recovery",
-                    envelope=asdict(recovery_envelope),
-                    account_key_commitment=compute_account_key_commitment(account_key),
-                )
-        # Newly enabled sync defaults to Meetings-only (docs/record-categories-spec.md);
-        # only set when unset so a returning user's explicit choice is preserved.
-        if config_mod.load_config(self.config_path).sync_scope is None:
-            self._safe(lambda: config_mod.set_sync_scope("meetings", self.config_path), None)
-        engine = self._sync_engine()
-        engine.attach_outbox()
-        self._enqueue_sync_snapshot()
-        result = engine.run_once().as_dict()
-        if self.broker is not None:
-            self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
-        payload = {"sync": self._sync_state(last_result=result), "deviceId": state.device_id}
-        if returned_recovery_key:
-            payload["recoveryKey"] = returned_recovery_key
-        return payload
-
-    def disable_sync(self, *, clear_key: bool = False) -> dict[str, Any]:
-        settings = self._require_sync_settings()
-        settings.disable(clear_key=clear_key)
-        self._sync_engine().attach_outbox()
-        if self.broker is not None:
-            self.broker.publish("sync-changed", sync=self._sync_state())
-        return {"sync": self._sync_state()}
-
-    def run_sync(self) -> dict[str, Any]:
-        self._require_active_pro_state("Active Dictate Pro access is required before syncing.")
-        result = self._sync_engine().run_once().as_dict()
-        if self.broker is not None:
-            self.broker.publish("history-changed")
-            self.broker.publish("sync-changed", sync=self._sync_state(last_result=result))
-        return {"sync": self._sync_state(last_result=result), "result": result, "history": self.get_history()}
-
-    def list_pro_devices(self) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
-        return client.list_devices()
-
-    def revoke_pro_device(self, device_id: str) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
-        return client.revoke_device(device_id)
-
-    def approve_pro_device(self, device_id: str) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required to manage devices.")
-        session = client.refresh_if_needed()
-        if session is None:
-            raise ApiError(401, "Sign in to Dictate Pro before approving a device.")
-        account_key = self._require_sync_settings().account_key()
-        if account_key is None:
-            raise ApiError(409, "Enable encrypted sync on this device before approving another device.")
-        target = device_id.strip()
-        if not target:
-            raise ApiError(400, "device_id is required")
-        devices = client.list_devices().get("devices", [])
-        device = next(
-            (
-                item for item in devices
-                if isinstance(item, dict) and str(item.get("device_id") or item.get("deviceId") or "") == target
-            ),
-            None,
-        )
-        if not isinstance(device, dict):
-            raise ApiError(404, "Device not found.")
-        public_key = str(device.get("public_key") or device.get("publicKey") or "").strip()
-        if not public_key:
-            raise ApiError(409, "This device cannot be approved because it did not register a sync public key.")
-        envelope = wrap_account_key_for_device(
-            account_id=session.account_id,
-            account_key=account_key,
-            recipient_public_key=public_key,
-        )
-        return client.approve_device(target, envelope=envelope)
-
-    def _save_current_device_key_envelope(
-        self,
-        client: ProClient,
-        account_id: str,
-        device_id: str,
-        account_key: bytes,
-    ) -> None:
-        public_key = self._current_device_public_key(client, device_id)
-        if not public_key:
-            raise ApiError(409, "This device cannot enable encrypted sync because it did not register a sync public key.")
-        envelope = wrap_account_key_for_device(
-            account_id=account_id,
-            account_key=account_key,
-            recipient_public_key=public_key,
-        )
-        client.save_key_envelope(envelope_kind="device", envelope=envelope)
-
-    def _current_device_public_key(self, client: ProClient, device_id: str) -> str:
-        target = device_id.strip()
-        if not target:
-            return ""
-        devices = client.list_devices().get("devices", [])
-        for item in devices:
-            if not isinstance(item, dict):
-                continue
-            item_id = str(item.get("device_id") or item.get("deviceId") or "").strip()
-            if item_id != target:
-                continue
-            return str(item.get("public_key") or item.get("publicKey") or "").strip()
-        return ""
-
-    def export_pro_cloud_data(self) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required to export cloud data.")
-        return client.export_cloud_data()
-
-    def delete_pro_cloud_data(self) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required to delete cloud data.")
-        result = client.delete_cloud_data()
-        if self.sync_settings is not None:
-            self.sync_settings.disable(clear_key=False)
-        self._sync_engine().attach_outbox()
-        if self.broker is not None:
-            self.broker.publish("sync-changed", sync=self._sync_state())
-        return {"cloud": result, "sync": self._sync_state()}
-
-    def create_pro_meeting(
-        self,
-        *,
-        language: str | None = None,
-        audio_duration_seconds: float | None = None,
-    ) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
-        client.ensure_hosted_result_key()
-        return client.create_meeting(
-            language=language,
-            audio_duration_seconds=audio_duration_seconds,
-        )
-
-    def upload_pro_meeting_audio(self, job_id: str, audio_path: Path) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
-        return client.upload_meeting_audio(job_id, audio_path)
-
-    def get_pro_meeting(self, job_id: str) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
-        return client.get_meeting(job_id)
-
-    def get_pro_meeting_transcript(self, job_id: str) -> dict[str, Any]:
-        client = self._require_pro_client()
-        self._require_active_pro_state("Active Dictate Pro access is required for hosted meetings.")
-        response = client.get_meeting(job_id)
-        nested = response.get("job")
-        job = nested if isinstance(nested, dict) else response
-        request_id = str(job.get("request_id") or "").strip()
-        correlation_id = str(job.get("correlation_id") or "").strip()
-        if not request_id or not correlation_id:
-            raise ApiError(502, "Hosted meeting identity correlation is unavailable.")
-        result = client.consume_hosted_result(
-            job_id,
-            request_id=request_id,
-            correlation_id=correlation_id,
-        )
-        client.accept_hosted_result(job_id)
-        return result
-
-    def _require_pro_client(self) -> ProClient:
-        if self.pro_client is None:
-            raise ApiError(503, "Dictate Pro client is not configured")
-        return self.pro_client
-
-    def _require_sync_settings(self) -> SyncSettingsStore:
-        if self.sync_settings is None:
-            raise ApiError(503, "Dictate sync is not configured")
-        return self.sync_settings
-
-    def _require_active_pro_state(self, message: str = "Active Dictate Pro access required.") -> None:
-        if not _pro_state_active(self._dictate_pro_state()):
-            raise ApiError(403, message)
-
-    def _sync_engine(self) -> SyncEngine:
-        return SyncEngine(
-            settings=self._require_sync_settings(),
-            pro_client=self._require_pro_client(),
-            history_store=self.history_store,
-            note_store=self.note_store,
-            config_path=self.config_path,
-            prefs_store=self.prefs_store,
-        )
-
-    def _sync_outbox(self):
-        if self.sync_settings is None:
-            return None
-        return self._safe(self.sync_settings.outbox, None)
-
-    def _enqueue_sync_snapshot(self) -> None:
-        outbox = self._sync_outbox()
-        if outbox is None:
-            return
-        self.history_store.enqueue_sync_snapshot()
-        self.note_store.enqueue_sync_snapshot()
-        prefs = self.prefs_store.load()
-        for key in sorted(SYNCED_PREF_KEYS):
-            if key in prefs:
-                self._enqueue_synced_pref(key, prefs[key])
-        cfg = config_mod.load_config(self.config_path)
-        for term in cfg.hotwords:
-            self._enqueue_synced_hotword(term, deleted=False)
-        for wrong, right in cfg.lexicon_replacements.items():
-            self._enqueue_synced_replacement(wrong, right, deleted=False)
-
-    def _enqueue_synced_pref(self, key: str, value: Any, *, updated_at: str | None = None) -> None:
-        if key not in SYNCED_PREF_KEYS:
-            return
-        outbox = self._sync_outbox()
-        if outbox is None:
-            return
-        updated_at = updated_at or self.now().isoformat()
-        self.prefs_store.mark_synced(key, updated_at=updated_at)
-        outbox.enqueue(
-            collection="settings",
-            record_id=f"prefs.{key}",
-            content_type=SYNC_SETTINGS_CONTENT_TYPE,
-            payload={"key": key, "value": value, "updated_at": updated_at},
-        )
-
-    def _enqueue_synced_hotword(self, term: str, *, deleted: bool) -> None:
-        enqueue_lexicon_hotwords(
-            self._sync_outbox(),
-            [term],
-            deleted=deleted,
-            updated_at=self.now().isoformat(),
-        )
-
-    def _enqueue_synced_replacement(self, wrong: str, right: str | None, *, deleted: bool) -> None:
-        enqueue_lexicon_replacements(
-            self._sync_outbox(),
-            {wrong: right},
-            deleted=deleted,
-            updated_at=self.now().isoformat(),
-        )
 
     def _shortcut(self, cfg: config_mod.Config, prefs: dict[str, Any]) -> dict[str, Any]:
         combo = cfg.push_to_talk_combo or cfg.push_to_talk_key or DEFAULT_PUSH_TO_TALK_COMBO
@@ -1078,51 +410,12 @@ class UiBackend:
                     "desc": meta.get("desc", ""),
                     "default": model == default_model,
                 }
-                if not meta.get("local"):
-                    entry["keyName"] = meta.get("keyName", f"{backend} API key")
-                    entry["keyPrefix"] = meta.get("keyPrefix", "")
-                    entry["configured"] = self._provider_ready(backend, cfg)
                 models.append(entry)
         # The local provider's display name keeps the "provider · model" form.
         for entry in models:
             if entry["local"]:
                 entry["name"] = f"{entry['backend']} · {entry['model']}"
         return models
-
-    def _providers(self, cfg: config_mod.Config) -> dict[str, dict[str, Any]]:
-        providers: dict[str, dict[str, Any]] = {}
-        for backend in api_keys_mod.API_BACKENDS:
-            status = self._safe(lambda b=backend: self._provider_status(b, cfg), None)
-            if status is None:
-                providers[backend] = {"configured": False, "status": "None"}
-            else:
-                providers[backend] = {
-                    "configured": status.ready,
-                    "status": status.status,
-                }
-        return providers
-
-    def _provider_ready(self, backend: str, cfg: config_mod.Config | None = None) -> bool:
-        cfg = cfg or config_mod.load_config(self.config_path)
-        status = self._safe(lambda: self._provider_status(backend, cfg), None)
-        return bool(status and status.ready)
-
-    def _provider_status(
-        self,
-        backend: str,
-        cfg: config_mod.Config,
-    ) -> api_keys_mod.ApiKeyStatus:
-        command = {
-            "openai": cfg.openai_api_key_command,
-            "xai": cfg.xai_api_key_command,
-            "gemini": cfg.gemini_api_key_command,
-        }.get(backend)
-        if command:
-            api_key = api_keys_mod._api_key_from_command(command, backend=backend)
-            return self.api_key_status(
-                backend, api_key=api_key, include_command=False, log_failures=False
-            )
-        return self.api_key_status(backend, log_failures=False)
 
     def get_history(self) -> list[dict[str, Any]]:
         seen_text: set[str] = set()
@@ -1263,9 +556,7 @@ class UiBackend:
         if activation is not None:
             if activation not in _VALID_ACTIVATIONS:
                 raise ApiError(400, f"invalid activation: {activation!r}")
-            updated_at = self.now().isoformat()
-            updated = self.prefs_store.update({"activation": activation}, updated_at=updated_at)
-            self._enqueue_synced_pref("activation", updated["activation"], updated_at=updated_at)
+            self.prefs_store.update({"activation": activation})
 
     def _set_prefs(self, prefs: Any) -> dict[str, Any]:
         if not isinstance(prefs, dict):
@@ -1276,12 +567,7 @@ class UiBackend:
             raise ApiError(400, f"invalid activation: {prefs['activation']!r}")
         if "outputFormat" in prefs and prefs["outputFormat"] not in _VALID_OUTPUT_FORMATS:
             raise ApiError(400, f"invalid outputFormat: {prefs['outputFormat']!r}")
-        updated_at = self.now().isoformat()
-        updated = self.prefs_store.update(prefs, updated_at=updated_at)
-        for key in SYNCED_PREF_KEYS:
-            if key in prefs:
-                self._enqueue_synced_pref(key, updated[key], updated_at=updated_at)
-        return updated
+        return self.prefs_store.update(prefs)
 
     def _set_startup(self, enabled: Any) -> None:
         try:
@@ -1307,16 +593,12 @@ class UiBackend:
             if isinstance(word, str):
                 cleaned.extend(config_mod.parse_hotwords_text(word))
         added = config_mod.add_hotwords(cleaned, path=self.config_path)
-        for term in added:
-            self._enqueue_synced_hotword(term, deleted=False)
         return {"added": added, "hotwords": list(config_mod.load_config(self.config_path).hotwords)}
 
     def remove_hotword(self, word: str) -> dict[str, Any]:
         if not isinstance(word, str) or not word.strip():
             raise ApiError(400, "word is required")
         removed = config_mod.remove_hotwords([word], path=self.config_path)
-        for term in removed:
-            self._enqueue_synced_hotword(term, deleted=True)
         return {
             "removed": removed,
             "hotwords": list(config_mod.load_config(self.config_path).hotwords),
@@ -1459,31 +741,6 @@ class UiBackend:
             compute_type=cfg.stt_compute_type or "int8",
         )
         set_meeting(stt, hotwords=cfg.hotwords_for_backend(backend))
-
-    def save_provider_key(self, backend: str, api_key: str) -> dict[str, Any]:
-        if backend not in api_keys_mod.API_BACKENDS:
-            raise ApiError(400, f"unknown provider: {backend!r}")
-        if not isinstance(api_key, str) or not api_key.strip():
-            raise ApiError(400, "an API key is required")
-        fmt_error = self._safe(lambda: self.validate_api_key_format(backend, api_key), None)
-        if fmt_error:
-            raise ApiError(422, fmt_error)
-        try:
-            self.save_api_key(backend, api_key)
-        except Exception as exc:  # noqa: BLE001
-            raise ApiError(500, f"could not save key: {exc}") from exc
-        config_mod.set_api_key_command(backend, None, path=self.config_path)
-        return {"backend": backend, "configured": self._provider_ready(backend)}
-
-    def clear_provider_key(self, backend: str) -> dict[str, Any]:
-        if backend not in api_keys_mod.API_BACKENDS:
-            raise ApiError(400, f"unknown provider: {backend!r}")
-        try:
-            self.clear_api_key(backend)
-        except Exception as exc:  # noqa: BLE001
-            raise ApiError(500, f"could not clear key: {exc}") from exc
-        config_mod.set_api_key_command(backend, None, path=self.config_path)
-        return {"backend": backend, "configured": False}
 
     def run_doctor(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
@@ -1636,91 +893,13 @@ class UiBackend:
         - ``since``      str|null   — ISO-8601 UTC timestamp of degradation start
 
         Logic:
-        * Local/private backends → always healthy; no key needed.
-        * Supervisor present → read full state from supervisor.
-        * Online + no key → unhealthy, status ``no-key``.
-        * Online + key present → reflect the tracked runtime outcome.
+        Transcription is local-only, so the provider is always healthy.
         """
         backend = cfg.stt_backend or "faster-whisper"
-        is_private = bool(PROVIDER_META.get(backend, {}).get("local", False))
-        mode = "private" if is_private else "online"
-
-        # --- supervisor path (richer state) ---
-        if self._supervisor is not None:
-            sup_state = self._supervisor.get_state()
-            preferred = sup_state.get("preferred", backend)
-            active = sup_state.get("active", backend)
-            degraded = bool(sup_state.get("degraded", False))
-            reason = sup_state.get("reason")
-            since = sup_state.get("since")
-            healthy = not degraded
-            status = reason if degraded else "ok"
-            # Still surface no-key as unhealthy for hosted backends even when
-            # supervisor is healthy. Local Parakeet/Whisper lanes need no key.
-            if not is_private and healthy:
-                has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(preferred), False)
-                has_pro = preferred == "xai" and _pro_state_active(self._dictate_pro_state())
-                if not has_key and not has_pro:
-                    healthy = False
-                    status = "no-key"
-            return {
-                "healthy": healthy,
-                "status": status,
-                "mode": mode,
-                "preferred": preferred,
-                "active": active,
-                "degraded": degraded,
-                "reason": reason,
-                "since": since,
-            }
-
-        # --- legacy path (no supervisor) ---
-        if is_private:
-            return {
-                "healthy": True,
-                "status": "ok",
-                "mode": mode,
-                "preferred": backend,
-                "active": backend,
-                "degraded": False,
-                "reason": None,
-                "since": None,
-            }
-
-        # Online: check that a key is present
-        has_key = self._safe(lambda: api_keys_mod.has_stored_api_key(backend), False)
-        if backend == "xai" and _pro_state_active(self._dictate_pro_state()):
-            has_key = True
-        if not has_key:
-            return {
-                "healthy": False,
-                "status": "no-key",
-                "mode": mode,
-                "preferred": backend,
-                "active": backend,
-                "degraded": False,
-                "reason": None,
-                "since": None,
-            }
-
-        # Online + key present: reflect the tracked runtime outcome
-        healthy, reason = self.provider_health.get()
-        if not healthy:
-            return {
-                "healthy": False,
-                "status": reason or "unreachable",
-                "mode": mode,
-                "preferred": backend,
-                "active": "faster-whisper",
-                "degraded": True,
-                "reason": reason or "unreachable",
-                "since": None,
-            }
-
         return {
             "healthy": True,
             "status": "ok",
-            "mode": mode,
+            "mode": "private",
             "preferred": backend,
             "active": backend,
             "degraded": False,
@@ -1728,45 +907,10 @@ class UiBackend:
             "since": None,
         }
 
-    def connect_supervisor(self, supervisor: ProviderSupervisor) -> None:
-        """Wire a ``ProviderSupervisor`` to this backend for SSE and get_state.
-
-        Installs ``on_degraded`` / ``on_recovered`` callbacks that update
-        ``provider_health`` and publish the new ``provider-degraded`` /
-        ``provider-recovered`` SSE events.  Call after the supervisor is created
-        and before the daemon starts transcribing.
-        """
-        self._supervisor = supervisor
-        ph = self.provider_health
-        broker = self.broker
-
-        def _on_degraded(state: dict) -> None:
-            ph.report(False, state.get("reason"))
-            if broker is not None:
-                broker.publish(
-                    "provider-degraded",
-                    preferred=state.get("preferred"),
-                    active=state.get("active"),
-                    reason=state.get("reason"),
-                    since=state.get("since"),
-                )
-
-        def _on_recovered(state: dict) -> None:
-            ph.report(True, None)
-            if broker is not None:
-                broker.publish(
-                    "provider-recovered",
-                    preferred=state.get("preferred"),
-                    active=state.get("active"),
-                )
-
-        supervisor._on_degraded = _on_degraded
-        supervisor._on_recovered = _on_recovered
 
     def connect_engine_health(self, engine: Any) -> None:
         """Wire this backend's health tracker as the engine's ``health_sink``.
 
-        Legacy convenience method for setups without a ``ProviderSupervisor``.
         Installs a callback that updates ``provider_health`` and pushes a
         ``provider-health`` SSE event on every state change.
         """
@@ -1842,24 +986,6 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ApiError(400, f"invalid JSON: {exc}") from exc
 
-    def _read_uploaded_audio_file(self) -> Path:
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        if length <= 0:
-            raise ApiError(400, "audio body is required")
-        raw = self.rfile.read(length)
-        if not raw:
-            raise ApiError(400, "audio body is required")
-        suffix = ".wav"
-        content_type = str(self.headers.get("Content-Type") or "")
-        if "mpeg" in content_type:
-            suffix = ".mp3"
-        elif "ogg" in content_type:
-            suffix = ".ogg"
-        temp_dir = Path(tempfile.mkdtemp(prefix="dictate-pro-upload-"))
-        path = temp_dir / f"audio{suffix}"
-        path.write_bytes(raw)
-        return path
-
     def _send_json(self, status: int, body: Any) -> None:
         data = json.dumps(body).encode("utf-8")
         self.send_response(status)
@@ -1910,9 +1036,6 @@ class UiRequestHandler(BaseHTTPRequestHandler):
         try:
             response = self._route(method, path)
         except ApiError as exc:
-            self._send_json(exc.status, {"error": exc.message})
-            return
-        except ProClientError as exc:
             self._send_json(exc.status, {"error": exc.message})
             return
         except Exception as exc:  # noqa: BLE001
@@ -1969,96 +1092,12 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.resume_note_recording())
         if path == "/api/notes/toggle" and method == "POST":
             return _Response(200, backend.toggle_note_recording())
-        if path == "/api/api-keys" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(
-                200, backend.save_provider_key(body.get("backend", ""), body.get("apiKey", ""))
-            )
-        if path == "/api/api-keys" and method == "DELETE":
-            body = self._read_json() or {}
-            return _Response(200, backend.clear_provider_key(body.get("backend", "")))
         if path == "/api/doctor" and method == "POST":
             return _Response(200, backend.run_doctor())
         if path == "/api/update-status" and method == "GET":
             return _Response(200, backend.get_update_status())
         if path == "/api/update" and method == "POST":
             return _Response(200, backend.start_update())
-        if path == "/api/pro/auth/start" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.start_pro_sign_in(str(body.get("email", "")).strip()))
-        if path == "/api/pro/auth/complete" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(
-                200,
-                backend.complete_pro_sign_in(
-                    challenge_id=str(body.get("challenge_id", "")).strip(),
-                    code=str(body.get("code", "")).strip(),
-                    device_label=str(body.get("deviceLabel") or body.get("device_label") or "Desktop"),
-                ),
-            )
-        if path == "/api/pro/auth/browser/start" and method == "POST":
-            body = self._read_json() or {}
-            flow = str(body.get("flow") or "auto").strip() or "auto"
-            device_label = str(body.get("deviceLabel") or body.get("device_label") or "Desktop")
-            return _Response(200, backend.start_pro_browser_sign_in(flow=flow, device_label=device_label))
-        if path == "/api/pro/auth/browser/status" and method == "GET":
-            return _Response(200, backend.poll_pro_browser_sign_in())
-        if path == "/api/pro/auth/browser/cancel" and method == "POST":
-            return _Response(200, backend.cancel_pro_browser_sign_in())
-        if path == "/api/pro/sign-out" and method == "POST":
-            return _Response(200, backend.sign_out_pro())
-        if path == "/api/pro/sync/enable" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.enable_sync(recovery_key=str(body.get("recoveryKey") or "")))
-        if path == "/api/pro/sync/disable" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.disable_sync(clear_key=bool(body.get("clearKey", False))))
-        if path == "/api/pro/sync/run" and method == "POST":
-            return _Response(200, backend.run_sync())
-        if path == "/api/pro/sync/scope" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.set_sync_scope(str(body.get("scope") or "meetings")))
-        if path == "/api/pro/devices" and method == "GET":
-            return _Response(200, backend.list_pro_devices())
-        if path == "/api/pro/devices/revoke" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.revoke_pro_device(str(body.get("deviceId") or body.get("device_id") or "")))
-        if path == "/api/pro/devices/approve" and method == "POST":
-            body = self._read_json() or {}
-            return _Response(200, backend.approve_pro_device(str(body.get("deviceId") or body.get("device_id") or "")))
-        if path == "/api/pro/cloud/export" and method == "GET":
-            return _Response(200, backend.export_pro_cloud_data())
-        if path == "/api/pro/cloud/delete" and method == "DELETE":
-            return _Response(200, backend.delete_pro_cloud_data())
-        if path == "/api/pro/meetings" and method == "POST":
-            body = self._read_json() or {}
-            language = str(body.get("language") or "").strip() or None
-            audio_duration_seconds = _optional_positive_float(
-                body.get("audioDurationSeconds", body.get("audio_duration_seconds"))
-            )
-            return _Response(
-                200,
-                backend.create_pro_meeting(
-                    language=language,
-                    audio_duration_seconds=audio_duration_seconds,
-                ),
-            )
-        if path.startswith("/api/pro/meetings/") and method == "GET":
-            job_id = path.removeprefix("/api/pro/meetings/").split("/", 1)[0]
-            if path.endswith("/transcript"):
-                return _Response(200, backend.get_pro_meeting_transcript(job_id))
-            return _Response(200, backend.get_pro_meeting(job_id))
-        if path.startswith("/api/pro/meetings/") and path.endswith("/audio") and method == "POST":
-            job_id = path.removeprefix("/api/pro/meetings/").removesuffix("/audio")
-            audio_path = self._read_uploaded_audio_file()
-            try:
-                return _Response(200, backend.upload_pro_meeting_audio(job_id, audio_path))
-            finally:
-                try:
-                    audio_path.unlink(missing_ok=True)
-                    audio_path.parent.rmdir()
-                except OSError:
-                    pass
         if path == "/api/events" and method == "GET":
             return _Response(200, sse=self.server.broker.subscribe())  # type: ignore[attr-defined]
         raise ApiError(404, f"no route for {method} {path}")

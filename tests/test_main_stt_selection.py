@@ -55,11 +55,11 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="gemini", stt_model="gemini-3-flash-preview"),
+                config=Config(stt_backend="whisperx", stt_model="large-v3"),
             )
 
-        self.assertEqual(backend, "gemini")
-        self.assertEqual(model, "gemini-3-flash-preview")
+        self.assertEqual(backend, "whisperx")
+        self.assertEqual(model, "large-v3")
 
     def test_cli_flags_override_saved_selection(self) -> None:
         parser = main_module.build_parser()
@@ -69,7 +69,7 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=["--stt-backend", "faster-whisper", "--model", "small"],
-                config=Config(stt_backend="gemini", stt_model="gemini-3-flash-preview"),
+                config=Config(stt_backend="whisperx", stt_model="large-v3"),
             )
 
         self.assertEqual(backend, "faster-whisper")
@@ -192,7 +192,7 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(backend, "faster-whisper")
         self.assertEqual(model, "base")
 
-    def test_saved_custom_hosted_model_name_is_preserved(self) -> None:
+    def test_saved_custom_model_name_outside_examples_is_preserved(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -200,13 +200,13 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="gemini", stt_model="gemini-future-model"),
+                config=Config(stt_backend="parakeet", stt_model="parakeet-tdt-9.9b-future"),
             )
 
-        self.assertEqual(backend, "gemini")
-        self.assertEqual(model, "gemini-future-model")
+        self.assertEqual(backend, "parakeet")
+        self.assertEqual(model, "parakeet-tdt-9.9b-future")
 
-    def test_gemini_backend_without_model_uses_remote_default(self) -> None:
+    def test_whisperx_backend_without_model_uses_registry_default(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -214,13 +214,13 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="gemini"),
+                config=Config(stt_backend="whisperx"),
             )
 
-        self.assertEqual(backend, "gemini")
-        self.assertEqual(model, "gemini-3-flash-preview")
+        self.assertEqual(backend, "whisperx")
+        self.assertEqual(model, "large-v3")
 
-    def test_openai_backend_without_model_uses_remote_default(self) -> None:
+    def test_parakeet_backend_without_model_uses_registry_default(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
@@ -228,56 +228,11 @@ class MainSttSelectionTests(unittest.TestCase):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
                 cli_args=[],
-                config=Config(stt_backend="openai"),
+                config=Config(stt_backend="parakeet"),
             )
 
-        self.assertEqual(backend, "openai")
-        self.assertEqual(model, "gpt-4o-mini-transcribe")
-
-    def test_openai_key_command_from_config_is_applied(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            main_module._apply_configured_secret_commands(
-                config=Config(
-                    stt_backend="openai",
-                    openai_api_key_command="/usr/bin/printf key",
-                ),
-                stt_backend="openai",
-            )
-
-            self.assertEqual(
-                main_module.os.environ.get("DICTATE_OPENAI_API_KEY_COMMAND"),
-                "/usr/bin/printf key",
-            )
-
-    def test_xai_key_command_from_config_is_applied(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            main_module._apply_configured_secret_commands(
-                config=Config(
-                    stt_backend="xai",
-                    xai_api_key_command="/usr/bin/printf key",
-                ),
-                stt_backend="xai",
-            )
-
-            self.assertEqual(
-                main_module.os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
-                "/usr/bin/printf key",
-            )
-
-    def test_gemini_key_command_from_config_is_applied(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            main_module._apply_configured_secret_commands(
-                config=Config(
-                    stt_backend="gemini",
-                    gemini_api_key_command="/usr/bin/printf key",
-                ),
-                stt_backend="gemini",
-            )
-
-            self.assertEqual(
-                main_module.os.environ.get("DICTATE_GEMINI_API_KEY_COMMAND"),
-                "/usr/bin/printf key",
-            )
+        self.assertEqual(backend, "parakeet")
+        self.assertEqual(model, "parakeet-tdt-0.6b-v2")
 
     def test_saved_runtime_profile_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
@@ -381,13 +336,6 @@ class MainSttSelectionTests(unittest.TestCase):
             patch.object(main_module.sys, "platform", "win32"),
             patch.object(main_module, "_resolve_typing_output_or_exit", return_value=output),
             patch.dict(sys.modules, {"dictate.windows_tray": fake_windows_tray}),
-            patch(
-                "dictate.provider_supervisor.ProviderSupervisor",
-                lambda preferred, *, probe_fn, **kw: type(
-                    "_Sup", (), {"preferred": preferred, "shutdown": lambda self: None}
-                )(),
-            ),
-            patch("dictate.provider_supervisor.make_remote_probe", return_value=lambda: False),
         ):
             main_module._run_tray(
                 stt,
@@ -397,7 +345,7 @@ class MainSttSelectionTests(unittest.TestCase):
                 lexicon_mode="native",
                 lexicon_replacements=None,
                 push_to_talk_combo="ctrl_r",
-                stt_backend="xai",
+                stt_backend="parakeet",
             )
 
         self.assertTrue(calls["ran"])

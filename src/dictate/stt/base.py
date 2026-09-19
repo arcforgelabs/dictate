@@ -40,9 +40,6 @@ SttBackend = Literal[
     "parakeet-diarizen",
     "parakeet-sortformer",
     "whisperx",
-    "openai",
-    "xai",
-    "gemini",
 ]
 
 

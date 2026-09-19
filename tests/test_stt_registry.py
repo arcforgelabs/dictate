@@ -31,9 +31,6 @@ class SttRegistryTests(unittest.TestCase):
                 "parakeet-diarizen",
                 "parakeet-sortformer",
                 "whisperx",
-                "openai",
-                "xai",
-                "gemini",
             ),
         )
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
@@ -47,9 +44,7 @@ class SttRegistryTests(unittest.TestCase):
         self.assertEqual(resolve_model_name("parakeet-diarizen", None), "parakeet-tdt-0.6b-v2")
         self.assertEqual(resolve_model_name("parakeet-sortformer", None), "parakeet-tdt-0.6b-v2")
         self.assertEqual(resolve_model_name("whisperx", None), "large-v3")
-        self.assertEqual(resolve_model_name("openai", None), "gpt-4o-mini-transcribe")
-        self.assertEqual(resolve_model_name("xai", None), "grok-speech-to-text")
-        self.assertEqual(resolve_model_name("gemini", None), "gemini-3-flash-preview")
+        self.assertEqual(resolve_model_name("parakeet", None), "parakeet-tdt-0.6b-v2")
 
     def test_create_backend_instances_without_loading_models(self) -> None:
         whisper = create_speech_to_text(
@@ -57,24 +52,11 @@ class SttRegistryTests(unittest.TestCase):
             model="turbo",
             device="cpu",
         )
-        with patch.dict("os.environ", {"DICTATE_OPENAI_API_KEY": "test-key"}):
-            openai = create_speech_to_text(
-                backend="openai",
-                model="gpt-4o-mini-transcribe",
-                device="cpu",
-            )
-        with patch.dict("os.environ", {"DICTATE_XAI_API_KEY": "test-key"}):
-            xai = create_speech_to_text(
-                backend="xai",
-                model="grok-speech-to-text",
-                device="cpu",
-            )
-        with patch.dict("os.environ", {"DICTATE_GEMINI_API_KEY": "test-key"}):
-            gemini = create_speech_to_text(
-                backend="gemini",
-                model="gemini-3-flash-preview",
-                device="cpu",
-            )
+        parakeet = create_speech_to_text(
+            backend="parakeet",
+            model="parakeet-tdt-0.6b-v2",
+            device="cpu",
+        )
         fake_whisperx = types.SimpleNamespace(
             load_model=lambda *args, **kwargs: types.SimpleNamespace(
                 transcribe=lambda *a, **kw: {"segments": [{"text": "hello"}], "language": "en"}
@@ -102,13 +84,11 @@ class SttRegistryTests(unittest.TestCase):
             device="cpu",
         )
         self.assertEqual(whisper.backend_name, "faster-whisper")
+        self.assertEqual(parakeet.backend_name, "parakeet")
         self.assertEqual(parakeet_pyannote.backend_name, "parakeet-pyannote")
         self.assertEqual(parakeet_diarizen.backend_name, "parakeet-diarizen")
         self.assertEqual(parakeet_sortformer.backend_name, "parakeet-sortformer")
         self.assertEqual(whisperx.backend_name, "whisperx")
-        self.assertEqual(openai.backend_name, "openai")
-        self.assertEqual(xai.backend_name, "xai")
-        self.assertEqual(gemini.backend_name, "gemini")
 
     @unittest.skipIf(
         sys.platform == "win32",
@@ -118,7 +98,6 @@ class SttRegistryTests(unittest.TestCase):
         code = textwrap.dedent(
             """
             import builtins
-            import os
 
             original_import = builtins.__import__
 
@@ -128,13 +107,14 @@ class SttRegistryTests(unittest.TestCase):
                 return original_import(name, *args, **kwargs)
 
             builtins.__import__ = blocked_import
-            os.environ["DICTATE_XAI_API_KEY"] = "test-key"
 
             from dictate.stt import STT_BACKENDS, create_speech_to_text
 
-            assert "xai" in STT_BACKENDS
-            stt = create_speech_to_text(backend="xai", model="grok-speech-to-text", device="cpu")
-            assert stt.backend_name == "xai"
+            assert "parakeet" in STT_BACKENDS
+            stt = create_speech_to_text(
+                backend="parakeet", model="parakeet-tdt-0.6b-v2", device="cpu"
+            )
+            assert stt.backend_name == "parakeet"
             """
         )
         completed = subprocess.run(
@@ -247,19 +227,6 @@ class SttRegistryTests(unittest.TestCase):
         self.assertFalse(report.errors)
         self.assertTrue(any("MIGraphXExecutionProvider" in note for note in report.notes))
 
-    def test_openai_readiness_requires_api_key(self) -> None:
-        with (
-            patch.dict("os.environ", {"OPENAI_API_KEY": "", "DICTATE_OPENAI_API_KEY": ""}),
-            patch("dictate.stt.openai_backend.read_api_key", return_value=None),
-            patch("dictate.api_keys.read_api_key", return_value=None),
-        ):
-            report = check_backend_readiness(
-                backend="openai",
-                model="gpt-4o-mini-transcribe",
-                device="cpu",
-            )
-        self.assertTrue(any("API key" in error for error in report.errors))
-
     def test_whisperx_readiness_reports_missing_optional_package(self) -> None:
         with patch("dictate.stt.factory.whisperx_available", return_value=False):
             report = check_backend_readiness(
@@ -338,46 +305,6 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any("Sortformer Meeting backend" in error for error in report.errors))
         self.assertTrue(any("Sortformer model" in note for note in report.notes))
 
-    def test_gemini_readiness_requires_api_key(self) -> None:
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "GEMINI_API_KEY": "",
-                    "GOOGLE_API_KEY": "",
-                    "DICTATE_GEMINI_API_KEY": "",
-                    "DICTATE_GEMINI_API_KEY_COMMAND": "",
-                },
-            ),
-            patch("dictate.stt.gemini_backend.read_api_key", return_value=None),
-            patch("dictate.api_keys.read_api_key", return_value=None),
-        ):
-            report = check_backend_readiness(
-                backend="gemini",
-                model="gemini-3-flash-preview",
-                device="cpu",
-            )
-        self.assertTrue(any("API key" in error for error in report.errors))
-
-    def test_xai_readiness_requires_api_key(self) -> None:
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "XAI_API_KEY": "",
-                    "DICTATE_XAI_API_KEY": "",
-                    "DICTATE_XAI_API_KEY_COMMAND": "",
-                },
-            ),
-            patch("dictate.stt.xai_backend.read_api_key", return_value=None),
-            patch("dictate.api_keys.read_api_key", return_value=None),
-        ):
-            report = check_backend_readiness(
-                backend="xai",
-                model="grok-speech-to-text",
-                device="cpu",
-            )
-        self.assertTrue(any("API key" in error for error in report.errors))
 
 
 if __name__ == "__main__":
