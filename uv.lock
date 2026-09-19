@@ -635,6 +635,8 @@ x11 = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cairosvg" },
+    { name = "pillow" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -667,6 +669,8 @@ provides-extras = ["gpu", "amd", "whisperx", "meeting", "sortformer", "x11", "wa
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cairosvg", specifier = ">=2.7" },
+    { name = "pillow" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.15.21" },
 ]
