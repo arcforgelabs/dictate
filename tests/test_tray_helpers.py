@@ -38,29 +38,6 @@ class TrayHelperTests(unittest.TestCase):
         self.assertEqual(tray._device_for_backend("faster-whisper", "cuda"), "cuda")
         self.assertEqual(tray._device_for_backend("openai", "cuda"), "auto")
 
-    def test_command_status_overrides_stale_stored_key_status(self) -> None:
-        tray = _import_tray_with_fake_gi()
-
-        with (
-            patch.dict(
-                "os.environ",
-                {"XAI_API_KEY": "", "DICTATE_XAI_API_KEY": "", "DICTATE_XAI_API_KEY_COMMAND": ""},
-            ),
-            patch(
-                "dictate.tray.api_key_status",
-                return_value=tray.ApiKeyStatus(
-                    backend="xai",
-                    status="Invalid",
-                    source="secret-store",
-                ),
-            ),
-            patch("dictate.tray._api_key_command_configured_for_backend", return_value=True),
-        ):
-            status = tray.TrayIcon._api_key_status_for_backend(object(), "xai")
-
-        self.assertEqual(status.status, "Ready")
-        self.assertEqual(status.source, "api-key-command")
-
     def test_profile_selection_resolves_local_model_for_new_device(self) -> None:
         # P2-2: selecting the CPU profile (on a box whose current device is cuda)
         # must resolve the local model for the NEWLY selected device, not the stale

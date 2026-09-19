@@ -841,45 +841,16 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     """
     import argparse as _ap
 
-    from dictate.api_keys import (
-        API_BACKENDS,
-        has_stored_api_key,
-        save_api_key,
-        secret_store_available,
-        secret_store_description,
-        validate_api_key_format,
-    )
-
     parser = _ap.ArgumentParser(
         prog="dictate config",
-        description="Manage Dictate configuration and API keys",
+        description="Manage Dictate configuration",
         add_help=True,
     )
     sub = parser.add_subparsers(dest="cmd")
 
-    # set-key <backend> <KEY>
-    sk = sub.add_parser("set-key", help="Save an API key to the OS secret store")
-    sk.add_argument(
-        "backend",
-        choices=list(API_BACKENDS),
-        help="API backend (openai, xai, gemini)",
-    )
-    sk.add_argument("key", help="The API key value")
-
-    # set-provider online|private
-    sp = sub.add_parser(
-        "set-provider",
-        help="Switch between private (on-device faster-whisper) and online (xAI)",
-    )
-    sp.add_argument(
-        "mode",
-        choices=["private", "online"],
-        help="'private' → faster-whisper; 'online' → xai",
-    )
-
     # set-model <id>
     sm = sub.add_parser("set-model", help="Set the model for the current backend")
-    sm.add_argument("model_id", help="Model name (e.g. grok-speech-to-text)")
+    sm.add_argument("model_id", help="Model name (e.g. parakeet-tdt-0.6b-v2)")
 
     # set-meeting-model [backend/]model
     smm = sub.add_parser(
@@ -921,40 +892,16 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     suc = sub.add_parser("set-update-channel", help="Opt into stable or unstable app updates")
     suc.add_argument("channel", choices=["stable", "unstable"])
 
-    scp = sub.add_parser("set-cloud-preference", help="Choose whether Dictate Pro or personal API keys are used first")
-    scp.add_argument("preference", choices=["pro-first", "personal-first"])
-
     sipv = sub.add_parser("set-installed-package-version", help=argparse.SUPPRESS)
     sipv.add_argument("version")
 
     # show
-    sub.add_parser("show", help="Print current config and key status")
+    sub.add_parser("show", help="Print current config")
 
     args = parser.parse_args(argv)
     if args.cmd is None:
         parser.print_help()
         return 2
-
-    # ---- set-key -----------------------------------------------------------
-    if args.cmd == "set-key":
-        fmt_error = validate_api_key_format(args.backend, args.key)
-        if fmt_error:
-            print(f"error: {fmt_error}", file=sys.stderr)
-            return 1
-        try:
-            save_api_key(args.backend, args.key)
-        except Exception as exc:  # noqa: BLE001
-            print(f"error: could not save key: {exc}", file=sys.stderr)
-            return 1
-        print(f"ok: {args.backend} key saved to {secret_store_description()}")
-        return 0
-
-    # ---- set-provider ------------------------------------------------------
-    if args.cmd == "set-provider":
-        backend = "faster-whisper" if args.mode == "private" else "xai"
-        set_stt_backend(backend)
-        print(f"ok: provider={args.mode} (stt_backend={backend})")
-        return 0
 
     # ---- set-model ---------------------------------------------------------
     if args.cmd == "set-model":
@@ -1053,13 +1000,6 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"ok: update_channel={channel}")
         return 0
 
-    if args.cmd == "set-cloud-preference":
-        from dictate.config import set_cloud_provider_preference
-
-        preference = set_cloud_provider_preference(args.preference)
-        print(f"ok: cloud_provider_preference={preference}")
-        return 0
-
     # ---- set-installed-package-version ------------------------------------
     if args.cmd == "set-installed-package-version":
         version = set_installed_package_version(args.version)
@@ -1070,14 +1010,13 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     if args.cmd == "show":
         cfg = load_config()
         backend = cfg.stt_backend or "faster-whisper"
-        mode = "online" if backend in {"openai", "xai", "gemini"} else "private"
         model = cfg.stt_model or "(default)"
         meeting_backend = cfg.meeting_stt_backend or "parakeet-pyannote"
         if meeting_backend not in STT_BACKENDS:
             meeting_backend = "parakeet-pyannote"
         meeting_model = resolve_model_name(meeting_backend, cfg.meeting_stt_model)
         prefs = _config_load_ui_prefs()
-        print(f"provider: {mode} (stt_backend={backend})")
+        print(f"stt_backend: {backend}")
         print(f"model: {model}")
         print(f"meeting_model: {meeting_backend}/{meeting_model}")
         print(f"shortcut: {cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO}")
@@ -1089,7 +1028,6 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"sound: {'on' if prefs.get('sound') else 'off'}")
         update_channel = cfg.update_channel if cfg.update_channel in {"stable", "unstable"} else "stable"
         print(f"update_channel: {update_channel}")
-        print(f"cloud_provider_preference: {cfg.cloud_provider_preference or 'pro-first'}")
         if cfg.installed_package_version:
             print(f"installed_package_version: {cfg.installed_package_version}")
         try:
@@ -1099,12 +1037,6 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         except Exception:  # noqa: BLE001
             startup_on = False
         print(f"startup: {'on' if startup_on else 'off'}")
-        for b in API_BACKENDS:
-            has_key = has_stored_api_key(b)
-            print(f"key.{b}: {'set' if has_key else 'not-set'}")
-        store = secret_store_description()
-        available = secret_store_available()
-        print(f"secret-store: {store} ({'available' if available else 'unavailable'})")
         return 0
 
     return 2  # unreachable, argparse catches unknown subcommands

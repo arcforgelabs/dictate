@@ -34,7 +34,6 @@ from typing import Any, Callable
 from urllib.parse import urlparse, parse_qs
 
 
-from dictate import api_keys as api_keys_mod
 from dictate import config as config_mod
 from dictate import startup as startup_mod
 from dictate import update_status as update_status_mod
@@ -282,14 +281,6 @@ class UiBackend:
     daemon: Any | None = None
     provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
     # Injectable hooks (default to the real implementations).
-    save_api_key: Callable[[str, str], None] = api_keys_mod.save_api_key
-    clear_api_key: Callable[[str], None] = api_keys_mod.clear_api_key
-    api_key_status: Callable[..., api_keys_mod.ApiKeyStatus] = api_keys_mod.api_key_status
-    validate_api_key_format: Callable[[str, str], str | None] = (
-        api_keys_mod.validate_api_key_format
-    )
-    secret_store_description: Callable[[], str] = api_keys_mod.secret_store_description
-    secret_store_available: Callable[[], bool] = api_keys_mod.secret_store_available
     check_update_status: Callable[[], update_status_mod.UpdateStatus] = (
         update_status_mod.check_update_status
     )
@@ -371,8 +362,6 @@ class UiBackend:
             "prefs": prefs,
             "notes": self._notes_payload(),
             "startup": bool(self._safe(self.startup_enabled, False)),
-            "secretStore": self._safe(self.secret_store_description, "OS secret store"),
-            "secretStoreAvailable": bool(self._safe(self.secret_store_available, False)),
             "micConnected": True,
             "providerHealth": self._compute_provider_health(cfg),
         }
@@ -755,11 +744,6 @@ class UiBackend:
             {"label": "Microphone access", "sub": "Default device", "ok": True},
             {"label": "Model loads", "sub": f"{backend} · {model}", "ok": True},
             {"label": "Output backend", "sub": "Typing into focused app", "ok": True},
-            {
-                "label": "Secret store",
-                "sub": self._safe(self.secret_store_description, "OS secret store"),
-                "ok": bool(self._safe(self.secret_store_available, False)),
-            },
             {
                 "label": "Shortcut registered",
                 "sub": format_hotkey_combo(normalize_push_to_talk_combo(combo)),

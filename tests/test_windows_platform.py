@@ -75,11 +75,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
     def test_doctor_requires_daemon_clipboard_preflight(self) -> None:
         report = types.SimpleNamespace(ok=True, notes=[], warnings=[], errors=[])
-        config = types.SimpleNamespace(
-            openai_api_key_command=None,
-            xai_api_key_command=None,
-            gemini_api_key_command=None,
-        )
+        config = types.SimpleNamespace()
         with (
             patch("dictate.doctor.load_config", return_value=config),
             patch("dictate.doctor.run_preflight", return_value=report) as preflight,
@@ -203,28 +199,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('ui_launcher.open_settings_window', source)
         self.assertIn('ui_launcher.ensure_server_started(daemon)', source)
         self.assertIn('[sys.executable, "-m", "dictate", "controls"]', source)
-
-    def test_windows_controls_apply_configured_key_command(self) -> None:
-        fake_tkinter = types.ModuleType("tkinter")
-        fake_tkinter.messagebox = types.SimpleNamespace()
-        fake_tkinter.ttk = types.SimpleNamespace()
-
-        with (
-            patch.dict("sys.modules", {"tkinter": fake_tkinter}),
-            patch.dict("os.environ", {}, clear=True),
-            patch(
-                "dictate.windows_control.load_config",
-                return_value=Config(xai_api_key_command="/usr/bin/printf key"),
-            ),
-        ):
-            from dictate.windows_control import _apply_api_key_command_from_config
-
-            _apply_api_key_command_from_config("xai")
-
-            self.assertEqual(
-                os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
-                "/usr/bin/printf key",
-            )
 
     def test_windows_installer_shortcut_starts_tray_launcher(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(

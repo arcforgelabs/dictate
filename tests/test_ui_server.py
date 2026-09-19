@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from dictate.api_keys import ApiKeyStatus
 from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
@@ -35,12 +34,6 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         history_store=HistoryStore(base / "history.json"),
         note_store=NoteStore(base / "notes"),
         prefs_store=UiPrefsStore(base / "ui-prefs.json"),
-        save_api_key=lambda backend, key: None,
-        clear_api_key=lambda backend: None,
-        api_key_status=lambda backend, **kw: ApiKeyStatus(backend=backend, status="None"),
-        validate_api_key_format=lambda backend, key: None,
-        secret_store_description=lambda: "the desktop Secret Service keyring",
-        secret_store_available=lambda: True,
         check_update_status=lambda: UpdateStatus(
             current_version=RELEASE_VERSION,
             latest_version=RELEASE_VERSION,
@@ -273,7 +266,7 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["providerHealth"]["status"], "ok")
             self.assertTrue(state["providerHealth"]["healthy"])
 
-    def test_parakeet_provider_health_is_private_without_api_key(self) -> None:
+    def test_parakeet_provider_health_is_private(self) -> None:
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:

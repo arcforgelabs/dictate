@@ -12,7 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from dictate.api_keys import API_BACKENDS, ApiKeyStorageError, api_key_status, save_api_key
 from dictate.config import (
     CONFIG_PATH,
     load_config,
@@ -81,8 +80,6 @@ class ControlPanel:
         self.compute_var = tk.StringVar(value="int8")
         self.local_runtime_var = tk.StringVar(value="CPU")
         self.combo_var = tk.StringVar(value="ctrl_r")
-        self.api_key_var = tk.StringVar(value="")
-        self.api_status_var = tk.StringVar(value="API key: None")
         self.launch_on_startup_var = tk.BooleanVar(value=True)
         self.history_page_var = tk.StringVar(value="")
         self.version_var = tk.StringVar(value=f"Version: {RELEASE_VERSION}")
@@ -92,7 +89,6 @@ class ControlPanel:
         self._history_page = 0
         self._history_entries: list[HistoryEntry] = []
         self.model_box: ttk.Combobox | None = None
-        self.api_entry: ttk.Entry | None = None
         self.update_button: ttk.Button | None = None
 
         self._build()
@@ -110,7 +106,7 @@ class ControlPanel:
 
         config_frame = ttk.LabelFrame(outer, text="Configuration", padding=10)
         config_frame.grid(row=1, column=0, sticky="ew", pady=(10, 10))
-        for idx in range(4):
+        for idx in range(3):
             config_frame.columnconfigure(idx, weight=1)
 
         ttk.Label(config_frame, text="Provider").grid(row=0, column=0, sticky="w")
@@ -132,23 +128,12 @@ class ControlPanel:
         self.model_box.grid(row=1, column=1, sticky="ew", padx=(0, 8))
         self.model_box.bind("<<ComboboxSelected>>", lambda _event: self._sync_status_line())
 
-        ttk.Label(config_frame, text="API key").grid(row=0, column=2, sticky="w")
-        self.api_entry = ttk.Entry(config_frame, textvariable=self.api_key_var, show="*")
-        self.api_entry.grid(row=1, column=2, sticky="ew", padx=(0, 8))
-        ttk.Label(config_frame, textvariable=self.api_status_var).grid(
-            row=2,
-            column=2,
-            sticky="w",
-            padx=(0, 8),
-            pady=(4, 0),
-        )
-
-        ttk.Label(config_frame, text="Hotkeys").grid(row=0, column=3, sticky="w")
+        ttk.Label(config_frame, text="Hotkeys").grid(row=0, column=2, sticky="w")
         combo_entry = ttk.Entry(config_frame, textvariable=self.combo_var)
-        combo_entry.grid(row=1, column=3, sticky="ew")
+        combo_entry.grid(row=1, column=2, sticky="ew")
 
         advanced_frame = ttk.Frame(config_frame)
-        advanced_frame.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        advanced_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         advanced_frame.columnconfigure(0, weight=1)
         advanced_frame.columnconfigure(1, weight=1)
 
@@ -169,7 +154,7 @@ class ControlPanel:
         ).grid(row=1, column=1, sticky="w", padx=(8, 0))
 
         button_frame = ttk.Frame(config_frame)
-        button_frame.grid(row=4, column=0, columnspan=4, sticky="e", pady=(10, 0))
+        button_frame.grid(row=4, column=0, columnspan=3, sticky="e", pady=(10, 0))
         ttk.Button(button_frame, text="Save", command=self.save).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             button_frame,
@@ -264,18 +249,14 @@ class ControlPanel:
         default_model = DEFAULT_MODELS.get(backend, model_choices[0])
         self.model_var.set(config.stt_model if config.stt_model in model_choices else default_model)
         self._set_local_runtime_from_config(config.stt_device, config.stt_compute_type)
-        self.api_key_var.set("")
         combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
         self.launch_on_startup_var.set(startup_enabled())
-        self._sync_api_key_field()
         self._sync_status_line()
         self.refresh_history()
 
     def _on_backend_changed(self) -> None:
         self._sync_model_choices()
-        self.api_key_var.set("")
-        self._sync_api_key_field()
         self._sync_status_line()
 
     def _on_runtime_changed(self) -> None:
@@ -294,18 +275,6 @@ class ControlPanel:
             self.model_box.configure(values=choices)
         if self.model_var.get() not in choices:
             self.model_var.set(DEFAULT_MODELS.get(backend, choices[0]))
-
-    def _sync_api_key_field(self) -> None:
-        if self.api_entry is None:
-            return
-        backend = self.backend_var.get()
-        state = tk.NORMAL if backend in API_BACKENDS else tk.DISABLED
-        self.api_entry.configure(state=state)
-        if backend in API_BACKENDS:
-            _apply_api_key_command_from_config(backend)
-            self.api_status_var.set(f"API key: {api_key_status(backend).status}")
-        else:
-            self.api_status_var.set("API key: Local")
 
     def _set_local_runtime_from_config(
         self,
@@ -456,29 +425,6 @@ class ControlPanel:
             messagebox.showerror("Invalid Hotkey", str(exc))
             return False
 
-        api_key = self.api_key_var.get().strip()
-        if backend in API_BACKENDS:
-            _apply_api_key_command_from_config(backend)
-            status = (
-                api_key_status(backend, api_key=api_key, validate_remote=True)
-                if api_key
-                else api_key_status(backend, validate_remote=True)
-            )
-            if not status.ready:
-                messagebox.showerror(
-                    "API Key Required",
-                    f"{backend} API key status: {status.status}. "
-                    "Add a valid key before saving this model.",
-                )
-                return False
-            if api_key:
-                try:
-                    save_api_key(backend, api_key)
-                except ApiKeyStorageError as exc:
-                    messagebox.showerror("API Key Not Saved", str(exc))
-                    return False
-                self.api_key_var.set("")
-                self._sync_api_key_field()
         try:
             set_startup_enabled(self.launch_on_startup_var.get())
         except Exception as exc:  # noqa: BLE001
@@ -519,16 +465,6 @@ def _format_timestamp(iso_str: str) -> str:
         return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except Exception:  # noqa: BLE001
         return iso_str
-
-
-def _apply_api_key_command_from_config(backend: str) -> None:
-    config = load_config()
-    if backend == "openai" and config.openai_api_key_command:
-        os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
-    if backend == "xai" and config.xai_api_key_command:
-        os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
-    if backend == "gemini" and config.gemini_api_key_command:
-        os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
 
 
 def _source_root() -> Path:
