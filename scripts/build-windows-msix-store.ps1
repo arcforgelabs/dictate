@@ -243,10 +243,8 @@ $ManifestContent = Get-Content $ManifestTemplate -Raw
 $ManifestContent = $ManifestContent.Replace("{{VERSION}}", $MsixVersion)
 Set-Content -Path $Manifest -Value $ManifestContent -Encoding UTF8
 
-$Icon = Join-Path $Root "ui-shell\src-tauri\icons\icon.png"
-Resize-Png $Icon (Join-Path $Assets "StoreLogo.png") 50 50
-Resize-Png $Icon (Join-Path $Assets "Square44x44Logo.png") 44 44
-Resize-Png $Icon (Join-Path $Assets "Square150x150Logo.png") 150 150
+# Manifest logos are rendered from assets/dictate.svg by scripts/render_brand_icons.py.
+Copy-Item (Join-Path $MsixRoot "assets\*.png") $Assets -Force
 
 Write-Host "packing MSIX"
 if (Test-Path $Output) {

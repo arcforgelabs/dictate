@@ -4,7 +4,8 @@
 The brand mark is defined once, in ``assets/dictate.svg`` (see the
 ``dictate-brand-mark-canonical`` note). Every PNG / ICO the app ships — the
 per-user Linux launcher icon, the Windows tray icons, the Tauri bundle icons,
-the transparent marks and the circular badge — must always be *generated from
+the transparent marks, the circular badge, the Store listing logos and the
+MSIX manifest logos — must always be *generated from
 the SVGs* — never hand-drawn or hand-edited — otherwise they silently drift
 (wrong smile, wrong vertical position, pitch-black tile) and look malformed
 next to each other.
@@ -29,6 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 TAURI_ICONS = ROOT / "ui-shell" / "src-tauri" / "icons"
+STORE_LOGOS = ROOT / "docs" / "msstore" / "assets" / "logos"
+MSIX_ASSETS = ROOT / "packaging" / "msix" / "assets"
 
 # (svg source, png target, size) rendered 1:1.
 PNG_TARGETS = [
@@ -41,6 +44,12 @@ PNG_TARGETS = [
     (ASSETS / "dictate.svg", TAURI_ICONS / "128x128.png", 128),
     (ASSETS / "dictate.svg", TAURI_ICONS / "128x128@2x.png", 256),
     (ASSETS / "dictate.svg", TAURI_ICONS / "icon.png", 512),
+    # Microsoft Store listing uploads (docs/msstore-listing.md) …
+    *[(ASSETS / "dictate.svg", STORE_LOGOS / f"dictate-store-logo-{s}.png", s) for s in (71, 150, 300, 512, 600, 1080, 1240)],
+    # … and the MSIX manifest logos (packaging/msix/Package.appxmanifest.in).
+    (ASSETS / "dictate.svg", MSIX_ASSETS / "StoreLogo.png", 50),
+    (ASSETS / "dictate.svg", MSIX_ASSETS / "Square44x44Logo.png", 44),
+    (ASSETS / "dictate.svg", MSIX_ASSETS / "Square150x150Logo.png", 150),
 ]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 # (svg source, ico target) — one multi-resolution .ico per source.
