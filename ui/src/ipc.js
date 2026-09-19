@@ -147,12 +147,6 @@ export const ipc = {
   async toggleNoteRecording() {
     return call("POST", "/api/notes/toggle");
   },
-  async saveApiKey(backend, apiKey) {
-    return call("POST", "/api/api-keys", { backend, apiKey });
-  },
-  async clearApiKey(backend) {
-    return call("DELETE", "/api/api-keys", { backend });
-  },
   async runDoctor() {
     return call("POST", "/api/doctor");
   },
@@ -164,55 +158,6 @@ export const ipc = {
   },
   async setUpdateChannel(updateChannel) {
     return call("PATCH", "/api/config", { updateChannel });
-  },
-  async startProSignIn(email) {
-    return call("POST", "/api/pro/auth/start", { email });
-  },
-  async completeProSignIn({ challengeId, code, deviceLabel = "Desktop" }) {
-    return call("POST", "/api/pro/auth/complete", {
-      challenge_id: challengeId,
-      code,
-      deviceLabel,
-    });
-  },
-  async startBrowserSignIn(flow = "auto") {
-    return call("POST", "/api/pro/auth/browser/start", { flow });
-  },
-  async getBrowserSignInStatus() {
-    return call("GET", "/api/pro/auth/browser/status");
-  },
-  async cancelBrowserSignIn() {
-    return call("POST", "/api/pro/auth/browser/cancel");
-  },
-  async signOutPro() {
-    return call("POST", "/api/pro/sign-out");
-  },
-  async enableProSync(recoveryKey = "") {
-    return call("POST", "/api/pro/sync/enable", recoveryKey ? { recoveryKey } : {});
-  },
-  async disableProSync(clearKey = false) {
-    return call("POST", "/api/pro/sync/disable", { clearKey });
-  },
-  async runProSync() {
-    return call("POST", "/api/pro/sync/run");
-  },
-  async setProSyncScope(scope) {
-    return call("POST", "/api/pro/sync/scope", { scope });
-  },
-  async listProDevices() {
-    return call("GET", "/api/pro/devices");
-  },
-  async revokeProDevice(deviceId) {
-    return call("POST", "/api/pro/devices/revoke", { deviceId });
-  },
-  async approveProDevice(deviceId) {
-    return call("POST", "/api/pro/devices/approve", { deviceId });
-  },
-  async exportProCloudData() {
-    return call("GET", "/api/pro/cloud/export");
-  },
-  async deleteProCloudData() {
-    return call("DELETE", "/api/pro/cloud/delete");
   },
 
   // Server-sent events: live recording / status pushes from the daemon.

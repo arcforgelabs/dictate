@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within, cleanup, waitFor, act } from "@testing-library/react";
 import App from "../App.jsx";
-import { PRODUCT_DESTINATIONS } from "../productDestinations.js";
 
 afterEach(() => {
   cleanup();
@@ -48,8 +47,6 @@ function mockPackagePolling(statuses) {
           updateChannel: "stable",
           model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
           history: [],
-          dictatePro: { signedIn: false, account: null },
-          sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
         }),
       };
     }
@@ -74,12 +71,6 @@ function mockPackagePolling(statuses) {
     getResolvedChecks: () => resolvedChecks,
   };
 }
-
-const ACTIVE_PRO = {
-  signedIn: true,
-  account: { email: "samuel@example.test" },
-  entitlements: { active: true, display_name: "Dictate Pro", status: "active" },
-};
 
 describe("Quiet Console app (mock mode)", () => {
   it("renders the capture (mic) home by default", () => {
@@ -217,481 +208,8 @@ describe("Quiet Console app (mock mode)", () => {
   it("has no settings gear — config lives in the dictate config CLI", () => {
     render(<App />);
     expect(screen.queryByTitle("Settings")).not.toBeInTheDocument();
-    // The one survivor on the home is the privacy toggle.
-    expect(screen.getByLabelText("Local")).toBeInTheDocument();
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-  });
-
-  it("opens account status behind the Dictate mark and enables encrypted sync", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            updateChannel: "unstable",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            device: { device: "cuda", compute: "float16" },
-            history: [],
-            dictatePro: ACTIVE_PRO,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/sync/enable" && opts.method === "POST") {
-        return {
-          ok: true,
-          json: async () => ({
-            sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: true, lastSeq: 4 },
-            recoveryKey: "dictate-rk-test",
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") {
-        return {
-          ok: true,
-          json: async () => ({
-            devices: [
-              { device_id: "dev_1", label: "This workstation", trusted_at: "2026-07-05T12:00:00Z", revoked_at: null },
-              { device_id: "dev_2", label: "Windows lab", trusted_at: "2026-07-05T12:00:00Z", revoked_at: null },
-              { device_id: "dev_3", label: "New laptop", trusted_at: null, revoked_at: null },
-            ],
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-
-    expect(screen.getByRole("dialog", { name: "Dictate" })).toBeInTheDocument();
-    expect(screen.getByText("Version 2026.7.4 · unstable")).toBeInTheDocument();
-    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
-    expect(screen.getByText("Offline")).toBeInTheDocument();
-    expect(screen.getByText("Sync my dictations across devices")).toBeInTheDocument();
-    expect(screen.getByText("This encrypts your synced dictations before upload.")).toBeInTheDocument();
-    expect(screen.getByText("Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "dictate-rk-existing" } });
-    expect(screen.getByText("Restore sync")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Recovery key"), { target: { value: "" } });
-
-    fireEvent.click(screen.getByText("Sync my dictations"));
-    await waitFor(() => expect(screen.getByText("Connected")).toBeInTheDocument());
-    expect(screen.getByText("Encrypted sync enabled")).toBeInTheDocument();
-    expect(screen.getByText("Save this key. It restores synced dictations on a new device if your other devices are unavailable.")).toBeInTheDocument();
-    expect(screen.getByText("dictate-rk-test")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Windows lab")).toBeInTheDocument());
-    expect(screen.getByText("New laptop")).toBeInTheDocument();
-    expect(screen.getByText("Action needed")).toBeInTheDocument();
-    expect(screen.getByText("Approve")).toBeInTheDocument();
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://127.0.0.1:1/api/pro/sync/enable",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
-
-  it("offers Manage account only when signed in, and it opens the web portal", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            history: [],
-            dictatePro: ACTIVE_PRO,
-            productDestinations: PRODUCT_DESTINATIONS,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-
-    expect(screen.getByText("samuel@example.test")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Manage account"));
-    expect(open).toHaveBeenCalledWith(
-      PRODUCT_DESTINATIONS.hub,
-      "_blank",
-      "noopener,noreferrer",
-    );
-    expect(screen.getByText("Opened account portal")).toBeInTheDocument();
-  });
-
-  it("does not offer Manage account when signed out", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            history: [],
-            dictatePro: { signedIn: false, account: null },
-            browserSigninEnabled: true,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-    fireEvent.click(screen.getByRole("button", { name: "Account" }));
-
-    expect(screen.getByText("Sign in")).toBeInTheDocument();
-    expect(screen.queryByText("Manage account")).not.toBeInTheDocument();
-  });
-
-  // Shared harness for the signed-out account panel: mounts the app, opens the account
-  // dialog and reveals the sign-in block, wiring `fetch` through a caller-supplied router
-  // keyed on path (+ method for ambiguous paths). Returns the fetch spy for assertions.
-  function renderSignedOutAccountPanel(routes) {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts = {}) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            history: [],
-            dictatePro: { signedIn: false, account: null },
-            // These tests exercise the browser sign-in flow itself; the one test that
-            // covers the disabled state builds its own /api/state mock with this false.
-            browserSigninEnabled: true,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      const route = routes(path, opts);
-      if (route) return route;
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-    return { sources, fetchSpy };
-  }
-
-  async function openSignInBlock(sources) {
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-    expect(screen.getByText("Not signed in")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Account" }));
-  }
-
-  it("shows a working Sign in affordance instead of the old unavailable apology", async () => {
-    const { sources } = renderSignedOutAccountPanel(() => null);
-    await openSignInBlock(sources);
-
-    expect(screen.queryByText("Browser sign-in unavailable")).not.toBeInTheDocument();
-    expect(screen.getByText("Sign in")).toBeInTheDocument();
-    expect(screen.getByText("Opens your browser to connect this device to your account.")).toBeInTheDocument();
-    expect(screen.getByText("Email me a code instead")).toBeInTheDocument();
-  });
-
-  it("drives the loopback waiting state, reopens the link, and cancels back to idle", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    let cancelCalls = 0;
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize?x=1", expires_in: 300 }) };
-      }
-      if (path === "/api/pro/auth/browser/status") {
-        return { ok: true, json: async () => ({ status: "pending" }) };
-      }
-      if (path === "/api/pro/auth/browser/cancel" && opts.method === "POST") {
-        cancelCalls += 1;
-        return { ok: true, json: async () => ({ status: "cancelled" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("Waiting for browser…")).toBeInTheDocument());
-    expect(screen.getByText("Approve the sign-in in the browser tab we just opened.")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Open sign-in page"));
-    expect(open).toHaveBeenCalledWith("http://127.0.0.1:9/authorize?x=1", "_blank", "noopener,noreferrer");
-
-    fireEvent.click(screen.getByText("Cancel"));
-    await waitFor(() => expect(cancelCalls).toBe(1));
-    expect(screen.getByText("Sign in")).toBeInTheDocument();
-  }, 10_000);
-
-  it("completes sign-in once the status poll reports complete", async () => {
-    let statusCalls = 0;
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }) };
-      }
-      if (path === "/api/pro/auth/browser/status") {
-        statusCalls += 1;
-        if (statusCalls < 2) return { ok: true, json: async () => ({ status: "pending" }) };
-        return { ok: true, json: async () => ({ status: "complete", account_id: "acct_1", device_id: "dev_1", dictatePro: ACTIVE_PRO }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("Waiting for browser…")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText("samuel@example.test")).toBeInTheDocument(), { timeout: 5000 });
-    expect(screen.getByText("Signed in")).toBeInTheDocument();
-  }, 10_000);
-
-  it("shows the device-code waiting state with a copyable code and portal link", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return {
-          ok: true,
-          json: async () => ({
-            flow: "device_code",
-            user_code: "ABCD-EFGH",
-            verification_uri: "http://127.0.0.1:9/device",
-            verification_uri_complete: "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
-            expires_in: 900,
-            interval: 5,
-          }),
-        };
-      }
-      if (path === "/api/pro/auth/browser/status") {
-        return { ok: true, json: async () => ({ status: "pending" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument());
-    expect(screen.getByText("Enter this code at your account portal")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Open portal"));
-    expect(open).toHaveBeenCalledWith(
-      "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
-      "_blank",
-      "noopener,noreferrer",
-    );
-  }, 10_000);
-
-  it("never opens a non-https/non-loopback verification_uri (belt-and-braces)", async () => {
-    // The Python client already clamps this server-side (ProClient._clamp_verification_uri);
-    // this is the last-line-of-defense guard in openVerificationPortal itself.
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return {
-          ok: true,
-          json: async () => ({
-            flow: "device_code",
-            user_code: "ABCD-EFGH",
-            verification_uri: "javascript:alert(1)",
-            verification_uri_complete: "javascript:alert(1)",
-            expires_in: 900,
-            interval: 5,
-          }),
-        };
-      }
-      if (path === "/api/pro/auth/browser/status") {
-        return { ok: true, json: async () => ({ status: "pending" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Open portal"));
-    expect(open).not.toHaveBeenCalled();
-  }, 10_000);
-
-  it("cancels the pending attempt instead of leaking a poll if the dialog closes mid-request", async () => {
-    let resolveStart;
-    const startPromise = new Promise((resolve) => { resolveStart = resolve; });
-    let cancelCalls = 0;
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return startPromise.then(() => ({
-          ok: true,
-          json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }),
-        }));
-      }
-      if (path === "/api/pro/auth/browser/cancel" && opts.method === "POST") {
-        cancelCalls += 1;
-        return { ok: true, json: async () => ({ status: "cancelled" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    // Close the dialog (unmounts AccountDialog) while /browser/start is still in flight.
-    fireEvent.click(screen.getByLabelText("Close"));
-    resolveStart();
-
-    await waitFor(() => expect(cancelCalls).toBe(1));
-  }, 10_000);
-
-  it("resets the email form on Cancel instead of resuming a stale code-entry step", async () => {
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ challenge_id: "ch_1", account_id: "acct_1" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Email me a code instead"));
-    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "samuel@example.test" } });
-    fireEvent.click(screen.getByText("Send code"));
-    await waitFor(() => expect(screen.getByLabelText("Sign-in code")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByText("Cancel"));
-    expect(screen.queryByText("Sign in with an email code")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Email me a code instead"));
-    expect(screen.getByLabelText("Email address")).toHaveValue("");
-    expect(screen.queryByLabelText("Sign-in code")).not.toBeInTheDocument();
-  });
-
-  it("shows honest email-only copy when browser sign-in is disabled", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            history: [],
-            dictatePro: { signedIn: false, account: null },
-            browserSigninEnabled: false,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    await openSignInBlock(sources);
-
-    expect(screen.getByText("We'll email you a code to sign in this device.")).toBeInTheDocument();
-    expect(screen.queryByText("Opens your browser to connect this device to your account.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Email me a code instead")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Sign in"));
-    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
-  });
-
-  it("shows an inline error with Try again / Email me a code after a failed poll", async () => {
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ flow: "loopback", authorize_url: "http://127.0.0.1:9/authorize", expires_in: 300 }) };
-      }
-      if (path === "/api/pro/auth/browser/status") {
-        return { ok: true, json: async () => ({ status: "error", reason: "expired_token" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("Sign-in timed out.")).toBeInTheDocument(), { timeout: 5000 });
-    expect(screen.getByText("Try again")).toBeInTheDocument();
-    expect(screen.getByText("Email me a code")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Email me a code"));
-    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
-  }, 10_000);
-
-  it("falls back straight to the email form with no apology when browser sign-in is unavailable", async () => {
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/browser/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ flow: "email" }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Sign in"));
-    await waitFor(() => expect(screen.getByText("Sign in with an email code")).toBeInTheDocument());
-    expect(screen.queryByText("Browser sign-in unavailable")).not.toBeInTheDocument();
-    expect(screen.queryByText("Waiting for browser…")).not.toBeInTheDocument();
-  });
-
-  it("completes sign-in via the email code fallback form", async () => {
-    const { sources } = renderSignedOutAccountPanel((path, opts) => {
-      if (path === "/api/pro/auth/start" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ challenge_id: "ch_1", expires_at: "2026-07-06T00:00:00Z", account_id: "acct_1" }) };
-      }
-      if (path === "/api/pro/auth/complete" && opts.method === "POST") {
-        return { ok: true, json: async () => ({ account_id: "acct_1", device_id: "dev_1", signedIn: true, dictatePro: ACTIVE_PRO }) };
-      }
-      return null;
-    });
-    await openSignInBlock(sources);
-
-    fireEvent.click(screen.getByText("Email me a code instead"));
-    expect(screen.getByText("Sign in with an email code")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "samuel@example.test" } });
-    fireEvent.click(screen.getByText("Send code"));
-    await waitFor(() => expect(screen.getByText("Code sent — check your email")).toBeInTheDocument());
-
-    fireEvent.change(screen.getByLabelText("Sign-in code"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByText("Verify code"));
-    await waitFor(() => expect(screen.getByText("samuel@example.test")).toBeInTheDocument());
-    expect(screen.getByText("Signed in")).toBeInTheDocument();
+    // Transcription is local-only: no provider switch to offer on the home.
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
   it("shows update controls and lets local users choose Beta", async () => {
@@ -712,8 +230,6 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -733,7 +249,7 @@ describe("Quiet Console app (mock mode)", () => {
 
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+    fireEvent.click(screen.getByLabelText("About Dictate"));
 
     expect(screen.getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Beta" })).not.toBeDisabled();
@@ -775,8 +291,6 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -828,7 +342,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(localStorage.getItem("dictate.skippedVersion")).toBe("2026.7.4-unstable.53.1");
     expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
     const accountUpdate = await screen.findByRole("button", { name: "Update" });
     fireEvent.click(accountUpdate);
     expect(localStorage.getItem("dictate.skippedVersion")).toBeNull();
@@ -870,8 +384,6 @@ describe("Quiet Console app (mock mode)", () => {
             updateChannel: "stable",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -937,7 +449,7 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.click(screen.getByRole("button", { name: action }));
     expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
     fireEvent.click(await screen.findByRole("button", { name: "Check for update" }));
     await waitFor(() => expect(polling.getChecks()).toBe(3));
     expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
@@ -958,7 +470,7 @@ describe("Quiet Console app (mock mode)", () => {
 
     render(<App />);
     expect(await screen.findByRole("button", { name: /Restart Dictate/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
     fireEvent.click(await screen.findByRole("button", { name: "Update" }));
 
     expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
@@ -1110,7 +622,7 @@ describe("Quiet Console app (mock mode)", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Dictate account and status" }));
+    fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
     fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
     await act(async () => {});
 
@@ -1139,8 +651,6 @@ describe("Quiet Console app (mock mode)", () => {
             updateChannel: "unstable",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -1208,8 +718,6 @@ describe("Quiet Console app (mock mode)", () => {
             updateChannel: "stable",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -1235,7 +743,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("lets Dictate Pro users switch to Beta updates", async () => {
+  it("switches to Beta updates and adopts the new package version", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -1253,8 +761,6 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: ACTIVE_PRO,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -1268,129 +774,22 @@ describe("Quiet Console app (mock mode)", () => {
             installedPackageVersion: "2026.7.4-unstable.52.1",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: ACTIVE_PRO,
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
       if (path === "/api/update-status") {
         return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
       }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
       return { ok: true, json: async () => ({}) };
     });
 
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
+    fireEvent.click(screen.getByLabelText("About Dictate"));
     fireEvent.click(screen.getByRole("button", { name: "Beta" }));
 
     await waitFor(() => expect(screen.getByText("Beta updates selected")).toBeInTheDocument());
     expect(screen.getByText("2026.7.4-unstable.52.1")).toBeInTheDocument();
-  });
-
-  it("shows an offline sync status when the last sync could not reach the service", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            updateChannel: "unstable",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            device: { device: "cuda", compute: "float16" },
-            history: [],
-            dictatePro: ACTIVE_PRO,
-            sync: {
-              enabled: true,
-              accountId: "acct_1",
-              deviceId: "dev_1",
-              keyAvailable: true,
-              lastSeq: 4,
-              lastResult: { error: "sync push failed: network unreachable" },
-            },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-
-    expect(screen.getByText("Not connected")).toBeInTheDocument();
-  });
-
-  it("shows action needed when encrypted sync is enabled but the local key is missing", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const path = String(url).replace("http://127.0.0.1:1", "");
-      if (path === "/api/state") {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2026.7.4",
-            updateChannel: "unstable",
-            model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
-            device: { device: "cuda", compute: "float16" },
-            history: [],
-            dictatePro: ACTIVE_PRO,
-            sync: { enabled: true, accountId: "acct_1", deviceId: "dev_1", keyAvailable: false, lastSeq: 4 },
-          }),
-        };
-      }
-      if (path === "/api/pro/devices") return { ok: true, json: async () => ({ devices: [] }) };
-      return { ok: true, json: async () => ({ updateAvailable: false, checked: true }) };
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText("Dictate account and status"));
-
-    expect(screen.getByText("Not connected")).toBeInTheDocument();
-    expect(screen.getByText("Action needed")).toBeInTheDocument();
-    expect(screen.getByText("The encryption key is missing from this device.")).toBeInTheDocument();
-  });
-
-  it("shows API key toast with copy instructions when enabling cloud without a key", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
-    render(<App />);
-    fireEvent.click(screen.getByRole("switch"));
-    expect(screen.getByText("Requires Dictate Pro or API key.")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Copy"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("dictate config set-key xai")));
-    expect(writeText.mock.calls[0][0]).toContain("dictate config set-provider online");
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-  });
-
-  it("opens Dictate Pro when the missing-key toast is clicked", () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    render(<App />);
-    fireEvent.click(screen.getByRole("switch"));
-    const toast = screen.getByText("Requires Dictate Pro or API key.").closest(".toast");
-    fireEvent.click(toast);
-    expect(open).toHaveBeenCalledWith(
-      "https://arcforge.au/download/dictate#dictate-pro",
-      "_blank",
-      "noopener,noreferrer",
-    );
-    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("notebook toggle returns to the capture home from the dictations view", () => {
@@ -2095,159 +1494,9 @@ describe("Notes list (history view)", () => {
 });
 
 /* =====================================================================
-   Feature: Provider resilience — graceful degradation (Bundle C Part 3)
-   Recording is NEVER hard-blocked. On-device is the always-available floor.
+   Feature: honest update phases for the platform package updater.
    ===================================================================== */
-describe("Provider resilience — graceful degradation", () => {
-  it("shows the capture home by default with mic always enabled", () => {
-    render(<App />);
-    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-    expect(screen.getByText("Click to dictate")).toBeInTheDocument();
-    // BlockedHome is gone — these strings must never appear
-    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
-  });
-
-  it("mic is NOT disabled by provider state — online+unhealthy still shows Start recording", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "auth", mode: "online", degraded: true, reason: "auth", active: "faster-whisper" },
-        providers: { xai: { configured: true, status: "Ready" } },
-      }),
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-
-    // After hydration with degraded state, the mic button must still be enabled
-    await waitFor(() => expect(screen.getByLabelText("Start recording")).toBeInTheDocument());
-    expect(screen.queryByText("Online transcription isn't working")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Recording blocked — provider unhealthy")).not.toBeInTheDocument();
-  });
-
-  it("provider-degraded SSE loudly persists the on-device model", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({ history: [] }),
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-
-    // Start recording via SSE note-recording event
-    act(() => {
-      sources[0].onmessage({
-        data: JSON.stringify({ type: "note-recording", active: true }),
-      });
-    });
-    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
-
-    // Fire provider-degraded SSE
-    act(() => {
-      sources[0].onmessage({
-        data: JSON.stringify({ type: "provider-degraded", preferred: "xai", active: "faster-whisper", reason: "unreachable" }),
-      });
-    });
-
-    // Amber toast: "Switched to on-device"
-    await waitFor(() =>
-      expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument()
-    );
-
-    // Privacy toggle is genuinely Local and the model change is persisted.
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-    expect(document.querySelector(".privpill.degraded")).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) =>
-      String(opts?.body || "").includes("parakeet-tdt-0.6b-v2")
-    )).toBe(true));
-
-    // Mic remains functional (recording still active)
-    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
-  });
-
-  it("ignores late provider recovery after fallback persisted Local", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({ history: [] }),
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-
-    // First degrade
-    act(() => {
-      sources[0].onmessage({
-        data: JSON.stringify({ type: "provider-degraded", preferred: "xai", active: "faster-whisper", reason: "unreachable" }),
-      });
-    });
-    await waitFor(() => expect(screen.getByText(/Switched to on-device/i)).toBeInTheDocument());
-
-    // Then recover
-    act(() => {
-      sources[0].onmessage({
-        data: JSON.stringify({ type: "provider-recovered", preferred: "xai", active: "xai" }),
-      });
-    });
-
-    expect(screen.queryByText(/Back online/)).not.toBeInTheDocument();
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-    // Home screen is still reachable (mic not disabled)
-    expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
-  });
-
-  it("hydrated degradation is persisted as Local before recording starts", async () => {
-    const sources = [];
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    window.EventSource = class {
-      constructor() { sources.push(this); }
-      close() {}
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        history: [],
-        providerHealth: { healthy: false, status: "unreachable", mode: "online", degraded: true, reason: "unreachable", active: "faster-whisper" },
-      }),
-    });
-
-    render(<App />);
-    await waitFor(() => expect(sources).toHaveLength(1));
-
-    // Start recording after hydration has committed the Local model.
-    act(() => {
-      sources[0].onmessage({
-        data: JSON.stringify({ type: "note-recording", active: true }),
-      });
-    });
-
-    await waitFor(() => expect(fetchSpy.mock.calls.some(([, opts]) =>
-      String(opts?.body || "").includes("parakeet-tdt-0.6b-v2")
-    )).toBe(true));
-    expect(document.querySelector(".privpill.degraded")).not.toBeInTheDocument();
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByLabelText("Pause recording")).toBeInTheDocument();
-  });
-
+describe("Update flow — package phases", () => {
   it("shows honest linux-package update phases without fake percentages", async () => {
     const sources = [];
     let launchChecked = false;
@@ -2271,8 +1520,6 @@ describe("Provider resilience — graceful degradation", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }
@@ -2407,8 +1654,6 @@ describe("Provider resilience — graceful degradation", () => {
             installedPackageVersion: "2026.7.4",
             model: { id: "parakeet/parakeet-tdt-0.6b-v2" },
             history: [],
-            dictatePro: { signedIn: false, account: null },
-            sync: { enabled: false, accountId: null, deviceId: "dev_1", keyAvailable: false, lastSeq: 0 },
           }),
         };
       }

@@ -1,6 +1,6 @@
 // overlays.jsx — listening HUD, command palette (⌘K), toast stack.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Icon, Brand } from "./icons.jsx";
+import { Icon } from "./icons.jsx";
 import { Kbd } from "./primitives.jsx";
 import { useStore } from "./store.jsx";
 
@@ -81,7 +81,7 @@ export function CommandPalette() {
               <div key={i}>
                 {head && <div className="cmd-grp">{head}</div>}
                 <button className={"cmd-item" + (i === cur ? " cur" : "")} onMouseEnter={() => setCur(i)} onClick={() => exec(i)}>
-                  {it.brand ? <Brand name={it.brand} /> : <Icon name={it.icon} size={17} />}
+                  <Icon name={it.icon} size={17} />
                   <span>{it.label}</span>{it.meta && <span className="meta">{it.meta}</span>}
                 </button>
               </div>

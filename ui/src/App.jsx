@@ -1,18 +1,17 @@
 // App.jsx — Note Capture shell. Home = Breath Cradle capture surface.
-// The GUI is do-it-for-them: there is no settings menu. The home carries one
-// control — the privacy pill (on-device vs online) — plus a Notes button; the
-// only non-home view is the Notes list. All advanced config lives in the
-// `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
+// The GUI is do-it-for-them: there is no settings menu. Transcription runs on
+// this machine, so the home chrome is just the update pill, the About mark and
+// a Notes button; the only non-home view is the Notes list. All advanced config
+// lives in the `dictate config` CLI. ⌘K palette = Notes + a few daily actions.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Icon, Mark } from "./icons.jsx";
-import { Kbd, Toggle, Tooltip } from "./primitives.jsx";
-import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime, XAI_API_KEY_AGENT_INSTRUCTIONS, DICTATE_PRO_URL } from "./store.jsx";
+import { Kbd, Tooltip } from "./primitives.jsx";
+import { StoreCtx, useStore, modelById, DEMO_PHRASES, formatHistoryTime } from "./store.jsx";
 import { VIEWS, HomeBar, NotebookToggle } from "./views.jsx";
 import { ListeningHUD, CommandPalette, Toasts } from "./overlays.jsx";
 import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
-import { PRODUCT_DESTINATIONS } from "./productDestinations.js";
 
 const DEFAULT_VERSION = "2026.7.4";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
@@ -132,99 +131,8 @@ function noteMarkdown(note, titleDate) {
   return `${lines.join("\n\n")}\n`;
 }
 
-/* ── Privacy control: one label + toggle on the home — where audio is transcribed. ── */
-const ONLINE_MODEL = "xai/grok-speech-to-text";
-// Local engine. English (Parakeet) is the private default — fast + accurate on
-// this machine. Multilingual is cloud-only, so the UI only offers it as a
-// cloud/Pro action rather than a regular local option.
+/* The transcription engine. Everything runs on this machine. */
 const PRIVATE_MODEL = "parakeet/parakeet-tdt-0.6b-v2";
-
-function cloudAvailable(s) {
-  return Boolean((s.dictatePro?.signedIn && s.dictatePro?.entitlements?.active) || s.keys.xai);
-}
-
-/* Local language toggle — only shown in Private mode. English stays on-device;
-   Multilingual is a cloud-only action that routes through the existing sign-in
-   / Dictate Pro flow before switching providers. */
-function LocalEngineToggle() {
-  const s = useStore();
-  const online = s.providerMode === "online";
-  const privateOn = !online || s.providerDegraded;
-  if (!privateOn) return null;
-  const isEnglish = true;
-  const pickEnglish = () => {
-    if (s.model !== PRIVATE_MODEL) s.setModel(PRIVATE_MODEL);
-  };
-  const pickMultilingual = () => {
-    s.toast("Multilingual is available in Cloud mode only.", { tone: "amber" });
-    if (!cloudAvailable(s)) {
-      s.toast("Cloud mode requires an active Dictate Pro subscription or personal xAI API key.", {
-        bad: true,
-        ms: 12_000,
-        copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
-        href: DICTATE_PRO_URL,
-      });
-      return;
-    }
-    s.setModel(ONLINE_MODEL);
-  };
-  return (
-    <div className="engine-seg" role="group" aria-label="Language mode">
-      <button
-        type="button"
-        className={"engine-opt" + (isEnglish ? " on" : "")}
-        aria-pressed={isEnglish}
-        onClick={pickEnglish}
-      >
-        English
-      </button>
-      <button
-        type="button"
-        className={"engine-opt" + (!isEnglish ? " on" : "")}
-        aria-pressed={false}
-        onClick={pickMultilingual}
-      >
-        Multilingual
-      </button>
-    </div>
-  );
-}
-
-function PrivacyPill() {
-  const s = useStore();
-  const online = s.providerMode === "online";
-  const degraded = s.providerDegraded;
-  const privateOn = !online || degraded;
-
-  const onToggle = (on) => {
-    if (on === privateOn) return;
-    if (on) {
-      s.setModel(PRIVATE_MODEL);
-      return;
-    }
-    if (!cloudAvailable(s)) {
-      s.toast("Requires Dictate Pro or API key.", {
-        bad: true,
-        ms: 12_000,
-        copy: XAI_API_KEY_AGENT_INSTRUCTIONS,
-        href: DICTATE_PRO_URL,
-      });
-      return;
-    }
-    s.setModel(ONLINE_MODEL);
-  };
-
-  return (
-    <Tooltip label={privateOn ? "Local" : "Cloud"}>
-      <div className={"privpill" + (degraded ? " degraded" : "")}>
-        <Toggle on={privateOn} onChange={onToggle} />
-        <span className="priv-icon" aria-label={privateOn ? "Local" : "Cloud"}>
-          <Icon name={privateOn ? "laptop" : "cloud"} size={23} />
-        </span>
-      </div>
-    </Tooltip>
-  );
-}
 
 /* ── Update affordance: one quiet pill in the home bar. The primary action is
    the only thing shown; Skip / Later are revealed on proximity (hover/focus).
@@ -338,17 +246,16 @@ function UpdatePill() {
   );
 }
 
-function AccountButton() {
+function AboutButton() {
   const s = useStore();
-  const syncOn = !!s.syncState?.enabled;
   return (
     <Tooltip label="Dictate">
       <button
         type="button"
-        className={"account-mark" + (syncOn ? " synced" : "")}
-        aria-label="Dictate account and status"
-        title="Dictate account and status"
-        onClick={() => s.setAccountOpen(true)}
+        className="about-mark"
+        aria-label="About Dictate"
+        title="About Dictate"
+        onClick={() => s.setAboutOpen(true)}
       >
         <Mark size={17} />
       </button>
@@ -356,43 +263,11 @@ function AccountButton() {
   );
 }
 
-function syncStatusLabel({ signedIn, sync, syncBusy, syncError }) {
-  if (!signedIn && !sync.accountId) return "Offline";
-  if (!sync.enabled) return "Offline";
-  if (!sync.keyAvailable || syncError) return "Not connected";
-  if (syncBusy) return "Updating";
-  return "Connected";
-}
-
-function AccountDialog() {
+/* About Dictate — version, engine and the update controls. Local only: there is
+   no account, no plan and no cloud here, so this dialog is the whole story. */
+function AboutDialog() {
   const s = useStore();
-  const accountPortalUrl = s.productDestinations?.hub ?? PRODUCT_DESTINATIONS.hub;
-  const sync = s.syncState || { enabled: false, keyAvailable: false, lastSeq: 0 };
-  const pro = s.dictatePro || { signedIn: false };
   const model = modelById(s.model);
-  const signedIn = !!pro.signedIn;
-  const proActive = signedIn && !!pro.entitlements?.active;
-  const proStatus = pro.entitlements?.status || (signedIn ? "inactive" : "");
-  const [devices, setDevices] = useState([]);
-  const [recoveryKey, setRecoveryKey] = useState(null);
-  const [restoreKey, setRestoreKey] = useState("");
-  const [signInOpen, setSignInOpen] = useState(false);
-  // Browser sign-in (loopback / device-code): {status: "idle"|"waiting"|"error", flow?, ...}.
-  // Scoped to this dialog instance — polling only matters while it's open, and unmounting
-  // (closing the dialog) clears the interval via the effect below.
-  const [browserSignIn, setBrowserSignIn] = useState({ status: "idle" });
-  const browserPollRef = useRef(null);
-  // Email-code fallback form — shown directly (no "unavailable" apology) whenever browser
-  // sign-in is off/unsupported, or the user picks "Email me a code instead"/"Try again".
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [emailStep, setEmailStep] = useState("idle"); // "idle" (enter address) | "sent" (enter code)
-  const [emailAddress, setEmailAddress] = useState("");
-  const [emailCode, setEmailCode] = useState("");
-  const [emailChallengeId, setEmailChallengeId] = useState("");
-  const [emailBusy, setEmailBusy] = useState(false);
-  const accountLabel = pro.account?.email || pro.account?.name || sync.accountId || (signedIn ? "Signed in" : "Not signed in");
-  const syncError = String(sync.lastResult?.error || sync.error || "").trim();
-  const syncLabel = proActive ? syncStatusLabel({ signedIn, sync, syncBusy: s.syncBusy, syncError }) : "Offline";
   const betaSelected = s.updateChannel === "unstable";
   const storeInstall = s.updateStatus?.installKind === "windows-store";
   const updateBusy = !!(
@@ -400,353 +275,14 @@ function AccountDialog() {
     || s.updateStatus?.updating
     || isUpdateBusyPhase(s.updatePhase)
   );
-  const offlineSyncError = syncError && /(offline|network|unreachable|failed|timeout|timed out|connection|fetch)/i.test(syncError);
-  const syncedLabel = !sync.enabled
-    ? "Off"
-    : !sync.keyAvailable
-      ? "Action needed"
-      : s.syncBusy
-        ? "Syncing"
-        : offlineSyncError
-          ? "Offline"
-          : syncError
-            ? "Action needed"
-            : sync.lastSeq
-              ? "Up to date"
-              : "Starting";
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); s.setAccountOpen(false); }
+      if (e.key === "Escape") { e.preventDefault(); s.setAboutOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [s]);
-
-  useEffect(() => {
-    if (!proActive || !ipc.isLive()) return;
-    let cancelled = false;
-    ipc.listProDevices()
-      .then((r) => {
-        if (!cancelled) setDevices(Array.isArray(r?.devices) ? r.devices : []);
-      })
-      .catch(() => {
-        if (!cancelled) setDevices([]);
-      });
-    return () => { cancelled = true; };
-  }, [proActive]);
-
-  const refreshAccountState = () => {
-    if (!ipc.isLive()) return Promise.resolve(null);
-    return ipc.getState().then((st) => {
-      if (st?.dictatePro) s.setDictatePro(st.dictatePro);
-      if (st?.sync) s.setSyncState(st.sync);
-      if (Array.isArray(st?.history)) s.setHistory(mapHistoryPayload(st.history));
-      return st;
-    });
-  };
-
-  // ---- browser sign-in (loopback / device-code), with an always-working email floor ----
-  const clearBrowserPoll = () => {
-    if (browserPollRef.current) { clearInterval(browserPollRef.current); browserPollRef.current = null; }
-  };
-  // Guards setState/setInterval in async callbacks that can resolve after this dialog
-  // instance has already unmounted (e.g. /browser/start is still in flight when the user
-  // closes the dialog) — without it, that late resolution would both leak an interval
-  // no cleanup ever clears and call setState on an unmounted component.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      clearBrowserPoll();
-    };
-  }, []);
-
-  const pollBrowserSignIn = () => {
-    ipc.getBrowserSignInStatus()
-      .then((r) => {
-        if (!mountedRef.current) return;
-        if (r?.status === "pending") return;
-        clearBrowserPoll();
-        if (r?.status === "complete") {
-          setBrowserSignIn({ status: "idle" });
-          if (r.dictatePro) s.setDictatePro(r.dictatePro);
-          refreshAccountState().catch(() => {});
-          s.toast("Signed in");
-          return;
-        }
-        const reason = r?.reason;
-        const message = reason === "access_denied"
-          ? "Sign-in was declined."
-          : reason === "expired_token" || reason === "timeout"
-            ? "Sign-in timed out."
-            : reason && /secret store|plaintext token|keyring|secret-tool/i.test(String(reason))
-              ? "Couldn't store your sign-in securely on this computer. Install libsecret-tools (secret-tool) and try again."
-              : reason && reason !== "unknown" && reason !== "token_exchange_failed" && reason !== "no_pending_attempt"
-                ? String(reason)
-                : "Couldn't reach the sign-in service.";
-        setBrowserSignIn({ status: "error", error: message });
-      })
-      .catch((e) => {
-        if (!mountedRef.current) return;
-        clearBrowserPoll();
-        const raw = e && e.message ? String(e.message) : "";
-        const message = /secret store|plaintext token|keyring|secret-tool/i.test(raw)
-          ? "Couldn't store your sign-in securely on this computer. Install libsecret-tools (secret-tool) and try again."
-          : raw && raw !== "Failed to fetch"
-            ? raw
-            : "Couldn't reach the sign-in service.";
-        setBrowserSignIn({ status: "error", error: message });
-      });
-  };
-
-  const startBrowserSignIn = (flow = "auto") => {
-    if (!ipc.isLive()) {
-      s.toast("Sign in from the installed app", { bad: true });
-      return;
-    }
-    resetEmailFallback();
-    clearBrowserPoll();
-    ipc.startBrowserSignIn(flow)
-      .then((r) => {
-        if (!mountedRef.current) {
-          // The dialog closed while the request was in flight — best-effort tell the
-          // server to give up the pending attempt instead of orphaning it, and never
-          // touch state on an unmounted component.
-          ipc.cancelBrowserSignIn().catch(() => {});
-          return;
-        }
-        if (!r || r.flow === "email") {
-          // No apology — this is the normal floor, not an error state.
-          setBrowserSignIn({ status: "idle" });
-          setEmailOpen(true);
-          return;
-        }
-        setBrowserSignIn({
-          status: "waiting",
-          flow: r.flow,
-          authorizeUrl: r.authorize_url || r.authorizeUrl || null,
-          userCode: r.user_code || r.userCode || null,
-          verificationUri: r.verification_uri || r.verificationUri || null,
-          verificationUriComplete: r.verification_uri_complete || r.verificationUriComplete || null,
-        });
-        browserPollRef.current = setInterval(pollBrowserSignIn, 1000);
-      })
-      .catch((e) => {
-        if (!mountedRef.current) return;
-        setBrowserSignIn({ status: "error", error: e.message || "Couldn't reach the sign-in service." });
-      });
-  };
-
-  const cancelBrowserSignIn = () => {
-    clearBrowserPoll();
-    setBrowserSignIn({ status: "idle" });
-    if (ipc.isLive()) ipc.cancelBrowserSignIn().catch(() => {});
-  };
-
-  const reopenAuthorizeUrl = () => {
-    if (browserSignIn.authorizeUrl) window.open(browserSignIn.authorizeUrl, "_blank", "noopener,noreferrer");
-  };
-
-  // Belt-and-braces: the gateway's verification_uri is already scheme-clamped
-  // server-side (ProClient._start_device_code / _clamp_verification_uri), but this is
-  // the last line of defense before window.open — never pass through anything other
-  // than https, or http on a loopback host (the local reference server).
-  const isSafeVerificationUri = (url) => {
-    if (!url) return false;
-    if (/^https:/i.test(url)) return true;
-    return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|\?|$)/i.test(url);
-  };
-
-  const openVerificationPortal = () => {
-    const url = browserSignIn.verificationUriComplete || browserSignIn.verificationUri;
-    if (isSafeVerificationUri(url)) window.open(url, "_blank", "noopener,noreferrer");
-  };
-
-  const startEmailFallback = () => {
-    cancelBrowserSignIn();
-    setEmailOpen(true);
-  };
-
-  // Fully resets the email-code form's state (not just visibility): used whenever the
-  // form is abandoned (Cancel, or switching to browser sign-in instead) so reopening it
-  // later always starts a fresh challenge rather than resuming a stale code-entry step
-  // against an old (possibly expired) challenge_id with no way to change the address.
-  const resetEmailFallback = () => {
-    setEmailOpen(false);
-    setEmailStep("idle");
-    setEmailAddress("");
-    setEmailCode("");
-    setEmailChallengeId("");
-  };
-
-  const sendEmailCode = () => {
-    const email = emailAddress.trim();
-    if (!email || !ipc.isLive()) return;
-    setEmailBusy(true);
-    ipc.startProSignIn(email)
-      .then((r) => {
-        setEmailChallengeId(r?.challenge_id || r?.challengeId || email);
-        setEmailStep("sent");
-        s.toast("Code sent — check your email");
-      })
-      .catch((e) => s.toast(e.message || "Could not send the code", { bad: true }))
-      .finally(() => setEmailBusy(false));
-  };
-
-  const verifyEmailCode = () => {
-    const code = emailCode.trim();
-    if (!code || !ipc.isLive()) return;
-    setEmailBusy(true);
-    ipc.completeProSignIn({ challengeId: emailChallengeId, code })
-      .then((r) => {
-        if (r?.dictatePro) s.setDictatePro(r.dictatePro);
-        resetEmailFallback();
-        s.toast("Signed in");
-      })
-      .catch((e) => s.toast(e.message || "Could not verify the code", { bad: true }))
-      .finally(() => setEmailBusy(false));
-  };
-
-  const openAccountPortal = () => {
-    window.open(accountPortalUrl, "_blank", "noopener,noreferrer");
-    s.toast("Opened account portal");
-  };
-
-  const signOut = () => {
-    if (!ipc.isLive()) return;
-    if (!window.confirm("Sign out of Dictate Pro on this device? Local dictations stay here.")) return;
-    s.setSyncBusy(true);
-    ipc.signOutPro()
-      .then((r) => {
-        s.setDictatePro({ signedIn: false, account: null });
-        if (r?.sync) s.setSyncState(r.sync);
-        else s.setSyncState({ enabled: false, accountId: null, deviceId: sync.deviceId || null, keyAvailable: sync.keyAvailable || false, lastSeq: sync.lastSeq || 0 });
-        setDevices([]);
-        s.toast("Signed out");
-      })
-      .catch((e) => s.toast(e.message || "Could not sign out", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const enableSync = () => {
-    if (!proActive) {
-      s.toast("Active Dictate Pro access is required for sync", { bad: true });
-      return;
-    }
-    if (!ipc.isLive()) {
-      s.toast("Sign in on the installed app to enable sync", { bad: true });
-      return;
-    }
-    s.setSyncBusy(true);
-    ipc.enableProSync(restoreKey.trim())
-      .then((r) => {
-        if (r?.sync) s.setSyncState(r.sync);
-        if (r?.recoveryKey) setRecoveryKey(r.recoveryKey);
-        setRestoreKey("");
-        s.toast("Encrypted sync enabled");
-      })
-      .catch((e) => s.toast(e.message || "Could not enable sync", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const runSync = () => {
-    if (!proActive) {
-      s.toast("Active Dictate Pro access is required for sync", { bad: true });
-      return;
-    }
-    if (!ipc.isLive()) return;
-    s.setSyncBusy(true);
-    ipc.runProSync()
-      .then((r) => {
-        if (r?.sync) s.setSyncState(r.sync);
-        if (Array.isArray(r?.history)) s.setHistory(mapHistoryPayload(r.history));
-        s.toast("Sync complete");
-      })
-      .catch((e) => s.toast(e.message || "Could not sync", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const setSyncScope = (scope) => {
-    if ((sync.scope || "meetings") === scope) return;
-    if (!ipc.isLive()) { s.setSyncState({ ...sync, scope }); return; }
-    s.setSyncBusy(true);
-    ipc.setProSyncScope(scope)
-      .then((r) => { const st = r?.sync || r; if (st) s.setSyncState(st); })
-      .catch((e) => s.toast(e.message || "Could not change sync scope", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const disableSync = () => {
-    if (!ipc.isLive()) {
-      s.setSyncState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
-      return;
-    }
-    s.setSyncBusy(true);
-    ipc.disableProSync(false)
-      .then((r) => {
-        if (r?.sync) s.setSyncState(r.sync);
-        s.toast("Sync disabled");
-      })
-      .catch((e) => s.toast(e.message || "Could not disable sync", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const refreshDevices = () => {
-    if (!ipc.isLive()) return;
-    ipc.listProDevices()
-      .then((r) => setDevices(Array.isArray(r?.devices) ? r.devices : []))
-      .catch((e) => s.toast(e.message || "Could not load devices", { bad: true }));
-  };
-
-  const revokeDevice = (deviceId) => {
-    if (!deviceId || !ipc.isLive()) return;
-    if (!window.confirm("Remove this device from Dictate Pro sync?")) return;
-    s.setSyncBusy(true);
-    ipc.revokeProDevice(deviceId)
-      .then(() => {
-        s.toast("Device removed");
-        refreshDevices();
-      })
-      .catch((e) => s.toast(e.message || "Could not remove device", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const approveDevice = (deviceId) => {
-    if (!deviceId || !ipc.isLive()) return;
-    s.setSyncBusy(true);
-    ipc.approveProDevice(deviceId)
-      .then(() => {
-        s.toast("Device approved");
-        refreshDevices();
-      })
-      .catch((e) => s.toast(e.message || "Could not approve device", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const exportCloudData = () => {
-    if (!ipc.isLive()) return;
-    s.setSyncBusy(true);
-    ipc.exportProCloudData()
-      .then((data) => ipc.saveTextFile("dictate-pro-cloud-export.json", JSON.stringify(data, null, 2)))
-      .then(() => s.toast("Cloud export saved"))
-      .catch((e) => s.toast(e.message || "Could not export cloud data", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
-
-  const deleteCloudData = () => {
-    if (!ipc.isLive()) return;
-    if (!window.confirm("Delete Dictate Pro cloud data for this account? Local notes stay on this device.")) return;
-    s.setSyncBusy(true);
-    ipc.deleteProCloudData()
-      .then((r) => {
-        if (r?.sync) s.setSyncState(r.sync);
-        setDevices([]);
-        s.toast("Cloud data deleted");
-      })
-      .catch((e) => s.toast(e.message || "Could not delete cloud data", { bad: true }))
-      .finally(() => s.setSyncBusy(false));
-  };
 
   const selectUpdateChannel = (channel) => {
     if (channel === s.updateChannel) return;
@@ -766,52 +302,33 @@ function AccountDialog() {
   };
 
   return (
-    <div className="account-scrim" onMouseDown={() => s.setAccountOpen(false)}>
+    <div className="about-scrim" onMouseDown={() => s.setAboutOpen(false)}>
       <div
-        className="account-dialog"
+        className="about-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="account-title"
+        aria-labelledby="about-title"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="account-head">
-          <span className="account-logo"><Mark size={22} /></span>
-          <div className="account-title-wrap">
-            <div id="account-title" className="account-title">Dictate</div>
-            <div className="account-sub">Version {s.version}{s.updateChannel ? ` · ${s.updateChannel}` : ""}</div>
+        <div className="about-head">
+          <span className="about-logo"><Mark size={22} /></span>
+          <div className="about-title-wrap">
+            <div id="about-title" className="about-title">Dictate</div>
+            <div className="about-sub">Version {s.version}{s.updateChannel ? ` · ${s.updateChannel}` : ""}</div>
           </div>
-          <button type="button" className="ibtn" aria-label="Close" title="Close" onClick={() => s.setAccountOpen(false)}>
+          <button type="button" className="ibtn" aria-label="Close" title="Close" onClick={() => s.setAboutOpen(false)}>
             <Icon name="x" size={16} />
           </button>
         </div>
 
-        <div className="account-grid">
-          <div className="account-row">
-            <span>Account</span>
-            {signedIn ? (
-              <strong>{accountLabel}</strong>
-            ) : (
-              <div className="account-row-end">
-                <strong>Not signed in</strong>
-                {!signInOpen && (
-                  <button type="button" className="account-signin" disabled={s.syncBusy} onClick={() => setSignInOpen(true)}>
-                    Account
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="account-row"><span>Sync</span><strong>{syncLabel}</strong></div>
-          {signedIn && (
-            <div className="account-row"><span>Plan</span><strong>{proActive ? (pro.entitlements?.display_name || "Dictate Pro") : proStatus}</strong></div>
-          )}
-          <div className="account-row"><span>Model</span><strong>{model.name}</strong></div>
+        <div className="about-grid">
+          <div className="about-row"><span>Model</span><strong>{model.name}</strong></div>
           {s.installedPackageVersion && (
-            <div className="account-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
+            <div className="about-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
-          <div className="account-row">
+          <div className="about-row">
             <span>Updates</span>
-            {storeInstall ? <strong>Microsoft Store · Stable</strong> : <div className="account-channel" role="group" aria-label="Update channel">
+            {storeInstall ? <strong>Microsoft Store · Stable</strong> : <div className="about-channel" role="group" aria-label="Update channel">
               <button
                 type="button"
                 className={!betaSelected ? "active" : ""}
@@ -831,271 +348,22 @@ function AccountDialog() {
               </button>
             </div>}
           </div>
-          {sync.enabled && (
-            <div className="account-row"><span>Synced</span><strong>{syncedLabel}</strong></div>
-          )}
-          {sync.enabled && (
-            <div className="account-row">
-              <span>Sync scope</span>
-              <div className="account-channel" role="group" aria-label="Sync scope">
-                <button
-                  type="button"
-                  className={(sync.scope || "meetings") === "meetings" ? "active" : ""}
-                  aria-pressed={(sync.scope || "meetings") === "meetings"}
-                  disabled={s.syncBusy}
-                  title="Sync meetings only"
-                  onClick={() => setSyncScope("meetings")}
-                >
-                  Meetings
-                </button>
-                <button
-                  type="button"
-                  className={(sync.scope || "meetings") === "everything" ? "active" : ""}
-                  aria-pressed={(sync.scope || "meetings") === "everything"}
-                  disabled={s.syncBusy}
-                  title="Also sync the rolling quick-copy history"
-                  onClick={() => setSyncScope("everything")}
-                >
-                  Everything
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="account-actions account-actions--split">
-          <button type="button" className="account-secondary" disabled={updateBusy} onClick={s.checkUpdates}>
+        <div className="about-actions about-actions--split">
+          <button type="button" className="about-secondary" disabled={updateBusy} onClick={s.checkUpdates}>
             <Icon name="refresh" size={14} />
             <span>{s.updateStatus?.checking ? "Checking" : "Check for update"}</span>
           </button>
           {s.updateStatus?.updateAvailable && (
-            <button type="button" className="account-primary" disabled={updateBusy} onClick={s.runUpdate}>
+            <button type="button" className="about-primary" disabled={updateBusy} onClick={s.runUpdate}>
               <Icon name="download" size={14} />
               <span>{s.updateStatus?.updating ? "Updating" : "Update"}</span>
             </button>
           )}
         </div>
 
-        {(signedIn || signInOpen) && (
-        <div className="account-actions">
-          {!signedIn ? (
-            <div className="account-enable-stack">
-              {browserSignIn.status === "waiting" && browserSignIn.flow === "loopback" ? (
-                <>
-                  <div className="account-consent">
-                    <strong>Waiting for browser…</strong>
-                    <span>Approve the sign-in in the browser tab we just opened.</span>
-                  </div>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={reopenAuthorizeUrl}>
-                    Open sign-in page
-                  </button>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("device_code")}>
-                    Use a code instead
-                  </button>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
-                    Cancel
-                  </button>
-                </>
-              ) : browserSignIn.status === "waiting" && browserSignIn.flow === "device_code" ? (
-                <>
-                  <div className="account-recovery">
-                    <span>Enter this code at your account portal</span>
-                    <code>{browserSignIn.userCode}</code>
-                  </div>
-                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={openVerificationPortal}>
-                    Open portal
-                  </button>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={cancelBrowserSignIn}>
-                    Cancel
-                  </button>
-                </>
-              ) : browserSignIn.status === "error" ? (
-                <>
-                  <div className="account-note bad">{browserSignIn.error}</div>
-                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
-                    Try again
-                  </button>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={startEmailFallback}>
-                    Email me a code
-                  </button>
-                </>
-              ) : emailOpen ? (
-                <>
-                  <div className="account-consent">
-                    <strong>Sign in with an email code</strong>
-                    <span>We'll email a code to sign in this device.</span>
-                  </div>
-                  {emailStep === "idle" ? (
-                    <>
-                      <input
-                        className="account-input"
-                        value={emailAddress}
-                        onChange={(e) => setEmailAddress(e.target.value)}
-                        placeholder="Email address"
-                        aria-label="Email address"
-                      />
-                      <button
-                        type="button"
-                        className="account-primary"
-                        disabled={s.syncBusy || emailBusy || !emailAddress.trim()}
-                        onClick={sendEmailCode}
-                      >
-                        Send code
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <input
-                        className="account-input"
-                        value={emailCode}
-                        onChange={(e) => setEmailCode(e.target.value)}
-                        placeholder="Code from email"
-                        aria-label="Sign-in code"
-                      />
-                      <button
-                        type="button"
-                        className="account-primary"
-                        disabled={s.syncBusy || emailBusy || !emailCode.trim()}
-                        onClick={verifyEmailCode}
-                      >
-                        Verify code
-                      </button>
-                    </>
-                  )}
-                  <button type="button" className="account-secondary" disabled={s.syncBusy || emailBusy} onClick={resetEmailFallback}>
-                    Cancel
-                  </button>
-                </>
-              ) : !s.browserSigninEnabled ? (
-                // Flag off: don't promise a browser this build won't open — the primary
-                // action goes straight to the email-code floor with honest copy.
-                <>
-                  <div className="account-consent">
-                    <strong>Sign in to your account</strong>
-                    <span>We'll email you a code to sign in this device.</span>
-                  </div>
-                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
-                    Sign in
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="account-consent">
-                    <strong>Sign in to your account</strong>
-                    <span>Opens your browser to connect this device to your account.</span>
-                  </div>
-                  <button type="button" className="account-primary" disabled={s.syncBusy} onClick={() => startBrowserSignIn("auto")}>
-                    Sign in
-                  </button>
-                  <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => setEmailOpen(true)}>
-                    Email me a code instead
-                  </button>
-                </>
-              )}
-            </div>
-          ) : !proActive ? (
-            <div className="account-enable-stack">
-              <div className="account-consent">
-                <strong>Dictate Pro access required</strong>
-                <span>This account is signed in, but cloud sync and Beta updates are not active on its plan.</span>
-              </div>
-            </div>
-          ) : !sync.enabled ? (
-            <div className="account-enable-stack">
-              <div className="account-consent">
-                <strong>Sync my dictations across devices</strong>
-                <span>This encrypts your synced dictations before upload.</span>
-              </div>
-              <input
-                className="account-input"
-                value={restoreKey}
-                onChange={(e) => setRestoreKey(e.target.value)}
-                placeholder="Recovery key"
-                aria-label="Recovery key"
-              />
-              <button type="button" className="account-primary" disabled={s.syncBusy || !proActive} onClick={enableSync}>
-                <Icon name="lock" size={14} />
-                <span>{restoreKey.trim() ? "Restore sync" : "Sync my dictations"}</span>
-              </button>
-            </div>
-          ) : (
-            <>
-              <button type="button" className="account-primary" disabled={s.syncBusy || !sync.keyAvailable} onClick={runSync}>
-                <Icon name="refresh" size={14} />
-                <span>Sync now</span>
-              </button>
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={disableSync}>
-                Disable
-              </button>
-            </>
-          )}
-        </div>
-        )}
-        {recoveryKey && (
-          <div className="account-recovery">
-            <span>Recovery key</span>
-            <p>Save this key. It restores synced dictations on a new device if your other devices are unavailable.</p>
-            <code>{recoveryKey}</code>
-          </div>
-        )}
-        {signedIn && proActive && (
-          <>
-            <div className="account-section-title">Devices</div>
-            <div className="account-device-list">
-              {devices.length ? devices.map((device) => {
-                const id = device.device_id || device.deviceId;
-                const isThis = id && sync.deviceId && id === sync.deviceId;
-                const revoked = !!(device.revoked_at || device.revokedAt);
-                const trusted = !!(device.trusted_at || device.trustedAt);
-                const status = isThis ? "This device" : revoked ? "Removed" : trusted ? "Active" : "Action needed";
-                return (
-                  <div className="account-device" key={id || device.label || "device"}>
-                    <div>
-                      <strong>{device.label || (isThis ? "This device" : "Desktop")}</strong>
-                      <span>{status}</span>
-                    </div>
-                    {!isThis && !revoked && (
-                      <div className="account-device-actions">
-                        {!trusted && (
-                          <button type="button" className="account-primary mini" disabled={s.syncBusy || !sync.keyAvailable} onClick={() => approveDevice(id)}>
-                            Approve
-                          </button>
-                        )}
-                        <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={() => revokeDevice(id)}>
-                          Remove
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              }) : (
-                <div className="account-empty">No devices to show.</div>
-              )}
-            </div>
-            <div className="account-actions account-actions--split">
-              <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={exportCloudData}>
-                Export my data
-              </button>
-              <button type="button" className="account-danger" disabled={s.syncBusy} onClick={deleteCloudData}>
-                Delete cloud data
-              </button>
-            </div>
-          </>
-        )}
-        {signedIn && (
-          <div className="account-actions account-actions--split">
-            <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={openAccountPortal}>
-              Manage account
-            </button>
-            <button type="button" className="account-secondary" disabled={s.syncBusy} onClick={signOut}>
-              Sign out
-            </button>
-          </div>
-        )}
-        {!signedIn && <div className="account-note">Cloud sync needs a signed-in desktop session.</div>}
-        {signedIn && proActive && <div className="account-note">Hosted Pro transcription is separate from sync and may send audio to hosted model providers when selected.</div>}
-        {signedIn && !proActive && <div className="account-note">This account is signed in but does not currently have active Dictate Pro access. Cloud sync is off.</div>}
-        {sync.enabled && !sync.keyAvailable && <div className="account-note bad">The encryption key is missing from this device.</div>}
+        <div className="about-note">Transcription runs on this machine. Nothing is sent anywhere.</div>
       </div>
     </div>
   );
@@ -1191,8 +459,7 @@ function CaptureHome() {
       {/* Home chrome: the privacy truth (the one human control) + Notes. No gear —
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
       <HomeBar
-        left={<><PrivacyPill /><LocalEngineToggle /></>}
-        right={<><UpdatePill /><AccountButton /></>}
+        right={<><UpdatePill /><AboutButton /></>}
         meeting={!s.noteRecording ? (
           <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
             <Icon name="users" size={14} />
@@ -1205,11 +472,7 @@ function CaptureHome() {
         <div className="note-screen">
           <div className="note-capture-stack">
             <div className="note-capture-anchor">
-              {/* cradle-wrap: positions the one-shot flash ring relative to the cradle */}
               <div className="cradle-wrap">
-                {s.flash && (
-                  <span className={"flashring " + s.flash.to} key={s.flash.id} aria-hidden="true" />
-                )}
                 <BreathCradle
                   session={s.noteRecording}
                   active={s.noteRecording && !s.notePaused}
@@ -1289,13 +552,6 @@ function CaptureHome() {
               </div>
             </div>
           </div>
-          {/* Degraded recording strip: amber, visible while recording on local fallback */}
-          {s.noteRecording && !s.notePaused && s.providerDegraded && (
-            <div className="note-longstrip amber t-mono">
-              <span className="wdot" />
-              On-device · reconnecting…
-            </div>
-          )}
         </div>
       </div>
       {discardOpen && (
@@ -1425,7 +681,6 @@ export default function App() {
   const [model, setModelState] = useState(PRIVATE_MODEL);
   const [meetingModel, setMeetingModelState] = useState("parakeet-pyannote/parakeet-tdt-0.6b-v2");
   const [meetingReadiness, setMeetingReadiness] = useState({ ready: true, reason: null });
-  const [keys, setKeys] = useState({ openai: false, xai: false, gemini: false });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
@@ -1483,21 +738,7 @@ export default function App() {
   // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
-  // Provider health: on-device is always-available floor; degraded = fell back from the online provider.
-  const [providerHealthy, setProviderHealthy] = useState(true);
-  const [providerStatus, setProviderStatus] = useState("ok");
-  const [providerMode, setProviderMode] = useState("private");
-  const [providerDegraded, setProviderDegraded] = useState(false);
-  const [providerReason, setProviderReason] = useState(null);
-  const [providerActive, setProviderActive] = useState(null);
-  const [dictatePro, setDictatePro] = useState({ signedIn: false });
-  const [productDestinations, setProductDestinations] = useState(PRODUCT_DESTINATIONS);
-  const [browserSigninEnabled, setBrowserSigninEnabled] = useState(false);
-  const [syncState, setSyncState] = useState({ enabled: false, accountId: null, deviceId: null, keyAvailable: false, lastSeq: 0 });
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
-  // flash: one-shot ring pulse on provider switch (local=amber, remote=green). Never silent.
-  const [flash, setFlash] = useState(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
   // expandedFrom: where the expanded view was opened from — "capture" (just dictated) or
   // "history" (notes list).
   const [expandedFrom, setExpandedFrom] = useState("capture");
@@ -1536,7 +777,6 @@ export default function App() {
   const tgtRef = useRef(""); tgtRef.current = targetText;
   const actRef = useRef(activation); actRef.current = activation;
   const capRef = useRef(false); capRef.current = capturing;
-  const providerModeRef = useRef("private"); providerModeRef.current = providerMode;
   const transcriptIdRef = useRef(null);
   const terminalTranscriptIdsRef = useRef(new Set());
   const terminalTranscriptIdOrderRef = useRef([]);
@@ -1546,9 +786,6 @@ export default function App() {
   const captureModeRef = useRef("note"); captureModeRef.current = captureMode;
   // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
   const watchdogRef = useRef(null);
-  // Flash ring: stable refs so triggerFlash can be useCallback([]) and safe in SSE handler.
-  const flashIdRef = useRef(0);
-  const flashTimerRef = useRef(null);
   const ARCHIVE_LEAVE_MS = 220;
   const ARCHIVE_UNDO_LIMIT = 20;
   const [leavingNoteIds, setLeavingNoteIds] = useState([]);
@@ -1844,28 +1081,6 @@ export default function App() {
         } else if (typeof ev.text === "string") {
           setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
         }
-      } else if (ev.type === "provider-degraded") {
-        // A fallback is a real persisted mode change, not a cosmetic degraded state.
-        providerModeRef.current = "private";
-        setProviderMode("private");
-        setModelState(PRIVATE_MODEL);
-        setProviderHealthy(true);
-        setProviderDegraded(false);
-        setProviderReason(ev.reason || null);
-        setProviderActive("parakeet");
-        ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
-          .catch(() => toast("Switched locally, but could not save the change", { bad: true }));
-        triggerFlash("local");
-        toast("Cloud failed — switched to on-device", { tone: "amber", icon: "cloudoff", ms: 6000 });
-      } else if (ev.type === "provider-recovered") {
-        // Ignore a late online probe after the fallback persisted Local.
-        if (providerModeRef.current === "private") return;
-        setProviderDegraded(false);
-        setProviderActive(ev.active || "online");
-        triggerFlash("remote");
-        toast("Back online", { icon: "cloud" });
-      } else if (ev.type === "sync-changed") {
-        if (ev.sync) setSyncState(ev.sync);
       } else if (ev.type === "history-changed") {
         ipc.getState().then((st) => {
           if (!st) return;
@@ -1919,13 +1134,6 @@ export default function App() {
     }
     if (Array.isArray(st.hotwords)) setHotwords(st.hotwords);
     setHistory(mapHistory(st));
-    if (st.providers) {
-      setKeys({
-        openai: !!st.providers.openai?.configured,
-        xai: !!st.providers.xai?.configured,
-        gemini: !!st.providers.gemini?.configured,
-      });
-    }
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.notes && typeof st.notes.paused === "boolean") setNotePaused(st.notes.paused);
     if (st.notes && (st.notes.mode === "meeting" || st.notes.mode === "note")) setCaptureMode(st.notes.mode);
@@ -1944,30 +1152,6 @@ export default function App() {
     if (st.version) setVersion(st.version);
     if (st.updateChannel) setUpdateChannel(st.updateChannel);
     if (typeof st.installedPackageVersion === "string") setInstalledPackageVersion(st.installedPackageVersion);
-    if (st.providerHealth) {
-      const ph = st.providerHealth;
-      if (ph.mode === "online" && ph.degraded) {
-        providerModeRef.current = "private";
-        setProviderMode("private");
-        setModelState(PRIVATE_MODEL);
-        setProviderHealthy(true);
-        setProviderDegraded(false);
-        setProviderActive("parakeet");
-        ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
-          .catch(() => {});
-      } else {
-        setProviderHealthy(!!ph.healthy);
-        setProviderStatus(ph.status || "ok");
-        setProviderMode(ph.mode || "private");
-        setProviderDegraded(!!ph.degraded);
-        if (ph.reason !== undefined) setProviderReason(ph.reason || null);
-        if (ph.active) setProviderActive(ph.active);
-      }
-    }
-    if (st.dictatePro) setDictatePro(st.dictatePro);
-    if (st.productDestinations) setProductDestinations(st.productDestinations);
-    if (typeof st.browserSigninEnabled === "boolean") setBrowserSigninEnabled(st.browserSigninEnabled);
-    if (st.sync) setSyncState(st.sync);
   }, []);
 
   const mapHistory = (st) => mapHistoryPayload(st.history);
@@ -2006,12 +1190,6 @@ export default function App() {
   const setModel = (id) => {
     setModelState(id);
     const m = modelById(id);
-    // Optimistically update provider mode when the model changes.
-    // Private (local) models are always healthy; switching clears any degraded state immediately.
-    const newMode = m.local ? "private" : "online";
-    setProviderMode(newMode);
-    providerModeRef.current = newMode;
-    if (m.local) { setProviderHealthy(true); setProviderDegraded(false); }
     persist({ model: { backend: m.backend, model: id.split("/").slice(1).join("/") } });
   };
   const setShortcut = async (arr) => {
@@ -2033,17 +1211,6 @@ export default function App() {
   const setSound = (v) => { setSoundState(v); persist({ prefs: { sound: v } }); };
   const setAmbient = (v) => { setAmbientState(v); persist({ prefs: { ambient: v } }); };
   const setDevice2 = (v) => { setDevice2State(v); persist({ device: { device: v } }); };
-
-  const addKey = (p) => setKeys((k) => ({ ...k, [p]: true }));
-  const saveKey = (brand, key, modelId) => {
-    if (ipc.isLive()) {
-      ipc.saveApiKey(brand, key)
-        .then(() => { addKey(brand); setModel(modelId); toast(`${providerLabel(brand)} key saved to keychain`); })
-        .catch((e) => toast(e.message || "Could not save key", { bad: true }));
-    } else {
-      addKey(brand); setModel(modelId); toast(`${providerLabel(brand)} key saved to keychain`);
-    }
-  };
 
   const addHotword = (w) => {
     setHotwords((hw) => (hw.includes(w) ? hw : [...hw, w]));
@@ -2155,40 +1322,6 @@ export default function App() {
     }
     return true;
   }, [toast]);
-
-  // triggerFlash: one-shot ring pulse on the cradle on every provider switch. Never silent.
-  const triggerFlash = useCallback((to) => {
-    const id = ++flashIdRef.current;
-    setFlash({ to, id });
-    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
-    flashTimerRef.current = setTimeout(() => {
-      setFlash((f) => (f && f.id === id ? null : f));
-      flashTimerRef.current = null;
-    }, 850);
-  }, []);
-
-  const hydrateProviderHealth = useCallback((ph) => {
-    if (!ph) return;
-    if (ph.mode === "online" && ph.degraded) {
-      providerModeRef.current = "private";
-      setProviderMode("private");
-      setModelState(PRIVATE_MODEL);
-      setProviderHealthy(true);
-      setProviderDegraded(false);
-      setProviderActive("parakeet");
-      ipc.patchConfig({ model: { backend: "parakeet", model: "parakeet-tdt-0.6b-v2" } })
-        .catch(() => toast("Switched locally, but could not save the change", { bad: true }));
-      triggerFlash("local");
-      toast("Cloud failed — switched to on-device", { tone: "amber", icon: "cloudoff", ms: 6000 });
-      return;
-    }
-    setProviderHealthy(!!ph.healthy);
-    setProviderStatus(ph.status || "ok");
-    setProviderMode(ph.mode || "private");
-    setProviderDegraded(!!ph.degraded);
-    if (ph.reason !== undefined) setProviderReason(ph.reason || null);
-    if (ph.active) setProviderActive(ph.active);
-  }, [toast, triggerFlash]);
 
   const applyNoteState = (r) => {
     if (!r) return;
@@ -2495,7 +1628,6 @@ export default function App() {
       { label: "Microphone access", sub: "Default device responding", ok: true },
       { label: "Model loads", sub: modelById(model).name, ok: true },
       { label: "Output backend", sub: "Typing into focused app", ok: true },
-      { label: "Secret store", sub: "the desktop Secret Service keyring", ok: true },
       { label: "Shortcut registered", sub: shortcut.join(" + "), ok: true },
     ],
   });
@@ -2671,7 +1803,7 @@ export default function App() {
     && (!skippedVersion || updateStatus.latestVersion !== skippedVersion);
 
   const store = {
-    view, setView, model, setModel, keys, addKey, saveKey, shortcut, setShortcut, activation, setActivation,
+    view, setView, model, setModel, shortcut, setShortcut, activation, setActivation,
     device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
     history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
@@ -2687,13 +1819,8 @@ export default function App() {
     noteElapsed, reduced, audioLevel, live,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
-    // Provider health — on-device is always available; degraded = fell back from the online provider
-    providerHealthy, providerStatus, providerMode,
-    providerDegraded, providerReason, providerActive,
-    flash, hydrateProviderHealth, meetingModel,
-    meetingReadiness,
-    dictatePro, setDictatePro, productDestinations, browserSigninEnabled, syncState, setSyncState, syncBusy, setSyncBusy,
-    accountOpen, setAccountOpen, setHistory,
+    meetingModel, meetingReadiness,
+    aboutOpen, setAboutOpen, setHistory,
   };
 
   // Resolve the current settings view component (null when on capture home).
@@ -2727,15 +1854,11 @@ export default function App() {
 
         <ListeningHUD />
         <CommandPalette />
-        {accountOpen && <AccountDialog />}
+        {aboutOpen && <AboutDialog />}
         <Toasts />
       </div>
     </StoreCtx.Provider>
   );
-}
-
-function providerLabel(brand) {
-  return { openai: "OpenAI", xai: "xAI", gemini: "Gemini" }[brand] || brand;
 }
 
 // Display keys (["Ctrl","Shift","R"] / ["Ctrl (R)"]) → engine combo token.
