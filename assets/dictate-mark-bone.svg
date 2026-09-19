@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 8 84 84" role="img" aria-label="Dictate">
+  <!-- Cradle-mic mark, bone #f3f0e8, transparent background — for use 'on dark. -->
+  <rect x="47" y="16" width="26" height="48" rx="13" fill="#f3f0e8"/>
+  <path d="M28 48 A32 32 0 0 0 92 48" fill="none" stroke="#f3f0e8" stroke-width="8" stroke-linecap="round"/>
+</svg>
