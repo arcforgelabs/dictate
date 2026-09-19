@@ -21,12 +21,15 @@ still referenced below; see `docs/local-only-audit.md` for what is going and
 
 ## Install
 
-Windows 11 — direct download from GitHub Releases is the supported channel.
+Windows 11 — Microsoft Store remains the intended public channel, with direct
+download from GitHub Releases available meanwhile.
 
-Microsoft Store packaging still exists in the tree but is no longer a target:
-it was the commercial distribution route, and a Store listing with in-app
-subscriptions does not fit a free local-only app. Whether to retire it is an
-open question in `docs/local-only-audit.md`.
+The Store listing is overdue for an update and will get one once the first
+stable local-only build is done. Store packaging, submission automation and the
+listing copy all stay; only the in-app subscription part goes, since there is
+nothing to subscribe to. See `docs/msstore-automation.md`.
+
+Windows direct download:
 
 1. Open the latest GitHub release.
 2. Download `Dictate_*_x64_en-US.msi` when a staging MSI is attached.

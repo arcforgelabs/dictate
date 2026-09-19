@@ -14,9 +14,12 @@ transcription path.
 
 ## Headline
 
-Removing the cloud surface deletes roughly **20,300 lines across 51 files**,
-about **37%** of `src` + `tests` combined (55,257 lines today). A further
+Removing the cloud surface deletes roughly **20,000 lines across 50 files**,
+about **36%** of `src` + `tests` combined (55,257 lines today). A further
 ~10,500 lines across 12 files need editing rather than deleting.
+
+There are no existing users on the cloud side, so nothing needs migrating,
+deprecating or keeping alive for compatibility. The code can just come out.
 
 This is not only "delete the cloud code". A large part of the win is that
 machinery which exists *because* the cloud can fail also stops being needed.
@@ -33,8 +36,11 @@ These have no local-only purpose. Nothing survives them.
 | `src/dictate/stt/{openai,gemini,xai}_backend.py` | 3 | 818 |
 | `src/dictate/provider_supervisor.py` | 1 | 387 |
 | Tests covering all of the above | 24 | 9,128 |
-| `scripts/` — cloud sync audits/smokes, msstore submit | 4 | 913 |
-| **Total** | **51** | **20,327** |
+| `scripts/` — cloud sync audits and smokes | 3 | 606 |
+| **Total** | **50** | **20,020** |
+
+`scripts/msstore-submit.py` (307 lines) is **not** in this list. Microsoft
+Store submission stays — see Tier 3.
 
 ### Why `provider_supervisor.py` goes
 
@@ -89,7 +95,8 @@ Move to `docs/archive/` rather than delete, so the history stays readable:
 - `dictate-pro-subscription-architecture.md`
 - `desktop-browser-signin-architecture.md`
 - `dictate-pro-terms.md`
-- `msstore-in-app-subscriptions.md`
+- `msstore-in-app-subscriptions.md` — the subscription mechanism only; the
+  Store channel itself stays
 - `deck-sections-and-dictate-space-spec.md`
 - `platform/dictate-platform-inventory-v1.md`
 - `platform/arc-forge-backend-handoff-v1.md`
@@ -117,19 +124,27 @@ Stripe or web-framework dependency to drop, because the hosted server was built
 on the standard library. `cryptography` should be re-checked once sync is gone —
 it may only be there for sync record encryption.
 
-## Open questions
+## Decisions
 
-1. **Microsoft Store.** `msstore-*` workflows and docs assume a Store listing
-   with in-app subscriptions. If distribution becomes GitHub Releases only,
-   three workflows and two docs go too. Not assumed here.
-2. **`history`/`note_store` outbox.** Both take `SyncOutbox`. Confirm removing
-   it leaves local history intact — it should, but the write path needs reading
-   before cutting.
-3. **Config migration.** Existing users have `stt_backend: openai|gemini|xai` in
-   their config. The strip needs a migration that falls back to the local
-   default instead of failing at startup.
-4. **Stored secrets.** Removing `api_keys.py` should also clear previously saved
-   keys from the OS secret store, rather than orphaning them.
+**Microsoft Store stays.** It remains the intended public Windows channel. The
+listing is overdue for an update and gets one once the first stable local-only
+build is done. `msstore-publish-msix.yml`, `msstore-api-smoke.yml`,
+`windows-msix-store-bundle.yml`, `scripts/msstore-submit.py`,
+`msstore-automation.md` and `msstore-listing.md` all stay; the listing copy
+needs rewriting for local-only positioning when that update happens. Only the
+in-app subscription content goes, since there is nothing to subscribe to.
+
+**No migration needed.** There are no existing users on the cloud side, so
+there is no saved `stt_backend: openai|gemini|xai` config in the wild to fall
+back gracefully from, and no stored API keys in an OS secret store to clear.
+Both of these would otherwise have been required work; neither is. The cloud
+code can be deleted outright rather than deprecated.
+
+## Open question
+
+**`history`/`note_store` outbox.** Both take `SyncOutbox`. Confirm removing it
+leaves local history intact — it should, but the write path needs reading
+before cutting. This is answerable from the code and does not block starting.
 
 ## Suggested sequence
 
@@ -141,5 +156,4 @@ Each step should land green on its own.
    `__main__`.
 4. Delete sync; unwire `SyncOutbox` from `history.py` and `note_store.py`.
 5. Delete API-key management; strip the tray, control panel and UI surfaces.
-6. Add the config migration for orphaned cloud backend selections.
-7. Archive docs; rewrite the privacy policy.
+6. Archive docs; rewrite the privacy policy; drop the in-app subscription doc.
