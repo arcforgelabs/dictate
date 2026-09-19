@@ -4,14 +4,17 @@ Design for **Dictate**, the "Quiet Console" desktop dictation app. The locked pr
 direction is **Note Capture** — one mic that toggles; every capture is a Note you read /
 edit / insert — and its **core is now merged to production** (`../ui/src/`).
 
-> **Source of truth & sync policy.** The Claude Design **cloud** projects are the source of
-> truth; the local mirror (`.claude-design-ds/`) is a **disposable, gitignored cache** —
-> re-export anytime, never commit. To freeze a stable target, make a deliberate
-> **`locks/<name>/`** (the committed durable artifact). See the `claude-design` + `forge` skills.
+> **Source of truth.** Tokens (colour, type, spacing, radius, shadow) and the brand-book
+> rules live in the **Dictate design system artifact**:
+> <https://claude.ai/artifact/2kMgmfMmYfH5xDuBxKye7D> (`project/README.md` is the brand book,
+> `project/tokens.json` the tokens). It was derived from `../ui/src/styles.css` and the
+> September 2026 icon reference, so where the code and the artifact disagree the code is
+> wrong unless the artifact's note says "source kept". `locks/<name>/` stays the frozen UI
+> target the shipped views are measured against. Brand raster assets are regenerated from
+> `../assets/*.svg` with `python scripts/render_brand_icons.py`.
 
-> **Canonical cloud project:** "Dictate Design System" (`2477ec…`) — the Note Capture ui-kit
-> + the design system. The old **"[LEGACY] dictate"** project (`2309408a…`) is superseded and
-> flagged for deletion.
+> The earlier Claude Design cloud projects ("Dictate Design System" `2477ec…`, the legacy
+> `2309408a…`) and the gitignored `.claude-design-ds/` mirror are superseded by the artifact.
 
 ## What's here
 | Path | What it is |
@@ -33,6 +36,6 @@ edit / insert — and its **core is now merged to production** (`../ui/src/`).
 ## Retired (2026-06-22)
 The pre-Note-Capture prototypes were retired now that the direction shipped and is frozen in
 `locks/`: `dictate-app/` (the dense seven-view console), `dictate-ds/` (the old embedded
-design system, superseded by the `2477ec` cloud project), `explorations/` (the A/B/C
+design system, superseded by the design system artifact), `explorations/` (the A/B/C
 concepts), and the loose `dictate-note-capture/` working copy (the lock holds the freeze;
 the prototype is re-exportable from the cloud cache). All recoverable from git history.
