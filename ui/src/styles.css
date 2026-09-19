@@ -1,6 +1,6 @@
 /* ============================================================================
    Dictate — Quiet Console
-   styles.css · warm greyscale, Hanken Grotesk + JetBrains Mono, light + dark.
+   styles.css · navy ink on warm paper, Hanken Grotesk + JetBrains Mono, light + dark.
    Ported from the design kit (design/ui_kits/dictate-app/styles.css) with local
    @font-face up top and per-OS window chrome appended at the bottom.
    ============================================================================ */
@@ -11,16 +11,16 @@
 
 :root{
   --bg:#efece6; --bg-2:#e9e5dd; --surface:#fff; --surface-2:#f7f5f1; --surface-3:#f0ede7;
-  --fg:#1b1a16; --muted:rgba(27,26,22,.56); --subtle:rgba(27,26,22,.40); --faint:rgba(27,26,22,.22);
-  --border:rgba(27,26,22,.10); --border-2:rgba(27,26,22,.16); --hairline:rgba(27,26,22,.07);
-  --shell-edge:rgba(27,26,22,.30); --shell-edge-soft:rgba(27,26,22,.10); --shell-divider:rgba(27,26,22,.18);
-  --primary:#1b1a16; --primary-fg:#faf8f4; --primary-hover:#322f29;
+  --fg:#1b1f27; --muted:rgba(27,31,39,.56); --subtle:rgba(27,31,39,.40); --faint:rgba(27,31,39,.22);
+  --border:rgba(27,31,39,.10); --border-2:rgba(27,31,39,.16); --hairline:rgba(27,31,39,.07);
+  --shell-edge:rgba(27,31,39,.30); --shell-edge-soft:rgba(27,31,39,.10); --shell-divider:rgba(27,31,39,.18);
+  --primary:#1b1f27; --primary-fg:#faf8f4; --primary-hover:#323c48;
   --danger:#c5402c; --danger-bg:rgba(197,64,44,.10); --live:#2f8f63; --live-bg:rgba(47,143,99,.12); --live-text:#1d6b48;
   --amber:#c08a2d; --amber-bg:rgba(192,138,45,.09); --amber-line:rgba(192,138,45,.28); --amber-text:#7a5a1e; --amber-dot:#c08a2d;
-  --shadow-sm:0 1px 2px rgba(27,26,22,.05),0 1px 1px rgba(27,26,22,.04);
-  --shadow-md:0 2px 4px rgba(27,26,22,.05),0 6px 16px rgba(27,26,22,.07);
-  --shadow-lg:0 8px 24px rgba(27,26,22,.10),0 24px 48px rgba(27,26,22,.10);
-  --shadow-pop:0 12px 32px rgba(27,26,22,.16),0 2px 8px rgba(27,26,22,.10);
+  --shadow-sm:0 1px 2px rgba(27,31,39,.05),0 1px 1px rgba(27,31,39,.04);
+  --shadow-md:0 2px 4px rgba(27,31,39,.05),0 6px 16px rgba(27,31,39,.07);
+  --shadow-lg:0 8px 24px rgba(27,31,39,.10),0 24px 48px rgba(27,31,39,.10);
+  --shadow-pop:0 12px 32px rgba(27,31,39,.16),0 2px 8px rgba(27,31,39,.10);
   --r-xl:24px; --r-lg:18px; --r-md:13px; --r-sm:9px; --r-pill:999px;
   --font-ui:"Hanken Grotesk",system-ui,sans-serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
   --ease:cubic-bezier(.22,.61,.36,1); --ease-out:cubic-bezier(.16,1,.3,1);
@@ -29,11 +29,11 @@
   color-scheme:light;
 }
 [data-theme="dark"]{
-  --bg:#0a0a0b; --bg-2:#050506; --surface:#19191c; --surface-2:#212126; --surface-3:#2c2c33;
-  --fg:#f3f1ec; --muted:rgba(243,241,236,.60); --subtle:rgba(243,241,236,.42); --faint:rgba(243,241,236,.22);
-  --border:rgba(243,241,236,.14); --border-2:rgba(243,241,236,.24); --hairline:rgba(243,241,236,.09);
-  --shell-edge:rgba(243,241,236,.32); --shell-edge-soft:rgba(0,0,0,.46); --shell-divider:rgba(243,241,236,.22);
-  --primary:#f3f1ec; --primary-fg:#161618; --primary-hover:#dedbd3;
+  --bg:#0f131b; --bg-2:#0b0e14; --surface:#1b212b; --surface-2:#232a35; --surface-3:#2e3744;
+  --fg:#f3f0e8; --muted:rgba(243,240,232,.60); --subtle:rgba(243,240,232,.42); --faint:rgba(243,240,232,.22);
+  --border:rgba(243,240,232,.14); --border-2:rgba(243,240,232,.24); --hairline:rgba(243,240,232,.09);
+  --shell-edge:rgba(243,240,232,.32); --shell-edge-soft:rgba(0,0,0,.46); --shell-divider:rgba(243,240,232,.22);
+  --primary:#f3f0e8; --primary-fg:#151921; --primary-hover:#dedbd3;
   --danger:#ff6b5b; --danger-bg:rgba(255,107,91,.13); --live:#4fbd86; --live-bg:rgba(79,189,134,.14); --live-text:#4fbd86;
   --amber:#e0a83a; --amber-bg:rgba(192,138,45,.14); --amber-line:rgba(192,138,45,.35); --amber-text:#e0a83a; --amber-dot:#e0a83a;
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
@@ -340,14 +340,14 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   opacity:0;pointer-events:none;transition:opacity var(--t),transform var(--t);}
 .hud.show{opacity:1;transform:translateX(-50%) translateY(0);}
 .hud-pill{display:flex;align-items:center;gap:14px;padding:13px 18px;border-radius:var(--r-pill);
-  background:#19191c;color:#f3f1ec;box-shadow:var(--shadow-lg);}
+  background:#1b212b;color:#f3f0e8;box-shadow:var(--shadow-lg);}
 .hud-pill .reckdot{width:9px;height:9px;border-radius:50%;background:#ff6b5b;flex:0 0 auto;
   box-shadow:0 0 0 0 rgba(255,107,91,.5);animation:rec 1.5s ease infinite;}
 @keyframes rec{0%,100%{box-shadow:0 0 0 0 rgba(255,107,91,.5);}50%{box-shadow:0 0 0 7px rgba(255,107,91,0);}}
 .hud-pill .txt{font-size:13.5px;font-weight:600;}
-.hud-pill .rel{font-size:11.5px;color:rgba(243,241,236,.6);display:flex;align-items:center;gap:6px;}
-.hud-pill .rel .kbd{background:#26262b;border-color:rgba(255,255,255,.18);color:#f3f1ec;}
-.hud-pill .timer{font-family:var(--font-mono);font-size:11.5px;color:rgba(243,241,236,.7);font-variant-numeric:tabular-nums;}
+.hud-pill .rel{font-size:11.5px;color:rgba(243,240,232,.6);display:flex;align-items:center;gap:6px;}
+.hud-pill .rel .kbd{background:#2e3744;border-color:rgba(255,255,255,.18);color:#f3f0e8;}
+.hud-pill .timer{font-family:var(--font-mono);font-size:11.5px;color:rgba(243,240,232,.7);font-variant-numeric:tabular-nums;}
 .wave{display:flex;align-items:center;gap:2.5px;height:24px;}
 .wave i{width:3px;border-radius:3px;background:#4fbd86;display:block;transition:height .08s linear;}
 
@@ -412,20 +412,20 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .wincaps button{width:46px;display:flex;align-items:center;justify-content:center;color:var(--fg);
   transition:background var(--t-fast),color var(--t-fast);}
 .wincaps button svg{width:11px;height:11px;}
-.wincaps button:hover{background:rgba(27,26,22,.07);}
-[data-theme="dark"] .wincaps button:hover{background:rgba(243,241,236,.10);}
+.wincaps button:hover{background:rgba(27,31,39,.07);}
+[data-theme="dark"] .wincaps button:hover{background:rgba(243,240,232,.10);}
 .wincaps button.x:hover{background:#c42b1c;color:#fff;}
 .win.win10 .wincaps button.x:hover{background:#e81123;color:#fff;}
 .win.win11 .wincaps button:last-child{border-top-right-radius:7px;}
 
 /* GNOME / Adwaita: round min, max, close */
 .adw{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag;}
-.adw button{width:26px;height:26px;border-radius:50%;background:rgba(27,26,22,.08);color:var(--fg);
+.adw button{width:26px;height:26px;border-radius:50%;background:rgba(27,31,39,.08);color:var(--fg);
   display:flex;align-items:center;justify-content:center;transition:background var(--t-fast);}
 .adw button svg{width:11px;height:11px;}
-.adw button:hover{background:rgba(27,26,22,.16);}
-[data-theme="dark"] .adw button{background:rgba(243,241,236,.10);}
-[data-theme="dark"] .adw button:hover{background:rgba(243,241,236,.18);}
+.adw button:hover{background:rgba(27,31,39,.16);}
+[data-theme="dark"] .adw button{background:rgba(243,240,232,.10);}
+[data-theme="dark"] .adw button:hover{background:rgba(243,240,232,.18);}
 .adw button.x:hover{background:#c5402c;color:#fff;}
 
 /* KDE / Breeze: min · max · close, round hover, close goes red */
@@ -433,8 +433,8 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .breeze button{width:24px;height:24px;border-radius:50%;color:var(--muted);
   display:flex;align-items:center;justify-content:center;transition:var(--t-fast);}
 .breeze button svg{width:12px;height:12px;}
-.breeze button:hover{background:rgba(27,26,22,.10);color:var(--fg);}
-[data-theme="dark"] .breeze button:hover{background:rgba(243,241,236,.12);}
+.breeze button:hover{background:rgba(27,31,39,.10);color:var(--fg);}
+[data-theme="dark"] .breeze button:hover{background:rgba(243,240,232,.12);}
 .breeze button.x:hover{background:#c5402c;color:#fff;}
 
 /* ===========================================================================
