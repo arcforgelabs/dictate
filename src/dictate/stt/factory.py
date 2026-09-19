@@ -7,7 +7,6 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable
 
-from dictate.api_keys import API_BACKEND_LABELS, api_key_status
 from dictate.stt.base import (
     ONNX_AMD_PROVIDERS,
     ComputeDevice,
@@ -17,8 +16,6 @@ from dictate.stt.base import (
     SttCapabilities,
 )
 from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
-from dictate.stt.gemini_backend import GeminiSpeechToText, gemini_api_key_available
-from dictate.stt.openai_backend import OpenAISpeechToText, openai_api_key_available
 from dictate.stt.parakeet_backend import ParakeetSpeechToText, parakeet_available
 from dictate.stt.parakeet_pyannote_backend import (
     PYANNOTE_COMMUNITY_MODEL,
@@ -38,7 +35,6 @@ from dictate.stt.parakeet_speaker_backend import (
     sortformer_model_source,
 )
 from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
-from dictate.stt.xai_backend import XAISpeechToText, xai_api_key_available
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "turbo",
@@ -47,9 +43,6 @@ DEFAULT_MODELS: dict[SttBackend, str] = {
     "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
     "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
     "whisperx": "large-v3",
-    "openai": "gpt-4o-mini-transcribe",
-    "xai": "grok-speech-to-text",
-    "gemini": "gemini-3-flash-preview",
 }
 FASTER_WHISPER_MODELS: tuple[str, ...] = (
     "tiny",
@@ -65,13 +58,6 @@ PARAKEET_PYANNOTE_MODELS: tuple[str, ...] = PARAKEET_MODELS
 PARAKEET_DIARIZEN_MODELS: tuple[str, ...] = PARAKEET_MODELS
 PARAKEET_SORTFORMER_MODELS: tuple[str, ...] = PARAKEET_MODELS
 WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
-OPENAI_MODELS: tuple[str, ...] = (
-    "gpt-4o-mini-transcribe",
-    "gpt-4o-transcribe",
-    "whisper-1",
-)
-XAI_MODELS: tuple[str, ...] = ("grok-speech-to-text",)
-GEMINI_MODELS: tuple[str, ...] = ("gemini-3-flash-preview",)
 @dataclass(frozen=True, slots=True)
 class BackendSpec:
     backend: SttBackend
@@ -153,39 +139,6 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
             model_name=model,
             device=device,
             compute_type=compute_type,
-        ),
-    ),
-    "openai": BackendSpec(
-        backend="openai",
-        default_model=DEFAULT_MODELS["openai"],
-        model_examples=OPENAI_MODELS,
-        description="Hosted OpenAI Audio Transcriptions API.",
-        capabilities=OpenAISpeechToText.capabilities,
-        builder=lambda model, device, _compute_type: OpenAISpeechToText(
-            model_name=model,
-            device=device,
-        ),
-    ),
-    "xai": BackendSpec(
-        backend="xai",
-        default_model=DEFAULT_MODELS["xai"],
-        model_examples=XAI_MODELS,
-        description="Hosted xAI Speech to Text API.",
-        capabilities=XAISpeechToText.capabilities,
-        builder=lambda model, device, _compute_type: XAISpeechToText(
-            model_name=model,
-            device=device,
-        ),
-    ),
-    "gemini": BackendSpec(
-        backend="gemini",
-        default_model=DEFAULT_MODELS["gemini"],
-        model_examples=GEMINI_MODELS,
-        description="Hosted Gemini audio understanding transcription.",
-        capabilities=GeminiSpeechToText.capabilities,
-        builder=lambda model, device, _compute_type: GeminiSpeechToText(
-            model_name=model,
-            device=device,
         ),
     ),
 }
@@ -395,33 +348,8 @@ def check_backend_readiness(
     if backend == "whisperx":
         _check_whisperx(report, model_name=model_name, device=device)
 
-    if backend == "openai":
-        _check_openai(report, model_name=model_name)
-
-    if backend == "xai":
-        _check_xai(report, model_name=model_name)
-
-    if backend == "gemini":
-        _check_gemini(report, model_name=model_name)
-
     return report
 
-
-def _check_openai(report: BackendReadiness, *, model_name: str) -> None:
-    if model_name not in OPENAI_MODELS:
-        report.warnings.append(
-            f"OpenAI STT model '{model_name}' is not one of the built-in examples."
-        )
-    status = api_key_status("openai", validate_remote=True)
-    if status.ready:
-        report.notes.append("OpenAI API key ready.")
-    elif not openai_api_key_available():
-        report.errors.append(
-            "OpenAI backend selected but no API key is configured. "
-            "Set DICTATE_OPENAI_API_KEY, OPENAI_API_KEY, or DICTATE_OPENAI_API_KEY_COMMAND."
-        )
-    else:
-        report.errors.append(f"OpenAI API key status: {status.status}.")
 
 
 def _check_whisperx(
@@ -577,38 +505,6 @@ def _check_parakeet_speaker_foundation(
         _check_amd_with_onnxruntime(report, requested_device=device)
 
 
-def _check_xai(report: BackendReadiness, *, model_name: str) -> None:
-    if model_name not in XAI_MODELS:
-        report.warnings.append(f"xAI STT model '{model_name}' is not one of the built-in examples.")
-    status = api_key_status("xai", validate_remote=True)
-    if status.ready:
-        report.notes.append("xAI API key ready.")
-    elif not xai_api_key_available():
-        report.errors.append(
-            "xAI backend selected but no API key is configured. "
-            "Set DICTATE_XAI_API_KEY, XAI_API_KEY, or DICTATE_XAI_API_KEY_COMMAND."
-        )
-    else:
-        report.errors.append(f"xAI API key status: {status.status}.")
-
-
-def _check_gemini(report: BackendReadiness, *, model_name: str) -> None:
-    if model_name not in GEMINI_MODELS:
-        report.warnings.append(
-            f"Gemini STT model '{model_name}' is not one of the built-in examples."
-        )
-    status = api_key_status("gemini", validate_remote=True)
-    if status.ready:
-        report.notes.append("Gemini API key ready.")
-    elif not gemini_api_key_available():
-        report.errors.append(
-            "Gemini backend selected but no API key is configured. "
-            "Set DICTATE_GEMINI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY, "
-            "or DICTATE_GEMINI_API_KEY_COMMAND."
-        )
-    else:
-        label = API_BACKEND_LABELS["gemini"]
-        report.errors.append(f"{label} API key status: {status.status}.")
 
 
 def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:

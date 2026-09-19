@@ -110,9 +110,9 @@ Use the repository license for open-source package terms:
 - `LICENSE`
 
 Before public Store submission, confirm whether Arc Forge wants additional
-commercial terms beyond the MIT license and `https://arcforge.au/terms`. If
-Dictate Pro sync or hosted models are enabled, public terms must match
-[dictate-pro-terms.md](dictate-pro-terms.md) or a stricter published version.
+commercial terms beyond the MIT license and `https://arcforge.au/terms`.
+Dictate is local-only and free: there is no account, no subscription and no
+hosted model, so no subscription terms are required.
 
 ## Store Assets
 
@@ -218,8 +218,9 @@ Recommended age-rating stance:
 - No in-app purchases in the current release. If Dictate Pro hosted/frontier
   transcription is added, treat it as an in-app subscription for a digital
   service and update Store listing metadata, price ranges, certification notes,
-  and age rating answers before submission. See
-  [msstore-in-app-subscriptions.md](msstore-in-app-subscriptions.md).
+  and age rating answers before submission. Dictate is local-only today, so
+  none of that applies; the historical note is
+  [archive/msstore-in-app-subscriptions-2026-09-19.md](archive/msstore-in-app-subscriptions-2026-09-19.md).
 - No advertising.
 - No social network or public content sharing features.
 - No location access.
@@ -273,8 +274,6 @@ data, and a small local recent transcript history for copy/paste recovery.
 - Microsoft Store MSI/EXE listing info: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/add-and-edit-store-listing-info
 - Microsoft Store MSIX listing screenshots and images: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images
 - Microsoft Store policies: https://learn.microsoft.com/en-us/windows/apps/publish/store-policies
-- Microsoft Store in-app subscriptions policy note:
-  [msstore-in-app-subscriptions.md](msstore-in-app-subscriptions.md)
 - Device capabilities guidance: https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/enable-device-capabilities
 - Microsoft winapp CLI with Tauri: https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/guides/tauri
 - Tauri Microsoft Store guidance: https://v2.tauri.app/distribute/microsoft-store/

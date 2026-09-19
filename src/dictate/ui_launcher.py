@@ -140,103 +140,8 @@ def _default_spawn(command: list[str]) -> subprocess.Popen:
 _server_handle: object | None = None
 _server_broker: object | None = None
 _wired_daemon_id: int | None = None
-_supervisor: object | None = None  # ProviderSupervisor, created by _wire_supervisor()
 
 
-def _make_probe_fn(preferred: str) -> Callable[[], bool]:
-    """Return a health-probe callable for the given STT backend.
-
-    Only xAI has a real probe today; all other remote backends return a
-    no-op that always returns ``False`` (supervisor stays degraded until
-    the process restarts or the user reconfigures).
-    """
-    if preferred == "xai":
-        from dictate.stt.xai_backend import make_xai_probe
-
-        return make_xai_probe()
-    # Fallback: no auto-recovery for this backend
-    return lambda: False
-
-
-def _wire_supervisor(daemon: object, backend: object) -> None:
-    """Wire a ``ProviderSupervisor`` to the daemon and UI backend.
-
-    If the daemon already carries a supervisor (injected at startup by
-    ``__main__.py``), that supervisor is reused and connected to the UI
-    backend — no duplicate is created and ``Daemon.__init__`` already wired
-    ``engine.health_sink``.
-
-    If no supervisor exists yet (e.g. ``DICTATE_UI_SERVER`` headless mode
-    without a startup supervisor), a fresh one is created from the daemon's
-    active STT backend.
-
-    Shuts down any previously registered module-level supervisor before
-    registering a new one.  Safe to call after the daemon is constructed.
-    """
-    global _supervisor  # noqa: PLW0603
-
-    # ------------------------------------------------------------------
-    # Fast path: reuse the supervisor that __main__.py already created.
-    # ------------------------------------------------------------------
-    existing = getattr(daemon, "supervisor", None)
-    if existing is not None:
-        old = _supervisor
-        if old is not None and old is not existing:
-            try:
-                old.shutdown()  # type: ignore[union-attr]
-            except Exception:  # noqa: BLE001
-                pass
-        _supervisor = existing
-        # health_sink was already wired in Daemon.__init__; just connect the UI.
-        try:
-            backend.connect_supervisor(existing)  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to connect supervisor to UI backend")
-        return
-
-    # ------------------------------------------------------------------
-    # Slow path: no startup supervisor — create one now.
-    # ------------------------------------------------------------------
-    old = _supervisor
-    if old is not None:
-        try:
-            old.shutdown()  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
-            pass
-
-    from dictate.provider_supervisor import ProviderSupervisor
-
-    engine = getattr(daemon, "engine", None)
-    stt = getattr(engine, "stt", None)
-    preferred: str = getattr(stt, "backend_name", "faster-whisper") if stt is not None else "faster-whisper"
-
-    probe_fn = _make_probe_fn(preferred)
-    supervisor = ProviderSupervisor(preferred, probe_fn=probe_fn)
-    _supervisor = supervisor
-
-    # --- Wire to daemon so it controls transcription routing ---
-    try:
-        daemon.supervisor = supervisor  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not set daemon.supervisor")
-
-    if engine is not None:
-        try:
-            def _sink(healthy: bool, reason: str | None) -> None:
-                if healthy:
-                    supervisor.report_success()
-                else:
-                    supervisor.report_failure(reason or "unreachable")
-
-            engine.health_sink = _sink  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
-            logger.warning("Could not wire health_sink to engine")
-
-    # --- Wire to UI backend for SSE events and get_state() ---
-    try:
-        backend.connect_supervisor(supervisor)  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to connect supervisor to UI backend")
 
 
 def ensure_server_started(daemon: object | None = None) -> object:
@@ -251,11 +156,6 @@ def ensure_server_started(daemon: object | None = None) -> object:
         if daemon is not None and _server_broker is not None and _wired_daemon_id != id(daemon):
             _wire_daemon_events(daemon, _server_broker)
             _wired_daemon_id = id(daemon)
-            if hasattr(_server_handle, "backend"):
-                try:
-                    _wire_supervisor(daemon, _server_handle.backend)
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to wire supervisor to UI backend")
         return _server_handle
     from dictate import ui_server
 
@@ -270,12 +170,6 @@ def ensure_server_started(daemon: object | None = None) -> object:
     if daemon is not None:
         _wire_daemon_events(daemon, broker)
         _wired_daemon_id = id(daemon)
-        engine = getattr(daemon, "engine", None)
-        if engine is not None:
-            try:
-                _wire_supervisor(daemon, backend)
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to wire supervisor to UI backend")
     return _server_handle
 
 

@@ -19,15 +19,12 @@ from dictate.runtime_logging import (
 )
 from dictate.stt import (
     COMPUTE_DEVICES,
-    GEMINI_MODELS,
-    OPENAI_MODELS,
     PARAKEET_DIARIZEN_MODELS,
     PARAKEET_MODELS,
     PARAKEET_PYANNOTE_MODELS,
     PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
     WHISPERX_MODELS,
-    XAI_MODELS,
     create_speech_to_text,
     resolve_default_local_model,
     resolve_model_name,
@@ -57,10 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"parakeet-pyannote examples: {', '.join(PARAKEET_PYANNOTE_MODELS)}. "
             f"parakeet-diarizen examples: {', '.join(PARAKEET_DIARIZEN_MODELS)}. "
             f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}. "
-            f"whisperx examples: {', '.join(WHISPERX_MODELS)}. "
-            f"openai examples: {', '.join(OPENAI_MODELS)}. "
-            f"xai examples: {', '.join(XAI_MODELS)}. "
-            f"gemini examples: {', '.join(GEMINI_MODELS)}."
+            f"whisperx examples: {', '.join(WHISPERX_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -113,14 +107,6 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
         model_name = resolve_default_local_model(args.device)
     else:
         model_name = resolve_model_name(args.stt_backend, args.model)
-    config = load_config()
-    if args.stt_backend == "openai" and config.openai_api_key_command:
-        os.environ.setdefault("DICTATE_OPENAI_API_KEY_COMMAND", config.openai_api_key_command)
-    if args.stt_backend == "xai" and config.xai_api_key_command:
-        os.environ.setdefault("DICTATE_XAI_API_KEY_COMMAND", config.xai_api_key_command)
-    if args.stt_backend == "gemini" and config.gemini_api_key_command:
-        os.environ.setdefault("DICTATE_GEMINI_API_KEY_COMMAND", config.gemini_api_key_command)
-
     report = run_preflight(
         require_typing=True,
         require_clipboard=True,

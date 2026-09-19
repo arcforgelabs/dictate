@@ -10,12 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from dictate.api_keys import ApiKeyStatus
 from dictate import config as config_mod
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
-from dictate.pro.client import ProClientError, ProSession
-from dictate.sync import SyncSettingsStore, decrypt_record, generate_device_key_pair
 from dictate.update_status import UpdateFlow, UpdateStatus
 from dictate.version import RELEASE_VERSION
 from dictate.ui_server import (
@@ -37,12 +34,6 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         history_store=HistoryStore(base / "history.json"),
         note_store=NoteStore(base / "notes"),
         prefs_store=UiPrefsStore(base / "ui-prefs.json"),
-        save_api_key=lambda backend, key: None,
-        clear_api_key=lambda backend: None,
-        api_key_status=lambda backend, **kw: ApiKeyStatus(backend=backend, status="None"),
-        validate_api_key_format=lambda backend, key: None,
-        secret_store_description=lambda: "the desktop Secret Service keyring",
-        secret_store_available=lambda: True,
         check_update_status=lambda: UpdateStatus(
             current_version=RELEASE_VERSION,
             latest_version=RELEASE_VERSION,
@@ -74,11 +65,6 @@ def _backend(temp_dir: str, **overrides) -> UiBackend:
         ),
         startup_enabled=lambda: True,
         set_startup_enabled=lambda enabled: None,
-        # Structural safety net: UiBackend's real default is webbrowser.open, which would
-        # otherwise launch an actual browser tab any time a test enables browser sign-in
-        # and drives a "loopback" start result. No-op here; tests that need to assert
-        # "did it open" pass their own recorder via **overrides (which wins below).
-        open_browser=lambda url: None,
     )
     kwargs.update(overrides)
     return UiBackend(**kwargs)
@@ -169,219 +155,10 @@ class _FakeNoteDaemon:
         return True
 
 
-class _FakeProClient:
-    def __init__(self) -> None:
-        self.current_device_keys = generate_device_key_pair()
-        self.create_calls: list[dict[str, object]] = []
-        self.result_key_registrations = 0
-        self.result_consumptions: list[dict[str, str]] = []
-        self.accepted_results: list[str] = []
-        self.sync_drains = 0
-        self.sync_pulls: list[dict[str, int]] = []
-        self.drained_sync_records = []
-        self.saved_key_envelopes = []
-        self.revoked_devices: list[str] = []
-        self.approved_devices: list[dict[str, object]] = []
-        self.deleted_cloud = False
-        self.session = ProSession(
-            account_id="acct_test",
-            device_id="device_test",
-            access_token="access",
-            refresh_token="refresh",
-            access_expires_at="2027-01-01T00:00:00+00:00",
-            refresh_expires_at="2028-01-01T00:00:00+00:00",
-        )
-
-    def get_state(self) -> dict[str, object]:
-        return {
-            "signedIn": True,
-            "entitlements": {"active": True},
-            "usage": None,
-            "account": None,
-            "commerce": {"subscriptions": []},
-        }
-
-    def create_meeting(
-        self,
-        *,
-        language: str | None = None,
-        audio_duration_seconds: float | None = None,
-    ) -> dict[str, object]:
-        call = {"language": language, "audio_duration_seconds": audio_duration_seconds}
-        self.create_calls.append(call)
-        return {
-            "job_id": "job_test",
-            "request_id": "request_test",
-            "correlation_id": "correlation_test",
-            **call,
-        }
-
-    def ensure_hosted_result_key(self):  # noqa: ANN201
-        self.result_key_registrations += 1
-
-    def get_meeting(self, job_id: str) -> dict[str, object]:
-        return {
-            "job": {
-                "job_id": job_id,
-                "request_id": "request_test",
-                "correlation_id": "correlation_test",
-                "state": "completed",
-            }
-        }
-
-    def consume_hosted_result(
-        self,
-        job_id: str,
-        *,
-        request_id: str,
-        correlation_id: str,
-    ) -> dict[str, object]:
-        self.result_consumptions.append(
-            {"job_id": job_id, "request_id": request_id, "correlation_id": correlation_id}
-        )
-        return {"text": "encrypted hosted transcript"}
-
-    def get_transcript(self, job_id: str) -> dict[str, object]:
-        raise AssertionError(f"plaintext transcript route called for {job_id}")
-
-    def accept_hosted_result(self, job_id: str) -> None:
-        self.accepted_results.append(job_id)
-
-    def refresh_if_needed(self) -> ProSession:
-        return self.session
-
-    def clear_session(self) -> None:
-        self.session = None
-
-    def drain_sync_outbox(self, outbox):  # noqa: ANN001
-        self.sync_drains += 1
-        pending = outbox.pending()
-        self.drained_sync_records.extend(pending)
-        outbox.replace_pending([])
-        return {"pushed": len(pending), "remaining": 0, "results": []}
-
-    def get_sync_changes(self, *, since: int = 0, limit: int = 500):
-        self.sync_pulls.append({"since": since, "limit": limit})
-        return {"records": [], "next_seq": since, "has_more": False}
-
-    def update_sync_cursor(self, *, last_seq: int):
-        return {"last_seq": last_seq}
-
-    def save_key_envelope(
-        self,
-        *,
-        envelope_kind: str,
-        envelope: dict[str, object],
-        account_key_commitment: str | None = None,
-    ) -> dict[str, object]:
-        saved = {"envelope_kind": envelope_kind, "envelope": envelope}
-        if account_key_commitment:
-            saved["account_key_commitment"] = account_key_commitment
-        self.saved_key_envelopes.append(saved)
-        return saved
-
-    def list_key_envelopes(self, *, envelope_kind: str | None = None) -> dict[str, object]:
-        envelopes = [
-            item for item in self.saved_key_envelopes
-            if envelope_kind is None or item["envelope_kind"] == envelope_kind
-        ]
-        return {"envelopes": envelopes}
-
-    def list_devices(self) -> dict[str, object]:
-        return {
-            "devices": [
-                {
-                    "device_id": "device_test",
-                    "label": "Test Desktop",
-                    "public_key": self.current_device_keys.public_key,
-                    "trusted_at": "2026-07-05T12:00:00+00:00",
-                    "revoked_at": None,
-                },
-                {
-                    "device_id": "device_other",
-                    "label": "Other Desktop",
-                    "trusted_at": "2026-07-05T12:00:00+00:00",
-                    "revoked_at": None,
-                },
-                {
-                    "device_id": "device_pending",
-                    "label": "New laptop",
-                    "public_key": "MoQq/Kdp1dGMzaBKnJ6bN1DRe4E9eKUGq9MfSi7vHEA=",
-                    "trusted_at": None,
-                    "revoked_at": None,
-                },
-            ]
-        }
-
-    def revoke_device(self, device_id: str) -> dict[str, object]:
-        self.revoked_devices.append(device_id)
-        return {"revoked": True, "device_id": device_id}
-
-    def approve_device(self, device_id: str, *, envelope: dict[str, object] | None = None) -> dict[str, object]:
-        self.approved_devices.append({"device_id": device_id, "envelope": envelope})
-        return {"approved": True, "device": {"device_id": device_id, "trusted_at": "2026-07-05T12:00:00+00:00"}}
-
-    def approve_current_device_with_recovery(
-        self,
-        *,
-        recovery_key_envelope: dict[str, object] | None = None,
-        account_key_commitment: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        self.approved_with_recovery = True
-        self.recovery_approval_envelope = recovery_key_envelope
-        self.recovery_approval_commitment = account_key_commitment
-        return {"approved": True, "method": "recovery"}
-
-    def export_cloud_data(self) -> dict[str, object]:
-        return {"account": {"account_id": "acct_test"}, "sync_records": []}
-
-    def delete_cloud_data(self) -> dict[str, object]:
-        self.deleted_cloud = True
-        return {"deleted": {"sync_records": 0}}
 
 
-class _FakeBrowserProClient(_FakeProClient):
-    """Adds the Episode 1/2 browser sign-in surface (start/poll/cancel) on top of
-    _FakeProClient's existing email-code/sync/device methods."""
-
-    def __init__(self, *, start_result=None, start_raises=None, poll_result=None) -> None:
-        super().__init__()
-        self._start_result = start_result or {
-            "flow": "loopback",
-            "authorize_url": "http://127.0.0.1:9/authorize?state=s",
-            "expires_in": 300,
-        }
-        self._start_raises = start_raises
-        self.poll_result = poll_result or {"status": "pending"}
-        self.start_calls: list[dict[str, object]] = []
-        self.poll_calls: list[dict[str, object]] = []
-        self.cancel_calls = 0
-
-    def start_browser_sign_in(self, *, device_label: str = "Desktop", prefer: str = "auto") -> dict[str, object]:
-        self.start_calls.append({"device_label": device_label, "prefer": prefer})
-        if self._start_raises is not None:
-            raise self._start_raises
-        return self._start_result
-
-    def poll_browser_sign_in(self, *, device_public_key=None, device_label: str = "Desktop") -> dict[str, object]:
-        self.poll_calls.append({"device_public_key": device_public_key, "device_label": device_label})
-        return self.poll_result
-
-    def cancel_browser_sign_in(self) -> None:
-        self.cancel_calls += 1
 
 
-def _sync_settings(base: Path) -> SyncSettingsStore:
-    saved: dict[str, str] = {}
-    return SyncSettingsStore(
-        path=base / "sync-state.json",
-        device_path=base / "sync-device.json",
-        outbox_path=base / "sync-outbox.jsonl",
-        save_key=lambda account, encoded: saved.__setitem__(account, encoded),
-        read_key=lambda account: saved.get(account),
-        clear_key=lambda account: saved.pop(account, None),
-    )
 
 
 class UiPrefsStoreTests(unittest.TestCase):
@@ -402,41 +179,7 @@ class UiPrefsStoreTests(unittest.TestCase):
             # reload from disk
             self.assertEqual(UiPrefsStore(path).load()["theme"], "dark")
 
-    def test_synced_pref_metadata_is_separate_from_prefs(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "p.json"
-            meta_path = Path(d) / "p-meta.json"
-            store = UiPrefsStore(path, meta_path)
-            store.update({"theme": "dark", "trayOnly": False}, updated_at="2026-07-05T12:00:00+00:00")
 
-            self.assertEqual(store.load()["theme"], "dark")
-            self.assertNotIn("2026-07-05T12:00:00+00:00", path.read_text())
-            self.assertEqual(store.sync_updated_at("theme"), "2026-07-05T12:00:00+00:00")
-            self.assertIsNone(store.sync_updated_at("trayOnly"))
-
-    def test_apply_synced_setting_uses_last_writer_wins(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "p.json"
-            meta_path = Path(d) / "p-meta.json"
-            store = UiPrefsStore(path, meta_path)
-            store.update({"theme": "dark"}, updated_at="2026-07-05T12:10:00+00:00")
-
-            self.assertFalse(
-                store.apply_synced_setting(
-                    "theme",
-                    "light",
-                    updated_at="2026-07-05T12:09:59+00:00",
-                )
-            )
-            self.assertEqual(store.load()["theme"], "dark")
-            self.assertTrue(
-                store.apply_synced_setting(
-                    "theme",
-                    "light",
-                    updated_at="2026-07-05T12:11:00+00:00",
-                )
-            )
-            self.assertEqual(store.load()["theme"], "light")
 
     def test_invalid_theme_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -490,7 +233,7 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["model"]["backend"], "parakeet")
             self.assertEqual(state["model"]["model"], "parakeet-tdt-0.6b-v2")
             self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
-            # local models first (parakeet English default leads), hosted present
+            # local models only (parakeet English default leads)
             self.assertEqual(state["models"][0]["backend"], "parakeet")
             self.assertTrue(state["models"][0]["local"])
             local_models = [
@@ -510,9 +253,6 @@ class UiBackendStateTests(unittest.TestCase):
                     "parakeet-sortformer",
                     "faster-whisper",
                     "whisperx",
-                    "openai",
-                    "xai",
-                    "gemini",
                 },
             )
             # default shortcut + activation
@@ -520,12 +260,13 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["shortcut"]["display"], ["Ctrl (R)"])
             self.assertEqual(state["shortcut"]["activation"], "hold")
             self.assertEqual(state["prefs"], DEFAULT_PREFS)
-            self.assertEqual(state["providers"]["openai"]["status"], "None")
+            # Transcription is local-only: every listed model runs on this machine.
+            self.assertTrue(all(model["local"] for model in state["models"]))
             self.assertEqual(state["providerHealth"]["mode"], "private")
             self.assertEqual(state["providerHealth"]["status"], "ok")
             self.assertTrue(state["providerHealth"]["healthy"])
 
-    def test_parakeet_provider_health_is_private_without_api_key(self) -> None:
+    def test_parakeet_provider_health_is_private(self) -> None:
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:
@@ -538,13 +279,6 @@ class UiBackendStateTests(unittest.TestCase):
         self.assertEqual(state["providerHealth"]["status"], "ok")
         self.assertTrue(state["providerHealth"]["healthy"])
 
-    def test_state_reflects_configured_model(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d)
-            backend.patch_config({"model": "gemini/gemini-3-flash-preview"})
-            state = backend.get_state()
-            self.assertEqual(state["model"]["backend"], "gemini")
-            self.assertEqual(state["model"]["model"], "gemini-3-flash-preview")
 
     def test_default_local_model_matches_backend_resolver(self) -> None:
         # Fresh config (no saved stt_model): the displayed local default must match
@@ -634,446 +368,34 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertIn("small", model_check["sub"])
             self.assertNotIn("turbo", model_check["sub"])
 
-    def test_models_default_flag_ignores_hosted_saved_model(self) -> None:
-        # P3-A: with a hosted backend saved (the normal state after a cloud
-        # selection), the faster-whisper "default" flag must still track the
-        # resolved local tier — not borrow the hosted model name.
-        from dictate import config as config_mod
-
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d)
-            config_mod.set_stt_selection("xai", "grok-speech-to-text", path=backend.config_path)
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
-                state = backend.get_state()
-            fw = [m for m in state["models"] if m["backend"] == "faster-whisper"]
-            defaults = [m["model"] for m in fw if m["default"]]
-            self.assertEqual(defaults, ["small"])
 
     def test_set_model_via_dict(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            backend.patch_config({"model": {"backend": "openai", "model": "gpt-4o-mini-transcribe"}})
-            self.assertEqual(backend.get_state()["model"]["backend"], "openai")
+            backend.patch_config({"model": {"backend": "parakeet-pyannote", "model": "parakeet-tdt-0.6b-v2"}})
+            self.assertEqual(backend.get_state()["model"]["backend"], "parakeet-pyannote")
 
-    def test_command_configured_provider_is_reported_ready(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(
-                d,
-                api_key_status=lambda backend, **kw: ApiKeyStatus(backend=backend, status="Ready"),
-            )
-            backend.patch_config({"model": {"backend": "xai", "model": "grok-speech-to-text"}})
-            from dictate import config as config_mod
-
-            config_mod.set_api_key_command(
-                "xai",
-                "/usr/bin/printf xai-validtokenvalidtoken",
-                path=backend.config_path,
-            )
-            with patch(
-                "dictate.ui_server.api_keys_mod._api_key_from_command",
-                return_value="xai-validtokenvalidtoken",
-            ):
-                state = backend.get_state()
-            self.assertTrue(state["providers"]["xai"]["configured"])
-            xai_model = next(model for model in state["models"] if model["backend"] == "xai")
-            self.assertTrue(xai_model["configured"])
 
     def test_unknown_backend_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(Exception):
                 _backend(d).patch_config({"model": "nope/x"})
 
-    def test_create_pro_meeting_passes_audio_duration_to_client(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            backend = _backend(d, pro_client=pro_client)
-            result = backend.create_pro_meeting(language="en", audio_duration_seconds=12.5)
-        self.assertEqual(result["job_id"], "job_test")
-        self.assertEqual(
-            pro_client.create_calls,
-            [{"language": "en", "audio_duration_seconds": 12.5}],
-        )
-        self.assertEqual(pro_client.result_key_registrations, 1)
 
-    def test_get_pro_meeting_transcript_consumes_encrypted_result_without_plaintext_route(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            backend = _backend(d, pro_client=pro_client)
-            result = backend.get_pro_meeting_transcript("job_test")
 
-        self.assertEqual(result["text"], "encrypted hosted transcript")
-        self.assertEqual(
-            pro_client.result_consumptions,
-            [
-                {
-                    "job_id": "job_test",
-                    "request_id": "request_test",
-                    "correlation_id": "correlation_test",
-                }
-            ],
-        )
-        self.assertEqual(pro_client.accepted_results, ["job_test"])
 
-    def test_state_includes_disabled_sync_status(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, sync_settings=_sync_settings(Path(d)))
-            state = backend.get_state()
 
-        self.assertFalse(state["sync"]["enabled"])
-        self.assertIsNone(state["sync"]["accountId"])
-        self.assertFalse(state["sync"]["keyAvailable"])
 
-    def test_enable_sync_requires_pro_sign_in(self) -> None:
-        class _UnsignedClient(_FakeProClient):
-            def refresh_if_needed(self):  # noqa: ANN201
-                return None
 
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(
-                d,
-                pro_client=_UnsignedClient(),
-                sync_settings=_sync_settings(Path(d)),
-            )
 
-            with self.assertRaisesRegex(ApiError, "Sign in to Dictate Pro"):
-                backend.enable_sync()
 
-    def test_enable_sync_requires_active_pro_entitlement(self) -> None:
-        class _InactiveProClient(_FakeProClient):
-            def get_state(self) -> dict[str, object]:
-                state = super().get_state()
-                state["entitlements"] = {"active": False, "status": "expired"}
-                return state
 
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(
-                d,
-                pro_client=_InactiveProClient(),
-                sync_settings=_sync_settings(Path(d)),
-            )
 
-            with self.assertRaises(ApiError) as ctx:
-                backend.enable_sync()
 
-            self.assertEqual(ctx.exception.status, 403)
 
-    def test_enable_sync_attaches_outbox_and_runs_initial_sync(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=_sync_settings(Path(d)),
-            )
 
-            result = backend.enable_sync()
-            backend.history_store.append("private local text")
 
-            self.assertTrue(result["sync"]["enabled"])
-            self.assertEqual(result["sync"]["accountId"], "acct_test")
-            self.assertTrue(result["sync"]["keyAvailable"])
-            self.assertEqual(pro_client.sync_drains, 1)
-            self.assertEqual(len(backend.history_store._sync_outbox.pending()), 1)
-            recovery_saves = [
-                item for item in pro_client.saved_key_envelopes
-                if item["envelope_kind"] == "recovery"
-            ]
-            self.assertEqual(len(recovery_saves), 1)
-            self.assertIn("account_key_commitment", recovery_saves[0])
 
-    def test_enable_sync_uploads_current_device_key_envelope(self) -> None:
-        from dictate.sync import unwrap_account_key_for_device
-
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            sync_settings = _sync_settings(Path(d))
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=sync_settings,
-            )
-
-            backend.enable_sync()
-
-            device_envelopes = [
-                item for item in pro_client.saved_key_envelopes
-                if item["envelope_kind"] == "device"
-            ]
-            self.assertEqual(len(device_envelopes), 1)
-            restored = unwrap_account_key_for_device(
-                account_id="acct_test",
-                private_key=pro_client.current_device_keys.private_key,
-                envelope=device_envelopes[0]["envelope"],
-            )
-            self.assertEqual(restored, sync_settings.account_key())
-
-    def test_enable_sync_requires_current_device_public_key(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-
-            def list_devices() -> dict[str, object]:
-                return {
-                    "devices": [
-                        {
-                            "device_id": "device_test",
-                            "label": "Test Desktop",
-                            "trusted_at": "2026-07-05T12:00:00+00:00",
-                            "revoked_at": None,
-                        }
-                    ]
-                }
-
-            pro_client.list_devices = list_devices  # type: ignore[method-assign]
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=_sync_settings(Path(d)),
-            )
-
-            with self.assertRaisesRegex(ApiError, "sync public key"):
-                backend.enable_sync()
-
-    def test_enable_sync_snapshots_portable_prefs_and_lexicon(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            pro_client = _FakeProClient()
-            sync_settings = _sync_settings(base)
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=sync_settings,
-            )
-            backend.patch_config({"prefs": {"theme": "dark", "sound": True, "activation": "toggle", "outputFormat": "markdown"}})
-            config_mod.add_hotwords(["OpenClaw"], path=backend.config_path)
-            config_mod.add_lexicon_replacements({"openc law": "OpenClaw"}, path=backend.config_path)
-
-            backend.enable_sync()
-
-            key = sync_settings.account_key()
-            self.assertIsNotNone(key)
-            payloads = [decrypt_record("acct_test", key, record) for record in pro_client.drained_sync_records]
-            self.assertTrue(any(payload.get("key") == "theme" and payload.get("value") == "dark" for payload in payloads))
-            self.assertTrue(any(payload.get("key") == "activation" and payload.get("value") == "toggle" for payload in payloads))
-            self.assertTrue(any(payload.get("key") == "outputFormat" and payload.get("value") == "markdown" for payload in payloads))
-            self.assertTrue(any(payload.get("kind") == "hotword" and payload.get("term") == "OpenClaw" for payload in payloads))
-            self.assertTrue(
-                any(
-                    payload.get("kind") == "replacement"
-                    and payload.get("wrong") == "openc law"
-                    and payload.get("right") == "OpenClaw"
-                    for payload in payloads
-                )
-            )
-
-    def test_enable_sync_snapshots_existing_local_history_notes_and_segments(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            pro_client = _FakeProClient()
-            sync_settings = _sync_settings(base)
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=sync_settings,
-            )
-            history_entry = backend.history_store.append("private local history before sync")
-            note_id = backend.note_store.create_note(
-                provider="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                mode="meeting",
-                speaker_labels=True,
-            )
-            backend.note_store.append_segment(
-                note_id,
-                NoteSegment(
-                    seq=0,
-                    t_start=0.0,
-                    t_end=2.0,
-                    provider="parakeet",
-                    model="parakeet-tdt-0.6b-v2",
-                    text="private note segment before sync",
-                    speaker_id="speaker_1",
-                    speaker_label="Speaker 1",
-                ),
-            )
-            backend.note_store.mark_ready(note_id, duration_s=2.0)
-
-            # This test exercises the full snapshot (history + note + segment), so opt into
-            # "everything" — enable_sync otherwise defaults new sync to meetings-only.
-            config_mod.set_sync_scope("everything", backend.config_path)
-            backend.enable_sync()
-
-            key = sync_settings.account_key()
-            self.assertIsNotNone(key)
-            raw_outbox = (base / "sync-outbox.jsonl").read_text() if (base / "sync-outbox.jsonl").exists() else ""
-            self.assertNotIn("private local history before sync", raw_outbox)
-            self.assertNotIn("private note segment before sync", raw_outbox)
-            records = pro_client.drained_sync_records
-            self.assertTrue(any(record.collection == "history" and record.record_id == history_entry.id for record in records))
-            self.assertTrue(any(record.collection == "note" and record.record_id == note_id for record in records))
-            self.assertTrue(any(record.collection == "segment" and record.record_id == f"{note_id}:0" for record in records))
-            payloads = [decrypt_record("acct_test", key, record) for record in records]
-            self.assertTrue(any(payload.get("text") == "private local history before sync" for payload in payloads))
-            self.assertTrue(any(payload.get("text") == "private note segment before sync" for payload in payloads))
-            self.assertTrue(any(payload.get("mode") == "meeting" and payload.get("speaker_labels") is True for payload in payloads))
-
-    def test_enable_sync_can_restore_existing_key_from_recovery_key(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            sync_settings = _sync_settings(base)
-            pro_client = _FakeProClient()
-            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
-            created = backend.enable_sync()
-            original_key = sync_settings.account_key()
-            assert original_key is not None
-            recovery_key = created["recoveryKey"]
-            sync_settings.disable(clear_key=True)
-
-            restored = backend.enable_sync(recovery_key=recovery_key)
-
-            self.assertTrue(restored["sync"]["enabled"])
-            self.assertNotIn("recoveryKey", restored)
-            self.assertEqual(sync_settings.account_key(), original_key)
-            self.assertTrue(pro_client.approved_with_recovery)
-            from dictate.sync import compute_account_key_commitment
-
-            self.assertEqual(
-                pro_client.recovery_approval_commitment,
-                compute_account_key_commitment(original_key),
-            )
-
-    def test_enable_sync_rejects_wrong_recovery_key(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            sync_settings = _sync_settings(base)
-            pro_client = _FakeProClient()
-            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
-            backend.enable_sync()
-            sync_settings.disable(clear_key=True)
-
-            with self.assertRaisesRegex(ApiError, "Recovery key could not unlock"):
-                backend.enable_sync(recovery_key="dictate-rk-wrong")
-
-    def test_approve_pro_device_wraps_local_sync_key(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            sync_settings = _sync_settings(Path(d))
-            pro_client = _FakeProClient()
-            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
-            backend.enable_sync()
-
-            result = backend.approve_pro_device("device_pending")
-
-            self.assertTrue(result["approved"])
-            self.assertEqual(pro_client.approved_devices[0]["device_id"], "device_pending")
-            envelope = pro_client.approved_devices[0]["envelope"]
-            self.assertIsInstance(envelope, dict)
-            assert isinstance(envelope, dict)
-            self.assertEqual(envelope["algorithm"], "x25519-aes-256-gcm")
-
-    def test_enable_sync_can_restore_existing_key_from_device_approval(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pending_keys = generate_device_key_pair()
-            sync_settings = _sync_settings(Path(d))
-            pro_client = _FakeProClient()
-            backend = _backend(d, sync_settings=sync_settings, pro_client=pro_client)
-            backend.enable_sync()
-            original_key = sync_settings.account_key()
-            assert original_key is not None
-
-            def list_devices() -> dict[str, object]:
-                return {
-                    "devices": [
-                        {
-                            "device_id": "device_test",
-                            "label": "Test Desktop",
-                            "trusted_at": "2026-07-05T12:00:00+00:00",
-                            "revoked_at": None,
-                        },
-                        {
-                            "device_id": "device_pending",
-                            "label": "New laptop",
-                            "public_key": pending_keys.public_key,
-                            "trusted_at": None,
-                            "revoked_at": None,
-                        },
-                    ]
-                }
-
-            pro_client.list_devices = list_devices  # type: ignore[method-assign]
-            backend.approve_pro_device("device_pending")
-            envelope = pro_client.approved_devices[0]["envelope"]
-            assert isinstance(envelope, dict)
-            pro_client.saved_key_envelopes.append({
-                "envelope_kind": "device",
-                "device_id": "device_pending",
-                "envelope": envelope,
-            })
-            pro_client.session = ProSession(
-                account_id="acct_test",
-                device_id="device_pending",
-                access_token="access",
-                refresh_token="refresh",
-                access_expires_at="2027-01-01T00:00:00+00:00",
-                refresh_expires_at="2028-01-01T00:00:00+00:00",
-            )
-            sync_settings.disable(clear_key=True)
-
-            with patch("dictate.ui_server.api_keys_mod.read_sync_device_private_key", return_value=pending_keys.private_key):
-                restored = backend.enable_sync()
-
-            self.assertTrue(restored["sync"]["enabled"])
-            self.assertNotIn("recoveryKey", restored)
-            self.assertEqual(sync_settings.account_key(), original_key)
-
-    def test_run_sync_drains_outbox_and_returns_history(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=_sync_settings(Path(d)),
-            )
-            backend.enable_sync()
-            backend.history_store.append("private local text")
-
-            result = backend.run_sync()
-
-            self.assertEqual(result["result"]["pushed"], 1)
-            self.assertEqual(result["result"]["remaining"], 0)
-            self.assertEqual(result["history"][0]["text"], "private local text")
-            self.assertEqual(backend.history_store._sync_outbox.pending(), [])
-
-    def test_sign_out_disables_sync_without_deleting_local_history(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeProClient()
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                sync_settings=_sync_settings(Path(d)),
-            )
-            backend.enable_sync()
-            backend.history_store.append("keep local")
-            note_id = backend.note_store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
-            backend.note_store.append_segment(
-                note_id,
-                NoteSegment(
-                    seq=0,
-                    t_start=0.0,
-                    t_end=1.0,
-                    provider="parakeet",
-                    model="parakeet-tdt-0.6b-v2",
-                    text="keep local note",
-                ),
-            )
-            backend.note_store.mark_ready(note_id, duration_s=1.0)
-
-            backend.sign_out_pro()
-
-            self.assertFalse(backend.get_state()["sync"]["enabled"])
-            texts = [item["text"] for item in backend.get_history()]
-            self.assertIn("keep local", texts)
-            self.assertIn("keep local note", texts)
 
     def test_export_local_data_includes_history_and_notes_without_cloud_or_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1115,127 +437,6 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertNotIn("sync_records", raw)
 
 
-class UiBackendBrowserSignInTests(unittest.TestCase):
-    """Episode 3: start_pro_browser_sign_in / poll_pro_browser_sign_in / cancel_pro_browser_sign_in."""
-
-    def test_flag_off_returns_email_fallback_without_touching_pro_client(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            # Exercise the real default while keeping the test independent from
-            # the developer shell/CI environment.
-            with patch.dict("os.environ", {"DICTATE_PRO_BROWSER_SIGNIN": ""}):
-                backend = _backend(d, pro_client=_FakeBrowserProClient())
-                self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
-                self.assertEqual(backend.pro_client.start_calls, [])
-
-    def test_start_happy_path_loopback_opens_browser(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            opened = []
-            pro_client = _FakeBrowserProClient()
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                browser_signin_enabled=lambda: True,
-                open_browser=lambda url: opened.append(url),
-            )
-            result = backend.start_pro_browser_sign_in(flow="auto", device_label="Test Desktop")
-            self.assertEqual(result["flow"], "loopback")
-            self.assertEqual(result["authorize_url"], "http://127.0.0.1:9/authorize?state=s")
-            self.assertEqual(pro_client.start_calls, [{"device_label": "Test Desktop", "prefer": "auto"}])
-            self.assertEqual(opened, ["http://127.0.0.1:9/authorize?state=s"])
-            # A device keypair was generated up front, mirroring complete_pro_sign_in.
-            self.assertIsNotNone(backend._pending_browser_device_key)
-
-    def test_start_device_code_flow_does_not_open_a_browser(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            opened = []
-            pro_client = _FakeBrowserProClient(
-                start_result={
-                    "flow": "device_code",
-                    "user_code": "ABCD-EFGH",
-                    "verification_uri": "http://127.0.0.1:9/device",
-                    "verification_uri_complete": "http://127.0.0.1:9/device?user_code=ABCD-EFGH",
-                    "expires_in": 900,
-                    "interval": 5,
-                }
-            )
-            backend = _backend(
-                d,
-                pro_client=pro_client,
-                browser_signin_enabled=lambda: True,
-                open_browser=lambda url: opened.append(url),
-            )
-            result = backend.start_pro_browser_sign_in(flow="device_code")
-            self.assertEqual(result["flow"], "device_code")
-            self.assertEqual(result["user_code"], "ABCD-EFGH")
-            self.assertEqual(opened, [])
-
-    def test_start_capability_501_returns_email_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient(start_raises=ProClientError(501, "browser sign-in unavailable"))
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            self.assertEqual(backend.start_pro_browser_sign_in(), {"flow": "email"})
-
-    def test_start_propagates_non_capability_errors(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient(start_raises=ProClientError(503, "unreachable"))
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            with self.assertRaises(ApiError) as ctx:
-                backend.start_pro_browser_sign_in()
-            self.assertEqual(ctx.exception.status, 503)
-
-    def test_poll_pending_leaves_device_key_and_session_untouched(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient(poll_result={"status": "pending"})
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            backend.start_pro_browser_sign_in()
-            result = backend.poll_pro_browser_sign_in()
-            self.assertEqual(result, {"status": "pending"})
-            self.assertIsNotNone(backend._pending_browser_device_key)
-
-    def test_poll_complete_persists_device_key_and_returns_dictate_pro_state(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient(
-                poll_result={"status": "complete", "account_id": "acct_x", "device_id": "device_x"}
-            )
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            backend.start_pro_browser_sign_in()
-            pending_key = backend._pending_browser_device_key
-            assert pending_key is not None
-
-            with patch("dictate.ui_server.api_keys_mod.save_sync_device_private_key") as save_mock:
-                result = backend.poll_pro_browser_sign_in()
-
-            save_mock.assert_called_once_with("device_x", pending_key.private_key)
-            self.assertEqual(result["status"], "complete")
-            self.assertEqual(result["account_id"], "acct_x")
-            self.assertIn("dictatePro", result)
-            self.assertTrue(result["dictatePro"]["signedIn"])
-            # The device key is single-shot: cleared once persisted.
-            self.assertIsNone(backend._pending_browser_device_key)
-
-    def test_poll_error_clears_pending_device_key(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient(poll_result={"status": "error", "reason": "expired_token"})
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            backend.start_pro_browser_sign_in()
-            result = backend.poll_pro_browser_sign_in()
-            self.assertEqual(result, {"status": "error", "reason": "expired_token"})
-            self.assertIsNone(backend._pending_browser_device_key)
-
-    def test_cancel_happy_path(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            pro_client = _FakeBrowserProClient()
-            backend = _backend(d, pro_client=pro_client, browser_signin_enabled=lambda: True)
-            backend.start_pro_browser_sign_in()
-            result = backend.cancel_pro_browser_sign_in()
-            self.assertEqual(result, {"status": "cancelled"})
-            self.assertEqual(pro_client.cancel_calls, 1)
-            self.assertIsNone(backend._pending_browser_device_key)
-
-    def test_cancel_when_disabled_is_a_harmless_no_op(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, pro_client=_FakeBrowserProClient())
-            self.assertEqual(backend.cancel_pro_browser_sign_in(), {"status": "cancelled"})
 
 
 class UiBackendShortcutPrefsTests(unittest.TestCase):
@@ -1255,40 +456,7 @@ class UiBackendShortcutPrefsTests(unittest.TestCase):
             self.assertEqual(prefs["theme"], "dark")
             self.assertTrue(prefs["sound"])
 
-    def test_synced_prefs_enqueue_when_sync_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            sync_settings = _sync_settings(Path(d))
-            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
-            backend.enable_sync()
 
-            backend.patch_config({"prefs": {"theme": "dark", "activation": "toggle", "outputFormat": "markdown", "trayOnly": False}})
-
-            outbox = sync_settings.outbox()
-            self.assertIsNotNone(outbox)
-            pending = outbox.pending()
-            payloads = [decrypt_record("acct_test", sync_settings.account_key(), record) for record in pending]
-            values_by_key = {payload["key"]: payload["value"] for payload in payloads}
-            self.assertEqual([record.collection for record in pending], ["settings", "settings", "settings"])
-            self.assertEqual(values_by_key["theme"], "dark")
-            self.assertEqual(values_by_key["activation"], "toggle")
-            self.assertEqual(values_by_key["outputFormat"], "markdown")
-            self.assertNotIn("trayOnly", values_by_key)
-
-    def test_shortcut_activation_enqueues_when_sync_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            sync_settings = _sync_settings(Path(d))
-            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
-            backend.enable_sync()
-
-            backend.patch_config({"shortcut": {"activation": "toggle"}})
-
-            outbox = sync_settings.outbox()
-            self.assertIsNotNone(outbox)
-            pending = outbox.pending()
-            self.assertEqual([record.collection for record in pending], ["settings"])
-            payload = decrypt_record("acct_test", sync_settings.account_key(), pending[0])
-            self.assertEqual(payload["key"], "activation")
-            self.assertEqual(payload["value"], "toggle")
 
     def test_invalid_theme_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1313,24 +481,6 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             res = backend.remove_hotword("AcmeWidget")
             self.assertNotIn("AcmeWidget", res["hotwords"])
 
-    def test_hotwords_enqueue_lexicon_records_when_sync_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            sync_settings = _sync_settings(Path(d))
-            backend = _backend(d, sync_settings=sync_settings, pro_client=_FakeProClient())
-            backend.enable_sync()
-
-            backend.add_hotwords(["OpenClaw"])
-            backend.remove_hotword("OpenClaw")
-
-            outbox = sync_settings.outbox()
-            self.assertIsNotNone(outbox)
-            pending = outbox.pending()
-            self.assertEqual([record.collection for record in pending], ["lexicon", "lexicon"])
-            self.assertFalse(pending[0].deleted)
-            self.assertTrue(pending[1].deleted)
-            payload = decrypt_record("acct_test", sync_settings.account_key(), pending[0])
-            self.assertEqual(payload["kind"], "hotword")
-            self.assertEqual(payload["term"], "OpenClaw")
 
     def test_history_label_and_clear(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1591,37 +741,6 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertEqual(backend._relative(now - timedelta(days=4)), "4d ago")
 
 
-class UiBackendApiKeyTests(unittest.TestCase):
-    def test_save_key_validates_format(self) -> None:
-        saved: list[tuple[str, str]] = []
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(
-                d,
-                save_api_key=lambda b, k: saved.append((b, k)),
-                validate_api_key_format=lambda b, k: None,
-            )
-            res = backend.save_provider_key("openai", "sk-abc123abc123abc123")
-            self.assertEqual(saved, [("openai", "sk-abc123abc123abc123")])
-            self.assertIn("backend", res)
-
-    def test_save_key_rejects_bad_format(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, validate_api_key_format=lambda b, k: "looks wrong")
-            with self.assertRaises(Exception):
-                backend.save_provider_key("openai", "bad")
-
-    def test_unknown_provider_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            with self.assertRaises(Exception):
-                _backend(d).save_provider_key("acme", "sk-xxxxxxxxxxxxxxxxxx")
-
-    def test_clear_key(self) -> None:
-        cleared: list[str] = []
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, clear_api_key=lambda b: cleared.append(b))
-            res = backend.clear_provider_key("xai")
-            self.assertEqual(cleared, ["xai"])
-            self.assertFalse(res["configured"])
 
 
 class UiBackendDoctorTests(unittest.TestCase):
@@ -1666,57 +785,22 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertEqual(flow["progress"], 0)
             self.assertEqual(flow["actions"], ["open_release"])
 
-    def test_patch_config_sets_stable_update_channel_without_pro(self) -> None:
-        class _SignedOutProClient(_FakeProClient):
-            def get_state(self) -> dict[str, object]:
-                state = super().get_state()
-                state["signedIn"] = False
-                state["account"] = None
-                return state
-
+    def test_patch_config_sets_stable_update_channel(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, pro_client=_SignedOutProClient())
+            backend = _backend(d)
             state = backend.patch_config({"updateChannel": "stable"})
 
             self.assertEqual(state["updateChannel"], "stable")
             self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "stable")
 
-    def test_patch_config_sets_beta_update_channel_without_pro(self) -> None:
-        class _SignedOutProClient(_FakeProClient):
-            def get_state(self) -> dict[str, object]:
-                state = super().get_state()
-                state["signedIn"] = False
-                state["account"] = None
-                return state
-
+    def test_patch_config_sets_beta_update_channel(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, pro_client=_SignedOutProClient())
+            backend = _backend(d)
             state = backend.patch_config({"updateChannel": "unstable"})
 
             self.assertEqual(state["updateChannel"], "unstable")
             self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
 
-    def test_patch_config_sets_beta_update_channel_for_inactive_pro(self) -> None:
-        class _InactiveProClient(_FakeProClient):
-            def get_state(self) -> dict[str, object]:
-                state = super().get_state()
-                state["entitlements"] = {"active": False, "status": "expired"}
-                return state
-
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, pro_client=_InactiveProClient())
-            state = backend.patch_config({"updateChannel": "unstable"})
-
-            self.assertEqual(state["updateChannel"], "unstable")
-            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
-
-    def test_patch_config_sets_beta_update_channel_for_pro(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d, pro_client=_FakeProClient())
-            state = backend.patch_config({"updateChannel": "unstable"})
-
-            self.assertEqual(state["updateChannel"], "unstable")
-            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
 
 
 @unittest.skipIf(
@@ -1829,106 +913,9 @@ class HttpIntegrationTests(unittest.TestCase):
         ids = [item["id"] for item in body["history"]]
         self.assertIn(history_id, ids)
 
-    def test_create_pro_meeting_over_http_passes_audio_duration(self) -> None:
-        pro_client = _FakeProClient()
-        self.handle.backend.pro_client = pro_client
-        with self._post(
-            "/api/pro/meetings",
-            {"language": "en", "audioDurationSeconds": 12.5},
-        ) as resp:
-            body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(body["job_id"], "job_test")
-        self.assertEqual(
-            pro_client.create_calls,
-            [{"language": "en", "audio_duration_seconds": 12.5}],
-        )
 
-    def test_browser_signin_routes_over_http(self) -> None:
-        opened = []
-        pro_client = _FakeBrowserProClient(
-            poll_result={"status": "complete", "account_id": "acct_x", "device_id": "device_x"}
-        )
-        self.handle.backend.pro_client = pro_client
-        self.handle.backend.browser_signin_enabled = lambda: True
-        self.handle.backend.open_browser = lambda url: opened.append(url)
 
-        with self._post("/api/pro/auth/browser/start", {"flow": "auto"}) as resp:
-            start_body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(start_body["flow"], "loopback")
-        self.assertEqual(opened, [start_body["authorize_url"]])
 
-        with self._get("/api/pro/auth/browser/status") as resp:
-            status_body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(status_body["status"], "complete")
-        self.assertTrue(status_body["dictatePro"]["signedIn"])
-
-        with self._post("/api/pro/auth/browser/cancel") as resp:
-            cancel_body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(cancel_body, {"status": "cancelled"})
-        self.assertEqual(pro_client.cancel_calls, 1)
-
-    def test_browser_signin_start_over_http_falls_back_to_email_when_disabled(self) -> None:
-        self.handle.backend.pro_client = _FakeBrowserProClient()
-        with patch.dict("os.environ", {"DICTATE_PRO_BROWSER_SIGNIN": ""}):
-            with self._post("/api/pro/auth/browser/start") as resp:
-                body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(body, {"flow": "email"})
-
-    def test_sync_enable_run_disable_over_http(self) -> None:
-        base = Path(self._tmp.name)
-        self.handle.backend.pro_client = _FakeProClient()
-        self.handle.backend.sync_settings = _sync_settings(base)
-        with self._post("/api/pro/sync/enable") as resp:
-            body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertTrue(body["sync"]["enabled"])
-        self.assertIn("recoveryKey", body)
-        self.assertEqual(
-            {item["envelope_kind"] for item in self.handle.backend.pro_client.saved_key_envelopes},
-            {"device", "recovery"},
-        )
-
-        self.handle.backend.history_store.append("queued private")
-        with self._post("/api/pro/sync/run") as resp:
-            body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(body["result"]["pushed"], 1)
-
-        with self._post("/api/pro/sync/disable", {"clearKey": True}) as resp:
-            body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertFalse(body["sync"]["enabled"])
-
-        req = urllib.request.Request(self.base + "/api/pro/devices", method="GET")
-        req.add_header("Authorization", "Bearer test-token")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            devices = json.loads(resp.read())
-        self.assertEqual(devices["devices"][0]["device_id"], "device_test")
-
-        with self._post("/api/pro/devices/revoke", {"deviceId": "device_other"}) as resp:
-            body = json.loads(resp.read())
-        self.assertEqual(resp.status, 200)
-        self.assertTrue(body["revoked"])
-        self.assertEqual(self.handle.backend.pro_client.revoked_devices, ["device_other"])
-
-        req = urllib.request.Request(self.base + "/api/pro/cloud/export", method="GET")
-        req.add_header("Authorization", "Bearer test-token")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            exported = json.loads(resp.read())
-        self.assertEqual(exported["account"]["account_id"], "acct_test")
-
-        req = urllib.request.Request(self.base + "/api/pro/cloud/delete", data=b"{}", method="DELETE")
-        req.add_header("Authorization", "Bearer test-token")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            deleted = json.loads(resp.read())
-        self.assertEqual(deleted["cloud"]["deleted"]["sync_records"], 0)
-        self.assertTrue(self.handle.backend.pro_client.deleted_cloud)
 
     def test_patch_config_over_http(self) -> None:
         payload = json.dumps({"prefs": {"theme": "dark"}}).encode()

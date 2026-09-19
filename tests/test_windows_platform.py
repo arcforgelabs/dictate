@@ -75,11 +75,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
     def test_doctor_requires_daemon_clipboard_preflight(self) -> None:
         report = types.SimpleNamespace(ok=True, notes=[], warnings=[], errors=[])
-        config = types.SimpleNamespace(
-            openai_api_key_command=None,
-            xai_api_key_command=None,
-            gemini_api_key_command=None,
-        )
+        config = types.SimpleNamespace()
         with (
             patch("dictate.doctor.load_config", return_value=config),
             patch("dictate.doctor.run_preflight", return_value=report) as preflight,
@@ -203,28 +199,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('ui_launcher.open_settings_window', source)
         self.assertIn('ui_launcher.ensure_server_started(daemon)', source)
         self.assertIn('[sys.executable, "-m", "dictate", "controls"]', source)
-
-    def test_windows_controls_apply_configured_key_command(self) -> None:
-        fake_tkinter = types.ModuleType("tkinter")
-        fake_tkinter.messagebox = types.SimpleNamespace()
-        fake_tkinter.ttk = types.SimpleNamespace()
-
-        with (
-            patch.dict("sys.modules", {"tkinter": fake_tkinter}),
-            patch.dict("os.environ", {}, clear=True),
-            patch(
-                "dictate.windows_control.load_config",
-                return_value=Config(xai_api_key_command="/usr/bin/printf key"),
-            ),
-        ):
-            from dictate.windows_control import _apply_api_key_command_from_config
-
-            _apply_api_key_command_from_config("xai")
-
-            self.assertEqual(
-                os.environ.get("DICTATE_XAI_API_KEY_COMMAND"),
-                "/usr/bin/printf key",
-            )
 
     def test_windows_installer_shortcut_starts_tray_launcher(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(
@@ -729,13 +703,9 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         # The package job gates on the core suites plus platform install smokes.
-        self.assertIn("needs: [tests, windows-user-smoke, linux-user-sync-smoke, npm, ui]", workflow)
+        self.assertIn("needs: [tests, windows-user-smoke, npm, ui]", workflow)
         self.assertIn("windows-user-smoke", workflow)
-        self.assertIn("linux-user-sync-smoke", workflow)
 
     def test_npm_package_exposes_public_installer_shim(self) -> None:
         package_json = (Path(__file__).resolve().parents[1] / "package.json").read_text(
@@ -758,14 +728,10 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("UNSTABLE_VERSION", workflow)
         self.assertIn("Windows user install smoke", workflow)
         self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts\\cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
-            "needs: [tests, windows-user-smoke, linux-user-sync-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
+            "needs: [tests, windows-user-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
             workflow,
         )
-        self.assertIn("needs.linux-user-sync-smoke.result == 'success'", workflow)
         self.assertIn("needs.linux-desktop-bundle.result == 'success'", workflow)
         self.assertIn("windows-latest", workflow)
         self.assertIn("Publish durable unstable Windows installers", workflow)
@@ -786,11 +752,8 @@ class WindowsPlatformTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Linux user install sync smoke", workflow)
-        self.assertIn("./scripts/linux-user-sync-smoke.sh", workflow)
-        self.assertIn("scripts/cloud_sync_volume_smoke.py", workflow)
         self.assertIn(
-            "needs: [validate-release-ref, tests, windows-user-smoke, linux-user-sync-smoke]",
+            "needs: [validate-release-ref, tests, windows-user-smoke]",
             workflow,
         )
 

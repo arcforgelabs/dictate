@@ -1,6 +1,8 @@
 # Local-only strip: audit
 
-Status: proposal. Nothing in this document has been deleted yet.
+Status: **done**. The strip landed on 2026-09-19. The plan below is kept
+as the record of what was removed and why; see *Outcome* for what it
+actually cost.
 
 Dictate is no longer a commercial product. It is a local-first dictation app
 worked on when there is time. Everything that exists to support accounts,
@@ -12,7 +14,45 @@ user installs one thing and it works, instead of assembling a UI and a model
 runtime themselves. No account. No API key. No network dependency in the
 transcription path.
 
-## Headline
+## Outcome
+
+The strip removed **27,064 lines across 107 files**, deleting 53 files
+outright — more than the 20,020 lines across 50 files estimated below.
+
+| Area | Files | Lines removed |
+| --- | ---: | ---: |
+| `src/` | 36 | 12,594 |
+| `tests/` | 37 | 11,431 |
+| `ui/` | 10 | 2,201 |
+| `scripts/` | 3 | 606 |
+| docs, CI, packaging | 21 | 232 |
+
+The estimate was low for three reasons the audit did not anticipate:
+
+1. **The front-end was not counted.** `ui/` contributed 2,201 lines,
+   dominated by `AccountDialog` and its tests.
+2. **Deleting a module means fixing every test that touched it.** The
+   tests row is nearly as large as `src/`, and most of that was editing
+   surviving tests rather than deleting cloud ones.
+3. **CI referenced the deleted code.** Three workflows ran the cloud-sync
+   audit and volume smoke, invoked deleted test modules by name, and
+   carried a whole `linux-user-sync-smoke` job that `package`, `publish`
+   and `release` gated on.
+
+Two things had to be kept that the audit listed for deletion. The update
+UI — version rows, the Stable/Beta channel selector, the update actions —
+lived inside `AccountDialog`, so that dialog was replaced by a smaller
+`AboutDialog` rather than deleted. And `scripts/msstore-submit.py` stayed
+once Microsoft Store distribution was confirmed as staying.
+
+One audit claim was wrong: `whisper-cpp` was listed as a surviving local
+backend, but `whisper_cpp_backend.py` has no `BACKEND_REGISTRY` entry, no
+`DEFAULT_MODELS` entry and is absent from the `SttBackend` literal. It is
+not selectable, and making it so would be new work, not preservation.
+
+After the strip: **589 Python tests and 85 UI tests pass.**
+
+## Headline (as estimated, before the work)
 
 Removing the cloud surface deletes roughly **20,000 lines across 50 files**,
 about **36%** of `src` + `tests` combined (55,257 lines today). A further
@@ -112,7 +152,8 @@ feasible rather than a rebuild:
 
 - `stt/parakeet_backend.py`, `parakeet_pyannote_backend.py`,
   `parakeet_speaker_backend.py` — local Parakeet and diarisation
-- `stt/faster_whisper_backend.py`, `whisper_cpp_backend.py`, `whisperx_backend.py`
+- `stt/faster_whisper_backend.py`, `whisperx_backend.py`
+  (`whisper_cpp_backend.py` exists but is not registered — see Outcome)
 - Audio capture, hotkey, tray, history, lexicon, note chunking, outputs
 - Installers, updater, packaging
 - `resolve_default_local_backend` / `resolve_default_local_model` in
@@ -121,8 +162,9 @@ feasible rather than a rebuild:
 Runtime dependencies in `pyproject.toml` need no change: they are already
 local-ML (`faster-whisper`, `onnx-asr`, `onnxruntime`, `numpy`). There is no
 Stripe or web-framework dependency to drop, because the hosted server was built
-on the standard library. `cryptography` should be re-checked once sync is gone —
-it may only be there for sync record encryption.
+on the standard library. `cryptography` was there only for sync record
+encryption and has been dropped: after the strip nothing in the repository
+imports it.
 
 ## Decisions
 

@@ -177,56 +177,6 @@ describe("ipc bridge", () => {
     );
   });
 
-  it("signs into Dictate Pro through authenticated backend routes", async () => {
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ email: "person@example.test", challenge_id: "challenge_1" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ signedIn: true, device_id: "dev_1" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ signedIn: false }),
-      });
-
-    await expect(ipc.startProSignIn("person@example.test")).resolves.toEqual({
-      email: "person@example.test",
-      challenge_id: "challenge_1",
-    });
-    await expect(
-      ipc.completeProSignIn({ challengeId: "challenge_1", code: "123456", deviceLabel: "Laptop" }),
-    ).resolves.toEqual({ signedIn: true, device_id: "dev_1" });
-    await expect(ipc.signOutPro()).resolves.toEqual({ signedIn: false });
-
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:1/api/pro/auth/start",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "person@example.test" }),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:1/api/pro/auth/complete",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ challenge_id: "challenge_1", code: "123456", deviceLabel: "Laptop" }),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:1/api/pro/sign-out",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
-  });
-
   it("starts and stops meetings through authenticated backend routes", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     vi.spyOn(globalThis, "fetch")
@@ -253,135 +203,18 @@ describe("ipc bridge", () => {
     );
   });
 
-  it("controls encrypted sync through authenticated backend routes", async () => {
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ sync: { enabled: true } }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ result: { ok: true } }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ sync: { enabled: false } }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ devices: [] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ revoked: true }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ approved: true }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ schema: "dictate.local-export.v1" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ account: {} }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ deleted: {} }),
-      });
-
-    await expect(ipc.enableProSync()).resolves.toEqual({ sync: { enabled: true } });
-    await expect(ipc.runProSync()).resolves.toEqual({ result: { ok: true } });
-    await expect(ipc.disableProSync(true)).resolves.toEqual({ sync: { enabled: false } });
-    await expect(ipc.listProDevices()).resolves.toEqual({ devices: [] });
-    await expect(ipc.revokeProDevice("dev_2")).resolves.toEqual({ revoked: true });
-    await expect(ipc.approveProDevice("dev_3")).resolves.toEqual({ approved: true });
-    await expect(ipc.exportLocalData()).resolves.toEqual({ schema: "dictate.local-export.v1" });
-    await expect(ipc.exportProCloudData()).resolves.toEqual({ account: {} });
-    await expect(ipc.deleteProCloudData()).resolves.toEqual({ deleted: {} });
-
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:1/api/pro/sync/enable",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:1/api/pro/sync/run",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:1/api/pro/sync/disable",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ clearKey: true }),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:1/api/pro/devices",
-      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:1/api/pro/devices/revoke",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId: "dev_2" }),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:1/api/pro/devices/approve",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId: "dev_3" }),
-      }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:1/api/local/export",
-      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      8,
-      "http://127.0.0.1:1/api/pro/cloud/export",
-      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      9,
-      "http://127.0.0.1:1/api/pro/cloud/delete",
-      expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer t" } }),
-    );
-  });
-
-  it("passes a recovery key when restoring encrypted sync", async () => {
+  it("exports local data through the authenticated backend route", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ sync: { enabled: true } }),
+      json: async () => ({ schema: "dictate.local-export.v1" }),
     });
 
-    await expect(ipc.enableProSync("dictate-rk-test")).resolves.toEqual({ sync: { enabled: true } });
+    await expect(ipc.exportLocalData()).resolves.toEqual({ schema: "dictate.local-export.v1" });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:1/api/pro/sync/enable",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
-        body: JSON.stringify({ recoveryKey: "dictate-rk-test" }),
-      }),
+      "http://127.0.0.1:1/api/local/export",
+      expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer t" } }),
     );
   });
 });

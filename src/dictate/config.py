@@ -48,15 +48,10 @@ class Config:
     meeting_stt_model: str | None = None
     stt_device: str | None = None
     stt_compute_type: str | None = None
-    openai_api_key_command: str | None = None
-    xai_api_key_command: str | None = None
-    gemini_api_key_command: str | None = None
-    cloud_provider_preference: str | None = None
     update_channel: str | None = None
     installed_package_version: str | None = None
     # Which record categories sync: "meetings" (note+segment only, the default) or
     # "everything" (also the rolling quick-copy history). See docs/record-categories-spec.md.
-    sync_scope: str | None = None
 
     @property
     def hotwords_str(self) -> str | None:
@@ -67,8 +62,6 @@ class Config:
         """Hotwords formatted for the selected backend."""
         if not self.hotwords:
             return None
-        if backend == "xai":
-            return "\n".join(self.hotwords)
         return self.hotwords_str
 
 
@@ -117,15 +110,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     meeting_stt_model = data.get("meeting_stt_model")
     stt_device = data.get("stt_device")
     stt_compute_type = data.get("stt_compute_type")
-    openai_api_key_command = data.get("openai_api_key_command")
-    xai_api_key_command = data.get("xai_api_key_command")
-    gemini_api_key_command = data.get("gemini_api_key_command")
-    cloud_provider_preference = data.get("cloud_provider_preference")
     update_channel = data.get("update_channel")
     installed_package_version = data.get("installed_package_version")
-    sync_scope = data.get("sync_scope")
-    if not isinstance(sync_scope, str) or sync_scope not in {"meetings", "everything"}:
-        sync_scope = None
     if not isinstance(stt_backend, str):
         stt_backend = None
     if not isinstance(stt_model, str):
@@ -138,14 +124,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_device = None
     if not isinstance(stt_compute_type, str):
         stt_compute_type = None
-    if not isinstance(openai_api_key_command, str):
-        openai_api_key_command = None
-    if not isinstance(xai_api_key_command, str):
-        xai_api_key_command = None
-    if not isinstance(gemini_api_key_command, str):
-        gemini_api_key_command = None
-    if cloud_provider_preference not in {"pro-first", "personal-first"}:
-        cloud_provider_preference = None
     if not isinstance(update_channel, str):
         update_channel = None
     if not isinstance(installed_package_version, str):
@@ -163,13 +141,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         meeting_stt_model=meeting_stt_model,
         stt_device=stt_device,
         stt_compute_type=stt_compute_type,
-        openai_api_key_command=openai_api_key_command,
-        xai_api_key_command=xai_api_key_command,
-        gemini_api_key_command=gemini_api_key_command,
-        cloud_provider_preference=cloud_provider_preference,
         update_channel=update_channel,
         installed_package_version=installed_package_version,
-        sync_scope=sync_scope,
     )
 
 
@@ -283,16 +256,6 @@ def set_update_channel(channel: str, path: Path = CONFIG_PATH) -> str:
     return normalized
 
 
-def set_cloud_provider_preference(preference: str, path: Path = CONFIG_PATH) -> str:
-    """Persist the priority between Pro and personal hosted credentials."""
-    normalized = preference.strip().lower()
-    if normalized not in {"pro-first", "personal-first"}:
-        raise ValueError("cloud provider preference must be pro-first or personal-first")
-    data = _load_raw(path)
-    data["cloud_provider_preference"] = normalized
-    _save_raw(data, path)
-    return normalized
-
 
 def set_installed_package_version(version: str, path: Path = CONFIG_PATH) -> str:
     """Persist the exact package version used by the installer/updater."""
@@ -305,38 +268,6 @@ def set_installed_package_version(version: str, path: Path = CONFIG_PATH) -> str
     return normalized
 
 
-def set_sync_scope(scope: str, path: Path = CONFIG_PATH) -> str:
-    """Persist which record categories sync. Returns the normalized scope.
-
-    "meetings" (default) syncs note+segment (durable recordings/notes); "everything"
-    also syncs the rolling quick-copy history. See docs/record-categories-spec.md.
-    """
-    normalized = scope.strip().lower()
-    if normalized not in {"meetings", "everything"}:
-        raise ValueError("sync scope must be meetings or everything")
-    data = _load_raw(path)
-    data["sync_scope"] = normalized
-    _save_raw(data, path)
-    return normalized
-
-
-def set_api_key_command(backend: str, command: str | None, path: Path = CONFIG_PATH) -> None:
-    """Persist or clear the API key command for a hosted backend."""
-    key_by_backend = {
-        "openai": "openai_api_key_command",
-        "xai": "xai_api_key_command",
-        "gemini": "gemini_api_key_command",
-    }
-    key = key_by_backend.get(backend)
-    if key is None:
-        return
-    data = _load_raw(path)
-    cleaned = command.strip() if isinstance(command, str) else ""
-    if cleaned:
-        data[key] = cleaned
-    else:
-        data.pop(key, None)
-    _save_raw(data, path)
 
 
 def set_push_to_talk_combo(combo: str, path: Path = CONFIG_PATH) -> None:

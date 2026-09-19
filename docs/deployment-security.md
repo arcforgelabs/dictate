@@ -125,7 +125,7 @@ Before publishing:
    release gates, and support-review documentation.
 9. For releases with Dictate Pro sync or hosted Pro models, confirm the public
    privacy page is aligned with [dictate-privacy-policy.md](dictate-privacy-policy.md),
-   the public terms are aligned with [dictate-pro-terms.md](dictate-pro-terms.md),
+   the public terms are current,
    and the Store listing copy separates sign-in, encrypted sync consent, and
    hosted transcription.
 

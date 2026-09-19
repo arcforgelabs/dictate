@@ -383,10 +383,6 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .toast .toast-act:hover{color:var(--fg);background:var(--surface-3);}
 @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 
-/* brand mark swatch helpers */
-.brandmark{display:flex;align-items:center;justify-content:center;}
-.brandmark svg{width:18px;height:18px;}
-
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important;}}
 [data-ambient="off"] .dot.live,[data-ambient="off"] .hero.live .orb,[data-ambient="off"] .hud-pill .reckdot{animation:none!important;box-shadow:var(--shadow-sm);}
 [data-ambient="off"] .hud-pill .reckdot{box-shadow:none;}
@@ -494,15 +490,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 
 /* ── capture home layout ── */
 .note-home{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);position:relative;}
-/* Privacy control — icon + toggle on the home chrome. */
-.privpill{display:inline-flex;align-items:center;gap:10px;color:var(--fg);}
-.priv-icon{display:inline-flex;align-items:center;color:var(--muted);line-height:0;height:23px;}
-.priv-icon svg{width:23px;height:23px;}
-.privpill.degraded .priv-icon{color:var(--amber-text);}
-.privpill .toggle:not(.on){background:var(--live);border-color:var(--live);}
-.privpill .toggle:not(.on) .knob{background:#fff;}
-[data-theme="dark"] .privpill .toggle:not(.on) .knob{background:var(--primary-fg);}
-/* Local language toggle — minimal segmented control, Private mode only. */
+/* Segmented control — reused by the notes category filter (views.jsx). */
 .engine-seg{display:inline-flex;align-items:center;margin-left:12px;padding:2px;gap:2px;
   border-radius:var(--r-pill);background:var(--surface-2);border:1px solid var(--border);
   -webkit-app-region:no-drag;}
@@ -540,68 +528,43 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .upd-mini:hover{background:var(--surface-3);color:var(--fg);}
 @media (prefers-reduced-motion:reduce){.updpill .upd-dot{animation:none!important;}}
 .reduce-motion .updpill .upd-dot{animation:none!important;}
-.account-mark{width:30px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;
-  color:var(--muted);background:none;border:none;cursor:pointer;transition:var(--t-fast);-webkit-app-region:no-drag;}
-.account-mark:hover{background:var(--surface-3);color:var(--fg);}
-.account-mark.synced{color:var(--live);}
-.account-scrim{position:absolute;inset:0;z-index:45;display:flex;align-items:flex-start;justify-content:flex-end;
-  padding:52px 16px 16px;background:color-mix(in srgb,var(--bg) 28%,transparent);}
-.account-dialog{width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 76px);overflow:auto;border:1px solid var(--border-2);border-radius:12px;
-  background:var(--surface);box-shadow:var(--shadow-pop);padding:14px;animation:menuIn .16s var(--ease-out);}
-.account-head{display:flex;align-items:center;gap:10px;}
-.account-logo{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
-  color:var(--fg);background:var(--surface-2);border:1px solid var(--border);}
-.account-title-wrap{min-width:0;flex:1;}
-.account-title{font-size:15px;font-weight:800;letter-spacing:0;color:var(--fg);}
-.account-sub{margin-top:2px;font-size:11.5px;color:var(--subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.account-grid{display:flex;flex-direction:column;gap:1px;margin-top:14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);}
-.account-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:34px;padding:6px 0;
-  font-size:12.5px;color:var(--muted);}
-.account-row+ .account-row{border-top:1px solid var(--hairline);}
-.account-row strong{min-width:0;text-align:right;color:var(--fg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.account-row-end{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
-.account-row-end strong{flex:0 1 auto;}
-.account-signin{height:26px;padding:0 11px;border-radius:var(--r-pill);border:1px solid var(--live);background:var(--live-bg);
-  color:var(--live-text);font-size:11.5px;font-weight:650;white-space:nowrap;transition:var(--t-fast);}
-.account-signin:hover:not(:disabled){background:var(--live);color:#fff;}
-.account-signin:disabled{opacity:.48;cursor:default;}
-.account-channel{height:28px;display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--r-pill);background:var(--surface-2);}
-.account-channel button{height:22px;padding:0 10px;border:0;border-radius:var(--r-pill);background:transparent;color:var(--muted);
+/* Update channel selector (Normal / Beta) — in the About dialog's Updates row. */
+.about-channel{height:28px;display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--r-pill);background:var(--surface-2);}
+.about-channel button{height:22px;padding:0 10px;border:0;border-radius:var(--r-pill);background:transparent;color:var(--muted);
   font-size:11.5px;font-weight:650;white-space:nowrap;cursor:pointer;transition:var(--t-fast);}
-.account-channel button.active{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px color-mix(in srgb,var(--shadow-color) 15%,transparent);}
-.account-channel button:hover:not(:disabled){color:var(--fg);}
-.account-channel button:disabled{opacity:.42;cursor:default;}
-.account-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
-.account-actions--split{justify-content:space-between;}
-.account-enable-stack{width:100%;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
-.account-consent{width:100%;padding:9px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--surface-2);}
-.account-consent strong{display:block;font-size:12px;line-height:1.3;color:var(--fg);}
-.account-consent span{display:block;margin-top:3px;font-size:11.5px;line-height:1.4;color:var(--subtle);}
-.account-input{height:31px;min-width:0;flex:1;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--fg);padding:0 11px;font-size:12px;outline:none;}
-.account-input:focus{border-color:var(--live);}
-.account-primary,.account-secondary,.account-danger{height:31px;padding:0 13px;border-radius:var(--r-pill);font-size:12px;font-weight:650;
+.about-channel button.active{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px color-mix(in srgb,var(--shadow-color) 15%,transparent);}
+.about-channel button:hover:not(:disabled){color:var(--fg);}
+.about-channel button:disabled{opacity:.42;cursor:default;}
+/* About Dictate — the mark in the home bar and the dialog it opens (version,
+   engine and the update controls). Local only: no account, no plan, no cloud. */
+.about-mark{width:30px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;
+  color:var(--muted);background:none;border:none;cursor:pointer;transition:var(--t-fast);-webkit-app-region:no-drag;}
+.about-mark:hover{background:var(--surface-3);color:var(--fg);}
+.about-scrim{position:absolute;inset:0;z-index:45;display:flex;align-items:flex-start;justify-content:flex-end;
+  padding:52px 16px 16px;background:color-mix(in srgb,var(--bg) 28%,transparent);}
+.about-dialog{width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 76px);overflow:auto;border:1px solid var(--border-2);border-radius:12px;
+  background:var(--surface);box-shadow:var(--shadow-pop);padding:14px;animation:menuIn .16s var(--ease-out);}
+.about-head{display:flex;align-items:center;gap:10px;}
+.about-logo{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
+  color:var(--fg);background:var(--surface-2);border:1px solid var(--border);}
+.about-title-wrap{min-width:0;flex:1;}
+.about-title{font-size:15px;font-weight:800;letter-spacing:0;color:var(--fg);}
+.about-sub{margin-top:2px;font-size:11.5px;color:var(--subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.about-grid{display:flex;flex-direction:column;gap:1px;margin-top:14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);}
+.about-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:34px;padding:6px 0;
+  font-size:12.5px;color:var(--muted);}
+.about-row+ .about-row{border-top:1px solid var(--hairline);}
+.about-row strong{min-width:0;text-align:right;color:var(--fg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.about-actions{margin-top:14px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+.about-actions--split{justify-content:space-between;}
+.about-primary,.about-secondary{height:31px;padding:0 13px;border-radius:var(--r-pill);font-size:12px;font-weight:650;
   transition:var(--t-fast);display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;}
-.account-primary{border:1px solid var(--live);background:var(--live-bg);color:var(--live-text);}
-.account-primary:hover:not(:disabled){background:var(--live);color:#fff;}
-.account-secondary{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);}
-.account-secondary:hover:not(:disabled){background:var(--surface-3);}
-.account-danger{border:1px solid color-mix(in srgb,var(--danger) 34%,var(--border));background:var(--surface-2);color:var(--danger);}
-.account-danger:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 12%,var(--surface-2));}
-.account-primary:disabled,.account-secondary:disabled,.account-danger:disabled{opacity:.48;cursor:default;}
-.account-note{margin-top:10px;font-size:11.5px;line-height:1.4;color:var(--subtle);}
-.account-note.bad{color:var(--danger);}
-.account-section-title{margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline);font-size:11px;font-weight:750;color:var(--subtle);text-transform:uppercase;letter-spacing:0;}
-.account-device-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
-.account-device{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border:1px solid var(--hairline);border-radius:8px;background:var(--surface-2);}
-.account-device strong{display:block;max-width:210px;font-size:12px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.account-device span{display:block;margin-top:2px;font-size:11px;color:var(--subtle);}
-.account-device-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-.account-device-actions .mini{min-height:28px;padding:0 9px;font-size:11px;}
-.account-empty{padding:10px 8px;border:1px dashed var(--border);border-radius:8px;color:var(--subtle);font-size:12px;}
-.account-recovery{margin-top:12px;padding:9px;border:1px solid color-mix(in srgb,var(--live) 28%,var(--border));border-radius:8px;background:var(--live-bg);}
-.account-recovery span{display:block;margin-bottom:6px;font-size:11px;font-weight:750;color:var(--live-text);}
-.account-recovery p{margin:0 0 7px;font-size:11.5px;line-height:1.4;color:var(--fg);}
-.account-recovery code{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;font-size:11.5px;line-height:1.35;color:var(--fg);}
+.about-primary{border:1px solid var(--live);background:var(--live-bg);color:var(--live-text);}
+.about-primary:hover:not(:disabled){background:var(--live);color:#fff;}
+.about-secondary{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);}
+.about-secondary:hover:not(:disabled){background:var(--surface-3);}
+.about-primary:disabled,.about-secondary:disabled{opacity:.48;cursor:default;}
+.about-note{margin-top:10px;font-size:11.5px;line-height:1.4;color:var(--subtle);}
 /* Themed tooltip — matches toast/surface tokens. */
 .tip-wrap{position:relative;display:inline-flex;vertical-align:middle;}
 .tip-wrap .tip{position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);
@@ -714,14 +677,7 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   clip:rect(0 0 0 0);white-space:nowrap;border:0;}
 .note-caret{display:inline-block;width:2px;height:14px;background:var(--live);vertical-align:-2px;
   margin-left:2px;animation:blink 1s step-end infinite;}
-/* Degraded recording strip: amber band pinned to the bottom of the capture screen */
-.note-longstrip{position:absolute;bottom:24px;left:0;right:0;display:flex;justify-content:center;
-  align-items:center;gap:8px;color:var(--subtle);font-size:10.5px;padding:0 24px;text-align:center;}
-.note-longstrip.amber{color:var(--amber-text);}
-.note-longstrip .wdot{width:7px;height:7px;border-radius:50%;background:var(--amber-dot);flex:0 0 auto;}
-
 /* ── Breath Cradle (cradle-wrap / recwrap-zone / recwrap / recbtn / cradle-halo / cradle-ring) ── */
-/* cradle-wrap: positions the flash ring relative to the cradle */
 .cradle-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:0 0 172px;}
 .recwrap-zone{position:relative;width:172px;height:172px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;cursor:pointer;touch-action:manipulation;}
 .recwrap-zone:focus-visible{outline:2px solid var(--live);outline-offset:4px;border-radius:50%;}
@@ -743,17 +699,10 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 /* The halo and bloom rings emanate from the cradle, behind the button */
 .cradle-halo,.cradle-ring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;
   border:1.5px solid var(--live);transform:translate(-50%,-50%) scale(1);opacity:0;pointer-events:none;z-index:1;}
-/* Provider-switch flash ring: one-shot ring pulse (never silent) */
-.flashring{position:absolute;left:50%;top:50%;width:108px;height:108px;border-radius:50%;border:2.5px solid var(--live);
-  transform:translate(-50%,-50%) scale(1);pointer-events:none;z-index:5;animation:flashpulse .85s var(--ease-out) forwards;}
-.flashring.local{border-color:var(--amber);}
-.flashring.remote{border-color:var(--live);}
-@keyframes flashpulse{0%{opacity:.7;transform:translate(-50%,-50%) scale(.98);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.7);}}
 /* Reduced-motion: static state-colour — never invisible */
 @media (prefers-reduced-motion:reduce){
   .cradle-ring{display:none!important;}
   .cradle-halo{opacity:.5!important;transform:translate(-50%,-50%) scale(1.16)!important;}
-  .flashring{animation:none!important;opacity:.6;transform:translate(-50%,-50%) scale(1.2);}
 }
 
 /* ── Settings view wrapper (replaces .rail + .content) ── */
@@ -791,10 +740,9 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
   cursor:pointer;color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;transition:var(--t-fast);}
 .gear-mini-seg button.on{background:var(--surface);color:var(--fg);box-shadow:var(--shadow-sm);}
 
-/* Reduced-motion: suppress Breath Cradle loop + ring blooms + flash animation */
+/* Reduced-motion: suppress Breath Cradle loop + ring blooms */
 .reduce-motion .cradle-ring{display:none!important;}
 .reduce-motion .cradle-halo{opacity:.5!important;transform:translate(-50%,-50%) scale(1.16)!important;}
-.reduce-motion .flashring{animation:none!important;opacity:.6;transform:translate(-50%,-50%) scale(1.2);}
 
 /* ===========================================================================
    NOTE CAPTURE — Stage 2: Processing / ExpandedNote

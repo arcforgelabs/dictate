@@ -13,10 +13,10 @@ Current status: not a commercial product. Dictate was retired as one on
 source installs, tray controls, startup integration, local dictation history,
 update, and uninstall paths are implemented.
 
-The account, subscription, cloud sync and hosted-transcription code is being
-removed rather than maintained. Some of it is still present in the tree and
-still referenced below; see `docs/local-only-audit.md` for what is going and
-`VISION.md` for the direction. The current transcription/model plan is
+The account, subscription, cloud sync and hosted-transcription code was
+removed on 2026-09-19 — 27,064 lines across 107 files. See
+`docs/local-only-audit.md` for what went and why, and `VISION.md` for the
+direction. The current transcription/model plan is
 `docs/TRANSCRIPTION_PLAN.md`.
 
 ## Install

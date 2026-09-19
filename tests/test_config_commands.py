@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import io
-import sys
 import contextlib
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from dictate import __main__ as main_module
-from dictate.config import load_config, CONFIG_PATH
 
 
 def _run_config(argv: list[str]) -> tuple[int, str, str]:
@@ -21,63 +17,6 @@ def _run_config(argv: list[str]) -> tuple[int, str, str]:
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = main_module._handle_config_commands(argv)
     return code, stdout.getvalue(), stderr.getvalue()
-
-
-class ConfigSetKeyTests(unittest.TestCase):
-    """set-key subcommand."""
-
-    def test_invalid_backend_rejected(self) -> None:
-        # argparse will error before our code runs — SystemExit raised
-        with self.assertRaises(SystemExit):
-            _run_config(["set-key", "unknown-backend", "xai-abc123"])
-
-    def test_invalid_key_format_rejected(self) -> None:
-        # Bad xai key format (doesn't match xai-... pattern)
-        code, out, err = _run_config(["set-key", "xai", "not-a-valid-key"])
-        self.assertEqual(code, 1)
-        self.assertIn("error", err.lower())
-
-    def test_valid_xai_key_saved(self) -> None:
-        with patch("dictate.api_keys.save_api_key") as mock_save:
-            code, out, err = _run_config(["set-key", "xai", "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ"])
-        self.assertEqual(code, 0)
-        self.assertIn("ok", out)
-        self.assertIn("xai", out)
-        mock_save.assert_called_once_with("xai", "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-    def test_valid_openai_key_saved(self) -> None:
-        with patch("dictate.api_keys.save_api_key") as mock_save:
-            code, out, _ = _run_config(["set-key", "openai", "sk-ABCDEFGHIJKLMNOPQRSTU"])
-        self.assertEqual(code, 0)
-        mock_save.assert_called_once_with("openai", "sk-ABCDEFGHIJKLMNOPQRSTU")
-
-    def test_save_error_returns_1(self) -> None:
-        with patch("dictate.api_keys.save_api_key", side_effect=RuntimeError("keyring unavailable")):
-            code, _, err = _run_config(["set-key", "xai", "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ"])
-        self.assertEqual(code, 1)
-        self.assertIn("error", err.lower())
-
-
-class ConfigSetProviderTests(unittest.TestCase):
-    """set-provider subcommand."""
-
-    def test_set_provider_private(self) -> None:
-        with patch("dictate.__main__.set_stt_backend") as mock_set:
-            code, out, _ = _run_config(["set-provider", "private"])
-        self.assertEqual(code, 0)
-        mock_set.assert_called_once_with("faster-whisper")
-        self.assertIn("private", out)
-
-    def test_set_provider_online(self) -> None:
-        with patch("dictate.__main__.set_stt_backend") as mock_set:
-            code, out, _ = _run_config(["set-provider", "online"])
-        self.assertEqual(code, 0)
-        mock_set.assert_called_once_with("xai")
-        self.assertIn("online", out)
-
-    def test_invalid_mode_rejected(self) -> None:
-        with self.assertRaises(SystemExit):
-            _run_config(["set-provider", "bogus"])
 
 
 class ConfigSetModelTests(unittest.TestCase):
@@ -126,18 +65,18 @@ class ConfigSetModelTests(unittest.TestCase):
 class ConfigShowTests(unittest.TestCase):
     """show subcommand."""
 
-    def test_show_private_provider(self) -> None:
+    def test_show_reports_local_backend_and_model(self) -> None:
         from dictate.config import Config
-        with patch("dictate.__main__.load_config", return_value=Config(stt_backend="faster-whisper", stt_model="turbo")):
-            with patch("dictate.api_keys.has_stored_api_key", return_value=False):
-                with patch("dictate.api_keys.secret_store_available", return_value=True):
-                    code, out, _ = _run_config(["show"])
+
+        cfg = Config(stt_backend="faster-whisper", stt_model="turbo")
+        with patch("dictate.__main__.load_config", return_value=cfg):
+            code, out, _ = _run_config(["show"])
         self.assertEqual(code, 0)
-        self.assertIn("private", out)
-        self.assertIn("faster-whisper", out)
+        self.assertIn("stt_backend: faster-whisper", out)
+        self.assertIn("model: turbo", out)
         self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
+        self.assertIn("shortcut: ", out)
         self.assertIn("update_channel: stable", out)
-        self.assertIn("not-set", out)
 
     def test_show_redacts_hotword_values(self) -> None:
         from dictate.config import Config
@@ -147,32 +86,12 @@ class ConfigShowTests(unittest.TestCase):
             hotwords=["PrivateProject", "PatientSurname"],
         )
         with patch("dictate.__main__.load_config", return_value=cfg):
-            with patch("dictate.api_keys.has_stored_api_key", return_value=False):
-                with patch("dictate.api_keys.secret_store_available", return_value=True):
-                    code, out, _ = _run_config(["show"])
+            code, out, _ = _run_config(["show"])
 
         self.assertEqual(code, 0)
         self.assertIn("hotwords: 2 configured terms", out)
         self.assertNotIn("PrivateProject", out)
         self.assertNotIn("PatientSurname", out)
-
-    def test_show_online_provider_with_key(self) -> None:
-        from dictate.config import Config
-
-        def _has_key(b):
-            return b == "xai"
-
-        with patch("dictate.__main__.load_config", return_value=Config(stt_backend="xai")):
-            with patch("dictate.api_keys.has_stored_api_key", side_effect=_has_key):
-                with patch("dictate.api_keys.secret_store_available", return_value=True):
-                    code, out, _ = _run_config(["show"])
-        self.assertEqual(code, 0)
-        self.assertIn("online", out)
-        self.assertIn("xai", out)
-        # xai should show "set"; others "not-set"
-        lines = out.splitlines()
-        xai_line = next((l for l in lines if "key.xai" in l), "")
-        self.assertIn("set", xai_line)
 
     def test_set_update_channel_unstable(self) -> None:
         with patch("dictate.__main__.set_update_channel", return_value="unstable") as mock_set:
@@ -185,13 +104,6 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _run_config(["set-update-channel", "nightly"])
 
-    def test_set_cloud_preference_personal_first(self) -> None:
-        with patch("dictate.config.set_cloud_provider_preference", return_value="personal-first") as mock_set:
-            code, out, _ = _run_config(["set-cloud-preference", "personal-first"])
-        self.assertEqual(code, 0)
-        mock_set.assert_called_once_with("personal-first")
-        self.assertIn("cloud_provider_preference=personal-first", out)
-
     def test_show_no_subcommand_returns_2(self) -> None:
         code, _, _ = _run_config([])
         self.assertEqual(code, 2)
@@ -200,9 +112,7 @@ class ConfigShowTests(unittest.TestCase):
         """main() with 'config show' argv dispatches to _handle_config_commands."""
         from dictate.config import Config
         with patch("dictate.__main__.load_config", return_value=Config()):
-            with patch("dictate.api_keys.has_stored_api_key", return_value=False):
-                with patch("dictate.api_keys.secret_store_available", return_value=False):
-                    code = main_module.main(["config", "show"])
+            code = main_module.main(["config", "show"])
         self.assertEqual(code, 0)
 
 
@@ -242,7 +152,7 @@ class ConfigDailySettingsTests(unittest.TestCase):
 
         with patch("dictate.__main__.add_hotwords") as add, patch(
             "dictate.__main__.load_config", return_value=Config(hotwords=["Baz"])
-        ), patch("dictate.__main__._sync_cli_outbox", return_value=None):
+        ):
             code, out, _ = _run_config(["hotwords", "--add", "Baz"])
         self.assertEqual(code, 0)
         add.assert_called_once_with(["Baz"])
@@ -252,7 +162,7 @@ class ConfigDailySettingsTests(unittest.TestCase):
 
         with patch("dictate.__main__.remove_hotwords") as rm, patch(
             "dictate.__main__.load_config", return_value=Config(hotwords=["X", "Y"])
-        ), patch("dictate.__main__._sync_cli_outbox", return_value=None):
+        ):
             code, out, _ = _run_config(["hotwords", "--clear"])
         self.assertEqual(code, 0)
         rm.assert_called_once_with(["X", "Y"])
