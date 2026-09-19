@@ -5,23 +5,28 @@ Desktop dictation that types into the focused app.
 `dictate` runs as a small tray app. Press your configured push-to-talk shortcut,
 speak, and it transcribes into whatever app you are already using.
 
-Current status: early desktop app. Linux installs, Windows 11 source installs,
-tray controls, startup integration, local dictation history, update, and
-uninstall paths are implemented. Microsoft Store packaging and submission
-automation are maintained separately from GitHub releases; see
-`docs/msstore-automation.md`. The current transcription/model deployment plan is
+**Local only.** Transcription runs on your machine. No account, no
+subscription, no API key, no hosted model. Nothing you say leaves the device.
+
+Current status: not a commercial product. Dictate was retired as one on
+2026-08-25 and is now worked on when there is time. Linux installs, Windows 11
+source installs, tray controls, startup integration, local dictation history,
+update, and uninstall paths are implemented.
+
+The account, subscription, cloud sync and hosted-transcription code is being
+removed rather than maintained. Some of it is still present in the tree and
+still referenced below; see `docs/local-only-audit.md` for what is going and
+`VISION.md` for the direction. The current transcription/model plan is
 `docs/TRANSCRIPTION_PLAN.md`.
 
 ## Install
 
-Windows 11 normal install:
+Windows 11 — direct download from GitHub Releases is the supported channel.
 
-The target public Windows channel is Microsoft Store distribution. A stable
-Windows release means a Store package that we are happy to submit and support.
-Paid Authenticode signing for direct-download MSI assets is a future option only;
-it is not a current release blocker or standing task.
-
-Windows direct download:
+Microsoft Store packaging still exists in the tree but is no longer a target:
+it was the commercial distribution route, and a Store listing with in-app
+subscriptions does not fit a free local-only app. Whether to retire it is an
+open question in `docs/local-only-audit.md`.
 
 1. Open the latest GitHub release.
 2. Download `Dictate_*_x64_en-US.msi` when a staging MSI is attached.
@@ -149,16 +154,16 @@ also want to remove config, logs, history, and downloaded model data.
 - Supports configurable push-to-talk
 - Presents a simple capture-first desktop UI
 - Supports launch on startup
-- Stores CLI-configured hosted-provider API keys in the OS secret store
 - Keeps a small local dictations history for copy/paste recovery
 - Provides installer, updater, uninstaller, and doctor paths
 
 ## Models
 
-The default local English path is Parakeet where the runtime is available. The
-desktop UI keeps engine names out of the primary workflow; advanced users and
-tests can still configure explicit local or hosted providers through CLI options
-and `dictate config`.
+The default English path is Parakeet where the runtime is available, falling
+back to local Whisper variants otherwise. Every supported model runs on your
+machine. The desktop UI keeps engine names out of the primary workflow;
+advanced users and tests can still select an explicit local engine through CLI
+options and `dictate config`.
 
 GPU lanes are explicit:
 
@@ -195,12 +200,8 @@ Advanced configuration remains available for automation and testing:
 
 ```bash
 dictate --stt-backend faster-whisper --model turbo
+dictate --stt-backend parakeet
 dictate config show
-dictate config set-provider online
-dictate config set-key xai xai-YOUR_KEY_HERE
-dictate --stt-backend openai --model gpt-4o-mini-transcribe
-dictate --stt-backend xai --model grok-speech-to-text
-dictate --stt-backend gemini --model gemini-3-flash-preview
 dictate --add-hotword AcmeWidget
 dictate --list-hotwords
 ```
@@ -224,8 +225,8 @@ and should not be packaged into the public repo default config.
 
 ## Safety
 
-- Dictate does not intentionally write raw API keys to `config.yaml`.
-- API keys configured through the CLI use the OS secret store.
+- Audio and transcripts stay on the device. There is no hosted transcription
+  path and no account.
 - Dictation text can be sensitive; check logs and issue reports before sharing.
 - Important transcriptions should be verified before relying on them.
 - Support and maintenance are best-effort.

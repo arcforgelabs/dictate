@@ -1,41 +1,46 @@
-<!--
-  GENERATED FILE — DO NOT HAND-EDIT.
-
-  Source of truth: https://arcforgelabs.atlassian.net/wiki/spaces/ARC/pages/426085
-  Product Vision is authoritative in Confluence (space ARC). This file is a
-  mechanically-derived read-only snapshot, kept in the repository so agents can
-  read the vision without a network call.
-
-  To change the vision, edit the Confluence page and re-sync. Editing this file
-  changes nothing upstream and will be overwritten. On conflict, Confluence wins.
-
-  Snapshot taken: 2026-07-31
--->
-
 # Dictate — Vision
 
-Dictate turns speech into usable text without making the user manage a
-heavyweight editor, recorder, or meeting tool. It should make spoken input feel
-fast enough for everyday writing, prompts, messages, and email, while also
-supporting reliable transcript-first capture for longer conversations.
+Dictate turns speech into text on your own machine, and types it into whatever
+app you are already using. Press a shortcut, speak, get text. That is the whole
+product.
 
-The current product is a desktop daily driver, but the intent is not limited to
-desktop. Dictate should be able to follow the user across practical capture
-contexts, including an on-the-run mobile experience, while preserving the same
-core promise: speak naturally, get an accurate transcript, and decide where that
-text belongs afterward.
+## Local only
 
-Dictate should prefer local-first operation where that gives the best user
-experience, privacy, and reliability, especially on desktop. When hosted models
-are the better fit, the product should make that explicit and handle sensitive
-transcript text carefully. Advanced BYO-key provider configuration can remain
-available through CLI configuration, but the main Dictate Pro product should
-handle hosted access for the user through account entitlements rather than
-exposing provider backend switching as a primary app workflow.
+Transcription runs on the user's machine. There is no account, no subscription,
+no API key, no hosted model, and no network call in the transcription path.
+Nothing the user says leaves the device.
+
+This is a constraint, not a default. "Local-first with a cloud option" is not
+what this is — a cloud option brings back accounts, keys, quotas, outage
+handling and a privacy story that has to be argued rather than stated. The
+value here is that none of that exists.
+
+## What finished looks like
+
+A user installs one package and it works. They do not assemble a UI, fetch a
+model, wire a runtime, or read a setup guide to get their first sentence typed.
+
+The honest gap today is packaging, not capability: the local transcription path
+already works, and the effort is in shipping it as something pleasant to install
+and run.
+
+## What this is not
+
+Not a meeting recorder, not a notes product, not a transcription service with a
+desktop client. It does not compete with Whisper Flow or Granola and should not
+grow in that direction. Speak, get accurate text, decide where it goes.
+
+## Status
+
+Dictate is not a commercial product. It was retired as one on 2026-08-25 and is
+now worked on when there is time. Features are judged by whether they make local
+dictation better, not by whether they would sell.
+
+The account, subscription, cloud sync and hosted-transcription code is being
+removed rather than maintained. See `docs/local-only-audit.md`.
 
 ---
 
-Vision is what this product is for and what finished looks and feels like.
-Measurable outcomes live in Atlassian Goals, product opportunities in Jira
-Product Discovery (`JPD`), and requirements in Jira delivery work (`DEL` / `OPS`).
-None of those belong in this file.
+This file is repository truth. Product direction is decided here and in GitHub
+issues; earlier revisions of this file were snapshots of an external Confluence
+page, which is no longer authoritative.
