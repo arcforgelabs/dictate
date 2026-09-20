@@ -116,18 +116,12 @@ Before publishing:
 4. Confirm Windows artifacts are signed before public upload.
 5. Confirm Microsoft Store draft contents in Partner Center before publish.
 6. Confirm website/legal notices match the release surface.
-7. Confirm no support logs, screenshots, or artifacts contain real API keys,
-   tokens, customer transcript text, synced lexicon terms, private file paths,
-   or payment details.
-8. Run `python scripts/cloud_sync_privacy_audit.py` on the release commit. It
-   checks the current cloud-sync privacy surfaces: routine runtime logs,
-   Dictate Pro server/client logging, crash reports, analytics dependencies,
-   release gates, and support-review documentation.
-9. For releases with Dictate Pro sync or hosted Pro models, confirm the public
-   privacy page is aligned with [dictate-privacy-policy.md](dictate-privacy-policy.md),
-   the public terms are current,
-   and the Store listing copy separates sign-in, encrypted sync consent, and
-   hosted transcription.
+7. Confirm no support logs, screenshots, or artifacts contain deployment
+   tokens, customer transcript text, lexicon terms, or private file paths.
+8. Confirm the public privacy page is aligned with
+   [dictate-privacy-policy.md](dictate-privacy-policy.md) and the public
+   terms are current. Dictate is local-only, so the only network surfaces to
+   review are model downloads, update checks, and Store install telemetry.
 
 ## Emergency Rotation
 

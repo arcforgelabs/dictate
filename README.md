@@ -170,10 +170,12 @@ options and `dictate config`.
 
 GPU lanes are explicit:
 
-- NVIDIA CUDA: install with the `gpu` extra and verify with
+- NVIDIA CUDA: install with the `gpu` extra (ONNX Runtime 1.30 with CUDA 13
+  runtime wheels; needs NVIDIA driver 580 or newer) and verify with
   `dictate doctor --stt-backend parakeet --device cuda --quick`.
-- Windows AMD GPU: install with the `amd` extra for ONNX Runtime DirectML and
-  verify with `dictate doctor --stt-backend parakeet --device amd --quick`.
+- Windows AMD GPU: install with the `amd` extra for ONNX Runtime DirectML
+  (1.24.x, the last published DirectML wheel) and verify with
+  `dictate doctor --stt-backend parakeet --device amd --quick`.
 - Linux AMD GPU: install a ROCm/MIGraphX-capable ONNX Runtime build, then verify
   with `dictate doctor --stt-backend parakeet --device amd --quick`.
 - Meeting uses a dedicated speaker-attribution lane. Inspect it with
