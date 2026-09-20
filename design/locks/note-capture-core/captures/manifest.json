@@ -1,0 +1,123 @@
+{
+  "captured_at": "2026-09-19T15:41:24.895Z",
+  "url": "http://localhost:5179/",
+  "viewport": {
+    "name": "win",
+    "width": 1200,
+    "height": 820
+  },
+  "captures": [
+    {
+      "name": "ready-win-light",
+      "theme": "light",
+      "state": "ready",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/ready-win-light.png"
+    },
+    {
+      "name": "recording-win-light",
+      "theme": "light",
+      "state": "recording",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/recording-win-light.png"
+    },
+    {
+      "name": "paused-win-light",
+      "theme": "light",
+      "state": "paused",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/paused-win-light.png"
+    },
+    {
+      "name": "dictations-win-light",
+      "theme": "light",
+      "state": "dictations",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/dictations-win-light.png"
+    },
+    {
+      "name": "meeting-note-win-light",
+      "theme": "light",
+      "state": "meeting-note",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/meeting-note-win-light.png"
+    },
+    {
+      "name": "quick-note-win-light",
+      "theme": "light",
+      "state": "quick-note",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/quick-note-win-light.png"
+    },
+    {
+      "name": "about-win-light",
+      "theme": "light",
+      "state": "about",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/about-win-light.png"
+    },
+    {
+      "name": "palette-win-light",
+      "theme": "light",
+      "state": "palette",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/palette-win-light.png"
+    },
+    {
+      "name": "ready-win-dark",
+      "theme": "dark",
+      "state": "ready",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/ready-win-dark.png"
+    },
+    {
+      "name": "recording-win-dark",
+      "theme": "dark",
+      "state": "recording",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/recording-win-dark.png"
+    },
+    {
+      "name": "paused-win-dark",
+      "theme": "dark",
+      "state": "paused",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/paused-win-dark.png"
+    },
+    {
+      "name": "dictations-win-dark",
+      "theme": "dark",
+      "state": "dictations",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/dictations-win-dark.png"
+    },
+    {
+      "name": "meeting-note-win-dark",
+      "theme": "dark",
+      "state": "meeting-note",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/meeting-note-win-dark.png"
+    },
+    {
+      "name": "quick-note-win-dark",
+      "theme": "dark",
+      "state": "quick-note",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/quick-note-win-dark.png"
+    },
+    {
+      "name": "about-win-dark",
+      "theme": "dark",
+      "state": "about",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/about-win-dark.png"
+    },
+    {
+      "name": "palette-win-dark",
+      "theme": "dark",
+      "state": "palette",
+      "title": "Dictate — Settings",
+      "screenshot": "design/locks/note-capture-core/captures/palette-win-dark.png"
+    }
+  ]
+}
