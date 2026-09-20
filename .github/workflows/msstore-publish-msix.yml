@@ -109,12 +109,27 @@ jobs:
           if (-not $msix) {
             throw "No MSIX package was produced."
           }
-          msstore publish . --inputFile "$($msix.FullName)" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
+          # The Store CLI takes the directory holding the .msix (-i); it has
+          # no --inputFile. Stage the one package alone so nothing else in
+          # the output directory is picked up.
+          $upload = Join-Path $env:RUNNER_TEMP "msstore-upload"
+          New-Item -ItemType Directory -Force -Path $upload | Out-Null
+          Copy-Item $msix.FullName -Destination $upload
+          msstore publish --inputDirectory "$upload" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
+          if ($LASTEXITCODE -ne 0) {
+            throw "msstore publish failed with exit code $LASTEXITCODE"
+          }
           msstore submission status "$env:MSSTORE_PRODUCT_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "msstore submission status failed with exit code $LASTEXITCODE"
+          }
 
       - name: Commit current Store draft
         if: inputs.mode == 'publish'
         shell: pwsh
         run: |
           msstore submission publish "$env:MSSTORE_PRODUCT_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "msstore submission publish failed with exit code $LASTEXITCODE"
+          }
           msstore submission poll "$env:MSSTORE_PRODUCT_ID"
