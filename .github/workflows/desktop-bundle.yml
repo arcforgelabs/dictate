@@ -30,6 +30,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Free runner disk space
+        # The .deb stages the offline Parakeet model and the meeting runtime,
+        # and tar/gzip needs a second copy; the stock image runs out mid-bundle.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h / | tail -1
+
       - name: Install Tauri + engine build dependencies
         run: |
           sudo apt-get update
