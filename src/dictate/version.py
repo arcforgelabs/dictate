@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 # Public app/release version. This is intentionally the requested CalVer form.
-RELEASE_VERSION = "2026.9.19"
+RELEASE_VERSION = "2026.9.20"
 
 # Python package metadata uses the same PEP 440-compatible CalVer form.
-PACKAGE_VERSION = "2026.9.19"
+PACKAGE_VERSION = "2026.9.20"
 
 __version__ = PACKAGE_VERSION
