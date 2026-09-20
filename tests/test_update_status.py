@@ -986,7 +986,17 @@ class UpdateStatusTests(unittest.TestCase):
             release_cleanup.set()
             self.assertTrue(failed_published.wait(timeout=2))
             failed = check_update_status()
+            # The retry starts a real worker thread. Wait for it inside the
+            # patch context so it cannot outlive this test and hit the next
+            # test's mocks (seen as a spurious second download call on slow
+            # Windows runners).
+            failed_published.clear()
             retry = start_update_flow()
+            retry_worker = update_status_mod._linux_package_operation.thread
+            self.assertTrue(failed_published.wait(timeout=2))
+            if retry_worker is not None:
+                retry_worker.join(timeout=2)
+                self.assertFalse(retry_worker.is_alive())
 
         self.assertEqual(started.mode, "working")
         self.assertEqual(before_cleanup.phase, "downloading")
