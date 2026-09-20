@@ -63,8 +63,10 @@ Current verified state:
 1. Linux source/local install is usable for human testing on this workstation.
 2. Fresh CPU English installs default to Parakeet v2 where the runtime is
    available.
-3. Parakeet CUDA can load on Samuel's NVIDIA workstation and passes doctor,
-   model-prepare, and silence-smoke checks.
+3. Parakeet CUDA loaded and passed doctor, model-prepare, and silence-smoke
+   checks on the CUDA 12 lane (onnxruntime-gpu 1.23.2). The GPU has since moved
+   out of the Linux host into the `win11-gpu` GPU-passthrough VM (with WSL2),
+   and the CUDA 13 lane (onnxruntime 1.30) has not yet been run there.
 4. The Windows `win11-dev` VM passes source install, update, uninstall, and
    desktop build smokes, including Store MSIX packaging.
 5. The Windows human-test artifacts currently proven in the local VM are the
@@ -202,8 +204,10 @@ Windows CUDA packaging status:
    surface. With `-ForceCuda`, it also verifies that the GPU wheel installs,
    `onnxruntime.preload_dlls()` can load the bundled CUDA/cuDNN runtime DLLs,
    `CUDAExecutionProvider` appears, and `dictate doctor --device cuda` is
-   healthy. It still cannot prove real NVIDIA inference until a GPU is passed
-   through or a physical Windows NVIDIA test host is used.
+   healthy. It cannot prove real NVIDIA inference. That is the job of the
+   `win11-gpu` VM, which has the NVIDIA GPU on passthrough plus WSL2 for the
+   Linux CUDA lane; it is being set up as of 2026-09-20 and
+   `scripts/windows-vm-smoke.sh` still needs a target for it.
 
 Windows VM evidence on `win11-dev`:
 

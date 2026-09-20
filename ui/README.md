@@ -58,7 +58,6 @@ Fonts (Hanken Grotesk + JetBrains Mono variable TTFs) are bundled in
 | set model / shortcut / theme / startup / device | `PATCH /api/config` |
 | add / remove hotword | `POST` / `DELETE /api/hotwords` |
 | clear history | `DELETE /api/history` |
-| save / clear provider key | `POST` / `DELETE /api/api-keys` |
 | run doctor | `POST /api/doctor` |
 | live recording / status | `GET /api/events` (SSE) |
 | window min/max/close | Tauri window API (`withGlobalTauri`) |
@@ -73,7 +72,7 @@ recording even if the engine bridge is temporarily unavailable.
 | Path | Role |
 |---|---|
 | `src/styles.css` | Design tokens, components, `@font-face`, per-OS chrome |
-| `src/icons.jsx` | Lucide-style line glyphs + authentic provider brand marks |
+| `src/icons.jsx` | Lucide-style line glyphs and the Dictate brand mark |
 | `src/primitives.jsx` | Kbd/Combo/Chip/Dot/Toggle/Seg/Row/Wave |
 | `src/store.jsx` | Model catalog, demo phrases, context |
 | `src/ipc.js` | Engine bridge (live + mock fallback) |

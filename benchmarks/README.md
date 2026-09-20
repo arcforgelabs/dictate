@@ -45,7 +45,7 @@ dataset and hardware matrix are stable.
 
 | Tier | Quality Gate | Speed Gate | Feature Gate |
 | --- | --- | --- | --- |
-| `minimum` | Within 10% relative WER of the recommended tier on the core dictation set | Dictation RTF <= `1.50` for short-form local captures | Local dictation works; hosted Pro can be used when entitled; local meeting speaker attribution is hidden unless a CPU wrapper passes benchmarks |
+| `minimum` | Within 10% relative WER of the recommended tier on the core dictation set | Dictation RTF <= `1.50` for short-form local captures | Local dictation works; local meeting speaker attribution is hidden unless a CPU wrapper passes benchmarks |
 | `recommended` | Baseline quality target for stable releases | Dictation RTF <= `1.00` for short-form local captures | Default stable experience |
 | `advanced` | No worse than recommended on dictation; speaker-attribution quality separately measured for Meeting mode | Dictation RTF <= `0.70`; meeting RTF targets set per DiariZen / Sortformer / pyannote benchmark | Optional early-access/experimental local meetings only after packaging and legal gates |
 
@@ -55,7 +55,7 @@ The canonical model lanes live in
 [../docs/TRANSCRIPTION_PLAN.md](../docs/TRANSCRIPTION_PLAN.md). This benchmark
 document defines dataset and measurement format only.
 
-Do not promote any CPU, NVIDIA GPU, AMD GPU, meeting, or hosted lane to default
+Do not promote any CPU, NVIDIA GPU, AMD GPU, or meeting lane to default
 from marketing claims alone. Run the same manifest on representative hardware
 and record WER, DER where applicable, RTF/RTFx, RAM/VRAM, install size, and
 package/runtime dependencies.

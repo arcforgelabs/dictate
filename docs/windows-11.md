@@ -3,7 +3,8 @@
 Windows 11 is a supported desktop target for Dictate. The normal path is the
 installed `Dictate` app entry, which starts the desktop capture app and tray
 process. The primary workflow is simple dictation and local dictation recovery;
-advanced provider/API-key configuration lives in the `dictate config` CLI.
+advanced configuration (model, meeting model, shortcut, hotwords, update
+channel) lives in the `dictate config` CLI.
 
 ## Supported Surface
 
@@ -47,13 +48,8 @@ Direct installs can choose Normal or Beta updates inside Dictate. Microsoft Stor
 installs show `Microsoft Store · Stable`; checking for updates opens the Store's
 Downloads and updates surface and never switches to the direct-install ecosystem.
 
-Cloud transcription prefers an active Dictate Pro entitlement, then falls back to a
-configured personal xAI API key. Advanced users can reverse that order:
-
-```powershell
-dictate config set-cloud-preference personal-first
-dictate config set-cloud-preference pro-first
-```
+Transcription is local-only: there is no cloud lane, account, or API key on
+Windows or anywhere else. See `VISION.md`.
 ```
 
 The npm package is an installer shim that publishes the PowerShell lifecycle scripts. The hosted bootstrap downloads the matching tagged Dictate source release and runs the platform installer. It is a developer/bootstrap path, not the public Windows install target. If Node.js is already installed, this is equivalent:
@@ -119,7 +115,7 @@ Update or uninstall from a repo root:
 
 Use `-RemoveUserData` with the uninstaller only when config, logs, history, and downloaded model data should also be removed.
 
-The setup wizard links to Dictate documentation, the dedicated Dictate privacy policy at <https://arcforge.au/privacy/dictate>, and Arc Forge terms at <https://arcforge.au/terms>. Dictate is built to be useful, but support and maintenance are best-effort. Verify important transcriptions, keep control of connected provider accounts, report issues, and consider paid support if Dictate saves you time and you have the means.
+The setup wizard links to Dictate documentation, the dedicated Dictate privacy policy at <https://arcforge.au/privacy/dictate>, and Arc Forge terms at <https://arcforge.au/terms>. Dictate is built to be useful, but support and maintenance are best-effort. Verify important transcriptions, report issues, and consider paid support if Dictate saves you time and you have the means.
 
 Manual install:
 
@@ -171,16 +167,15 @@ Open `Dictate` from the Start Menu. The desktop app includes:
 - a capture home with a mic control
 - a local dictations view for copy/paste recovery
 - a command palette for daily actions
-- a private/cloud toggle that points users to Dictate Pro or CLI API-key setup
-  when hosted transcription is unavailable
+- a privacy pill stating that transcription stays on this device
 - quiet update status when an app update is available
 
 Advanced configuration remains available from PowerShell:
 
 ```powershell
 .\.venv\Scripts\dictate.exe config show
-.\.venv\Scripts\dictate.exe config set-provider online
-.\.venv\Scripts\dictate.exe config set-key xai xai-YOUR_KEY_HERE
+.\.venv\Scripts\dictate.exe config set-model parakeet-tdt-0.6b-v3
+.\.venv\Scripts\dictate.exe config set-shortcut ctrl_r
 ```
 
 ## Known Gaps
