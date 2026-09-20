@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-20
+
+This is the first published release since 2026.7.4; the 2026-09-19 entry below
+was versioned but never tagged or published, and ships here.
+
+### Added
+
+- `distil-large-v3.5` is selectable on the faster-whisper lane (English only,
+  about one WER point better than `turbo` at the same speed).
+- Transparent brand marks, a circular badge, and Store/MSIX logos rendered
+  from the brand SVG.
+
+### Changed
+
+- ONNX Runtime moved to 1.30 for the CPU and CUDA lanes. The CUDA lane now
+  uses CUDA 13 runtime wheels and needs NVIDIA driver 580 or newer; on older
+  drivers Parakeet falls back to CPU. `onnxruntime-directml` is capped at
+  1.24.x, the last published DirectML wheel.
+- `onnx-asr` 0.12 and `pyannote.audio` 4.0.7.
+- The desktop views follow the brand-book spacing and colour rules.
+- `parakeet-tdt-0.6b-v2` stays the English default after a head-to-head with
+  `parakeet-unified-en-0.6b`; the evaluation is recorded in
+  `docs/TRANSCRIPTION_PLAN.md`.
+
+### Fixed
+
+- The published npm `latest` package now carries the Python source, so
+  `npx @arcforgelabs/dictate install` works on Linux on the stable channel.
+- Documentation no longer describes the removed cloud, Pro, or API-key
+  surfaces.
+
 ## 2026-09-19
 
 ### Removed
