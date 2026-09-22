@@ -227,6 +227,41 @@ jobs:
             echo "::warning::npm publish failed (scope/token not configured); continuing release without npm"
           fi
 
+      - name: Keep the unstable channel upstream of stable
+        # Invariant: everything on stable went through unstable first, or a
+        # newer build is on unstable. A stable release cut ahead of the
+        # unstable pointer moves that pointer forward to itself, so Beta users
+        # are never offered something older than stable. The client applies
+        # the same rule when it checks, so this is belt and braces.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if ! npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} is not on npm; cannot move the unstable dist-tag"
+            exit 0
+          fi
+          UNSTABLE="$(npm view "${PACKAGE_NAME}" dist-tags.unstable 2>/dev/null || true)"
+          # Stable base versions sort ahead of any unstable build of an older
+          # base, and behind unstable builds of the same base (semver prerelease
+          # ordering is the reverse, hence the explicit base comparison).
+          STABLE_BASE="${PACKAGE_VERSION%%-*}"
+          UNSTABLE_BASE="${UNSTABLE%%-*}"
+          if [ -n "$UNSTABLE" ] && [ "$(printf '%s\n%s\n' "$UNSTABLE_BASE" "$STABLE_BASE" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)" = "$UNSTABLE_BASE" ] && [ "$UNSTABLE_BASE" != "$STABLE_BASE" ]; then
+            echo "unstable dist-tag ${UNSTABLE} is already ahead of ${PACKAGE_VERSION}; leaving it"
+            exit 0
+          fi
+          if [ "$UNSTABLE_BASE" = "$STABLE_BASE" ] && [ "$UNSTABLE" != "$UNSTABLE_BASE" ]; then
+            echo "unstable dist-tag ${UNSTABLE} is a prerelease of ${PACKAGE_VERSION}; leaving it"
+            exit 0
+          fi
+          if npm dist-tag add "${PACKAGE_NAME}@${PACKAGE_VERSION}" unstable; then
+            echo "Moved the unstable dist-tag from ${UNSTABLE:-<none>} to ${PACKAGE_VERSION}"
+          else
+            echo "::warning::could not move the unstable dist-tag; the client-side rule still covers Beta users"
+          fi
+
   linux-desktop:
     name: Linux desktop bundle (.deb)
     runs-on: ubuntu-latest
