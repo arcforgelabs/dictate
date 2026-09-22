@@ -275,12 +275,14 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertNotIn("restart", flow.actions or [])
         self.assertEqual(calls, [(["bash", str(root / "update.sh")], str(root))])
 
-    def _linux_package(self):  # noqa: ANN202
-        # platform=linux, no source root -> install_kind == "linux-package"
+    def _linux_package(self, dpkg_version: str | None = None):  # noqa: ANN202
+        # platform=linux, no source root -> install_kind == "linux-package".
+        # dpkg is stubbed so the host's real package (if any) cannot leak in.
         return (
             patch("dictate.update_status.sys.platform", "linux"),
             patch("dictate.update_status._candidate_source_roots", return_value=[]),
             patch("dictate.update_status._is_linux_user_install", return_value=False),
+            patch("dictate.update_status._linux_installed_package_version", return_value=dpkg_version),
         )
 
     def _linux_user(self):  # noqa: ANN202
@@ -440,11 +442,12 @@ class UpdateStatusTests(unittest.TestCase):
             size=4,
             sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         )
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -487,11 +490,12 @@ class UpdateStatusTests(unittest.TestCase):
             size=4,
             sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         )
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -519,7 +523,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(snapshot["error_code"], "cancelled")
 
     def test_linux_package_update_requires_pkexec(self) -> None:
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with plat, roots, user, patch("dictate.update_status.shutil.which", return_value=None):
             flow = start_update_flow()
 
@@ -657,7 +661,7 @@ class UpdateStatusTests(unittest.TestCase):
             sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         )
         phases: list[str] = []
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         import dictate.update_status as update_status_mod
 
         real_set_phase = update_status_mod._linux_package_set_phase
@@ -671,6 +675,7 @@ class UpdateStatusTests(unittest.TestCase):
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
@@ -693,6 +698,29 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertIn("installing", phases)
         self.assertEqual(status.phase, "installed")
 
+    def test_linux_package_current_version_comes_from_dpkg_not_the_stale_stamp(self) -> None:
+        # A .deb installed outside the in-app updater leaves the config stamp
+        # behind; dpkg is the ground truth for what is installed.
+        plat, roots, user, dpkg = self._linux_package(dpkg_version="2026.9.20")
+        with (
+            plat,
+            roots,
+            user,
+            dpkg,
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(installed_package_version="2026.7.5"),
+            ),
+            patch(
+                "dictate.update_status._fetch_latest_version",
+                return_value=("2026.9.20", "https://example.test"),
+            ),
+        ):
+            status = check_update_status()
+
+        self.assertEqual(status.current_version, "2026.9.20")
+        self.assertFalse(status.update_available)
+
     def test_linux_package_duplicate_start_is_rejected(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",
@@ -700,7 +728,7 @@ class UpdateStatusTests(unittest.TestCase):
             size=4,
             sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         )
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
 
         class _SlowThread:
             def __init__(self, target=None, args=(), kwargs=None, **kw):  # noqa: ANN001, ARG001
@@ -717,6 +745,7 @@ class UpdateStatusTests(unittest.TestCase):
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),
@@ -752,11 +781,12 @@ class UpdateStatusTests(unittest.TestCase):
             worker_started.set()
             release_worker.wait(timeout=2)
 
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -792,7 +822,7 @@ class UpdateStatusTests(unittest.TestCase):
             size=4,
             sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         )
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
 
         class _SlowThread:
             def __init__(self, target=None, args=(), kwargs=None, **kw):  # noqa: ANN001, ARG001
@@ -805,6 +835,7 @@ class UpdateStatusTests(unittest.TestCase):
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -857,11 +888,12 @@ class UpdateStatusTests(unittest.TestCase):
         def worker(*args, **kwargs):  # noqa: ANN002, ANN003
             release_worker.wait(timeout=2)
 
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -906,11 +938,12 @@ class UpdateStatusTests(unittest.TestCase):
                 raise RuntimeError("thread unavailable")
             return _StoppedThread()
 
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -957,11 +990,12 @@ class UpdateStatusTests(unittest.TestCase):
             real_set_failed(code, detail)
             failed_published.set()
 
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -1006,11 +1040,12 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertNotEqual(retry.mode, "busy")
 
     def test_linux_package_asset_failure_keeps_target_version_and_retry_action(self) -> None:
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -1035,11 +1070,12 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertIn("retry", status.actions)
 
     def test_linux_package_version_lookup_failure_has_distinct_code(self) -> None:
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch(
                 "dictate.update_status.load_config",
@@ -1067,11 +1103,12 @@ class UpdateStatusTests(unittest.TestCase):
             size=None,
             sha256=None,
         )
-        plat, roots, user = self._linux_package()
+        plat, roots, user, dpkg = self._linux_package()
         with (
             plat,
             roots,
             user,
+            dpkg,
             patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
             patch("dictate.update_status.load_config", return_value=Config(installed_package_version="2026.7.4")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.5", "https://example.test")),

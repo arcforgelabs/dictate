@@ -199,13 +199,25 @@ def _current_linux_package_status(
     )
 
 
+def _current_installed_version(context: dict[str, object]) -> str:
+    """Resolve the version the user actually has installed.
+
+    Package managers (dpkg, the Microsoft Store) are authoritative when they
+    can answer. The config stamp only covers installs the in-app updater made
+    itself, so it is consulted after them and before falling back to the
+    running binary's version.
+    """
+    cfg = context["config"]
+    package_version = context.get("package_version")
+    if context["install_kind"] in {"windows-store", "linux-package"} and package_version:
+        return str(package_version)
+    stamped = getattr(cfg, "installed_package_version", None)
+    return str(stamped or package_version or RELEASE_VERSION)
+
+
 def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     context = _update_context()
-    cfg = context["config"]
-    if context["install_kind"] == "windows-store":
-        current_version = context.get("package_version") or RELEASE_VERSION
-    else:
-        current_version = cfg.installed_package_version or context.get("package_version") or RELEASE_VERSION
+    current_version = _current_installed_version(context)
     if context["install_kind"] == "linux-package":
         operation_status = _current_linux_package_status(context, str(current_version))
         if operation_status is not None:
@@ -393,12 +405,7 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
     global _linux_package_operation
     if not shutil.which("pkexec"):
         return _missing_deps_flow(context, ["pkexec"])
-    cfg = context["config"]
-    current_version = (
-        getattr(cfg, "installed_package_version", None)
-        or context.get("package_version")
-        or RELEASE_VERSION
-    )
+    current_version = _current_installed_version(context)
     with _linux_package_operation_guard:
         op = _linux_package_operation
         if op is not None and op.phase in {
@@ -541,12 +548,7 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
 
 def _run_windows_direct_update(context: dict[str, object]) -> UpdateFlow:
     """Download and launch the installer published for the selected channel."""
-    cfg = context["config"]
-    current_version = (
-        getattr(cfg, "installed_package_version", None)
-        or context.get("package_version")
-        or RELEASE_VERSION
-    )
+    current_version = _current_installed_version(context)
     try:
         latest, _ = _fetch_latest_version(_update_channel_for_context(context), timeout=10.0)
         if not is_newer_version(latest, current_version):
@@ -1017,13 +1019,42 @@ def _update_context() -> dict[str, object]:
     except Exception:  # noqa: BLE001
         config = SimpleNamespace(update_channel=None, installed_package_version=None)
     metadata = _windows_distribution_metadata() if platform == "windows" else {}
+    package_version = metadata.get("packageVersion")
+    if install_kind == "linux-package":
+        package_version = _linux_installed_package_version()
     return {
         "platform": platform,
         "install_kind": install_kind,
         "source_root": source_root,
         "config": config,
-        "package_version": metadata.get("packageVersion"),
+        "package_version": package_version,
     }
+
+
+def _linux_installed_package_version() -> str | None:
+    """The version dpkg has installed, or None when it cannot be determined.
+
+    This is the ground truth for a Linux package install. The
+    ``installed_package_version`` stamp in the config only reflects what the
+    in-app updater last installed, so it goes stale when a .deb is installed
+    any other way.
+    """
+    if not shutil.which("dpkg-query"):
+        return None
+    try:
+        completed = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Version}", "dictate"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    version = completed.stdout.strip()
+    return version or None
 
 
 def _install_kind(platform: str, source_root: Path | None) -> str:
