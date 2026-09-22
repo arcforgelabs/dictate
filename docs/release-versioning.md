@@ -125,6 +125,20 @@ remains a separate guarded
 workflow. Paid Authenticode signing for direct-download Windows installers is a
 future-only lane, not a current release blocker.
 
+### Unstable is upstream of stable
+
+The channels are ordered: everything on `latest` went through `unstable`
+first, or a newer build is on `unstable`. A Beta (unstable) user must never
+be offered something older than the current stable release. Two mechanisms
+keep that true:
+
+1. `release.yml` moves the npm `unstable` dist-tag forward to the stable
+   version it just published whenever the unstable pointer is behind it
+   (same-base prereleases and newer-base unstable builds are left alone).
+2. The app's update check resolves the Beta channel to the newer of the
+   `unstable` and `latest` dist-tags, so installed copies get the same
+   answer even if the pointer was not moved.
+
 To publish an unstable bootstrap:
 
 ```bash

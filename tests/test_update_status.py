@@ -149,7 +149,7 @@ class UpdateStatusTests(unittest.TestCase):
     def test_check_update_status_uses_npm_unstable_dist_tag(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
-            return _FakeResponse({"dist-tags": {"unstable": "2026.7.4-unstable.48.1"}})
+            return _FakeResponse({"dist-tags": {"latest": "2026.7.4", "unstable": "2026.7.4-unstable.48.1"}})
 
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
@@ -173,12 +173,71 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.install_kind, "linux-user")
         self.assertIn("update", status.actions or [])
 
+    def test_unstable_channel_offers_stable_when_the_unstable_pointer_is_behind(self) -> None:
+        # Unstable is upstream of stable: a stable release cut without a newer
+        # unstable build is the newest thing on the Beta channel as well.
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            return _FakeResponse({"dist-tags": {"latest": "2026.9.20", "unstable": "2026.7.4-unstable.68.1"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=True),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable", installed_package_version="2026.7.4"),
+            ),
+        ):
+            status = check_update_status()
+
+        self.assertEqual(status.latest_version, "2026.9.20")
+        self.assertTrue(status.update_available)
+
+    def test_unstable_channel_prefers_a_newer_unstable_build_over_stable(self) -> None:
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            return _FakeResponse({"dist-tags": {"latest": "2026.9.20", "unstable": "2026.9.20-unstable.1.1"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=True),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable", installed_package_version="2026.9.20"),
+            ),
+        ):
+            status = check_update_status()
+
+        self.assertEqual(status.latest_version, "2026.9.20-unstable.1.1")
+        self.assertTrue(status.update_available)
+
+    def test_unstable_channel_falls_back_to_stable_when_no_unstable_tag_exists(self) -> None:
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            return _FakeResponse({"dist-tags": {"latest": "2026.9.20"}})
+
+        with (
+            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("dictate.update_status._find_source_root", return_value=None),
+            patch("dictate.update_status._is_linux_user_install", return_value=True),
+            patch("dictate.update_status.sys.platform", "linux"),
+            patch(
+                "dictate.update_status.load_config",
+                return_value=Config(update_channel="unstable", installed_package_version="2026.7.4"),
+            ),
+        ):
+            status = check_update_status()
+
+        self.assertEqual(status.latest_version, "2026.9.20")
+        self.assertTrue(status.update_available)
+
     def test_source_checkout_defaults_to_unstable_update_channel(self) -> None:
         root = Path("/tmp/dictate-source")
 
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
-            return _FakeResponse({"dist-tags": {"unstable": "2026.7.4-unstable.52.1"}})
+            return _FakeResponse({"dist-tags": {"latest": "2026.7.4", "unstable": "2026.7.4-unstable.52.1"}})
 
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
@@ -199,7 +258,7 @@ class UpdateStatusTests(unittest.TestCase):
 
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
-            return _FakeResponse({"dist-tags": {"unstable": "2026.7.4-unstable.52.1"}})
+            return _FakeResponse({"dist-tags": {"latest": "2026.7.4", "unstable": "2026.7.4-unstable.52.1"}})
 
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),

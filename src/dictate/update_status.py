@@ -1152,8 +1152,45 @@ def _normalize_update_channel(value: str | None) -> str | None:
 def _fetch_latest_version(configured_channel: str | None, *, timeout: float) -> tuple[str, str | None]:
     channel = _resolve_update_channel(configured_channel)
     if channel == "unstable":
-        return _fetch_npm_dist_tag("unstable", timeout=timeout)
+        return _fetch_latest_unstable(timeout=timeout)
     return _fetch_latest_release(timeout=timeout)
+
+
+def _fetch_latest_unstable(*, timeout: float) -> tuple[str, str | None]:
+    """The newest build a Beta user should see.
+
+    The unstable lane is upstream of stable: everything on stable went through
+    unstable first, or a newer build is on unstable. If the unstable pointer
+    has fallen behind a stable release (a stable release cut without a
+    matching unstable build), the stable release is the newest thing on the
+    Beta channel too. Never offer a Beta user something older than stable.
+    """
+    stable: tuple[str, str | None] | None
+    try:
+        stable = _fetch_latest_release(timeout=timeout)
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        RuntimeError,
+    ):
+        stable = None
+    try:
+        unstable = _fetch_npm_dist_tag("unstable", timeout=timeout)
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        RuntimeError,
+    ):
+        if stable is None:
+            raise
+        return stable
+    if stable is not None and is_newer_version(stable[0], unstable[0]):
+        return stable
+    return unstable
 
 
 def _fetch_npm_dist_tag(tag: str, *, timeout: float) -> tuple[str, str | None]:
