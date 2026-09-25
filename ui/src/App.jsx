@@ -1680,6 +1680,8 @@ export default function App() {
       // Inventing an update there is how a dead engine shows "Update available"
       // with no version.
       if (!ipc.isMockMode()) return;
+      // Store screenshots load the demo with ?demoUpdate=off.
+      if (new URLSearchParams(window.location.search).get("demoUpdate") === "off") return;
       const t1 = setTimeout(() => {
         setUpdateStatus((u) => ({ ...u, updateAvailable: true, latestVersion: "2026.7.1", checked: true }));
         setUpdatePhase((p) => (p === "idle" ? "available" : p));

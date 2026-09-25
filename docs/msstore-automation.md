@@ -107,6 +107,24 @@ gh workflow run msstore-publish-msix.yml -f mode=publish -f product_id=9P5S7747V
 Review that draft in Partner Center before running `mode=publish`, which commits
 the current draft and polls Microsoft certification.
 
+## Updating the listing
+
+The Store listing text and screenshots live in the repo and ship with every
+draft:
+
+- Text: `docs/msstore-listing.md` sections `Short Description`, `Description`,
+  `Product Features`, `Release Notes` and `Keywords`.
+- Screenshots: `docs/msstore/assets/screenshots/`, in the order the README
+  there lists them, with its captions.
+
+`mode=draft` runs `scripts/msstore-submit.py legacy-draft`, which creates one
+API submission, queues the new MSIX (the previous package is marked for
+removal), replaces the `en-us` text and screenshots (logos are kept), uploads
+the package and screenshots in one zip, and reads the draft back to check the
+package and description landed. It never commits. To change only the listing,
+edit those files, merge, and run a draft; the package is rebuilt from `master`
+either way.
+
 ## Local Smoke
 
 Set the same environment variables locally, then run:
@@ -176,13 +194,15 @@ The current helper supports:
 - `status`
 - `metadata`
 - guarded `submit --confirm-submit`
+- `legacy-draft` (MSIX draft with package, listing text and screenshots; no commit)
 
-The manual publish workflow uses Microsoft Store Developer CLI:
-`msstore publish <path-to.msix> --appId <productId> --noCommit` uploads the
-package, and `msstore submission publish <productId>` is the separate commit
-step. Always pass the `.msix` path. Without it the CLI inspects the working
-directory, sees `package.json`, treats the repo as an Electron app and uploads
-without attaching the package. The Store then re-publishes the previous package
-and reports success; that happened with the September 2026 submission. The
-draft step now reads the submission back and fails unless the new `.msix` is
-in it.
+`mode=draft` uploads through `scripts/msstore-submit.py legacy-draft` (see
+"Updating the listing"). `mode=publish` and `mode=status` use the Microsoft
+Store Developer CLI: `msstore submission publish <productId>` commits the draft
+and `msstore submission poll` follows certification.
+
+An earlier draft step used `msstore publish --inputDirectory <dir>` with no
+project path. The CLI then inspected the working directory, saw `package.json`,
+treated the repo as an Electron app and uploaded without attaching the package;
+the Store re-published the previous package and reported success. That happened
+with the first September 2026 submission.

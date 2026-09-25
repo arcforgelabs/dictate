@@ -1,6 +1,6 @@
 # Dictate Privacy Policy Source Copy
 
-Date: 2026-09-19
+Date: 2026-09-26
 
 This is the repository source copy for the public Dictate privacy page at
 `https://arcforge.au/privacy/dictate`. Publish the current contents there when
@@ -13,9 +13,9 @@ subscription, no API key, and no hosted transcription. Microphone audio never
 leaves the device, and Arc Forge does not receive dictation text, audio, or
 transcripts at all.
 
-Microphone audio, dictation history, long-form notes, transcript segments,
-hotwords, spelling substitutions, model choices, and app preferences are stored
-in the operating-system user data directory:
+Microphone audio is used only while you dictate and is not kept. Dictation
+history, notes, custom words, spelling substitutions and app preferences are
+stored in the operating-system user data directory:
 
 - Linux: `~/.config/dictate/` and `~/.local/share/dictate/`
 - Windows: `%APPDATA%\dictate\` and `%LOCALAPPDATA%\dictate\`
@@ -25,12 +25,15 @@ Dictate and deleting that directory.
 
 ## What does reach the network
 
-Three things, none of which carry dictation content:
+Transcription itself never touches the network. Only these do, and none of
+them carry dictation content:
 
-- **Model downloads.** The first run of a given speech model downloads its
-  weights from the model host (Hugging Face). This sends the usual information
-  any file download does, such as an IP address. It carries no audio or
-  transcript.
+- **Model downloads, only outside the installed app.** The installed app ships
+  with its speech model (Parakeet), so it downloads nothing to transcribe.
+  Source installs, and other local models chosen from the command line,
+  download model files from the model host (Hugging Face) once. That sends the
+  usual information any file download does, such as an IP address, and no audio
+  or transcript.
 - **Update checks.** Dictate asks GitHub whether a newer release exists, and
   downloads it when the user chooses to update. This carries the current
   version and update channel, and no dictation content.
