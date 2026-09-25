@@ -1,7 +1,7 @@
 {
   "name": "@arcforgelabs/dictate-ui",
   "private": true,
-  "version": "2026.9.25-2",
+  "version": "2026.9.25-3",
   "description": "Dictate \"Quiet Console\" front-end — the design-system Settings window, hosted by the Tauri shell.",
   "type": "module",
   "scripts": {
