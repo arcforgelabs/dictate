@@ -1,0 +1,65 @@
+name: Windows release gate
+
+# Installs a published GitHub release on the win11-gpu VM, launches it in the
+# signed-in desktop session, checks the running engine's version, and
+# uninstalls. The Store draft refuses to run until this passes for the version
+# it is about to upload.
+#
+# The runner lives in the dictate-windows-gate runner group, which only this
+# file on master may use, so pull requests (including from forks) cannot reach
+# the VM.
+
+run-name: Windows release gate ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test, for example v2026.9.25-4"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Install, launch, uninstall ${{ inputs.tag }}
+    runs-on: [self-hosted, Windows, win11-gpu]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Download the Windows installer
+        shell: powershell
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:TAG -notmatch '^v20\d{2}\.\d{1,2}\.\d{1,2}(-\d+)?$') {
+            throw "Tag must look like vYYYY.M.D or vYYYY.M.D-N: $env:TAG"
+          }
+          $version = $env:TAG.Substring(1)
+          $name = "Dictate_${version}_x64-setup.exe"
+          $out = Join-Path $env:RUNNER_TEMP $name
+          curl.exe -fsSL --retry 3 -o $out "https://github.com/$env:REPO/releases/download/$env:TAG/$name"
+          if ($LASTEXITCODE -ne 0) { throw "download of $name failed with $LASTEXITCODE" }
+          "INSTALLER=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run the release gate
+        shell: powershell
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-release-gate.ps1 `
+            -Installer $env:INSTALLER -ExpectedVersion $env:VERSION -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { throw "release gate failed with $LASTEXITCODE" }
+
+      - name: Remove the installer
+        if: always()
+        shell: powershell
+        run: Remove-Item -Force -ErrorAction SilentlyContinue $env:INSTALLER

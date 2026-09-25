@@ -16,12 +16,18 @@ on:
         description: "Partner Center product ID"
         required: true
         default: "9P5S7747V0BP"
+      skip_windows_gate:
+        description: "Draft without a passing Windows release gate for this version (say why in the run)"
+        required: false
+        default: false
+        type: boolean
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   msstore:
@@ -93,6 +99,21 @@ jobs:
       - name: Show current Store submission status
         shell: pwsh
         run: msstore submission status "$env:MSSTORE_PRODUCT_ID"
+
+      - name: Require a passing Windows release gate
+        if: inputs.mode == 'draft' && !inputs.skip_windows_gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -Raw ui-shell\src-tauri\tauri.conf.json | ConvertFrom-Json).version
+          $title = "Windows release gate v$version"
+          $runs = gh run list --repo "${{ github.repository }}" --workflow windows-release-gate.yml --branch "${{ github.event.repository.default_branch }}" --limit 50 --json displayTitle,conclusion,url | ConvertFrom-Json
+          $passed = $runs | Where-Object { $_.displayTitle -eq $title -and $_.conclusion -eq 'success' } | Select-Object -First 1
+          if (-not $passed) {
+            throw "No passing '$title' run. Dispatch windows-release-gate.yml with tag v$version first, or rerun with skip_windows_gate."
+          }
+          Write-Output "Windows release gate passed for v${version}: $($passed.url)"
 
       - name: Build Store MSIX
         if: inputs.mode == 'draft'
