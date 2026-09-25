@@ -2549,3 +2549,28 @@ class DaemonHistoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _NoMicrophoneRecorder(_FakeRecorder):
+    def start(self, on_chunk=None, recording_id=None, **kwargs) -> None:  # noqa: ANN001, ARG002
+        raise AudioCaptureError("no microphone input devices detected")
+
+
+class MicrophoneMissingAtRecordTests(unittest.TestCase):
+    def test_record_without_a_microphone_tells_the_window(self) -> None:
+        from dictate.daemon import Daemon
+
+        with tempfile.TemporaryDirectory() as d:
+            statuses: list[str | None] = []
+            output = MagicMock()
+            output.name = "mock"
+            daemon = Daemon(
+                _FakeStt(),
+                output=output,
+                history_store=HistoryStore(path=Path(d) / "h.json"),
+                recorder=_NoMicrophoneRecorder(),
+                status_callback=statuses.append,
+            )
+            self.assertFalse(daemon._start_recording())
+            self.assertIsNone(daemon._active_recording_id)
+            self.assertIn("Microphone error: no microphone input devices detected", statuses)

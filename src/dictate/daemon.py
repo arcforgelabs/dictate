@@ -605,7 +605,7 @@ class Daemon:
                     if self._active_recording_id is not None:
                         self._clear_recording_state(self._active_recording_id)
                     self._active_recording_id = None
-                    print(f"\r  Microphone error: {exc}", file=sys.stderr)
+                    self._surface_status(f"Microphone error: {exc}")
                     return False
                 if note_start_error is not None:
                     if failed_recording_id is not None:
