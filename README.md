@@ -153,7 +153,8 @@ also want to remove config, logs, history, and downloaded model data.
 
 - Starts from the Windows Start Menu or Linux app launcher
 - Runs as a tray app
-- Types dictated text into the focused app
+- Types dictated text into the focused app. A terminal, including the Grok
+  CLI, receives that text with Shift+Insert so it is not filed as an attachment.
 - Supports configurable push-to-talk
 - Presents a simple capture-first desktop UI
 - Supports launch on startup
@@ -178,7 +179,9 @@ GPU lanes are explicit:
   `dictate doctor --stt-backend parakeet --device amd --quick`.
 - Linux AMD GPU: install a ROCm/MIGraphX-capable ONNX Runtime build, then verify
   with `dictate doctor --stt-backend parakeet --device amd --quick`.
-- Meeting uses a dedicated speaker-attribution lane. Inspect it with
+- The Meeting button and the dictation-list filter are beta-channel chrome.
+  The normal channel is dictation only. Meeting uses a dedicated
+  speaker-attribution lane. Inspect it with
   `dictate config show`; set it with
   `dictate config set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2`.
   Source installs can add pyannote support with `./install.sh --meeting` or
