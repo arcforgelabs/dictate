@@ -181,5 +181,88 @@ class MicrosoftStoreSubmitTests(unittest.TestCase):
             self.assertEqual(module.request_json("https://example.test"), {})
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class ListingSourceTests(unittest.TestCase):
+    def test_repo_listing_parses_within_store_limits(self) -> None:
+        module = load_msstore_module()
+        listing = module.parse_listing((ROOT / "docs" / "msstore-listing.md").read_text())
+        self.assertTrue(listing["shortDescription"])
+        self.assertIn("Parakeet", listing["description"])
+        self.assertLessEqual(len(listing["features"]), 20)
+        self.assertLessEqual(len(listing["keywords"]), 7)
+        for word in ("Dictate Pro", "hosted", "subscription path"):
+            self.assertNotIn(word, listing["description"])
+
+    def test_repo_screenshots_exist_in_order(self) -> None:
+        module = load_msstore_module()
+        folder = ROOT / "docs" / "msstore" / "assets" / "screenshots"
+        shots = module.parse_screenshot_captions((folder / "README.md").read_text())
+        self.assertEqual(shots[0][0], "dictate-01-ready.png")
+        for name, caption in shots:
+            self.assertTrue((folder / name).is_file(), name)
+            self.assertTrue(caption)
+
+    def test_missing_section_is_rejected(self) -> None:
+        module = load_msstore_module()
+        with self.assertRaises(SystemExit):
+            module.parse_listing("## Description\n\nOnly this.\n")
+
+
+class DraftChangesTests(unittest.TestCase):
+    def test_replaces_package_text_and_screenshots_only(self) -> None:
+        module = load_msstore_module()
+        original = {
+            "id": "1",
+            "applicationPackages": [{"fileName": "ArcForgeDictate_2026.6.3.0_x64.msix", "fileStatus": "Uploaded"}],
+            "listings": {"en-us": {"baseListing": {
+                "description": "old", "title": "Arc Forge Dictate",
+                "images": [
+                    {"fileName": "old.png", "fileStatus": "Uploaded", "imageType": "Screenshot"},
+                    {"fileName": "logo.png", "fileStatus": "Uploaded", "imageType": "StoreLogo300x300"},
+                ],
+            }}},
+        }
+        listing = {"description": "new", "features": ["a"], "releaseNotes": "- n",
+                   "shortDescription": "s", "keywords": ["k"]}
+        updated = module.apply_draft_changes(
+            original, msix_name="ArcForgeDictate_2026.9.2600.0_x64.msix", listing=listing,
+            screenshots=[("dictate-01-ready.png", "Home")],
+        )
+        packages = {p["fileName"]: p["fileStatus"] for p in updated["applicationPackages"]}
+        self.assertEqual(packages["ArcForgeDictate_2026.6.3.0_x64.msix"], "PendingDelete")
+        self.assertEqual(packages["ArcForgeDictate_2026.9.2600.0_x64.msix"], "PendingUpload")
+
+        base = updated["listings"]["en-us"]["baseListing"]
+        self.assertEqual(base["description"], "new")
+        self.assertEqual(base["title"], "Arc Forge Dictate")
+        images = {i["fileName"]: i for i in base["images"]}
+        self.assertEqual(images["old.png"]["fileStatus"], "PendingDelete")
+        self.assertEqual(images["logo.png"]["fileStatus"], "Uploaded")
+        self.assertEqual(images["screenshots/dictate-01-ready.png"]["fileStatus"], "PendingUpload")
+        self.assertEqual(images["screenshots/dictate-01-ready.png"]["description"], "Home")
+        self.assertEqual(original["listings"]["en-us"]["baseListing"]["description"], "old")
+
+    def test_legacy_draft_refuses_an_existing_pending_submission(self) -> None:
+        module = load_msstore_module()
+        config = module.StoreConfig(
+            tenant_id="t", client_id="c", client_secret="s", seller_id="x", product_id="9P5S7747V0BP",
+        )
+        with (
+            patch.object(module, "legacy_access_token", return_value={"access_token": "token"}),
+            patch.object(module, "request_json", return_value={"pendingApplicationSubmission": {"id": "42"}}),
+            patch("os.path.isfile", return_value=True),
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                module.command_legacy_draft(
+                    config, msix="ArcForgeDictate_2026.9.2600.0_x64.msix",
+                    listing_path=str(ROOT / "docs" / "msstore-listing.md"),
+                    screenshots_dir=str(ROOT / "docs" / "msstore" / "assets" / "screenshots"),
+                    language="en-us", replace_pending=False,
+                )
+        self.assertIn("already pending", str(raised.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

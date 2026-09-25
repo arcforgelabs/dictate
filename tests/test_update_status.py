@@ -95,6 +95,8 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status._is_linux_user_install", return_value=False),
             patch("dictate.update_status.sys.platform", "linux"),
             patch("dictate.update_status.load_config", return_value=Config(update_channel="stable")),
+            # dpkg would report a real installed .deb on a developer machine.
+            patch("dictate.update_status._linux_installed_package_version", return_value=None),
         ):
             status = check_update_status()
 

@@ -122,7 +122,7 @@ jobs:
           DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe"
 
-      - name: Upload package to draft without committing
+      - name: Upload package, listing and screenshots to a draft without committing
         if: inputs.mode == 'draft'
         shell: pwsh
         run: |
@@ -130,23 +130,16 @@ jobs:
           if (-not $msix) {
             throw "No MSIX package was produced."
           }
-          # Pass the .msix itself as the project path. With no path the CLI
-          # inspects the working directory, finds package.json, treats the repo
-          # as an Electron app, and uploads without attaching the package, so
-          # the Store re-publishes the previous package and still says success.
-          msstore publish "$($msix.FullName)" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
+          # One API submission carries the new package, the listing text from
+          # docs/msstore-listing.md and the screenshots, then is read back to
+          # check the package and description landed. (msstore publish without
+          # a project path treated the repo as an Electron app and silently
+          # re-published the previous package.)
+          python scripts/msstore-submit.py legacy-draft --msix "$($msix.FullName)" `
+            --listing docs/msstore-listing.md --screenshots docs/msstore/assets/screenshots
           if ($LASTEXITCODE -ne 0) {
-            throw "msstore publish failed with exit code $LASTEXITCODE"
+            throw "legacy-draft failed with exit code $LASTEXITCODE"
           }
-          $submission = (msstore submission get "$env:MSSTORE_PRODUCT_ID" | Out-String)
-          if ($LASTEXITCODE -ne 0) {
-            throw "msstore submission get failed with exit code $LASTEXITCODE"
-          }
-          if ($submission -notmatch [regex]::Escape($msix.Name)) {
-            Write-Output $submission
-            throw "The draft does not contain $($msix.Name); the Store would re-publish the previous package."
-          }
-          Write-Output "Draft contains $($msix.Name)"
           msstore submission status "$env:MSSTORE_PRODUCT_ID"
           if ($LASTEXITCODE -ne 0) {
             throw "msstore submission status failed with exit code $LASTEXITCODE"
