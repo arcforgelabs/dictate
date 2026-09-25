@@ -196,10 +196,9 @@ jobs:
       name: npm-publish
     permissions:
       contents: read
-      # Required to mint the OIDC token for `provenance: true` in package.json.
-      # Without it `npm publish` fails to generate provenance and (because the
-      # publish step is best-effort) the release silently ships without the npm
-      # package — which is why 2026.7.x never reached the registry.
+      # Trusted publishing. GitHub mints a short-lived token for this job.
+      # Do not set NODE_AUTH_TOKEN here: npm uses that instead of OIDC, and the
+      # expired granular token was failing the publish while the step continued.
       id-token: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -211,20 +210,15 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Publish npm package
-        # Best-effort: the npm shim is a convenience, not the primary artifact.
-        # A publish failure (e.g. scope/token not configured) must not block the
-        # GitHub release and downloadable desktop package that follow.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "npm package ${PACKAGE_NAME}@${PACKAGE_VERSION} already exists; skipping publish"
-          elif npm publish --access public --tag latest; then
-            echo "Published ${PACKAGE_NAME}@${PACKAGE_VERSION} to npm"
           else
-            echo "::warning::npm publish failed (scope/token not configured); continuing release without npm"
+            npm publish --access public --tag latest
+            echo "Published ${PACKAGE_NAME}@${PACKAGE_VERSION} to npm"
           fi
 
       - name: Keep the unstable channel upstream of stable
@@ -233,9 +227,8 @@ jobs:
         # unstable pointer moves that pointer forward to itself, so Beta users
         # are never offered something older than stable. The client applies
         # the same rule when it checks, so this is belt and braces.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           if ! npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
