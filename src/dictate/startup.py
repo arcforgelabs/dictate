@@ -101,6 +101,7 @@ def ensure_desktop_integration_once() -> None:
         return
     marker = _desktop_integration_marker()
     if marker.exists():
+        _repair_linux_entry_icons()
         return
     try:
         install_linux_desktop_integration(include_startup=True)
@@ -181,7 +182,47 @@ def _linux_exec_path() -> str:
     )
 
 
+_FALLBACK_ICON = "microphone-sensitivity-high-symbolic"
+# Theme icon name the .deb/AppImage installs under hicolor (Tauri names it after
+# the binary). The frozen engine has no assets/ dir, so without this it fell
+# back to the generic symbolic mic and shadowed the packaged launcher's icon.
+_PACKAGED_ICON = "dictate-ui-shell"
+
+
+def _packaged_icon_installed() -> bool:
+    data_dirs = [os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")]
+    data_dirs += (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    return any(
+        any((Path(base) / "icons" / "hicolor").glob(f"*/apps/{_PACKAGED_ICON}.png"))
+        for base in data_dirs
+        if base
+    )
+
+
+def _repair_linux_entry_icons() -> None:
+    """Rewrite the stale fallback icon in entries written by earlier releases.
+
+    Only the Icon= line changes, so a user's disabled autostart stays disabled.
+    """
+    icon = _linux_icon_path()
+    if icon == _FALLBACK_ICON:
+        return
+    for path in (app_entry_path(), startup_entry_path()):
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        stale = f"Icon={_FALLBACK_ICON}\n"
+        if stale in content:
+            try:
+                path.write_text(content.replace(stale, f"Icon={icon}\n"), encoding="utf-8")
+            except OSError:
+                pass
+
+
 def _linux_icon_path() -> str:
+    if getattr(sys, "frozen", False) and _packaged_icon_installed():
+        return _PACKAGED_ICON
     installed_icon = (
         Path.home() / ".local" / "share" / "dictate" / "share" / "icons" / "dictate-simple.png"
     )
@@ -190,7 +231,7 @@ def _linux_icon_path() -> str:
     source_icon = Path(__file__).resolve().parents[2] / "assets" / "dictate.png"
     if source_icon.is_file():
         return str(source_icon)
-    return "microphone-sensitivity-high-symbolic"
+    return _FALLBACK_ICON
 
 
 def _linux_applications_dir() -> Path:

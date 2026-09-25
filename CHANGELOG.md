@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-25-2
+
+### Fixed
+
+- The Linux dock and app menu show the Dictate icon instead of a generic
+  microphone. The packaged app's own launcher entry used a fallback icon that
+  hid the one the `.deb` installs. Existing entries are repaired on next start.
+
 ## 2026-09-25-1
 
 ### Fixed

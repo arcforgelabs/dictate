@@ -84,6 +84,50 @@ class EnsureDesktopIntegrationOnceTests(unittest.TestCase):
             self.assertFalse((tmp / "data" / ".desktop-integrated").exists())
 
 
+class LinuxIconTests(unittest.TestCase):
+    def _hicolor(self, tmp: Path) -> Path:
+        icon = tmp / "usr" / "share" / "icons" / "hicolor" / "128x128" / "apps" / "dictate-ui-shell.png"
+        icon.parent.mkdir(parents=True)
+        icon.write_bytes(b"")
+        return tmp / "usr" / "share"
+
+    def test_frozen_app_uses_packaged_theme_icon(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            share = self._hicolor(Path(raw))
+            with patch.object(startup.sys, "frozen", True, create=True), patch.dict(
+                "os.environ", {"XDG_DATA_HOME": str(Path(raw) / "home"), "XDG_DATA_DIRS": str(share)}
+            ):
+                self.assertEqual(startup._linux_icon_path(), "dictate-ui-shell")
+
+    def test_existing_entries_with_fallback_icon_are_repaired(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            share = self._hicolor(tmp)
+            (tmp / "data").mkdir()
+            (tmp / "data" / ".desktop-integrated").write_text("1\n")
+            autostart = tmp / "config" / "autostart" / "dictate.desktop"
+            autostart.parent.mkdir(parents=True)
+            autostart.write_text(
+                "[Desktop Entry]\nIcon=microphone-sensitivity-high-symbolic\n"
+                "X-GNOME-Autostart-enabled=false\n"
+            )
+            with patch.object(startup.sys, "frozen", True, create=True), patch.object(
+                startup.sys, "platform", "linux"
+            ), patch.object(startup, "user_data_dir", return_value=tmp / "data"), patch.dict(
+                "os.environ",
+                {
+                    "XDG_CONFIG_HOME": str(tmp / "config"),
+                    "XDG_DATA_HOME": str(tmp / "share"),
+                    "XDG_DATA_DIRS": str(share),
+                },
+            ):
+                startup.ensure_desktop_integration_once()
+            content = autostart.read_text()
+            self.assertIn("Icon=dictate-ui-shell\n", content)
+            self.assertIn("X-GNOME-Autostart-enabled=false", content)
+            self.assertFalse((tmp / "share" / "applications" / "dictate.desktop").exists())
+
+
 class DoctorStaleLauncherTests(unittest.TestCase):
     def test_packaged_desktop_entry_satisfies_runtime_check(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
