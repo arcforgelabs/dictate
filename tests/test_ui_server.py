@@ -309,6 +309,24 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(weak["model"]["model"], "small")
             self.assertEqual(weak["model"]["id"], "faster-whisper/small")
 
+    def test_removed_cloud_backend_migrates_to_parakeet_on_state_load(self) -> None:
+        # A saved hosted backend (xAI and the others removed in 2026.9.20) is
+        # not what the daemon runs. Hydrating state must report Parakeet, not
+        # the faster-whisper name the old fallback used.
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            config_mod.set_stt_selection(
+                "xai", "grok-speech-to-text", path=backend.config_path
+            )
+            state = backend.get_state()
+            cfg = config_mod.load_config(backend.config_path)
+            self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
+            self.assertEqual(state["model"]["backend"], "parakeet")
+            self.assertEqual(cfg.stt_backend, "parakeet")
+            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
+
     def test_stale_regular_local_model_migrates_to_parakeet_on_state_load(self) -> None:
         # Legacy regular dictation backends are UI-stale state and should be
         # rewritten to the shipped private default when the UI hydrates.
@@ -688,6 +706,41 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             self.assertEqual(payload["segments"][0]["speakerLabel"], "Speaker 1")
             self.assertEqual(payload["segments"][0]["tStart"], 0.0)
             self.assertEqual(payload["segments"][0]["tEnd"], 1.25)
+
+    def test_get_history_orders_by_when_it_was_spoken(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            note_store = NoteStore(Path(d) / "notes")
+            history_store = HistoryStore(Path(d) / "history.json")
+            note_id = note_store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
+            note_store.append_segment(
+                note_id,
+                NoteSegment(
+                    seq=0,
+                    t_start=0.0,
+                    t_end=1.0,
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
+                    text="hosted final",
+                ),
+            )
+            note_store.mark_interrupted(note_id)
+            note_path = Path(d) / "notes" / note_id / "note.json"
+            raw = json.loads(note_path.read_text(encoding="utf-8"))
+            raw["started_at"] = "2026-07-18T03:30:27+00:00"
+            raw["ended_at"] = "2026-08-04T02:30:14+00:00"
+            note_path.write_text(json.dumps(raw), encoding="utf-8")
+            history_store.append("Well, I guess we check to see if this works still.")
+            backend = _backend(d, history_store=history_store, note_store=note_store)
+
+            history = backend.get_history()
+
+            self.assertEqual(
+                [item["text"] for item in history],
+                [
+                    "Well, I guess we check to see if this works still.",
+                    "hosted final",
+                ],
+            )
 
     def test_get_history_rehydrates_persisted_note_segments(self) -> None:
         with tempfile.TemporaryDirectory() as d:

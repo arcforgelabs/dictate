@@ -267,7 +267,6 @@ function AboutButton() {
    no account, no plan and no cloud here, so this dialog is the whole story. */
 function AboutDialog() {
   const s = useStore();
-  const model = modelById(s.model);
   const betaSelected = s.updateChannel === "unstable";
   const storeInstall = s.updateStatus?.installKind === "windows-store";
   const updateBusy = !!(
@@ -322,7 +321,6 @@ function AboutDialog() {
         </div>
 
         <div className="about-grid">
-          <div className="about-row"><span>Model</span><strong>{model.name}</strong></div>
           {s.installedPackageVersion && (
             <div className="about-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
@@ -1626,7 +1624,7 @@ export default function App() {
     ok: true,
     checks: [
       { label: "Microphone access", sub: "Default device responding", ok: true },
-      { label: "Model loads", sub: modelById(model).name, ok: true },
+      { label: "Model loads", sub: "Ready", ok: true },
       { label: "Output backend", sub: "Typing into focused app", ok: true },
       { label: "Shortcut registered", sub: shortcut.join(" + "), ok: true },
     ],
