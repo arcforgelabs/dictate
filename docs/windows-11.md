@@ -97,6 +97,25 @@ scripts/windows-vm-smoke.sh --vm <your-windows-vm> --mode lifecycle
 ```
 
 The VM smoke script uses libvirt `virsh qemu-agent-command`, so the Windows guest must have QEMU Guest Agent installed and running. It copies the source zip through QEMU Guest Agent file APIs, so guest-to-host networking is not required. `syntax` only parses the PowerShell scripts in Windows PowerShell. `install` resets Dictate app data in the guest, runs a no-shortcut install, compiles Python sources, runs focused tests, checks the version, verifies the fresh Parakeet default with `dictate doctor --quick`, and uninstalls. `lifecycle` adds update and post-update doctor/uninstall smoke checks.
+The maintained VM is `win11-gpu`; pass `LIBVIRT_DEFAULT_URI=qemu:///system`.
+
+### Release gate
+
+Before a Microsoft Store draft, test the published installer on the VM:
+
+```bash
+scripts/windows-vm-release-gate.sh --tag v2026.9.25-4
+```
+
+It downloads `Dictate_<version>_x64-setup.exe` from the GitHub release, copies
+it over SSH (the installer is too large for guest-agent file copies), removes
+any existing Dictate, installs silently, checks the Installed Apps version,
+launches the app in the signed-in console session through a one-shot scheduled
+task, waits for the engine's `/api/health` to report the same version, then
+uninstalls and checks the entry and executable are gone. The guest needs
+OpenSSH Server and a user signed in at the console. It uses
+`-o IdentityAgent=none` because the local SSH agent can stall on an approval
+prompt; override with `DICTATE_WINDOWS_SSH_OPTS`.
 
 GitHub-hosted Windows user smoke test:
 

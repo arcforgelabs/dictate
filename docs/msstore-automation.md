@@ -127,12 +127,18 @@ same submission should continue through the API rather than Partner Center. For
 Dictate:
 
 1. Use the API smoke/status workflow to confirm credentials and product access.
-2. Use `msstore-publish-msix.yml` with `mode=draft` to create/update the Store
+2. Run the Windows release gate against the GitHub release you are about to
+   ship: `scripts/windows-vm-release-gate.sh --tag vYYYY.M.D-N`. It installs
+   the published `setup.exe` on the `win11-gpu` VM, launches it in the
+   signed-in session, checks the engine's `/api/health` version, and
+   uninstalls. Do not draft if it fails. See
+   [windows-11.md](windows-11.md#release-gate).
+3. Use `msstore-publish-msix.yml` with `mode=draft` to create/update the Store
    draft package.
-3. Review the draft in Partner Center.
-4. Use `mode=publish` only when that draft should be submitted for Microsoft
+4. Review the draft in Partner Center.
+5. Use `mode=publish` only when that draft should be submitted for Microsoft
    certification.
-5. Use API-created submissions consistently for future automated updates.
+6. Use API-created submissions consistently for future automated updates.
 
 Use [msstore-listing.md](msstore-listing.md) for the first listing copy,
 privacy/certification notes, screenshots checklist, and remaining pre-submit

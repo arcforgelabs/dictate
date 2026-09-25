@@ -1,0 +1,98 @@
+name: Windows release gate
+
+# Installs a published GitHub release on the win11-gpu VM, launches it in the
+# signed-in desktop session, checks the running engine's version, and
+# uninstalls. The Store draft refuses to run until this passes for the version
+# it is about to upload.
+#
+# The runner lives in the dictate-windows-gate runner group, which only this
+# file on master may use, so pull requests (including from forks) cannot reach
+# the VM.
+
+run-name: Windows release gate ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test, for example v2026.9.25-4"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Install, launch, uninstall ${{ inputs.tag }}
+    runs-on: [self-hosted, Windows, win11-gpu]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Download the Windows installer
+        shell: powershell
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:TAG -notmatch '^v20\d{2}\.\d{1,2}\.\d{1,2}(-\d+)?$') {
+            throw "Tag must look like vYYYY.M.D or vYYYY.M.D-N: $env:TAG"
+          }
+          $version = $env:TAG.Substring(1)
+          $name = "Dictate_${version}_x64-setup.exe"
+          $out = Join-Path $env:RUNNER_TEMP $name
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:REPO/releases/tags/$env:TAG" `
+            -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+          if (-not $asset) { throw "release $env:TAG has no $name" }
+
+          # GitHub release downloads are capped per connection (about
+          # 0.15 MB/s at times), so fetch 16 byte ranges in parallel, then
+          # check the SHA-256 GitHub publishes for the asset.
+          $url = "https://github.com/$env:REPO/releases/download/$env:TAG/$name"
+          $parts = 16
+          $chunk = [math]::Ceiling($asset.size / $parts)
+          $procs = @()
+          for ($i = 0; $i -lt $parts; $i++) {
+            $start = [int64]$i * $chunk
+            $end = [math]::Min($start + $chunk - 1, $asset.size - 1)
+            $procs += Start-Process -FilePath curl.exe -NoNewWindow -PassThru -ArgumentList @(
+              '-fsSL', '--retry', '5', '-r', "$start-$end", '-o', "$out.part$i", $url)
+          }
+          $procs | Wait-Process
+          foreach ($p in $procs) { if ($p.ExitCode -ne 0) { throw "a download part failed with $($p.ExitCode)" } }
+          $dest = [IO.File]::Create($out)
+          try {
+            for ($i = 0; $i -lt $parts; $i++) {
+              $src = [IO.File]::OpenRead("$out.part$i")
+              try { $src.CopyTo($dest) } finally { $src.Dispose() }
+              Remove-Item "$out.part$i"
+            }
+          } finally { $dest.Dispose() }
+          if ((Get-Item $out).Length -ne $asset.size) { throw "$name is not $($asset.size) bytes" }
+          if ($asset.digest -like 'sha256:*') {
+            $hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne $asset.digest.Substring(7)) { throw "$name failed its SHA-256 check" }
+          }
+          Write-Output "Downloaded and verified $name"
+          "INSTALLER=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run the release gate
+        shell: powershell
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-release-gate.ps1 `
+            -Installer $env:INSTALLER -ExpectedVersion $env:VERSION -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { throw "release gate failed with $LASTEXITCODE" }
+
+      - name: Remove the installer
+        if: always()
+        shell: powershell
+        run: Remove-Item -Force -ErrorAction SilentlyContinue $env:INSTALLER
