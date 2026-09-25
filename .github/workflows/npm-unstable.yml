@@ -403,7 +403,6 @@ jobs:
 
       - name: Publish npm dist-tag
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TAG: ${{ inputs.npm_tag }}
         run: |
           set -euo pipefail

@@ -78,10 +78,18 @@ require the Store MSIX workflow in draft mode, Partner Center review, and an
 explicit publish/certification step.
 
 The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN
-install/update scripts. Configure npm trusted publishing for this repository and
-`.github/workflows/release.yml`, or add a granular `NPM_TOKEN` repository secret
-with publish rights. Do not dispatch the release workflow for a tag until that
-npm publisher path is ready.
+install/update scripts. Publishing uses GitHub OIDC trusted publishing on the
+`npm-publish` environment. Do not dispatch a release until both publishers exist
+on the package, each with direct `npm publish` allowed:
+
+| Workflow file | Environment |
+| --- | --- |
+| `release.yml` | `npm-publish` |
+| `npm-unstable.yml` | `npm-publish` |
+
+Repository owner is `arcforgelabs`. Repository name is `dictate`. A long-lived
+`NPM_TOKEN` is not used. The June 2026 granular token expired, so `latest`
+stayed on `2026.7.4` while the GitHub release moved to `2026.9.25`.
 
 The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
 
