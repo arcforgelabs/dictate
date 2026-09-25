@@ -142,6 +142,7 @@ const UPDATE_LABEL = {
   preparing: "Preparing update…",
   downloading: "Downloading…",
   verifying: "Verifying download…",
+  ready: "Update ready",
   installing: "Installing update…",
   working: "Updating…",
   restart: "Restart Dictate",
@@ -175,6 +176,7 @@ function mapBackendUpdatePhase(status) {
   if (phase === "preparing") return "preparing";
   if (phase === "downloading") return "downloading";
   if (phase === "verifying") return "verifying";
+  if (phase === "ready") return "ready";
   if (phase === "installing") return "installing";
   if (phase === "installed" || status?.step === "restart") return "restart";
   if (phase === "failed" && status?.errorCode === "check_failed") return "check-error";
@@ -230,7 +232,8 @@ function UpdatePill() {
         onClick={s.runUpdate}
         disabled={busy}
         title={
-          phase === "restart" ? "Restart Dictate"
+          phase === "ready" ? "Install and restart"
+            : phase === "restart" ? "Restart Dictate"
             : phase === "error" ? "Retry update"
               : busy ? label
                 : "Update Dictate"
@@ -356,7 +359,11 @@ function AboutDialog() {
           {s.updateStatus?.updateAvailable && (
             <button type="button" className="about-primary" disabled={updateBusy} onClick={s.runUpdate}>
               <Icon name="download" size={14} />
-              <span>{s.updateStatus?.updating ? "Updating" : "Update"}</span>
+              <span>{
+                s.updatePhase === "ready" ? "Install and restart"
+                  : s.updatePhase === "restart" ? "Restart"
+                    : s.updateStatus?.updating ? "Updating" : "Update"
+              }</span>
             </button>
           )}
         </div>
@@ -796,6 +803,7 @@ export default function App() {
   const updatePollModeRef = useRef(null);
   const updatePollGenerationRef = useRef(0);
   const updateRestartRequestedRef = useRef(false);
+  const installConfirmedRef = useRef(false);
 
   const stopUpdatePolling = () => {
     updatePollGenerationRef.current += 1;
@@ -856,8 +864,20 @@ export default function App() {
       if (status.installStartedAt) setUpdateInstallStartedAt(status.installStartedAt);
       return;
     }
+    if (mapped === "ready") {
+      setUpdatePhase("ready");
+      setUpdateProgress(null);
+      setUpdateErrorReason(null);
+      stopUpdatePolling();
+      return;
+    }
     if (mapped === "restart") {
-      requestUpdateRestart("Update installed — restarting…");
+      if (installConfirmedRef.current) {
+        requestUpdateRestart("Update installed — restarting…");
+      } else {
+        setUpdatePhase("restart");
+        stopUpdatePolling();
+      }
       return;
     }
     if (mapped === "error") {
@@ -1533,9 +1553,9 @@ export default function App() {
           applyPolledUpdateStatus(next);
           return;
         }
-        if (mapped === "restart") {
+        if (mapped === "ready" || mapped === "restart") {
           setUpdateDismissed(false);
-          requestUpdateRestart("Update installed — restarting…");
+          setUpdatePhase(mapped);
           return;
         }
         if (next.installKind === "windows-store") {
@@ -1578,7 +1598,10 @@ export default function App() {
     ipc.startUpdate()
       .then((flow) => {
         setUpdateStatus((u) => ({ ...u, updating: false }));
-        if (flow?.mode === "installed" || (flow?.actions || []).includes("restart")) {
+        if (
+          installConfirmedRef.current
+          && (flow?.mode === "installed" || (flow?.actions || []).includes("restart"))
+        ) {
           requestUpdateRestart(flow?.message || "Update installed — restarting…");
           return;
         }
@@ -1656,6 +1679,7 @@ export default function App() {
     if (isUpdateBusyPhase(updatePhase)) return;
     setSkippedVersion("");
     try { localStorage.removeItem("dictate.skippedVersion"); } catch { /* ignore */ }
+    if (updatePhase === "ready") installConfirmedRef.current = true;
     if (updatePhase === "restart" || updatePhase === "restarting") {
       requestUpdateRestart("Restarting Dictate…");
       return;
@@ -1703,8 +1727,8 @@ export default function App() {
         startUpdatePolling("package");
         return;
       }
-      if (mapped === "restart") {
-        setUpdatePhase("restart");
+      if (mapped === "ready" || mapped === "restart") {
+        setUpdatePhase(mapped);
         return;
       }
       if (!st.updateAvailable) return;
@@ -1795,6 +1819,7 @@ export default function App() {
       || updatePhase === "error"
       || updatePhase === "downloading"
       || updatePhase === "verifying"
+      || updatePhase === "ready"
       || updatePhase === "installing"
       || updatePhase === "working"
     )

@@ -480,7 +480,7 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: /Restart Dictate/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Dictate" })).getByRole("button", { name: "Restart" }));
 
     expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Preparing update/i })).not.toBeInTheDocument();
@@ -537,6 +537,9 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
 
+    const restart = await screen.findByRole("button", { name: /Restart Dictate/i });
+    expect(invoke).not.toHaveBeenCalled();
+    fireEvent.click(restart);
     expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
     expect(invoke).toHaveBeenCalledWith("restart_app");
@@ -1651,7 +1654,10 @@ describe("Update flow — package phases", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Installing update… \d{2}:\d{2}/i })).toBeInTheDocument();
     }, { timeout: 5000 });
-    expect(await screen.findByRole("button", { name: /Restarting/i }, { timeout: 3000 })).toBeInTheDocument();
+    const restart = await screen.findByRole("button", { name: /Restart Dictate/i }, { timeout: 3000 });
+    expect(invoke).not.toHaveBeenCalled();
+    fireEvent.click(restart);
+    expect(await screen.findByRole("button", { name: /Restarting/i })).toBeInTheDocument();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_app"));
     expect(invoke).toHaveBeenCalledTimes(1);
   }, 15000);

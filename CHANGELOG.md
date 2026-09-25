@@ -22,6 +22,8 @@
 - Dictation into a terminal, including the Grok CLI, is inserted with
   Shift+Insert as plain text. Ctrl+V in that CLI treats a WebKit clipboard
   as a file chip.
+- A `.deb` update downloads while Dictate stays open. The app installs that
+  package and restarts only after a second click.
 
 ## 2026-09-20
 
