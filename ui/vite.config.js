@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const browserPreview = process.env.DICTATE_BROWSER_PREVIEW === "1";
 
 function dictateHandshakePath() {
   const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
@@ -16,6 +17,8 @@ function dictateBridgePlugin() {
   return {
     name: "dictate-bridge",
     transformIndexHtml(html) {
+      // The public browser preview must never expose a local engine bearer token.
+      if (browserPreview) return html;
       const handshakePath = dictateHandshakePath();
       if (!fs.existsSync(handshakePath)) return html;
       try {
@@ -40,6 +43,10 @@ export default defineConfig({
   plugins: [react(), dictateBridgePlugin()],
   base: "./",
   clearScreen: false,
+  // Desktop dev keeps Vite's defaults so Tauri's devUrl (localhost:5173) resolves.
+  server: browserPreview
+    ? { host: "0.0.0.0", port: 5000, strictPort: true, allowedHosts: true }
+    : undefined,
   build: {
     target: "es2021",
     outDir: "dist",

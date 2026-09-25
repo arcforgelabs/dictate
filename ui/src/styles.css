@@ -83,6 +83,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .tb-btn.close:hover{background:var(--danger-bg);color:var(--danger);}
 
 .shell{flex:1;min-height:0;min-width:0;display:flex;}
+.demo-mode-banner{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:7px;
+  min-height:32px;padding:5px 12px;background:var(--amber-bg);color:var(--amber-text);
+  border-bottom:1px solid var(--amber-line);font-size:11.5px;line-height:1.3;text-align:center;}
+.demo-mode-banner strong{font-weight:700;}
 
 /* ===== sidebar rail ===== */
 .rail{width:236px;flex:0 0 236px;background:var(--surface-2);border-right:1px solid var(--hairline);
