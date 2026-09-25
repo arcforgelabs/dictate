@@ -92,7 +92,7 @@ def _check_microphone(report: PreflightReport) -> None:
 
     error = result.get("error")
     if error is not None:
-        report.errors.append(f"Could not query audio devices: {error}")
+        report.warnings.append(f"Could not query audio devices: {error}")
         return
 
     devices = result.get("devices")
@@ -101,8 +101,12 @@ def _check_microphone(report: PreflightReport) -> None:
     except Exception:  # noqa: BLE001
         report.warnings.append("Unable to inspect microphone devices.")
         return
+    # A missing or busy microphone is a warning, not a startup failure: the
+    # engine must still start so the window, settings and history work, and a
+    # recording reports the microphone error when it is attempted. A headset
+    # unplugged at sign-in used to leave a window with no engine behind it.
     if not input_devices:
-        report.errors.append("No microphone input devices detected.")
+        report.warnings.append("No microphone input devices detected.")
 
     default_pair = result.get("default")
     try:
@@ -115,7 +119,7 @@ def _check_microphone(report: PreflightReport) -> None:
 
     capture_error = result.get("capture_error")
     if capture_error is not None:
-        report.errors.append(f"Could not open microphone input: {capture_error}")
+        report.warnings.append(f"Could not open microphone input: {capture_error}")
         return
 
     capture_rate = result.get("capture_rate")
