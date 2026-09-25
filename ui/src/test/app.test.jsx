@@ -7,6 +7,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   delete window.__DICTATE__;
+  delete window.__DICTATE_TEST_CHANNEL__;
   delete window.__TAURI__;
   delete window.EventSource;
   vi.restoreAllMocks();
@@ -28,11 +29,9 @@ function finishCapture() {
 }
 
 // Meeting capture and the All / Meetings / Quick filter are beta-channel chrome.
-function enableBeta() {
-  fireEvent.click(screen.getByLabelText("About Dictate"));
-  const dialog = screen.getByRole("dialog", { name: "Dictate" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Beta" }));
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+function renderApp(channel) {
+  if (channel) window.__DICTATE_TEST_CHANNEL__ = channel;
+  return render(<App />);
 }
 
 function mockPackagePolling(statuses) {
@@ -260,8 +259,9 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("About Dictate"));
 
-    expect(screen.getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Beta" })).not.toBeDisabled();
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Beta" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Normal" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
     await waitFor(() => expect(screen.getByText("You're on the latest version")).toBeInTheDocument());
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -352,7 +352,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByRole("button", { name: /Update available/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "About Dictate" }));
-    const accountUpdate = await screen.findByRole("button", { name: "Update" });
+    const accountUpdate = await screen.findByRole("button", { name: /Update to /i });
     fireEvent.click(accountUpdate);
     expect(localStorage.getItem("dictate.skippedVersion")).toBeNull();
     const preparingButton = await screen.findByRole("button", { name: /Preparing update/i });
@@ -755,7 +755,7 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("switches to Beta updates and adopts the new package version", async () => {
+  it("shows the installed release and does not switch channel", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -798,10 +798,10 @@ describe("Quiet Console app (mock mode)", () => {
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
     fireEvent.click(screen.getByLabelText("About Dictate"));
-    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
 
-    await waitFor(() => expect(screen.getByText("Beta updates selected")).toBeInTheDocument());
-    expect(screen.getByText("2026.7.4-unstable.52.1")).toBeInTheDocument();
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Beta" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Normal" })).not.toBeInTheDocument();
   });
 
   it("notebook toggle returns to the capture home from the dictations view", () => {
@@ -870,6 +870,18 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText(/project note/i)).toBeInTheDocument();
   });
 
+  it("does not invent a dictation when the engine is disconnected", () => {
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    render(<App />);
+    fireEvent.keyDown(window, { code: "ControlRight", bubbles: true });
+    fireEvent.keyUp(window, { code: "ControlRight", bubbles: true });
+    expect(screen.getByText("Dictate engine is not connected")).toBeInTheDocument();
+    expect(screen.queryByText(/planning session/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/turbo model/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/thanking the reviewers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Copy last dictation")).not.toBeInTheDocument();
+  });
+
   it("hides meeting capture and the dictation filter on the normal channel", () => {
     render(<App />);
     expect(screen.queryByRole("button", { name: "Meeting" })).not.toBeInTheDocument();
@@ -879,8 +891,7 @@ describe("Quiet Console app (mock mode)", () => {
   });
 
   it("records a mock meeting with speaker-labelled output", async () => {
-    render(<App />);
-    enableBeta();
+    renderApp("unstable");
     fireEvent.click(screen.getByText("Meeting"));
     expect(screen.getByText("Meeting")).toBeInTheDocument();
     expect(screen.getByLabelText("Finish meeting")).toBeInTheDocument();
@@ -896,8 +907,7 @@ describe("Quiet Console app (mock mode)", () => {
   });
 
   it("keeps a completed local meeting accessible in Dictations", async () => {
-    render(<App />);
-    enableBeta();
+    renderApp("unstable");
     fireEvent.click(screen.getByText("Meeting"));
     fireEvent.click(screen.getByLabelText("Finish meeting"));
     await waitFor(() => expect(screen.getByLabelText("Close note")).toBeInTheDocument(), { timeout: 2000 });
@@ -970,8 +980,7 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("exports segmented meeting notes with speaker labels and timestamps", async () => {
     const invoke = vi.fn().mockResolvedValue(true);
-    render(<App />);
-    enableBeta();
+    renderApp("unstable");
     fireEvent.click(screen.getByText("Meeting"));
     fireEvent.click(screen.getByLabelText("Finish meeting"));
 
@@ -1313,8 +1322,7 @@ describe("Notes list (history view)", () => {
   });
 
   it("category toggle filters meetings vs quick records", () => {
-    render(<App />);
-    enableBeta();
+    renderApp("unstable");
     navTo("Notes");
     // Default "All": both a meeting (diarized) and quick records are visible.
     expect(screen.getByText(/status round/i)).toBeInTheDocument();   // meeting (has segments)

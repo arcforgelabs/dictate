@@ -296,6 +296,9 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
   `./update.sh --system` installs a local `.deb` into `/usr` through `pkexec` or
   `sudo`. Use this channel for managed machine-wide installs, not as the default
   developer/user update path.
+- **One package at a time.** A stable `.deb` and a beta `.deb` are different
+  builds. Installing one replaces the other. About shows which build is
+  installed. It does not switch channels in place.
 - **In-app `.deb` updates stay open until the user installs.** A check downloads
   and verifies the new package in the background. The button then sits on
   **Update ready**. The next click installs that package with `apt-get` and

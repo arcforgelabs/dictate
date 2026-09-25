@@ -23,6 +23,7 @@ import argparse
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 from types import FrameType
@@ -60,6 +61,7 @@ from dictate.outputs import (
     resolve_typing_backend,
 )
 from dictate.process_lock import ProcessLock, daemon_lock_path
+from dictate.stt.factory import device_for_host
 from dictate.stt import (
     COMPUTE_DEVICES,
     COMPUTE_TYPES,
@@ -518,7 +520,27 @@ def _resolve_startup_runtime(
             file=sys.stderr,
         )
 
+    device = _device_leaving_passthrough_gpu(device)
     return (device, compute_type)
+
+
+def _device_leaving_passthrough_gpu(device: ComputeDevice) -> ComputeDevice:
+    """Keep a GPU that is passed through to a VM off the dictation path."""
+    try:
+        pci_text = subprocess.check_output(
+            ["lspci", "-nnk"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return device
+    chosen = device_for_host(device, pci_text)
+    if chosen != device:
+        print(
+            "STT device is cpu. The NVIDIA GPU is bound to vfio for the Windows VM.",
+            file=sys.stderr,
+        )
+    return chosen  # type: ignore[return-value]
 
 
 def _resolve_startup_lexicon_mode(

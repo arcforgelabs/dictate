@@ -847,21 +847,13 @@ class UiBackendUpdateStatusTests(unittest.TestCase):
             self.assertEqual(flow["progress"], 0)
             self.assertEqual(flow["actions"], ["open_release"])
 
-    def test_patch_config_sets_stable_update_channel(self) -> None:
+    def test_patch_config_rejects_channel_switch(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            state = backend.patch_config({"updateChannel": "stable"})
-
-            self.assertEqual(state["updateChannel"], "stable")
-            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "stable")
-
-    def test_patch_config_sets_beta_update_channel(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            backend = _backend(d)
-            state = backend.patch_config({"updateChannel": "unstable"})
-
-            self.assertEqual(state["updateChannel"], "unstable")
-            self.assertEqual(config_mod.load_config(backend.config_path).update_channel, "unstable")
+            with self.assertRaises(ApiError) as raised:
+                backend.patch_config({"updateChannel": "unstable"})
+            self.assertEqual(raised.exception.status, 409)
+            self.assertEqual(backend.get_state()["updateChannel"], "stable")
 
 
 

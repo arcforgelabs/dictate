@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 
@@ -251,19 +252,27 @@ def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
     )
 
 
-# Window class or title fragments whose Ctrl+V is a file/image paste.
+# Process name or window-class fragments. Any of these means the focused
+# window is a terminal, so paste must be plain text rather than Ctrl+V.
+# "terminal" covers gnome-terminal, xfce4-terminal, and the rest of that family.
 _PLAIN_PASTE_WINDOW_MARKERS = (
     "ghostty",
     "kitty",
     "alacritty",
     "wezterm",
-    "gnome-terminal",
+    "terminal",
+    "console",
     "kgx",
-    "org.gnome.console",
+    "ptyxis",
     "tilix",
     "xterm",
     "konsole",
-    "grok",
+    "warp",
+    "foot",
+    "rio",
+    "contour",
+    "tabby",
+    "hyper",
 )
 
 
@@ -276,12 +285,42 @@ def _set_x_selection(selection: str, text: str) -> None:
 
 
 def _focused_window_label() -> str:
+    """Class, process name, and title of the focused window.
+
+    ``xdotool`` here has ``getwindowname`` and does not have
+    ``getwindowclassname``. The process name and ``WM_CLASS`` are what decide
+    that a window is a terminal. Ghostty reports ``com.mitchellh.ghostty``.
+    """
     if not command_exists("xdotool"):
         return ""
     parts: list[str] = []
+    try:
+        wid = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    window_id = wid.stdout.strip()
+    if not window_id:
+        return ""
+    if command_exists("xprop"):
+        try:
+            props = subprocess.run(
+                ["xprop", "-id", window_id, "WM_CLASS", "WM_NAME"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            props = None
+        if props is not None:
+            parts.append(props.stdout)
     for args in (
-        ["xdotool", "getactivewindow", "getwindowclassname"],
-        ["xdotool", "getactivewindow", "getwindowname"],
+        ["xdotool", "getwindowname", window_id],
+        ["xdotool", "getwindowpid", window_id],
     ):
         try:
             completed = subprocess.run(
@@ -293,6 +332,13 @@ def _focused_window_label() -> str:
         except OSError:
             continue
         parts.append(completed.stdout)
+        if args[1] == "getwindowpid":
+            pid = completed.stdout.strip()
+            if pid.isdigit():
+                try:
+                    parts.append(Path(f"/proc/{pid}/comm").read_text(encoding="utf-8"))
+                except OSError:
+                    pass
     return " ".join(parts).lower()
 
 

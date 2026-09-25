@@ -1208,24 +1208,17 @@ def _manual_update_message(context: dict[str, object]) -> str:
 
 
 def _npm_update_channel() -> str:
-    try:
-        configured = load_config().update_channel
-    except Exception:  # noqa: BLE001
-        configured = None
-    return _resolve_update_channel(configured)
+    from dictate.version import release_channel
+
+    return release_channel()
 
 
 def _update_channel_for_context(context: dict[str, object]) -> str:
     if context.get("install_kind") == "windows-store":
         return "stable"
-    configured = getattr(context.get("config"), "update_channel", None)
-    channel = _normalize_update_channel(configured)
-    if channel:
-        return channel
-    install_kind = str(context.get("install_kind") or "")
-    if install_kind.endswith("-source"):
-        return "unstable"
-    return _resolve_update_channel(None)
+    from dictate.version import release_channel
+
+    return release_channel()
 
 
 def _resolve_update_channel(configured: str | None) -> str:
