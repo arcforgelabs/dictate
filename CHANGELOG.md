@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-25
+
+### Fixed
+
+- The dictation list and **Copy last dictation** follow when the words were
+  spoken. A crash recovery that stamped old notes with a later finish time no
+  longer floats those notes above a new dictation.
+- A saved backend this build does not ship, including the removed xAI, OpenAI,
+  and Gemini backends, is rewritten to Parakeet when the desktop UI loads. The
+  window was reporting `faster-whisper` for that stale setting even though the
+  engine was already running Parakeet.
+
+### Changed
+
+- The About dialog no longer shows a model name. Version, package, and the
+  update channel stay.
+
 ## 2026-09-20
 
 This is the first published release since 2026.7.4; the 2026-09-19 entry below

@@ -34,8 +34,10 @@ baseline, and the artifact is the spec it must keep satisfying.
    `minmax(96px,120px)` gutter holding the mono `t-mono` timestamp on a 26px line box so it
    sits on the first prose line, then the 15px/1.75 text. Quick notes render one prose
    block at the 65ch measure.
-7. **About** — mark + `Dictate` + version/channel, Model / Updates rows, `Check for update`
-   secondary + **one** primary `Update` (ink on paper), privacy note in muted 12.5px.
+7. **About** — mark + `Dictate` + version/channel, package when one is recorded,
+   Updates row, `Check for update` secondary + **one** primary `Update` (ink on
+   paper), privacy note in muted 12.5px. No model name. Engine names are not
+   part of this chrome.
 8. **Command palette** — `Esc` cap, `Go to` / `Actions` groups at t-label metrics.
 9. **Chrome** — one title bar: mark at 16px, drag region, per-OS window controls. Nothing
    else in it. System-theme default; light and dark both locked.

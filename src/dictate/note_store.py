@@ -334,7 +334,10 @@ def _note_sort_tuple(note: NoteRecord) -> tuple[int, str, str]:
 
 
 def _note_sort_key(note: NoteRecord) -> str:
-    return note.ended_at or note.started_at or ""
+    # Order by when the note was spoken. ended_at is a completion stamp, and
+    # recover_interrupted writes the same stamp onto every stale note, which
+    # would otherwise float old recordings above anything said since.
+    return note.started_at or note.ended_at or ""
 
 
 def _segment_display_text(segment: NoteSegment) -> str:

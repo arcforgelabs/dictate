@@ -320,7 +320,12 @@ class UiBackend:
         of continuing to hydrate the old multilingual local path.
         """
         cfg = config_mod.load_config(self.config_path)
-        if cfg.stt_backend in _LEGACY_REGULAR_BACKENDS:
+        # Legacy local backends, and backends this build no longer ships
+        # (hosted xAI / OpenAI / Gemini), are stale dictation state. The daemon
+        # already ignores them and runs Parakeet; rewrite the saved selection
+        # so the About row reports that same engine instead of a Whisper name.
+        removed = bool(cfg.stt_backend) and cfg.stt_backend not in BACKEND_REGISTRY
+        if cfg.stt_backend in _LEGACY_REGULAR_BACKENDS or removed:
             config_mod.set_stt_selection(
                 _PRIVATE_DICTATION_BACKEND,
                 _PRIVATE_DICTATION_MODEL,
@@ -332,11 +337,13 @@ class UiBackend:
     def get_state(self) -> dict[str, Any]:
         cfg = self._load_ui_config()
         prefs = self.prefs_store.load()
-        # No saved backend → the hardware-aware default (Parakeet English on CPU).
+        # No saved backend, or one this build does not ship, uses the same
+        # local default the daemon runs (Parakeet on this machine).
         backend = cfg.stt_backend or resolve_default_local_backend(cfg.stt_device or "auto")[0]
         if backend not in BACKEND_REGISTRY:
-            backend = "faster-whisper"
-        model = self._effective_model(cfg, backend)
+            backend, model = resolve_default_local_backend(cfg.stt_device or "auto")
+        else:
+            model = self._effective_model(cfg, backend)
         meeting_backend, meeting_model = self._meeting_selection(cfg)
         meeting_readiness = self._meeting_readiness(cfg)
         return {
@@ -435,6 +442,11 @@ class UiBackend:
                 }
             )
             seen_text.add(text_key)
+        # Notes are walked first so a saved note wins the text-dedupe over the
+        # rolling history copy. The list the UI shows is still newest speech
+        # first: a quick dictation that never became a note has to sort in with
+        # the notes, not get stuck underneath older ones.
+        out.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
         return out
 
     def export_local_data(self) -> dict[str, Any]:
