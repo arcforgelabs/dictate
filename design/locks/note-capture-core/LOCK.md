@@ -19,14 +19,16 @@ baseline, and the artifact is the spec it must keep satisfying.
    the keyboard graphic pointing at that key. Once capture has begun this session, the
    `Copy last dictation` pill (fg label, muted preview) replaces the hint. Home bar: update
    pill (amber when an update is ready / restart pending; danger only on failure), About,
-   `Meeting` and the Dictations toggle. **No gear, no settings menu, no provider names.**
+   and the Dictations toggle. `Meeting` is beta-channel chrome only.
+   **No gear, no settings menu, no provider names.**
 2. **Recording** — `Recording` / `Meeting` in `live`, mono timer, wave timeline or the live
    transcript preview. Reduced-motion: halo static at 50 %, never invisible.
 3. **Paused** — `Paused` / `Paused — no speech detected` in muted, timer, `Finish note`
    (or `Finish meeting`) + a danger-on-hover discard button → alertdialog (`Discard note?`,
    `Cancel` + danger `Confirm`).
 4. **Transcribing** — indeterminate ink bar, prose sub in the UI face.
-5. **Dictations** — search row (`Search dictations`, All / Meetings / Quick segment, toggle),
+5. **Dictations** — search row (`Search dictations`, toggle). The All / Meetings /
+   Quick segment is beta-channel chrome only; the normal channel has one list.
    rows with fg text + mono meta line, archive / copy / export on hover; empty and
    no-results states in fg title + muted sub.
 6. **Expanded note** — `Note · time · ago` title, copy + export, back column. Meeting notes
