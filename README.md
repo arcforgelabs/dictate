@@ -1,4 +1,8 @@
-# 🎙️ Dictate
+<p align="center">
+  <img src="https://raw.githubusercontent.com/arcforgelabs/dictate/master/assets/dictate.png" alt="Dictate" width="128" height="128">
+</p>
+
+# Dictate
 
 Desktop dictation that types into the focused app.
 
