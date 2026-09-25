@@ -716,7 +716,7 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn(f'"version": "{RELEASE_VERSION}"', package_json)
         self.assertIn('"dictate-install": "npm/dictate-lifecycle.mjs"', package_json)
         self.assertIn('"access": "public"', package_json)
-        self.assertIn('"provenance": true', package_json)
+        self.assertIn('"provenance": false', package_json)
 
     def test_unstable_npm_publish_workflow_uses_separate_dist_tag(self) -> None:
         workflow = (
