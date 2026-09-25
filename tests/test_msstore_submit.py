@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import sys
 import unittest
@@ -262,6 +263,32 @@ class DraftChangesTests(unittest.TestCase):
                     language="en-us", replace_pending=False,
                 )
         self.assertIn("already pending", str(raised.exception))
+
+
+class ListingLanguageKeyTests(unittest.TestCase):
+    def test_updates_the_existing_listing_whatever_its_casing(self) -> None:
+        module = load_msstore_module()
+        original = {
+            "applicationPackages": [],
+            "listings": {"en-US": {"baseListing": {"description": "old", "images": []}}},
+        }
+        updated = module.apply_draft_changes(
+            original, msix_name="a.msix",
+            listing={"description": "new", "features": [], "releaseNotes": "", "shortDescription": "", "keywords": []},
+            screenshots=[],
+        )
+        self.assertEqual(list(updated["listings"]), ["en-US"])
+        self.assertEqual(updated["listings"]["en-US"]["baseListing"]["description"], "new")
+
+    def test_summary_carries_no_tokens(self) -> None:
+        module = load_msstore_module()
+        summary = module.summarize_submission({
+            "id": "1", "status": "PendingCommit", "fileUploadUrl": "https://blob/sas?sig=secret",
+            "applicationPackages": [{"fileName": "a.msix", "fileStatus": "PendingUpload"}],
+            "listings": {"en-US": {"baseListing": {"description": "d", "images": []}}},
+        })
+        self.assertNotIn("sig=secret", json.dumps(summary))
+        self.assertEqual(summary["packages"], ["a.msix:PendingUpload"])
 
 
 if __name__ == "__main__":
