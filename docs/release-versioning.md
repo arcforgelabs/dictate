@@ -91,6 +91,11 @@ Repository owner is `arcforgelabs`. Repository name is `dictate`. A long-lived
 `NPM_TOKEN` is not used. The June 2026 granular token expired, so `latest`
 stayed on `2026.7.4` while the GitHub release moved to `2026.9.25`.
 
+Provenance is off. npm only accepts provenance statements from public source
+repositories, and this repository is private. Both publish steps force
+`publishConfig.provenance` to `false`, so tags cut before this change still
+publish.
+
 The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
 
 The current developer/bootstrap install path is:
