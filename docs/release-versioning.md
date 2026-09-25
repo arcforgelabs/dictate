@@ -71,11 +71,20 @@ commit reachable from the default branch, then runs the Linux/Windows test
 matrix, the hosted Windows user install smoke test, release metadata validation,
 Python artifact checks, and npm package validation before publishing.
 
+The `release`, `npm-publish` and `windows-signing` environments need maintainer
+approval, so each publishing job waits in the run until approved. After the
+Windows installer is uploaded, the release dispatches
+`windows-release-gate.yml`, which installs that exact `setup.exe` on the
+`win11-gpu` VM, launches it, checks the running engine's version, and
+uninstalls. See [windows-11.md](windows-11.md#release-gate).
+
 GitHub release publication and Microsoft Store publication are separate lanes.
 Publishing a GitHub release updates the downloadable source and unsigned direct-install artifacts;
 it does not make an update available through the Microsoft Store. Store updates
 require the Store MSIX workflow in draft mode, Partner Center review, and an
-explicit publish/certification step.
+explicit publish/certification step. The draft refuses to build without a
+passing Windows release gate for the same version; `skip_windows_gate` is the
+override.
 
 The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN
 install/update scripts. Publishing uses GitHub OIDC trusted publishing on the
@@ -92,9 +101,11 @@ Repository owner is `arcforgelabs`. Repository name is `dictate`. A long-lived
 stayed on `2026.7.4` while the GitHub release moved to `2026.9.25`.
 
 Provenance is off. npm only accepts provenance statements from public source
-repositories, and this repository is private. Both publish steps force
-`publishConfig.provenance` to `false`, so tags cut before this change still
-publish.
+repositories, and the repository was private when trusted publishing was set up.
+Both publish steps force `publishConfig.provenance` to `false`, so tags cut
+before that change still publish. The repository is public now, so provenance
+can be turned back on by removing that override and setting
+`publishConfig.provenance` to `true`.
 
 The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
 
