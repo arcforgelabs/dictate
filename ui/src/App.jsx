@@ -13,7 +13,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.9.25-3";
+const DEFAULT_VERSION = "2026.9.25-4";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {

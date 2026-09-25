@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-25-4
+
+### Fixed
+
+- About shows the version the package manager installed. A `.deb` installed
+  outside the in-app updater used to show an older stamped version.
+- The packaged app no longer offers an update to the version it is already
+  running when it is started from inside a source checkout.
+- The README shows the Dictate icon on GitHub and the npm package page.
+
 ## 2026-09-25-3
 
 ### Fixed
