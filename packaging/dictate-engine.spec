@@ -87,6 +87,23 @@ hiddenimports += [
     "pynput.keyboard",
     "pynput.mouse",
 ]
+# pynput picks its backend with importlib at runtime, so PyInstaller never
+# sees it. Name the backend for this platform, and its Xlib dependency on X11.
+if sys.platform.startswith("linux"):
+    hiddenimports += [
+        "pynput._util.xorg",
+        "pynput._util.xorg_keysyms",
+        "pynput.keyboard._xorg",
+        "pynput.mouse._xorg",
+    ]
+    hiddenimports += collect_submodules("Xlib")
+elif os.name == "nt":
+    hiddenimports += [
+        "pynput._util.win32",
+        "pynput._util.win32_vks",
+        "pynput.keyboard._win32",
+        "pynput.mouse._win32",
+    ]
 
 block_cipher = None
 
