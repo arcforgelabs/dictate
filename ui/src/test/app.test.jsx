@@ -27,6 +27,14 @@ function finishCapture() {
   fireEvent.click(screen.getByText("Finish note"));
 }
 
+// Meeting capture and the All / Meetings / Quick filter are beta-channel chrome.
+function enableBeta() {
+  fireEvent.click(screen.getByLabelText("About Dictate"));
+  const dialog = screen.getByRole("dialog", { name: "Dictate" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Beta" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+}
+
 function mockPackagePolling(statuses) {
   const sources = [];
   let checks = 0;
@@ -158,6 +166,7 @@ describe("Quiet Console app (mock mode)", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
+        updateChannel: "unstable",
         history: [
           {
             id: "segmented_note",
@@ -858,8 +867,17 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByText(/project note/i)).toBeInTheDocument();
   });
 
+  it("hides meeting capture and the dictation filter on the normal channel", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Meeting" })).not.toBeInTheDocument();
+    navTo("Notes");
+    expect(screen.queryByRole("group", { name: "Filter dictations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Meetings" })).not.toBeInTheDocument();
+  });
+
   it("records a mock meeting with speaker-labelled output", async () => {
     render(<App />);
+    enableBeta();
     fireEvent.click(screen.getByText("Meeting"));
     expect(screen.getByText("Meeting")).toBeInTheDocument();
     expect(screen.getByLabelText("Finish meeting")).toBeInTheDocument();
@@ -876,6 +894,7 @@ describe("Quiet Console app (mock mode)", () => {
 
   it("keeps a completed local meeting accessible in Dictations", async () => {
     render(<App />);
+    enableBeta();
     fireEvent.click(screen.getByText("Meeting"));
     fireEvent.click(screen.getByLabelText("Finish meeting"));
     await waitFor(() => expect(screen.getByLabelText("Close note")).toBeInTheDocument(), { timeout: 2000 });
@@ -949,6 +968,7 @@ describe("Quiet Console app (mock mode)", () => {
   it("exports segmented meeting notes with speaker labels and timestamps", async () => {
     const invoke = vi.fn().mockResolvedValue(true);
     render(<App />);
+    enableBeta();
     fireEvent.click(screen.getByText("Meeting"));
     fireEvent.click(screen.getByLabelText("Finish meeting"));
 
@@ -1291,6 +1311,7 @@ describe("Notes list (history view)", () => {
 
   it("category toggle filters meetings vs quick records", () => {
     render(<App />);
+    enableBeta();
     navTo("Notes");
     // Default "All": both a meeting (diarized) and quick records are visible.
     expect(screen.getByText(/status round/i)).toBeInTheDocument();   // meeting (has segments)
@@ -1407,6 +1428,7 @@ describe("Notes list (history view)", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
+        updateChannel: "unstable",
         history: [{
           id: "local_meeting_without_segments",
           text: "Durable local meeting without speaker labels",

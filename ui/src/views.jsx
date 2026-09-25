@@ -229,19 +229,21 @@ function HistoryView() {
             <Icon name="x" size={15} />
           </button>
         )}
-        <div className="engine-seg cat-seg" role="group" aria-label="Filter dictations">
-          {[["all", "All"], ["meetings", "Meetings"], ["quick", "Quick"]].map(([c, label]) => (
-            <button
-              key={c}
-              type="button"
-              className={"engine-opt" + (cat === c ? " on" : "")}
-              aria-pressed={cat === c}
-              onClick={() => setCat(c)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {s.updateChannel === "unstable" && (
+          <div className="engine-seg cat-seg" role="group" aria-label="Filter dictations">
+            {[["all", "All"], ["meetings", "Meetings"], ["quick", "Quick"]].map(([c, label]) => (
+              <button
+                key={c}
+                type="button"
+                className={"engine-opt" + (cat === c ? " on" : "")}
+                aria-pressed={cat === c}
+                onClick={() => setCat(c)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <NotebookToggle />
       </div>
 

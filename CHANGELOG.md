@@ -16,6 +16,9 @@
 
 - The About dialog no longer shows a model name. Version, package, and the
   update channel stay.
+- Starting a meeting, and the All / Meetings / Quick filter, are on the beta
+  channel only. The normal channel is dictation, and every saved note stays
+  in the one list.
 
 ## 2026-09-20
 

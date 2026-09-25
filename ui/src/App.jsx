@@ -13,7 +13,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.9.20";
+const DEFAULT_VERSION = "2026.9.25";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -458,7 +458,7 @@ function CaptureHome() {
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
       <HomeBar
         right={<><UpdatePill /><AboutButton /></>}
-        meeting={!s.noteRecording ? (
+        meeting={s.updateChannel === "unstable" && !s.noteRecording ? (
           <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
             <Icon name="users" size={14} />
             <span>Meeting</span>
