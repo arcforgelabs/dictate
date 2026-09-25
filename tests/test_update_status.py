@@ -525,13 +525,17 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.config.set_installed_package_version") as stamp,
             patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
-            flow = start_update_flow()
+            downloaded = start_update_flow()
+            ready = get_linux_package_update_snapshot()
+            install.assert_not_called()
+            installed = start_update_flow()
             snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "installed")
-        self.assertTrue(flow.started)
-        self.assertEqual(flow.phase, "installed")
-        self.assertEqual(flow.install_kind, "linux-package")
+        self.assertEqual(downloaded.phase, "ready")
+        self.assertIn("install", ready["actions"])
+        self.assertEqual(installed.mode, "working")
+        self.assertEqual(installed.phase, "installing")
+        self.assertEqual(installed.install_kind, "linux-package")
         find.assert_called_once_with("_amd64.deb", release_tag="v2026.7.4-unstable.2.1")
         dl.assert_called_once()
         finalize.assert_called_once()
@@ -572,12 +576,12 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status.Path.unlink"),
             patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
+            ready = start_update_flow()
             flow = start_update_flow()
             snapshot = get_linux_package_update_snapshot()
 
-        self.assertEqual(flow.mode, "error")
-        self.assertFalse(flow.started)
-        self.assertEqual(flow.error_code, "cancelled")
+        self.assertEqual(ready.phase, "ready")
+        self.assertEqual(flow.mode, "working")
         self.assertEqual(snapshot["phase"], "failed")
         self.assertEqual(snapshot["error_code"], "cancelled")
 
@@ -751,11 +755,11 @@ class UpdateStatusTests(unittest.TestCase):
             start = start_update_flow()
             status = check_update_status()
 
-        self.assertEqual(start.phase, "installed")
+        self.assertEqual(start.phase, "ready")
         self.assertIn("downloading", phases)
         self.assertIn("verifying", phases)
-        self.assertIn("installing", phases)
-        self.assertEqual(status.phase, "installed")
+        self.assertNotIn("installing", phases)
+        self.assertEqual(status.phase, "ready")
 
     def test_linux_package_current_version_comes_from_dpkg_not_the_stale_stamp(self) -> None:
         # A .deb installed outside the in-app updater leaves the config stamp

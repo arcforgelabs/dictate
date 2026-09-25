@@ -95,6 +95,7 @@ class _LinuxPackageOperation:
     error_detail: str | None
     target_version: str
     thread: threading.Thread | None
+    deb_path: Path | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -401,13 +402,31 @@ def _subprocess_env_for_tool(tool_path: str) -> dict[str, str]:
 
 
 def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
-    """Start a background .deb download, verify, and pkexec install."""
+    """Download a .deb in the background. Install only when the user asks again."""
     global _linux_package_operation
     if not shutil.which("pkexec"):
         return _missing_deps_flow(context, ["pkexec"])
     current_version = _current_installed_version(context)
     with _linux_package_operation_guard:
         op = _linux_package_operation
+        if op is not None and op.phase == "ready" and op.deb_path is not None:
+            return _begin_linux_package_install(context, op)
+        if op is not None and op.phase == "installed":
+            snap = _linux_package_operation_snapshot(op)
+            return UpdateFlow(
+                mode="installed",
+                started=True,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase="installed",
+                step="restart",
+                progress=100,
+                actions=["restart"],
+                commands={},
+                missing_deps=[],
+                message="Update installed — restart Dictate.",
+                install_started_at=snap.get("install_started_at"),
+            )
         if op is not None and op.phase in {
             "preparing",
             "downloading",
@@ -429,22 +448,6 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
                 message="Update already in progress.",
                 error_code=snap.get("error_code"),
                 error_detail=snap.get("error_detail"),
-                install_started_at=snap.get("install_started_at"),
-            )
-        if op is not None and op.phase == "installed":
-            snap = _linux_package_operation_snapshot(op)
-            return UpdateFlow(
-                mode="installed",
-                started=True,
-                platform=str(context["platform"]),
-                install_kind="linux-package",
-                phase="installed",
-                step="restart",
-                progress=100,
-                actions=["restart"],
-                commands={},
-                missing_deps=[],
-                message="Update installed — restart Dictate.",
                 install_started_at=snap.get("install_started_at"),
             )
         if op is not None and op.phase == "failed":
@@ -746,32 +749,8 @@ def _linux_package_update_worker(
             asset.name,
             expected_sha256=asset.sha256,
         )
-        _linux_package_set_phase(
-            "installing",
-            "install",
-            progress=None,
-            install_started_at=datetime.now(timezone.utc).isoformat(),
-            touch_install_started_at=True,
-        )
-        result = _install_deb(deb_path)
-        if result.returncode != 0:
-            detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
-            code = "cancelled" if result.returncode in (126, 127) else "install_failed"
-            failure = (code, detail)
-        else:
-            try:
-                from dictate.config import set_installed_package_version
-
-                set_installed_package_version(str(latest))
-            except Exception:  # noqa: BLE001
-                pass
-            _linux_package_set_phase(
-                "installed",
-                "restart",
-                progress=100,
-                install_started_at=None,
-                touch_install_started_at=True,
-            )
+        _linux_package_mark_ready(deb_path, latest)
+        deb_path = None
     except Exception as exc:  # noqa: BLE001
         code = "download_failed"
         message = str(exc)
@@ -784,13 +763,13 @@ def _linux_package_update_worker(
             code = "download_incomplete"
         failure = (code, message)
     finally:
-        if deb_path is not None:
-            try:
-                deb_path.unlink()
-            except OSError:
-                pass
-        _cleanup_download_artifacts(asset.name)
         if failure is not None:
+            if deb_path is not None:
+                try:
+                    deb_path.unlink()
+                except OSError:
+                    pass
+            _cleanup_download_artifacts(asset.name)
             _linux_package_set_failed(*failure)
 
 
@@ -851,7 +830,107 @@ def _linux_package_operation_snapshot(
             }
 
 
+def _linux_package_mark_ready(deb_path: Path, version: str) -> None:
+    with _linux_package_operation_guard:
+        op = _linux_package_operation
+        if op is None:
+            return
+        with op.lock:
+            op.phase = "ready"
+            op.step = "install"
+            op.progress = 100
+            op.deb_path = deb_path
+            op.target_version = version
+            op.error_code = None
+            op.error_detail = None
+
+
+def _begin_linux_package_install(
+    context: dict[str, object],
+    operation: _LinuxPackageOperation,
+) -> UpdateFlow:
+    """Install the downloaded .deb, then leave a restart for the window."""
+    with _linux_package_operation_guard:
+        if operation.phase == "installing":
+            snap = _linux_package_operation_snapshot(operation)
+            return UpdateFlow(
+                mode="busy",
+                started=False,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase="installing",
+                step=snap.get("step"),
+                progress=snap.get("progress"),
+                actions=list(snap.get("actions") or []),
+                commands=_commands_for_context(context),
+                missing_deps=[],
+                message="Update already in progress.",
+                install_started_at=snap.get("install_started_at"),
+            )
+        worker = threading.Thread(
+            target=_linux_package_install_worker,
+            args=(str(operation.target_version), operation.deb_path),
+            name="dictate-linux-package-install",
+            daemon=True,
+        )
+        with operation.lock:
+            operation.phase = "installing"
+            operation.step = "install"
+            operation.progress = None
+            operation.install_started_at = datetime.now(timezone.utc).isoformat()
+            operation.thread = worker
+        worker.start()
+    return UpdateFlow(
+        mode="working",
+        started=True,
+        platform=str(context["platform"]),
+        install_kind="linux-package",
+        phase="installing",
+        step="install",
+        progress=None,
+        actions=["check"],
+        commands=_commands_for_context(context),
+        missing_deps=[],
+        message="Installing update…",
+    )
+
+
+def _linux_package_install_worker(latest: str, deb_path: Path | None) -> None:
+    if deb_path is None:
+        _linux_package_set_failed("install_failed", "The downloaded package is missing.")
+        return
+    try:
+        result = _install_deb(deb_path)
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
+            code = "cancelled" if result.returncode in (126, 127) else "install_failed"
+            _linux_package_set_failed(code, detail)
+            return
+        try:
+            from dictate.config import set_installed_package_version
+
+            set_installed_package_version(str(latest))
+        except Exception:  # noqa: BLE001
+            pass
+        _linux_package_set_phase(
+            "installed",
+            "restart",
+            progress=100,
+            install_started_at=None,
+            touch_install_started_at=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _linux_package_set_failed("install_failed", str(exc))
+    finally:
+        try:
+            deb_path.unlink()
+        except OSError:
+            pass
+
+
 def _operation_actions(phase: str) -> list[str]:
+    if phase == "ready":
+        return ["install"]
     if phase == "installed":
         return ["restart"]
     if phase == "failed":
@@ -872,6 +951,7 @@ def _apply_linux_package_operation(status: UpdateStatus) -> UpdateStatus:
         "preparing",
         "downloading",
         "verifying",
+        "ready",
         "installing",
         "failed",
         "installed",
