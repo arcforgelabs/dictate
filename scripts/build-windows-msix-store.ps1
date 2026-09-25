@@ -63,13 +63,17 @@ function Find-MakeAppxCommand {
 
 function Convert-ToMsixVersion {
     param([Parameter(Mandatory = $true)][string]$Version)
-    $parts = @($Version.Split(".") | ForEach-Object { [int]$_ })
-    if ($parts.Count -gt 4) {
-        throw "MSIX version must have at most four numeric parts: $Version"
+    # The Store reserves the fourth part, so it must stay 0. A same-day
+    # release YYYY.M.D-N goes into the third part as D*100+N, which keeps
+    # 2026.9.25 < 2026.9.25-1 < 2026.9.26 in Store ordering.
+    if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-(\d+))?$') {
+        throw "Store MSIX needs a stable YYYY.M.D or YYYY.M.D-N version: $Version"
     }
-    while ($parts.Count -lt 4) {
-        $parts += 0
+    $sameDay = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+    if ($sameDay -gt 99) {
+        throw "Same-day release number must be 99 or less for MSIX: $Version"
     }
+    $parts = @([int]$Matches[1], [int]$Matches[2], ([int]$Matches[3] * 100 + $sameDay), 0)
     foreach ($part in $parts) {
         if ($part -lt 0 -or $part -gt 65535) {
             throw "MSIX version component is outside 0..65535: $part"

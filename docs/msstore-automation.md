@@ -34,6 +34,14 @@ uses `tauri build --no-bundle`, stages `dictate-ui-shell.exe` and
 `engine\dictate-engine.exe`, renders the four-part MSIX version from
 `tauri.conf.json`, and packs the loose layout with Microsoft `winapp`.
 
+The Store reserves the fourth version part, so it is always `0`. The day and
+the same-day release number share the third part: `2026.9.25` packs as
+`2026.9.2500.0` and `2026.9.25-1` as `2026.9.2501.0`. Unstable versions are
+rejected; the Store is stable-only.
+
+A draft upload fails if Partner Center already holds a submission created by
+hand there. Delete that submission in Partner Center, then rerun `mode=draft`.
+
 ## GitHub Actions Wiring
 
 Add these repository variables in GitHub Actions. Keep the values in repository
