@@ -52,10 +52,16 @@ Advisories:
   Reachable only via the `Trainer` (training) class; Dictate only runs inference
   and never trains. Blocked below 5.x by whisperx's `huggingface-hub<1.0.0` pin.
 - **nltk path traversal in `nltk.data.load()`** — GHSA-p4gq-832x-fm9v (high).
-  No patched nltk release exists (`<= 3.9.4`, the current latest). Transitive via
-  whisperx; whisperx's internal use loads fixed resources, not user-controlled
-  URL-encoded paths.
+  This older advisory is not among the current open Dependabot alerts. The
+  optional WhisperX stack now locks NLTK 3.10.3; do not treat the old
+  `<= 3.9.4` version statement as current.
+- **nltk model-artifact path sandbox bypass** — GHSA-8mgp-746c-j5xp (high).
+  NLTK 3.10.3 is still affected, and GitHub lists no patched release.
+  Transitive via the optional WhisperX stack. Dictate does not call the
+  affected model-artifact APIs directly, but optional model paths still need
+  evaluation against untrusted artifacts.
 
 **Action:** when whisperx publishes a release that lifts its `torch` /
 `huggingface-hub` pins, bump it, re-pin torch (`>=2.12.1`) and transformers
-(`>=5.x`) and nltk (first patched), re-lock, and remove the cleared entries here.
+(`>=5.x`) and re-lock. Upgrade NLTK again when the outstanding advisory has
+a patched release; remove entries here only after verifying the affected paths.
