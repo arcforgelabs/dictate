@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-26
+
+### Fixed
+
+- Dictate starts without a microphone. With none connected at startup, the
+  engine used to exit and leave a window that could not dictate, change
+  settings or show history. Recording without a microphone now says
+  "Microphone error" in the window.
+
 ## 2026-09-25-4
 
 ### Fixed
