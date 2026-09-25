@@ -1,17 +1,19 @@
 # Microsoft Store Screenshots
 
-These screenshots were captured from the current Dictate desktop UI at
-1366 x 768. They use neutral demo dictation text and contain no API keys,
-tokens, email addresses, or private workspace names.
+Captured from the current Dictate UI (dark theme) with
+`design/tools/capture-store.mjs` against the mock-mode dev server. Each image
+is the app window at 2x, 2112 x 1472, above the Store's 1366 x 768 minimum.
+They use neutral demo dictation text and contain no user data.
 
 Upload set:
 
-1. `dictate-01-ready.png` - Ready-to-dictate home surface.
-2. `dictate-02-recording.png` - Active recording state.
-3. `dictate-03-dictations.png` - Local dictations history view.
+1. `dictate-01-ready.png` - Home: click to dictate or hold Right Ctrl.
+2. `dictate-02-recording.png` - Push-to-talk in progress: "Listening, release to insert".
+3. `dictate-03-dictations.png` - Local dictations list for copy and recovery.
+4. `dictate-04-about.png` - About: "Transcription runs on this machine. Nothing is sent anywhere."
 
-Partner Center follow-up:
+Recapture after UI changes:
 
-- Replace the live old black microphone logo with the current Dictate app
-identity before the next public listing refresh.
-
+    XDG_DATA_HOME=/tmp/empty ui/node_modules/.bin/vite ui --port 5179 &
+    PLAYWRIGHT=<path>/node_modules/playwright/index.mjs CHROME=/usr/bin/google-chrome \
+      node design/tools/capture-store.mjs docs/msstore/assets/screenshots
