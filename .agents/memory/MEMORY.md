@@ -1,0 +1,1 @@
+- [UI dependency lockfile updates](ui-lockfile-updates.md) — preserve peer, platform, and portable registry metadata when refreshing UI dependencies.
