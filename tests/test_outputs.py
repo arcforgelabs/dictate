@@ -20,7 +20,7 @@ class PasteOutputTests(unittest.TestCase):
             PasteOutput(typing, clipboard).send("complete dictation")
 
         clipboard.send.assert_called_once_with("complete dictation")
-        shortcut.assert_called_once_with(typing)
+        shortcut.assert_called_once_with(typing, plain_text=False)
 
     def test_xdotool_pastes_instead_of_typing_characters(self) -> None:
         with (
@@ -33,6 +33,33 @@ class PasteOutputTests(unittest.TestCase):
         self.assertIsInstance(output.typing_output, XdotoolOutput)
         self.assertIsInstance(output.clipboard_output, ClipboardOutput)
         self.assertEqual(output.name, "paste/xdotool")
+
+    def test_xdotool_uses_shift_insert_when_the_focused_window_is_a_terminal(self) -> None:
+        with (
+            patch("dictate.outputs._focused_window_wants_plain_paste", return_value=True),
+            patch("dictate.outputs.command_exists", return_value=True),
+            patch("dictate.outputs._set_x_selection") as selection,
+            patch("dictate.outputs.subprocess.run") as run,
+        ):
+            PasteOutput(XdotoolOutput(), Mock()).send("hello from dictate")
+
+        selection.assert_called_once_with("primary", "hello from dictate")
+        run.assert_called_once_with(
+            ["xdotool", "key", "--clearmodifiers", "shift+Insert"],
+            check=True,
+        )
+
+    def test_xdotool_keeps_ctrl_v_for_ordinary_windows(self) -> None:
+        with (
+            patch("dictate.outputs._focused_window_wants_plain_paste", return_value=False),
+            patch("dictate.outputs.subprocess.run") as run,
+        ):
+            PasteOutput(XdotoolOutput(), Mock()).send("hello")
+
+        run.assert_called_once_with(
+            ["xdotool", "key", "--clearmodifiers", "ctrl+v"],
+            check=True,
+        )
 
     def test_wtype_paste_uses_control_v_key_chord(self) -> None:
         with patch("dictate.outputs.subprocess.run") as run:

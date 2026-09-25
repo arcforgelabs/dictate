@@ -19,6 +19,9 @@
 - Starting a meeting, and the All / Meetings / Quick filter, are on the beta
   channel only. The normal channel is dictation, and every saved note stays
   in the one list.
+- Dictation into a terminal, including the Grok CLI, is inserted with
+  Shift+Insert as plain text. Ctrl+V in that CLI treats a WebKit clipboard
+  as a file chip.
 
 ## 2026-09-20
 

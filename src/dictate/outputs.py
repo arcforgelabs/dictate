@@ -81,11 +81,7 @@ class ClipboardOutput:
 
         if command_exists("xclip"):
             try:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"],
-                    input=text.encode(),
-                    check=True,
-                )
+                _set_x_selection("clipboard", text)
                 return
             except subprocess.CalledProcessError as exc:
                 raise OutputError(f"clipboard command failed: {exc}") from exc
@@ -113,7 +109,17 @@ class PasteOutput:
 
     def send(self, text: str) -> None:
         self.clipboard_output.send(text)
-        _send_paste_shortcut(self.typing_output)
+        # Terminals such as the Grok CLI treat Ctrl+V as a media paste. A
+        # clipboard that still carries the Dictate window's WebKit target
+        # lands as an octet-stream chip instead of the words. Shift+Insert
+        # pastes the PRIMARY selection as text.
+        plain_text = (
+            isinstance(self.typing_output, XdotoolOutput)
+            and _focused_window_wants_plain_paste()
+        )
+        if plain_text and command_exists("xclip"):
+            _set_x_selection("primary", text)
+        _send_paste_shortcut(self.typing_output, plain_text=plain_text)
 
 
 @dataclass(slots=True)
@@ -245,10 +251,61 @@ def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
     )
 
 
-def _send_paste_shortcut(output: TextOutput) -> None:
+# Window class or title fragments whose Ctrl+V is a file/image paste.
+_PLAIN_PASTE_WINDOW_MARKERS = (
+    "ghostty",
+    "kitty",
+    "alacritty",
+    "wezterm",
+    "gnome-terminal",
+    "kgx",
+    "org.gnome.console",
+    "tilix",
+    "xterm",
+    "konsole",
+    "grok",
+)
+
+
+def _set_x_selection(selection: str, text: str) -> None:
+    subprocess.run(
+        ["xclip", "-selection", selection, "-t", "UTF8_STRING"],
+        input=text.encode(),
+        check=True,
+    )
+
+
+def _focused_window_label() -> str:
+    if not command_exists("xdotool"):
+        return ""
+    parts: list[str] = []
+    for args in (
+        ["xdotool", "getactivewindow", "getwindowclassname"],
+        ["xdotool", "getactivewindow", "getwindowname"],
+    ):
+        try:
+            completed = subprocess.run(
+                args,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            continue
+        parts.append(completed.stdout)
+    return " ".join(parts).lower()
+
+
+def _focused_window_wants_plain_paste() -> bool:
+    label = _focused_window_label()
+    return any(marker in label for marker in _PLAIN_PASTE_WINDOW_MARKERS)
+
+
+def _send_paste_shortcut(output: TextOutput, *, plain_text: bool = False) -> None:
     try:
         if isinstance(output, XdotoolOutput):
-            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=True)
+            key = "shift+Insert" if plain_text else "ctrl+v"
+            subprocess.run(["xdotool", "key", "--clearmodifiers", key], check=True)
             return
         if isinstance(output, WtypeOutput):
             subprocess.run(
