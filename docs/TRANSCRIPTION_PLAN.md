@@ -393,8 +393,9 @@ Current foundation:
    meeting audio through the strict contract.
 5. `POST /api/meetings/start` and `POST /api/meetings/stop` expose the backend
    surface for the desktop UI.
-6. The capture home exposes a user-facing `Meeting` action that records through
-   those strict meeting endpoints. Mock/dev mode returns speaker-labelled output
+6. The capture home exposes a user-facing `Meeting` action on the beta update
+   channel only. The normal channel is dictation, with no Meeting button and no
+   All / Meetings / Quick filter. Mock/dev mode returns speaker-labelled output
    so the flow is testable without a live engine.
 7. `parakeet-pyannote` is a selectable local Meeting backend foundation. It
    uses Parakeet v2/v3 for ASR and pyannote Community-1 for speaker turns,
@@ -482,9 +483,9 @@ Remaining app-level gates:
    only mock/dev output.
 2. Keep WhisperX visible only as an advanced/experimental backend while
    Parakeet speaker-attribution lanes are incomplete.
-3. Staged update preparation is not in scope for this human-test release. The
-   current live update route runs download and install together, and the
-   Windows lifecycle smoke verifies that path.
+3. A `.deb` update downloads and verifies while the app stays open. Install
+   and restart are a second click. The Windows lifecycle smoke still covers
+   its own installer path.
 4. Persistent skipped update versions are deferred with the staged update UX.
    The current UI-only `localStorage` skip remains a non-authoritative preview
    behavior until staged updates are promoted.

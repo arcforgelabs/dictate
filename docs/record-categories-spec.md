@@ -2,6 +2,8 @@
 
 **Status:** Proposed · **Owner:** product/design · **Phase 1 (this spec):** list filter toggle + quick-copy scoping · **Phase 2:** per-category sync scope
 
+**Shipping now:** the Meeting button and the All / Meetings / Quick filter are beta-channel chrome only. The normal channel is one dictation list until a stable meeting release.
+
 ## Why
 
 Dictate captures two genuinely different things, but the UI conflates them:
