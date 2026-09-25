@@ -47,9 +47,10 @@ function Uninstall-Dictate($entry) {
 }
 
 function Remove-GateTask {
-    schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
+$installedByGate = $false
 try {
     Stop-Dictate
     $existing = Get-DictateEntry
@@ -60,6 +61,7 @@ try {
     Remove-Item -Force -ErrorAction SilentlyContinue $handshake
 
     Step "Installing $([IO.Path]::GetFileName($Installer)) silently"
+    $installedByGate = $true
     $install = Start-Process -FilePath $Installer -ArgumentList '/S' -Wait -PassThru
     if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode)" }
 
@@ -88,11 +90,13 @@ try {
 
     Step 'Launching Dictate in the signed-in desktop session'
     Remove-GateTask
-    $run = '"' + $app.FullName + '"'
-    schtasks.exe /Create /TN $taskName /TR $run /SC ONCE /ST 00:00 /IT /RL LIMITED /F | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'could not create the launch task' }
-    schtasks.exe /Run /TN $taskName | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'could not run the launch task' }
+    # A one-shot task with an interactive principal starts the app on the
+    # console desktop even when this script runs over SSH.
+    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $action = New-ScheduledTaskAction -Execute $app.FullName -WorkingDirectory $installDir
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
 
     Step "Waiting up to ${TimeoutSeconds}s for the engine to answer"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -129,10 +133,20 @@ try {
     Stop-Dictate
     Remove-GateTask
     Uninstall-Dictate (Get-DictateEntry)
+    $installedByGate = $false
     if (Test-Path $app.FullName) { throw "$($app.FullName) is still present after uninstall" }
     Write-Output 'Uninstalled: Installed Apps entry and app executable are gone'
 
     Write-Output "Dictate Windows release gate passed: $ExpectedVersion"
 } finally {
     Remove-GateTask
+    # Leave the VM clean when a check fails after install.
+    if ($installedByGate) {
+        Write-Output '==> Cleaning up after a failed check'
+        Stop-Dictate
+        $leftover = Get-DictateEntry
+        if ($leftover) {
+            try { Uninstall-Dictate $leftover } catch { Write-Warning "cleanup uninstall failed: $_" }
+        }
+    }
 }
