@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-25-3
+
+### Fixed
+
+- Right Ctrl dictation works on X11 without extra libraries. The
+  2026.9.25-1 fix named pynput but not the X11 backend it loads at runtime, and
+  the build machine has no display, so the packaged engine still shipped
+  without it.
+
 ## 2026-09-25-2
 
 ### Fixed

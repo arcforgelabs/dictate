@@ -126,7 +126,7 @@ function Assert-InstalledUserSurface {
     Assert-PathExists $keyPath
     $entry = Get-ItemProperty -Path $keyPath
     Assert-True ($entry.DisplayName -eq "Dictate") "Installed Apps display name was $($entry.DisplayName)"
-    Assert-True ($entry.DisplayVersion -eq "2026.9.25-2") "Installed Apps version was $($entry.DisplayVersion)"
+    Assert-True ($entry.DisplayVersion -eq "2026.9.25-3") "Installed Apps version was $($entry.DisplayVersion)"
     Assert-True ($entry.Publisher -eq "Arc Forge Labs") "Installed Apps publisher was $($entry.Publisher)"
     Assert-True ($entry.InstallLocation -ieq $SourceDir) "InstallLocation was $($entry.InstallLocation), expected $SourceDir"
     Assert-True ($entry.UninstallString -like "*uninstall-windows.ps1*") "UninstallString did not reference uninstall-windows.ps1"
