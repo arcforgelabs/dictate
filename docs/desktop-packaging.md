@@ -255,10 +255,11 @@ experiments belong in manual bundle workflows until they are reliable and timed;
 an optional package format must not sink the primary GitHub release.
 
 ### Release pipeline must be resilient
-- **npm publish is best-effort.** It used to run before `gh release create` in the
-  same `bash -e` step, so an npm error (the `@arcforgelabs` scope/token not
-  configured) aborted the whole job and skipped the GitHub release + installers.
-  It now warns and continues. (See release-versioning.md for the token setup.)
+- **npm publish is its own job.** It runs beside the GitHub release job, so an
+  npm problem cannot skip the GitHub release or installers. A failed publish now
+  fails the release run instead of warning, so `latest` cannot silently fall
+  behind (it did from July to September 2026). Publishing uses trusted
+  publishing; see release-versioning.md.
 - **`gh release create` is idempotent** — `upload --clobber` if the release exists,
   so re-running after a bundle fix doesn't fail on a duplicate.
 
@@ -316,8 +317,6 @@ PyInstaller freeze locally (it needs none of those), but iterate the Tauri build
 
 ## Open / known follow-ups
 
-- **npm publishing**: the `arcforgelabs` org exists, but CI needs an **automation
-  token** in the `NPM_TOKEN` secret. Until set, npm publish just warns.
 - **Autostart**: on its first run the packaged engine self-registers both the
   app-menu launcher and a per-user login autostart entry
   (`~/.config/autostart/dictate.desktop`, `Exec=dictate-ui-shell`), gated by a

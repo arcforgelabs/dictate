@@ -36,8 +36,8 @@ lanes:
 
 | Environment | Purpose | Secrets / variables |
 | --- | --- | --- |
-| `release` | GitHub release assets and npm publish | `NPM_TOKEN` |
-| `npm-publish` | Manual unstable npm dist-tag publish | `NPM_TOKEN` |
+| `release` | GitHub release assets and desktop bundles | none beyond `GITHUB_TOKEN` |
+| `npm-publish` | npm publish from `release.yml` and `npm-unstable.yml` | none; npm trusted publishing (GitHub OIDC, `id-token: write`) |
 | `windows-signing` | Future paid Authenticode lane only; not required for current Store/staging releases | `WINDOWS_SIGNING_PFX_B64`, `WINDOWS_SIGNING_PFX_PASSWORD`, signing timestamp variables |
 | `microsoft-store-status` | Read-only Store credential smoke/status checks | Store tenant/client/seller/product values and Store client secret |
 | `microsoft-store-draft` | Build and upload Store package to an uncommitted draft | Store tenant/client/seller/product values and Store client secret |
@@ -56,6 +56,19 @@ Current repository settings:
   for `main`/`master`.
 - A release-tag ruleset protects `refs/tags/v20*` from deletion and
   non-fast-forward updates.
+
+## Self-Hosted Runner
+
+`windows-release-gate.yml` runs on a self-hosted runner, `win11-gpu`, inside the
+Windows 11 VM on the maintainer workstation. The runner connects outbound to
+GitHub; nothing on the VM or host is exposed. It starts at the `samuel` logon
+(the VM signs in automatically) so the gate can launch the desktop app.
+
+Because the repository is public, the runner sits in the organization runner
+group `dictate-windows-gate`, restricted to
+`arcforgelabs/dictate/.github/workflows/windows-release-gate.yml@refs/heads/master`.
+Pull requests, including edited copies of that workflow on a branch or fork,
+cannot schedule onto it. The workflow holds no secrets beyond `GITHUB_TOKEN`.
 
 ## Release Rules
 
