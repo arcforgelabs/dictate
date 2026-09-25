@@ -129,7 +129,11 @@ class WindowsPlatformTests(unittest.TestCase):
                 patch("dictate.startup.sys.platform", "linux"),
                 patch.dict(
                     "os.environ",
-                    {"XDG_DATA_HOME": str(data_dir), "XDG_CONFIG_HOME": str(config_dir)},
+                    {
+                        "XDG_DATA_HOME": str(data_dir),
+                        "XDG_CONFIG_HOME": str(config_dir),
+                        "XDG_DATA_DIRS": str(Path(temp_dir) / "system"),
+                    },
                 ),
                 patch("dictate.startup.shutil.which", return_value="/usr/bin/dictate"),
                 patch("dictate.startup.subprocess.run") as run,

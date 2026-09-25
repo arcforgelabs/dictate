@@ -47,7 +47,11 @@ class EnsureDesktopIntegrationOnceTests(unittest.TestCase):
             startup.sys, "platform", "linux"
         ), patch.object(startup, "user_data_dir", return_value=tmp / "data"), patch.dict(
             "os.environ",
-            {"XDG_CONFIG_HOME": str(tmp / "config"), "XDG_DATA_HOME": str(tmp / "share")},
+            {
+                "XDG_CONFIG_HOME": str(tmp / "config"),
+                "XDG_DATA_HOME": str(tmp / "share"),
+                "XDG_DATA_DIRS": str(tmp / "usr" / "share"),
+            },
         ), patch.object(
             startup.shutil, "which", _which_map({"dictate-ui-shell": "/usr/bin/dictate-ui-shell"})
         ):
@@ -64,6 +68,43 @@ class EnsureDesktopIntegrationOnceTests(unittest.TestCase):
             self.assertTrue(app.exists())
             self.assertTrue(marker.exists())
             self.assertIn("Exec=/usr/bin/dictate-ui-shell", autostart.read_text())
+
+    def _package_launcher(self, tmp: Path) -> None:
+        entry = tmp / "usr" / "share" / "applications" / "Dictate.desktop"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("[Desktop Entry]\nExec=dictate-ui-shell\n")
+
+    def test_deb_launcher_suppresses_user_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            self._package_launcher(tmp)
+            self._run_frozen(tmp)
+            self.assertTrue((tmp / "config" / "autostart" / "dictate.desktop").exists())
+            self.assertFalse((tmp / "share" / "applications" / "dictate.desktop").exists())
+
+    def test_duplicate_launcher_from_earlier_release_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            self._package_launcher(tmp)
+            (tmp / "data").mkdir()
+            (tmp / "data" / ".desktop-integrated").write_text("1\n")
+            app = tmp / "share" / "applications" / "dictate.desktop"
+            app.parent.mkdir(parents=True)
+            app.write_text(startup._linux_desktop_entry(autostart=False))
+            self._run_frozen(tmp)
+            self.assertFalse(app.exists())
+
+    def test_hand_made_user_launcher_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            self._package_launcher(tmp)
+            (tmp / "data").mkdir()
+            (tmp / "data" / ".desktop-integrated").write_text("1\n")
+            app = tmp / "share" / "applications" / "dictate.desktop"
+            app.parent.mkdir(parents=True)
+            app.write_text("[Desktop Entry]\nName=My Dictate\nExec=dictate --custom\n")
+            self._run_frozen(tmp)
+            self.assertTrue(app.exists())
 
     def test_existing_marker_is_not_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

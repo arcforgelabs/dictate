@@ -171,7 +171,12 @@ The current helper supports:
 - `metadata`
 - guarded `submit --confirm-submit`
 
-The manual publish workflow uses Microsoft Store Developer CLI because Microsoft
-documents `msstore publish --inputFile <msix> --appId <productId> --noCommit`
-for MSIX package upload and `msstore submission publish <productId>` for the
-separate commit step.
+The manual publish workflow uses Microsoft Store Developer CLI:
+`msstore publish <path-to.msix> --appId <productId> --noCommit` uploads the
+package, and `msstore submission publish <productId>` is the separate commit
+step. Always pass the `.msix` path. Without it the CLI inspects the working
+directory, sees `package.json`, treats the repo as an Electron app and uploads
+without attaching the package. The Store then re-publishes the previous package
+and reports success; that happened with the September 2026 submission. The
+draft step now reads the submission back and fails unless the new `.msix` is
+in it.

@@ -109,16 +109,23 @@ jobs:
           if (-not $msix) {
             throw "No MSIX package was produced."
           }
-          # The Store CLI takes the directory holding the .msix (-i); it has
-          # no --inputFile. Stage the one package alone so nothing else in
-          # the output directory is picked up.
-          $upload = Join-Path $env:RUNNER_TEMP "msstore-upload"
-          New-Item -ItemType Directory -Force -Path $upload | Out-Null
-          Copy-Item $msix.FullName -Destination $upload
-          msstore publish --inputDirectory "$upload" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
+          # Pass the .msix itself as the project path. With no path the CLI
+          # inspects the working directory, finds package.json, treats the repo
+          # as an Electron app, and uploads without attaching the package, so
+          # the Store re-publishes the previous package and still says success.
+          msstore publish "$($msix.FullName)" --appId "$env:MSSTORE_PRODUCT_ID" --noCommit
           if ($LASTEXITCODE -ne 0) {
             throw "msstore publish failed with exit code $LASTEXITCODE"
           }
+          $submission = (msstore submission get "$env:MSSTORE_PRODUCT_ID" | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            throw "msstore submission get failed with exit code $LASTEXITCODE"
+          }
+          if ($submission -notmatch [regex]::Escape($msix.Name)) {
+            Write-Output $submission
+            throw "The draft does not contain $($msix.Name); the Store would re-publish the previous package."
+          }
+          Write-Output "Draft contains $($msix.Name)"
           msstore submission status "$env:MSSTORE_PRODUCT_ID"
           if ($LASTEXITCODE -ne 0) {
             throw "msstore submission status failed with exit code $LASTEXITCODE"
