@@ -650,6 +650,7 @@ function ExpandedNote() {
    App — root component
    ====================================================================== */
 export default function App() {
+  const browserDemo = ipc.isMockMode();
   // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
   const [view, setView] = useState("home");
   const [model, setModelState] = useState(PRIVATE_MODEL);
@@ -1860,6 +1861,12 @@ export default function App() {
             platform={platform}
             hasUpdate={!!updateStatus.updateAvailable}
           />
+        )}
+        {browserDemo && (
+          <div className="demo-mode-banner" role="note">
+            <strong>Browser demo</strong>
+            <span>Recording is simulated; this preview does not use your microphone or type into other apps.</span>
+          </div>
         )}
 
         <div className="shell">

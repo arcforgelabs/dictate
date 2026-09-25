@@ -86,6 +86,25 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.getByLabelText("Start recording")).toBeInTheDocument();
     expect(screen.getByText("Click to dictate")).toBeInTheDocument();
     expect(screen.getByLabelText("Dictations")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Browser demo")).toBeInTheDocument();
+    expect(screen.getByText(/does not use your microphone or type into other apps/i)).toBeInTheDocument();
+  });
+
+  it("does not show the browser demo warning in a live desktop shell", () => {
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.__TAURI__ = { core: { invoke: vi.fn() } };
+    window.EventSource = class {
+      close() {}
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ history: [] }),
+    });
+
+    render(<App />);
+
+    expect(screen.queryByText("Browser demo")).not.toBeInTheDocument();
+    expect(screen.queryByText(/does not use your microphone or type into other apps/i)).not.toBeInTheDocument();
   });
 
   it("teaches the key on a fresh launch, then swaps to copy-last after capturing", async () => {
