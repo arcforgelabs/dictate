@@ -1,10 +1,10 @@
 ---
 name: UI dependency lockfile updates
-description: Replit npm quirks encountered while refreshing the nested UI dependency lockfile.
+description: Cross-platform native binding metadata can be corrupted during UI lockfile refreshes.
 ---
 
-When refreshing the UI lockfile in this environment, npm 10.9.4 can fail with an Arborist `edgesOut` TypeError while resolving Vite/Vitest optional peers. npm 11 succeeded on the available Node 22 runtime.
+When refreshing the nested UI lockfile, preserve native optional-package platform selectors even when the package versions do not change.
 
-**Why:** Using `--legacy-peer-deps` avoids that resolver path but removes `libc` selectors from optional native-package entries, and Replit's configured registry can write internal mirror URLs into the lockfile.
+**Why:** Lockfile regeneration in this environment has shifted `libc` selectors onto unrelated Android, Darwin, and FreeBSD bindings while removing them from Linux GNU/musl bindings. A successful Linux x64 install and build cannot detect the resulting failures on other platforms.
 
-**How to apply:** Prefer a normal clean install from the generated lockfile; preserve optional-package `libc` metadata and canonical `registry.npmjs.org` resolved URLs, then run the audit, UI tests, and build.
+**How to apply:** Compare unchanged packages' `cpu`, `os`, `libc`, and peer metadata with the prior lockfile, check updated packages against published metadata, and keep portable registry URLs. Then verify a locked install, UI tests, and build.
