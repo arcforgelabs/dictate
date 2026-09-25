@@ -43,9 +43,10 @@ export default defineConfig({
   plugins: [react(), dictateBridgePlugin()],
   base: "./",
   clearScreen: false,
+  // Desktop dev keeps Vite's defaults so Tauri's devUrl (localhost:5173) resolves.
   server: browserPreview
     ? { host: "0.0.0.0", port: 5000, strictPort: true, allowedHosts: true }
-    : { host: "127.0.0.1", port: 5173 },
+    : undefined,
   build: {
     target: "es2021",
     outDir: "dist",
