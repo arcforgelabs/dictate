@@ -88,22 +88,60 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# GitHub release downloads are capped per connection (about 0.15 MB/s at
+# times), so fetch the installer as parallel byte ranges and check the
+# SHA-256 GitHub publishes for the asset.
+fetch_release_asset() {
+  local name="$1" out="$2" parts=16 meta size digest url i start end
+  meta="$(gh api "repos/$REPO/releases/tags/$TAG" \
+    -q ".assets[] | select(.name == \"$name\") | \"\\(.size) \\(.digest)\"")"
+  [ -n "$meta" ] || die "release $TAG has no $name"
+  read -r size digest <<<"$meta"
+  url="https://github.com/$REPO/releases/download/$TAG/$name"
+  local chunk=$(( (size + parts - 1) / parts ))
+  local pids=()
+  for ((i = 0; i < parts; i++)); do
+    start=$(( i * chunk ))
+    end=$(( start + chunk - 1 ))
+    [ "$end" -ge "$size" ] && end=$(( size - 1 ))
+    curl -fsSL --retry 5 -r "$start-$end" -o "$out.part$i" "$url" &
+    pids+=("$!")
+  done
+  for i in "${!pids[@]}"; do
+    wait "${pids[$i]}" || die "download of $name part $i failed"
+  done
+  for ((i = 0; i < parts; i++)); do cat "$out.part$i"; done >"$out"
+  rm -f "$out".part*
+  [ "$(stat -c %s "$out")" = "$size" ] || die "$name is not $size bytes"
+  if [ "${digest%%:*}" = "sha256" ]; then
+    echo "${digest#sha256:}  $out" | sha256sum -c --quiet - || die "$name failed its SHA-256 check"
+  fi
+}
+
 if [ -z "$INSTALLER" ]; then
-  say "Downloading the Windows installer for $TAG"
-  gh release download "$TAG" -R "$REPO" -p "Dictate_${VERSION}_x64-setup.exe" -D "$TMP_DIR"
-  INSTALLER="$TMP_DIR/Dictate_${VERSION}_x64-setup.exe"
-  [ -f "$INSTALLER" ] || die "release $TAG has no Dictate_${VERSION}_x64-setup.exe"
+  # Keep verified installers so a rerun does not download 800 MB again.
+  CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dictate-release-gate"
+  mkdir -p "$CACHE_DIR"
+  find "$CACHE_DIR" -name 'Dictate_*_x64-setup.exe' ! -name "Dictate_${VERSION}_x64-setup.exe" -delete
+  INSTALLER="$CACHE_DIR/Dictate_${VERSION}_x64-setup.exe"
+  if [ -f "$INSTALLER" ]; then
+    say "Using the cached installer for $TAG"
+  else
+    say "Downloading the Windows installer for $TAG"
+    fetch_release_asset "Dictate_${VERSION}_x64-setup.exe" "$INSTALLER.tmp"
+    mv "$INSTALLER.tmp" "$INSTALLER"
+  fi
 fi
 
 say "Checking SSH to $HOST"
-ssh "${SSH_OPTS[@]}" "$HOST" "cmd /c ver" >/dev/null \
+ssh "${SSH_OPTS[@]}" "$HOST" "echo ok" >/dev/null \
   || die "cannot reach $HOST over SSH"
 
 GUEST_DIR="dictate-release-gate"
 GUEST_PS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/windows-release-gate.ps1"
 
 say "Copying the installer and gate script to $HOST"
-ssh "${SSH_OPTS[@]}" "$HOST" "cmd /c if not exist $GUEST_DIR mkdir $GUEST_DIR" >/dev/null
+ssh "${SSH_OPTS[@]}" "$HOST" "if not exist $GUEST_DIR mkdir $GUEST_DIR" >/dev/null
 scp -q "${SSH_OPTS[@]}" "$INSTALLER" "$GUEST_PS" "$HOST:$GUEST_DIR/"
 
 say "Running the release gate for $VERSION on $HOST"
@@ -113,7 +151,7 @@ ssh "${SSH_OPTS[@]}" "$HOST" \
   || status=$?
 
 if [ "$KEEP_GUEST_FILES" -eq 0 ]; then
-  ssh "${SSH_OPTS[@]}" "$HOST" "cmd /c rmdir /s /q $GUEST_DIR" >/dev/null 2>&1 || true
+  ssh "${SSH_OPTS[@]}" "$HOST" "rmdir /s /q $GUEST_DIR" >/dev/null 2>&1 || true
 fi
 
 if [ "$status" -ne 0 ]; then
