@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-25-1
+
+### Fixed
+
+- The packaged engine includes the X11 hotkey library, so a normal desktop
+  session can dictate without being in the `input` group.
+- Pasting into a terminal uses plain text. The focused window is recognized
+  from its process and window class, including Ghostty, not from a single app
+  name.
+- A disconnected engine no longer writes stock demo sentences into the
+  dictation list.
+- Dictation stays on CPU when every NVIDIA GPU is bound to vfio for a VM.
+  The RTX 4090 passed through to Windows is not taken.
+
 ## 2026-09-25
 
 ### Fixed
@@ -24,6 +38,8 @@
   as a file chip.
 - A `.deb` update downloads while Dictate stays open. The app installs that
   package and restarts only after a second click.
+- Stable and beta are separate builds. The installed version decides which
+  one you have. About no longer switches between them.
 
 ## 2026-09-20
 

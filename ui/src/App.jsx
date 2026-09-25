@@ -13,7 +13,7 @@ import TitleBar from "./platform/TitleBar.jsx";
 import { BreathCradle, WaveTimeline } from "./visualizers.jsx";
 import { ipc } from "./ipc.js";
 
-const DEFAULT_VERSION = "2026.9.25";
+const DEFAULT_VERSION = "2026.9.25-1";
 const TERMINAL_TRANSCRIPT_ID_LIMIT = 64;
 const WINDOWS_PLATFORM_RE = /Windows NT|Win64|Win32|WOW64/i;
 const DEMO_HISTORY = () => {
@@ -159,7 +159,8 @@ function formatUpdateElapsed(totalSeconds) {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
-function updateLabelForPhase(phase, progress, installElapsed) {
+function updateLabelForPhase(phase, progress, installElapsed, latestVersion) {
+  if (phase === "available" && latestVersion) return `Update available · ${latestVersion}`;
   if (phase === "downloading") {
     return Number.isFinite(progress) ? `Downloading… ${Math.round(progress)}%` : "Downloading…";
   }
@@ -213,7 +214,7 @@ function UpdatePill() {
     );
   }
   const phase = s.updatePhase;
-  const label = updateLabelForPhase(phase, s.updateProgress, s.updateInstallElapsed);
+  const label = updateLabelForPhase(phase, s.updateProgress, s.updateInstallElapsed, s.updateStatus?.latestVersion);
   const busy = isUpdateBusyPhase(phase);
   return (
     <div className={"updpill phase-" + phase}>
@@ -270,7 +271,7 @@ function AboutButton() {
    no account, no plan and no cloud here, so this dialog is the whole story. */
 function AboutDialog() {
   const s = useStore();
-  const betaSelected = s.updateChannel === "unstable";
+  const betaBuild = s.updateChannel === "unstable";
   const storeInstall = s.updateStatus?.installKind === "windows-store";
   const updateBusy = !!(
     s.updateStatus?.checking
@@ -286,23 +287,6 @@ function AboutDialog() {
     return () => window.removeEventListener("keydown", onKey);
   }, [s]);
 
-  const selectUpdateChannel = (channel) => {
-    if (channel === s.updateChannel) return;
-    if (!ipc.isLive()) {
-      s.setUpdateChannel(channel);
-      s.toast(channel === "unstable" ? "Beta updates selected" : "Normal updates selected");
-      return;
-    }
-    ipc.setUpdateChannel(channel)
-      .then((st) => {
-        if (st?.updateChannel) s.setUpdateChannel(st.updateChannel);
-        if (typeof st?.installedPackageVersion === "string") s.setInstalledPackageVersion(st.installedPackageVersion);
-        s.toast(channel === "unstable" ? "Beta updates selected" : "Normal updates selected");
-        s.checkUpdates();
-      })
-      .catch((e) => s.toast(e.message || "Could not change update channel", { bad: true }));
-  };
-
   return (
     <div className="about-scrim" onMouseDown={() => s.setAboutOpen(false)}>
       <div
@@ -316,7 +300,7 @@ function AboutDialog() {
           <span className="about-logo"><Mark size={22} /></span>
           <div className="about-title-wrap">
             <div id="about-title" className="about-title">Dictate</div>
-            <div className="about-sub">Version {s.version}{s.updateChannel ? ` · ${s.updateChannel}` : ""}</div>
+            <div className="about-sub">Version {s.version}</div>
           </div>
           <button type="button" className="ibtn" aria-label="Close" title="Close" onClick={() => s.setAboutOpen(false)}>
             <Icon name="x" size={16} />
@@ -328,26 +312,8 @@ function AboutDialog() {
             <div className="about-row"><span>Package</span><strong>{s.installedPackageVersion}</strong></div>
           )}
           <div className="about-row">
-            <span>Updates</span>
-            {storeInstall ? <strong>Microsoft Store · Stable</strong> : <div className="about-channel" role="group" aria-label="Update channel">
-              <button
-                type="button"
-                className={!betaSelected ? "active" : ""}
-                aria-pressed={!betaSelected}
-                onClick={() => selectUpdateChannel("stable")}
-              >
-                Normal
-              </button>
-              <button
-                type="button"
-                className={betaSelected ? "active" : ""}
-                aria-pressed={betaSelected}
-                title="Beta updates"
-                onClick={() => selectUpdateChannel("unstable")}
-              >
-                Beta
-              </button>
-            </div>}
+            <span>Release</span>
+            <strong>{storeInstall ? "Microsoft Store" : betaBuild ? "Beta" : "Stable"}</strong>
           </div>
         </div>
 
@@ -362,7 +328,10 @@ function AboutDialog() {
               <span>{
                 s.updatePhase === "ready" ? "Install and restart"
                   : s.updatePhase === "restart" ? "Restart"
-                    : s.updateStatus?.updating ? "Updating" : "Update"
+                    : s.updateStatus?.updating ? "Updating"
+                      : s.updateStatus?.updateAvailable && s.updateStatus?.latestVersion
+                        ? `Update to ${s.updateStatus.latestVersion}`
+                        : "Update"
               }</span>
             </button>
           )}
@@ -722,7 +691,9 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [capturing, setCapturing] = useState(false);
   const [version, setVersion] = useState(DEFAULT_VERSION);
-  const [updateChannel, setUpdateChannel] = useState("stable");
+  const [updateChannel, setUpdateChannel] = useState(
+    () => (import.meta.env.MODE === "test" && globalThis.__DICTATE_TEST_CHANNEL__) || "stable",
+  );
   const [installedPackageVersion, setInstalledPackageVersion] = useState("");
   const [updateStatus, setUpdateStatus] = useState(() => mockUpdateStatus(DEFAULT_VERSION));
   // Update affordance state machine: idle → available → preparing → ready → installing (→ error).
@@ -1704,6 +1675,10 @@ export default function App() {
   // ---- launch-time update flow: silent check, prepare in the background ----
   useEffect(() => {
     if (!ipc.isLive()) {
+      // A packaged window whose engine has not connected is not the demo.
+      // Inventing an update there is how a dead engine shows "Update available"
+      // with no version.
+      if (!ipc.isMockMode()) return;
       const t1 = setTimeout(() => {
         setUpdateStatus((u) => ({ ...u, updateAvailable: true, latestVersion: "2026.7.1", checked: true }));
         setUpdatePhase((p) => (p === "idle" ? "available" : p));
@@ -1752,14 +1727,33 @@ export default function App() {
       }
     }, 16);
   };
-  const dictateStart = () => { if (recRef.current || live) return; setRecording(true); setSessionStarted(true); };
+  const dictateStart = () => {
+    if (!ipc.isMockMode()) return;
+    if (recRef.current || live) return;
+    setRecording(true);
+    setSessionStarted(true);
+  };
   const dictateStop = () => {
+    // Stock phrases are a test double only. A disconnected engine must not
+    // write them into history or offer them as the last dictation.
+    if (!ipc.isMockMode()) {
+      setRecording(false);
+      return;
+    }
     if (!recRef.current || live) return;
     setRecording(false);
     const phrase = DEMO_PHRASES[Math.floor(Math.random() * DEMO_PHRASES.length)];
     setTimeout(() => typeText(phrase), 220);
   };
-  const dictateOnce = () => { if (recRef.current || live) return; setRecording(true); setTimeout(dictateStop, 1300); };
+  const dictateOnce = () => {
+    if (!ipc.isMockMode()) {
+      toast("Dictate engine is not connected", { bad: true });
+      return;
+    }
+    if (recRef.current || live) return;
+    setRecording(true);
+    setTimeout(dictateStop, 1300);
+  };
 
   // ---- global keyboard: ⌘K palette + push-to-talk demo (Right Ctrl) ----
   useEffect(() => {
@@ -1773,6 +1767,11 @@ export default function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
       if (e.code === "ControlRight" && !e.repeat) {
+        if (!live && !ipc.isMockMode()) {
+          e.preventDefault();
+          toast("Dictate engine is not connected", { bad: true });
+          return;
+        }
         if (live && noteRecRef.current && !notePausedRef.current && actRef.current === "hold") {
           e.preventDefault();
           finishNoteRef.current();
@@ -1787,6 +1786,7 @@ export default function App() {
       if (capRef.current || live) return;
     };
     const up = (e) => {
+      if (!live && !ipc.isMockMode()) return;
       if (capRef.current || live) return;
       if (e.code === "ControlRight" && actRef.current === "hold") { e.preventDefault(); dictateStop(); }
     };

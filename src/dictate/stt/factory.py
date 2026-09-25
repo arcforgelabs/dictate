@@ -36,6 +36,30 @@ from dictate.stt.parakeet_speaker_backend import (
 )
 from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
 
+def passthrough_blocks_cuda(pci_text: str) -> bool:
+    """True when every NVIDIA display GPU is bound to vfio for a VM.
+
+    An RTX 4090 handed to the Windows VM is not a free dictation device.
+    Another NVIDIA GPU that is still on the nvidia driver stays usable.
+    """
+    blocks = [
+        block
+        for block in pci_text.split("\n\n")
+        if "NVIDIA" in block and ("VGA" in block or "3D" in block)
+    ]
+    if not blocks:
+        return False
+    return all("vfio-pci" in block for block in blocks)
+
+
+def device_for_host(device: str, pci_text: str) -> str:
+    if device not in {"auto", "cuda"}:
+        return device
+    if passthrough_blocks_cuda(pci_text):
+        return "cpu"
+    return device
+
+
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "faster-whisper": "turbo",
     "parakeet": "parakeet-tdt-0.6b-v2",

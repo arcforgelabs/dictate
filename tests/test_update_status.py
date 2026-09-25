@@ -159,10 +159,11 @@ class UpdateStatusTests(unittest.TestCase):
             patch(
                 "dictate.update_status.load_config",
                 return_value=Config(
-                    update_channel="unstable",
+                    update_channel="stable",
                     installed_package_version="2026.7.4",
                 ),
             ),
+            patch("dictate.version.RELEASE_VERSION", "2026.7.4-unstable.1.1"),
         ):
             status = check_update_status()
 
@@ -186,8 +187,9 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status.sys.platform", "linux"),
             patch(
                 "dictate.update_status.load_config",
-                return_value=Config(update_channel="unstable", installed_package_version="2026.7.4"),
+                return_value=Config(update_channel="stable", installed_package_version="2026.7.4"),
             ),
+            patch("dictate.version.RELEASE_VERSION", "2026.7.4-unstable.1.1"),
         ):
             status = check_update_status()
 
@@ -205,8 +207,9 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status.sys.platform", "linux"),
             patch(
                 "dictate.update_status.load_config",
-                return_value=Config(update_channel="unstable", installed_package_version="2026.9.20"),
+                return_value=Config(update_channel="stable", installed_package_version="2026.9.20"),
             ),
+            patch("dictate.version.RELEASE_VERSION", "2026.9.20-unstable.1.1"),
         ):
             status = check_update_status()
 
@@ -249,8 +252,8 @@ class UpdateStatusTests(unittest.TestCase):
             status = check_update_status()
 
         self.assertTrue(status.checked)
-        self.assertEqual(status.latest_version, "2026.7.4-unstable.52.1")
-        self.assertTrue(status.update_available)
+        self.assertEqual(status.latest_version, "2026.7.4")
+        self.assertFalse(status.update_available)
         self.assertEqual(status.install_kind, "linux-source")
 
     def test_linux_user_install_wins_over_checkout_cwd(self) -> None:
@@ -273,7 +276,7 @@ class UpdateStatusTests(unittest.TestCase):
             status = check_update_status()
 
         self.assertEqual(status.install_kind, "linux-user")
-        self.assertEqual(status.commands, {"update": "npx -y @arcforgelabs/dictate@unstable update --user"})
+        self.assertEqual(status.commands, {"update": "npx -y @arcforgelabs/dictate@latest update --user"})
 
     def test_check_update_status_falls_back_to_tags(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
@@ -400,7 +403,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(
             calls,
-            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@unstable", "update", "--user"]],
+            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@latest", "update", "--user"]],
         )
 
     def test_linux_user_update_finds_npx_from_nvm_when_desktop_path_is_minimal(self) -> None:
@@ -429,7 +432,7 @@ class UpdateStatusTests(unittest.TestCase):
                 flow = start_update_flow()
 
         self.assertTrue(flow.started)
-        self.assertEqual(calls[0][0], [str(npx), "-y", "@arcforgelabs/dictate@unstable", "update", "--user"])
+        self.assertEqual(calls[0][0], [str(npx), "-y", "@arcforgelabs/dictate@latest", "update", "--user"])
         self.assertTrue(calls[0][1]["PATH"].startswith(str(npx.parent)))
 
     def test_invalid_update_channel_falls_back_to_latest(self) -> None:
@@ -449,7 +452,7 @@ class UpdateStatusTests(unittest.TestCase):
 
         self.assertEqual(status.commands, {"update": "npx -y @arcforgelabs/dictate@latest update --user"})
 
-    def test_saved_unstable_update_channel_wins_for_linux_user_update(self) -> None:
+    def test_linux_user_update_follows_the_installed_stable_build(self) -> None:
         calls = []
 
         def fake_popen(command, **kwargs):  # noqa: ANN001, ARG001
@@ -474,7 +477,7 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(
             calls,
-            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@unstable", "update", "--user"]],
+            [["/usr/bin/npx", "-y", "@arcforgelabs/dictate@latest", "update", "--user"]],
         )
 
     def test_linux_user_update_requires_npx(self) -> None:

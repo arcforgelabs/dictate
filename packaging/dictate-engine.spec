@@ -81,6 +81,11 @@ hiddenimports += [
     "sounddevice",
     "numpy",
     "yaml",
+    # X11 hotkeys. Evdev is present for Wayland, but a normal desktop session
+    # cannot read /dev/input, so the frozen engine must still contain pynput.
+    "pynput",
+    "pynput.keyboard",
+    "pynput.mouse",
 ]
 
 block_cipher = None

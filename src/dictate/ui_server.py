@@ -54,7 +54,7 @@ from dictate.stt.factory import (
     resolve_default_local_model,
     resolve_model_name,
 )
-from dictate.version import RELEASE_VERSION
+from dictate.version import RELEASE_VERSION, release_channel
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +364,7 @@ class UiBackend:
                 "device": cfg.stt_device or "auto",
                 "compute": cfg.stt_compute_type or "int8",
             },
-            "updateChannel": cfg.update_channel or "stable",
+            "updateChannel": release_channel(),
             "installedPackageVersion": cfg.installed_package_version,
             "prefs": prefs,
             "notes": self._notes_payload(),
@@ -511,7 +511,10 @@ class UiBackend:
         if "startup" in payload:
             self._set_startup(payload["startup"])
         if "updateChannel" in payload:
-            self._set_update_channel(payload["updateChannel"])
+            raise ApiError(
+                409,
+                "Install the stable or beta package. The channel is part of that build.",
+            )
         return self.get_state()
 
     def _set_model(self, model: Any) -> None:
