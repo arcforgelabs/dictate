@@ -1213,3 +1213,43 @@ class UpdateStatusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DisplayedPackageVersionTests(unittest.TestCase):
+    def test_linux_package_shows_dpkg_version_over_stale_stamp(self) -> None:
+        from dictate import update_status
+
+        with patch.object(update_status, "_platform_key", return_value="linux"), patch.object(
+            update_status, "_install_kind", return_value="linux-package"
+        ), patch.object(update_status, "_find_source_root", return_value=None), patch.object(
+            update_status, "_linux_installed_package_version", return_value="2026.9.25-3"
+        ):
+            self.assertEqual(update_status.displayed_package_version("2026.9.20"), "2026.9.25-3")
+
+    def test_source_install_keeps_the_stamp(self) -> None:
+        from dictate import update_status
+
+        with patch.object(update_status, "_platform_key", return_value="linux"), patch.object(
+            update_status, "_install_kind", return_value="linux-source"
+        ), patch.object(update_status, "_find_source_root", return_value=None):
+            self.assertEqual(update_status.displayed_package_version("2026.9.20"), "2026.9.20")
+            self.assertIsNone(update_status.displayed_package_version(None))
+
+    def test_linux_package_falls_back_to_stamp_when_dpkg_is_silent(self) -> None:
+        from dictate import update_status
+
+        with patch.object(update_status, "_platform_key", return_value="linux"), patch.object(
+            update_status, "_install_kind", return_value="linux-package"
+        ), patch.object(update_status, "_find_source_root", return_value=None), patch.object(
+            update_status, "_linux_installed_package_version", return_value=None
+        ):
+            self.assertEqual(update_status.displayed_package_version("2026.9.20"), "2026.9.20")
+
+
+class FrozenSourceRootTests(unittest.TestCase):
+    def test_frozen_engine_launched_inside_a_checkout_is_not_a_source_install(self) -> None:
+        from dictate import update_status
+
+        with patch.object(update_status.sys, "frozen", True, create=True):
+            self.assertEqual(update_status._candidate_source_roots(), [])
+            self.assertIsNone(update_status._find_source_root())

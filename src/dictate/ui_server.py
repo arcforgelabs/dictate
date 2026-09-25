@@ -365,7 +365,10 @@ class UiBackend:
                 "compute": cfg.stt_compute_type or "int8",
             },
             "updateChannel": release_channel(),
-            "installedPackageVersion": cfg.installed_package_version,
+            "installedPackageVersion": self._safe(
+                lambda: update_status_mod.displayed_package_version(cfg.installed_package_version),
+                cfg.installed_package_version,
+            ),
             "prefs": prefs,
             "notes": self._notes_payload(),
             "startup": bool(self._safe(self.startup_enabled, False)),

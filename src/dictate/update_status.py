@@ -216,6 +216,26 @@ def _current_installed_version(context: dict[str, object]) -> str:
     return str(stamped or package_version or RELEASE_VERSION)
 
 
+def displayed_package_version(stamped: str | None) -> str | None:
+    """The package version for the About panel.
+
+    dpkg or the Store answers for a package install; the config stamp only
+    covers what the in-app updater installed and goes stale when a .deb is
+    installed any other way.
+    """
+    platform = _platform_key()
+    install_kind = _install_kind(platform, _find_source_root())
+    if install_kind == "linux-package":
+        version = _linux_installed_package_version()
+        if version:
+            return version
+    elif install_kind == "windows-store":
+        version = _windows_distribution_metadata().get("packageVersion")
+        if version:
+            return version
+    return stamped or None
+
+
 def check_update_status(timeout: float = 5.0) -> UpdateStatus:
     context = _update_context()
     current_version = _current_installed_version(context)
@@ -1028,6 +1048,10 @@ def _missing_deps_flow(context: dict[str, object], deps: list[str]) -> UpdateFlo
 
 
 def _candidate_source_roots() -> list[Path]:
+    # A frozen package is never a source install, whatever directory it was
+    # launched from; a launch inside a checkout must not read as one.
+    if getattr(sys, "frozen", False):
+        return []
     roots = [
         Path.cwd(),
         Path(__file__).resolve().parents[2],
