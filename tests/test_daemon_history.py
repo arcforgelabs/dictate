@@ -18,6 +18,31 @@ from dictate.audio import AudioCaptureError, AudioChunk
 from dictate.history import HistoryStore
 from dictate.stt.base import SttCapabilities, TranscriptSegment
 
+# A Daemon built without note_store falls back to NoteStore(), which is the
+# real ~/.local/share/dictate/notes. Every run used to leave "hosted final"
+# notes in the developer's own Dictations list. Keep them in a temp dir.
+_NOTES_TMP = tempfile.TemporaryDirectory()
+_notes_patch = None
+
+
+def setUpModule() -> None:  # noqa: N802
+    global _notes_patch
+    from unittest.mock import patch
+
+    from dictate.note_store import NoteStore
+
+    _notes_patch = patch(
+        "dictate.daemon.NoteStore",
+        side_effect=lambda *a, **k: NoteStore(*a, **k) if a or k else NoteStore(Path(_NOTES_TMP.name)),
+    )
+    _notes_patch.start()
+
+
+def tearDownModule() -> None:  # noqa: N802
+    if _notes_patch is not None:
+        _notes_patch.stop()
+    _NOTES_TMP.cleanup()
+
 # Stub out heavy dependencies so tests work without faster-whisper / numpy / pynput.
 _stub_modules = {
     "faster_whisper": {"WhisperModel": MagicMock},
