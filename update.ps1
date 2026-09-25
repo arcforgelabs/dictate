@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$DictateVersion = "2026.9.25-4"
+$DictateVersion = "2026.9.26"
 
 if (-not $ArchiveUrl) {
     $ArchiveUrl = "https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip"
