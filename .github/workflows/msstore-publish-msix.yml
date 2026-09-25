@@ -98,7 +98,10 @@ jobs:
 
       - name: Show current Store submission status
         shell: pwsh
-        run: msstore submission status "$env:MSSTORE_PRODUCT_ID"
+        run: |
+          msstore submission status "$env:MSSTORE_PRODUCT_ID"
+          python scripts/msstore-submit.py legacy-submission --which pending
+          python scripts/msstore-submit.py legacy-submission --which published
 
       - name: Require a passing Windows release gate
         if: inputs.mode == 'draft' && !inputs.skip_windows_gate
@@ -135,8 +138,10 @@ jobs:
           # check the package and description landed. (msstore publish without
           # a project path treated the repo as an Electron app and silently
           # re-published the previous package.)
+          # --replace-pending discards an earlier API draft; a draft made by
+          # hand in Partner Center cannot be deleted by the API and still fails.
           python scripts/msstore-submit.py legacy-draft --msix "$($msix.FullName)" `
-            --listing docs/msstore-listing.md --screenshots docs/msstore/assets/screenshots
+            --listing docs/msstore-listing.md --screenshots docs/msstore/assets/screenshots --replace-pending
           if ($LASTEXITCODE -ne 0) {
             throw "legacy-draft failed with exit code $LASTEXITCODE"
           }

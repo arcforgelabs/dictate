@@ -228,7 +228,11 @@ def apply_draft_changes(
     })
 
     listings = updated.setdefault("listings", {})
-    entry = listings.setdefault(language, {"baseListing": {}, "platformOverrides": {}})
+    # The Store keys listings by language with its own casing (for example
+    # "en-US"). Update that entry; adding a differently cased one leaves the
+    # listing customers see untouched.
+    key = next((k for k in listings if k.lower() == language.lower()), language)
+    entry = listings.setdefault(key, {"baseListing": {}, "platformOverrides": {}})
     base = entry.setdefault("baseListing", {})
     base.update(listing)
     images = base.setdefault("images", [])
@@ -324,12 +328,48 @@ def command_legacy_draft(
 
     check = request_json(f"{app_url}/submissions/{submission_id}", headers=headers)
     names = {p.get("fileName") for p in check.get("applicationPackages", [])}
-    base = (check.get("listings", {}).get(language) or {}).get("baseListing", {})
     if msix_name not in names:
         raise SystemExit(f"Draft {submission_id} does not list {msix_name}")
+    matching = [k for k in check.get("listings", {}) if k.lower() == language.lower()]
+    if len(matching) != 1:
+        raise SystemExit(f"Draft {submission_id} has {len(matching)} listings for {language}: {matching}")
+    base = check["listings"][matching[0]].get("baseListing", {})
     if base.get("description") != listing["description"]:
         raise SystemExit(f"Draft {submission_id} did not keep the new {language} description")
     print(f"Draft {submission_id} contains {msix_name} and the new listing; not committed")
+
+
+def summarize_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    listings = {}
+    for lang, entry in (submission.get("listings") or {}).items():
+        base = (entry or {}).get("baseListing") or {}
+        listings[lang] = {
+            "description": (base.get("description") or "")[:120],
+            "features": (base.get("features") or [])[:3],
+            "releaseNotes": (base.get("releaseNotes") or "")[:80],
+            "images": [f"{i.get('imageType')}:{i.get('fileName')}:{i.get('fileStatus')}" for i in base.get("images") or []],
+        }
+    return {
+        "id": submission.get("id"),
+        "status": submission.get("status"),
+        "packages": [f"{p.get('fileName')}:{p.get('fileStatus')}" for p in submission.get("applicationPackages") or []],
+        "listings": listings,
+    }
+
+
+def command_legacy_submission(config: StoreConfig, *, which: str) -> None:
+    product_id = require_product_id(config)
+    token = legacy_access_token(config)["access_token"]
+    headers = legacy_api_headers(token)
+    app_url = f"{LEGACY_STORE_API_BASE}/applications/{urllib.parse.quote(product_id)}"
+    app = request_json(app_url, headers=headers)
+    field = "pendingApplicationSubmission" if which == "pending" else "lastPublishedApplicationSubmission"
+    submission_id = (app.get(field) or {}).get("id")
+    if not submission_id:
+        print(json.dumps({"which": which, "submission": None}, indent=2))
+        return
+    submission = request_json(f"{app_url}/submissions/{submission_id}", headers=headers)
+    print(json.dumps({"which": which, **summarize_submission(submission)}, indent=2))
 
 
 def require_product_id(config: StoreConfig) -> str:
@@ -482,6 +522,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory with the screenshots and a README listing them in order.",
     )
     draft.add_argument("--language", default="en-us")
+    show = subparsers.add_parser("legacy-submission", help="Summarize the pending or last published submission.")
+    show.add_argument("--which", choices=["pending", "published"], default="pending")
     draft.add_argument(
         "--replace-pending", action="store_true",
         help="Delete an existing API-created pending submission first.",
@@ -506,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
         command_metadata(config)
     elif args.command == "submit":
         command_submit(config, confirm_submit=args.confirm_submit)
+    elif args.command == "legacy-submission":
+        command_legacy_submission(config, which=args.which)
     elif args.command == "legacy-draft":
         command_legacy_draft(
             config,
