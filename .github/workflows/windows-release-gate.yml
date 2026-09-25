@@ -31,11 +31,16 @@ jobs:
     name: Install, launch, uninstall ${{ inputs.tag }}
     runs-on: [self-hosted, Windows, win11-gpu]
     timeout-minutes: 60
+    defaults:
+      run:
+        # Windows 11 blocks script files by default, and the built-in
+        # powershell shell runs each step as one. Bypass for these steps only
+        # rather than loosening the VM's execution policy.
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Download the Windows installer
-        shell: powershell
         env:
           TAG: ${{ inputs.tag }}
           REPO: ${{ github.repository }}
@@ -86,7 +91,6 @@ jobs:
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Run the release gate
-        shell: powershell
         run: |
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-release-gate.ps1 `
             -Installer $env:INSTALLER -ExpectedVersion $env:VERSION -TimeoutSeconds 300
@@ -94,5 +98,4 @@ jobs:
 
       - name: Remove the installer
         if: always()
-        shell: powershell
-        run: Remove-Item -Force -ErrorAction SilentlyContinue $env:INSTALLER
+        run: if ($env:INSTALLER) { Remove-Item -Force -ErrorAction SilentlyContinue "$env:INSTALLER*" }
