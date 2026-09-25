@@ -50,9 +50,14 @@ def set_startup_enabled(enabled: bool) -> None:
         startup_entry_path().unlink(missing_ok=True)
 
 
-def install_linux_app_entry() -> Path:
+def install_linux_app_entry() -> Path | None:
     _linux_settings_entry_path().unlink(missing_ok=True)
     path = app_entry_path()
+    if _packaged_app_entry_installed():
+        # The .deb already ships a launcher; a user copy under a different
+        # desktop ID shows up as a second "Dictate" in the app grid.
+        _remove_generated_app_entry()
+        return None
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_linux_desktop_entry(autostart=False), encoding="utf-8")
     update_desktop_database = shutil.which("update-desktop-database")
@@ -76,7 +81,7 @@ def install_linux_startup_entry() -> Path:
 def install_linux_desktop_integration(
     *,
     include_startup: bool = True,
-) -> tuple[Path, Path | None]:
+) -> tuple[Path | None, Path | None]:
     app_path = install_linux_app_entry()
     startup_path = install_linux_startup_entry() if include_startup else None
     return app_path, startup_path
@@ -90,8 +95,9 @@ def ensure_desktop_integration_once() -> None:
     """First time the installed Linux app runs, create the app launcher and
     autostart entries so Dictate appears in the menu and starts on sign-in.
 
-    The frozen ``.deb``/AppImage has no installer step that writes these (source
-    installs do it in ``install.sh``), so the engine self-registers on first run.
+    The ``.deb`` ships its own launcher but no autostart entry, and the AppImage
+    ships neither (source installs do both in ``install.sh``), so the engine
+    self-registers on first run.
     Gated to the frozen app and run once via a marker, so a user who later
     disables startup is not overridden. Best-effort: never blocks daemon start.
     """
@@ -101,6 +107,8 @@ def ensure_desktop_integration_once() -> None:
         return
     marker = _desktop_integration_marker()
     if marker.exists():
+        if _packaged_app_entry_installed():
+            _remove_generated_app_entry()
         _repair_linux_entry_icons()
         return
     try:
@@ -197,6 +205,28 @@ def _packaged_icon_installed() -> bool:
         for base in data_dirs
         if base
     )
+
+
+# Desktop ID the .deb installs its launcher under (Tauri names it after productName).
+_PACKAGED_APP_ENTRY = "Dictate.desktop"
+_GENERATED_ENTRY_MARK = "Comment=Dictate into the focused app\n"
+
+
+def _packaged_app_entry_installed() -> bool:
+    data_dirs = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    return any(
+        (Path(base) / "applications" / _PACKAGED_APP_ENTRY).is_file() for base in data_dirs if base
+    )
+
+
+def _remove_generated_app_entry() -> None:
+    """Delete the user launcher only if Dictate wrote it, never a hand-made one."""
+    path = app_entry_path()
+    try:
+        if _GENERATED_ENTRY_MARK in path.read_text(encoding="utf-8"):
+            path.unlink()
+    except OSError:
+        pass
 
 
 def _repair_linux_entry_icons() -> None:
