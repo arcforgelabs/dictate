@@ -3,21 +3,54 @@
 # upgrade/reinstall). Stop any running engine and desktop shell first, otherwise
 # the old engine keeps holding the single-instance lock and the freshly
 # installed engine cannot start. Best-effort: never block the install.
+#
+# The in-app updater is the exception: shell -> engine -> pkexec apt-get ->
+# dpkg -> this script. Killing those ancestors kills the updater mid-install and
+# the shell respawns the OLD engine before the new files are unpacked. Leave
+# them running; the app restarts itself onto the new binaries once apt is done.
 set +e
 
 ENGINE='/usr/lib/Dictate/engine/dictate-engine'
+SHELL_BIN='/usr/bin/dictate-ui-shell'
 
-pkill -f "$ENGINE" 2>/dev/null
-pkill -x dictate-ui-shell 2>/dev/null
+ancestors=' '
+pid=$$
+while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+  ancestors="$ancestors$pid "
+  pid=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$pid/status" 2>/dev/null)
+done
+
+# signal_matching SIGNAL PATTERN — signal every match that is not an ancestor.
+signal_matching() {
+  for p in $(pgrep -f "$2" 2>/dev/null); do
+    case "$ancestors" in *" $p "*) continue ;; esac
+    kill "$1" "$p" 2>/dev/null
+  done
+}
+
+# running PATTERN — true while a non-ancestor match is alive.
+running() {
+  for p in $(pgrep -f "$1" 2>/dev/null); do
+    case "$ancestors" in *" $p "*) continue ;; esac
+    return 0
+  done
+  return 1
+}
+
+# Shell first, so it cannot respawn the engine we are about to stop. Match the
+# full path: the kernel truncates process names to 15 characters, so
+# `pkill -x dictate-ui-shell` never matched anything.
+signal_matching -TERM "^$SHELL_BIN"
+signal_matching -TERM "^$ENGINE"
 
 # Give them a moment to exit and release the lock; then force any stragglers.
 i=0
 while [ "$i" -lt 5 ]; do
-  pgrep -f "$ENGINE" >/dev/null 2>&1 || break
+  running "^$ENGINE" || running "^$SHELL_BIN" || break
   sleep 0.3
   i=$((i + 1))
 done
-pkill -9 -f "$ENGINE" 2>/dev/null
-pkill -9 -x dictate-ui-shell 2>/dev/null
+signal_matching -KILL "^$SHELL_BIN"
+signal_matching -KILL "^$ENGINE"
 
 exit 0
