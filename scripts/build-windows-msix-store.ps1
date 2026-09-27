@@ -212,7 +212,7 @@ $MsixVersion = Convert-ToMsixVersion $TauriConfig.version
 Write-Host "building shared Windows desktop payload"
 & (Join-Path $Root "scripts\build-windows-desktop.ps1") -Python $Python -Bundles "no-bundle"
 $DistributionMarker = Join-Path $Root "ui-shell\src-tauri\engine\dictate-distribution.json"
-$StoreDistribution = @{ distribution = "store"; packageVersion = "2026.7.4" } | ConvertTo-Json -Compress
+$StoreDistribution = @{ distribution = "store"; packageVersion = $TauriConfig.version } | ConvertTo-Json -Compress
 Set-Content -Path $DistributionMarker -Encoding ASCII -Value $StoreDistribution
 if ($LASTEXITCODE -ne 0) {
     throw "Windows desktop payload build failed with exit code $LASTEXITCODE."
