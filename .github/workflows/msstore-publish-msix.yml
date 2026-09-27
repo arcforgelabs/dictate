@@ -39,7 +39,6 @@ jobs:
       MSSTORE_PRODUCT_ID: ${{ inputs.product_id }}
       MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
       MSSTORE_CLIENT_ID: ${{ vars.MSSTORE_CLIENT_ID }}
-      MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
       MSSTORE_SELLER_ID: ${{ vars.MSSTORE_SELLER_ID }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -60,8 +59,32 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Require a passing Windows release gate
+        if: inputs.mode == 'draft' && !inputs.skip_windows_gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -Raw ui-shell\src-tauri\tauri.conf.json | ConvertFrom-Json).version
+          $title = "Windows release gate v$version"
+          $runs = gh run list --repo "${{ github.repository }}" --workflow windows-release-gate.yml --branch "${{ github.event.repository.default_branch }}" --limit 50 --json displayTitle,conclusion,url | ConvertFrom-Json
+          $passed = $runs | Where-Object { $_.displayTitle -eq $title -and $_.conclusion -eq 'success' } | Select-Object -First 1
+          if (-not $passed) {
+            throw "No passing '$title' run. Dispatch windows-release-gate.yml with tag v$version first, or rerun with skip_windows_gate."
+          }
+          Write-Output "Windows release gate passed for v${version}: $($passed.url)"
+
+      - name: Build Store MSIX
+        if: inputs.mode == 'draft'
+        shell: pwsh
+        env:
+          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
+        run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe"
+
       - name: Check Microsoft Store credentials
         shell: pwsh
+        env:
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
           foreach ($name in "MSSTORE_TENANT_ID", "MSSTORE_CLIENT_ID", "MSSTORE_CLIENT_SECRET", "MSSTORE_SELLER_ID", "MSSTORE_PRODUCT_ID") {
             if (-not [Environment]::GetEnvironmentVariable($name)) {
@@ -89,6 +112,8 @@ jobs:
 
       - name: Configure Microsoft Store Developer CLI
         shell: pwsh
+        env:
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
           msstore reconfigure `
             --tenantId "$env:MSSTORE_TENANT_ID" `
@@ -98,36 +123,18 @@ jobs:
 
       - name: Show current Store submission status
         shell: pwsh
+        env:
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
           msstore submission status "$env:MSSTORE_PRODUCT_ID"
           python scripts/msstore-submit.py legacy-submission --which pending
           python scripts/msstore-submit.py legacy-submission --which published
 
-      - name: Require a passing Windows release gate
-        if: inputs.mode == 'draft' && !inputs.skip_windows_gate
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = (Get-Content -Raw ui-shell\src-tauri\tauri.conf.json | ConvertFrom-Json).version
-          $title = "Windows release gate v$version"
-          $runs = gh run list --repo "${{ github.repository }}" --workflow windows-release-gate.yml --branch "${{ github.event.repository.default_branch }}" --limit 50 --json displayTitle,conclusion,url | ConvertFrom-Json
-          $passed = $runs | Where-Object { $_.displayTitle -eq $title -and $_.conclusion -eq 'success' } | Select-Object -First 1
-          if (-not $passed) {
-            throw "No passing '$title' run. Dispatch windows-release-gate.yml with tag v$version first, or rerun with skip_windows_gate."
-          }
-          Write-Output "Windows release gate passed for v${version}: $($passed.url)"
-
-      - name: Build Store MSIX
-        if: inputs.mode == 'draft'
-        shell: pwsh
-        env:
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
-        run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe"
-
       - name: Upload package, listing and screenshots to a draft without committing
         if: inputs.mode == 'draft'
         shell: pwsh
+        env:
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
           $msix = Get-ChildItem "packaging\msix\out" -Filter "*.msix" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $msix) {
