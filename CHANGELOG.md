@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## 2026-09-27
 
 ### Fixed
 
+- `npx @arcforgelabs/dictate install` installs again, and per-user Linux
+  installs can update themselves from the app. npx ran the package's update
+  script for every command, so `install` and the app's `update --user` both
+  stopped with the installer's usage text.
 - In-app updates on Linux finish. The `.deb`'s pre-install script stopped the
   engine that was running the install, so the window respawned the old engine
   before the new files landed and offered the same update again. The script
