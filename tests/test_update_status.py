@@ -789,6 +789,29 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(status.current_version, "2026.9.20")
         self.assertFalse(status.update_available)
 
+    def test_linux_package_newer_than_running_engine_asks_for_restart(self) -> None:
+        # The .deb installed but this engine is the old binary (restarted
+        # mid-install, or apt ran behind the app). Offering the same update
+        # again does nothing; only a restart finishes it.
+        plat, roots, user, dpkg = self._linux_package(dpkg_version="2099.1.2")
+        with (
+            plat,
+            roots,
+            user,
+            dpkg,
+            patch("dictate.update_status.shutil.which", return_value="/usr/bin/pkexec"),
+            patch("dictate.update_status._fetch_latest_version") as fetch,
+        ):
+            status = check_update_status()
+            flow = start_update_flow()
+
+        fetch.assert_not_called()
+        self.assertEqual(status.phase, "installed")
+        self.assertEqual(status.actions, ["restart"])
+        self.assertEqual(status.current_version, "2099.1.2")
+        self.assertEqual(flow.mode, "installed")
+        self.assertEqual(flow.actions, ["restart"])
+
     def test_linux_package_duplicate_start_is_rejected(self) -> None:
         asset = ReleaseAsset(
             url="https://example.test/x_amd64.deb",

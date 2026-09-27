@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- In-app updates on Linux finish. The `.deb`'s pre-install script stopped the
+  engine that was running the install, so the window respawned the old engine
+  before the new files landed and offered the same update again. The script
+  now leaves the updater's own process chain running, stops the desktop shell
+  by its full path (the old name match never fired), and the app asks for a
+  restart whenever the installed package is newer than the running engine.
+
 ## 2026-09-26
 
 ### Fixed

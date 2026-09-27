@@ -200,6 +200,34 @@ def _current_linux_package_status(
     )
 
 
+def _linux_package_installed_status(
+    context: dict[str, object],
+    current_version: str,
+) -> UpdateStatus | None:
+    """A newer .deb is installed than the engine that is running.
+
+    The package landed (in-app, with the engine restarted mid-install, or by
+    apt behind the app's back) but this process is still the old binary. Only
+    a restart finishes the update; offering the same update again does nothing.
+    """
+    if not is_newer_version(current_version, RELEASE_VERSION):
+        return None
+    return UpdateStatus(
+        current_version=current_version,
+        latest_version=current_version,
+        update_available=True,
+        checked=True,
+        platform="linux",
+        install_kind="linux-package",
+        phase="installed",
+        step="restart",
+        progress=100,
+        actions=["restart"],
+        commands=_commands_for_context(context),
+        missing_deps=[],
+    )
+
+
 def _current_installed_version(context: dict[str, object]) -> str:
     """Resolve the version the user actually has installed.
 
@@ -243,6 +271,9 @@ def check_update_status(timeout: float = 5.0) -> UpdateStatus:
         operation_status = _current_linux_package_status(context, str(current_version))
         if operation_status is not None:
             return operation_status
+        installed_status = _linux_package_installed_status(context, str(current_version))
+        if installed_status is not None:
+            return installed_status
     if context["install_kind"] == "windows-store":
         return UpdateStatus(
             current_version=str(current_version), checked=True, platform="windows",
@@ -431,6 +462,20 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         op = _linux_package_operation
         if op is not None and op.phase == "ready" and op.deb_path is not None:
             return _begin_linux_package_install(context, op)
+        if op is None and _linux_package_installed_status(context, str(current_version)):
+            return UpdateFlow(
+                mode="installed",
+                started=True,
+                platform=str(context["platform"]),
+                install_kind="linux-package",
+                phase="installed",
+                step="restart",
+                progress=100,
+                actions=["restart"],
+                commands={},
+                missing_deps=[],
+                message="Update installed — restart Dictate.",
+            )
         if op is not None and op.phase == "installed":
             snap = _linux_package_operation_snapshot(op)
             return UpdateFlow(
