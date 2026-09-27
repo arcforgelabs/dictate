@@ -105,6 +105,14 @@ jobs:
             echo "No ClawSweeper command found in comment."
             exit 0
           fi
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR)
+              ;;
+            *)
+              echo "::notice::Ignoring ClawSweeper command from untrusted author association: $AUTHOR_ASSOCIATION"
+              exit 0
+              ;;
+          esac
           if [ -n "$TARGET_TOKEN" ]; then
             GH_TOKEN="$TARGET_TOKEN" gh api -X POST \
               -H "Accept: application/vnd.github+json" \
@@ -113,27 +121,23 @@ jobs:
           fi
           status_comment_id=""
           if [ -n "$TARGET_TOKEN" ]; then
-            case "$AUTHOR_ASSOCIATION" in
-              OWNER|MEMBER|COLLABORATOR)
-                status_body="$(printf '%s\n' \
-                  "<!-- clawsweeper-command-ack:$COMMENT_ID -->" \
-                  "ClawSweeper picked this up." \
-                  "" \
-                  "Command router queued. I will update this comment with the next step.")"
-                status_payload="$(jq -nc --arg body "$status_body" '{body:$body}')"
-                status_err="$(mktemp)"
-                if status_response="$(GH_TOKEN="$TARGET_TOKEN" gh api \
-                  "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments" \
-                  --method POST \
-                  --input - <<< "$status_payload" 2>"$status_err")"; then
-                  status_comment_id="$(jq -r '.id // empty' <<< "$status_response")"
-                else
-                  cat "$status_err" >&2
-                  echo "::warning::Could not create ClawSweeper queued status comment; dispatching command router without one."
-                fi
-                rm -f "$status_err"
-                ;;
-            esac
+            status_body="$(printf '%s\n' \
+              "<!-- clawsweeper-command-ack:$COMMENT_ID -->" \
+              "ClawSweeper picked this up." \
+              "" \
+              "Command router queued. I will update this comment with the next step.")"
+            status_payload="$(jq -nc --arg body "$status_body" '{body:$body}')"
+            status_err="$(mktemp)"
+            if status_response="$(GH_TOKEN="$TARGET_TOKEN" gh api \
+              "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments" \
+              --method POST \
+              --input - <<< "$status_payload" 2>"$status_err")"; then
+              status_comment_id="$(jq -r '.id // empty' <<< "$status_response")"
+            else
+              cat "$status_err" >&2
+              echo "::warning::Could not create ClawSweeper queued status comment; dispatching command router without one."
+            fi
+            rm -f "$status_err"
           fi
           payload="$(jq -nc \
             --arg target_repo "$TARGET_REPO" \
