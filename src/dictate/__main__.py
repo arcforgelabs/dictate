@@ -9,7 +9,6 @@ Usage:
     dictate benchmark ...     Benchmark STT backends on local WAV files
     dictate controls          Open Windows-friendly configuration/history controls
     dictate doctor ...        Diagnose environment/runtime setup
-    dictate pro ...           Manage Dictate Pro sign-in and encrypted sync
     dictate export-local ...  Export local dictations and notes to JSON
     dictate prepare-model ... Prepare/download a model before activation
     dictate --stt-backend faster-whisper
