@@ -58,27 +58,33 @@ powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/
 
 Open **Dictate** from the Start Menu after install.
 
-Linux default install (per-user, no sudo for app updates):
+Linux (Ubuntu) — install the release `.deb`. It is built once in CI with the
+engine, model and desktop shell inside, so every install of a version is the
+same:
+
+1. Download `Dictate_<version>_amd64.deb` from the latest GitHub release.
+2. Install it with apt, giving the path to the file:
+
+   ```bash
+   sudo apt install ~/Downloads/Dictate_<version>_amd64.deb
+   ```
+
+3. Open **Dictate** from the app launcher. It starts on sign-in.
+
+Dictate does not publish an apt repository, so `apt upgrade` does not see new
+versions. Update from the app, or install the next release's `.deb` the same
+way.
+
+Linux latest code (per-user, builds on your machine, no sudo). This installs
+from source into `~/.local/share/dictate` and compiles the desktop shell
+locally, so it needs `cargo`, `npm` and `webkit2gtk-4.1-dev`:
 
 ```bash
-./install-ubuntu.sh
+npx @arcforgelabs/dictate install
 ```
 
-Generic Linux user install:
-
-```bash
-./install.sh
-```
-
-Open **Dictate** from the app launcher after install.
-
-Linux system package install is also supported when you explicitly want a
-machine-wide `.deb` install:
-
-```bash
-DICTATE_BUNDLES=deb scripts/build-linux-desktop.sh
-./install.sh --system
-```
+Or from a checkout: `./install-ubuntu.sh`, or `./install.sh` on other
+distributions.
 
 Windows developer/source install, from the repo/source directory:
 
@@ -137,18 +143,21 @@ powershell -ExecutionPolicy Bypass -File .\update-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1
 ```
 
-Linux user install:
+Linux `.deb` install: update from the app, or install the newer `.deb` with
+`sudo apt install`. Remove it with:
 
 ```bash
-./update.sh
-./uninstall.sh
+sudo apt purge dictate
 ```
 
-Linux system package update:
+Linux latest-code (per-user) install:
 
 ```bash
-./update.sh --system
+npx @arcforgelabs/dictate update --user
+npx @arcforgelabs/dictate uninstall
 ```
+
+From a checkout, `./update.sh` and `./uninstall.sh` do the same.
 
 Use `-RemoveUserData` on Windows or `--remove-user-data` on Linux only when you
 also want to remove config, logs, history, and downloaded model data.
@@ -258,18 +267,9 @@ the `dictate config` CLI).
   tray can launch the shell for the desktop capture surface.
 - See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
 
-**Install it like a normal app:** the default Linux channel is a per-user install
-under `~/.local/share/dictate` with launchers in `~/.local/bin` and
-`~/.local/share/applications`. App updates do not need sudo.
-
-```bash
-./install.sh
-./update.sh
-```
-
-Tagged releases can also attach a **self-contained** Linux **`.deb`** for users
-who explicitly want a system package. It bundles the frozen Python engine inside
-(PyInstaller sidecar), so there's no separate Python/pip step:
+**Install it like a normal app:** on Linux that is the release **`.deb`**. It
+bundles the frozen Python engine (PyInstaller sidecar) and the prebuilt desktop
+shell, so there is no Python, pip or compiler step:
 
 ```bash
 sudo apt install ./Dictate_*_amd64.deb
@@ -278,8 +278,9 @@ sudo apt install ./Dictate_*_amd64.deb
 The app lives in the tray and desktop shell and does push-to-talk straight away.
 Build the package yourself in one step with
 [`scripts/build-linux-desktop.sh`](scripts/build-linux-desktop.sh) — see
-[`ui-shell/README.md`](ui-shell/README.md). The `pip`/`install.sh` route remains
-for source/dev installs.
+[`ui-shell/README.md`](ui-shell/README.md). The per-user `npm`/`install.sh`
+route installs under `~/.local/share/dictate` and builds on your machine; use it
+to try the latest code, not as the everyday install.
 
 ## Docs
 
