@@ -8,15 +8,18 @@ const packageRoot = dirname(scriptDir);
 const invokedAs = basename(process.argv[1] || "dictate-install");
 const firstArg = process.argv[2] || "";
 
+// `npx @arcforgelabs/dictate <command>` runs whichever bin npx picks (none is
+// named after the package, and npm settles on dictate-update), so an explicit
+// command word wins over the bin name and is never passed to the script.
 let command = "install";
 let passthrough = process.argv.slice(2);
-if (invokedAs.includes("update")) {
-  command = "update";
-} else if (invokedAs.includes("uninstall")) {
-  command = "uninstall";
-} else if (["install", "update", "uninstall", "wizard"].includes(firstArg)) {
+if (["install", "update", "uninstall", "wizard"].includes(firstArg)) {
   command = firstArg;
   passthrough = process.argv.slice(3);
+} else if (invokedAs.includes("uninstall")) {
+  command = "uninstall";
+} else if (invokedAs.includes("update")) {
+  command = "update";
 }
 
 const isWindows = process.platform === "win32";
