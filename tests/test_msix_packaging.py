@@ -87,6 +87,17 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt", script)
         self.assertIn(r"engine\models\pyannote-speaker-diarization-community-1\config.*", script)
 
+    def test_store_marker_carries_the_release_version(self) -> None:
+        # Store installs read their version from this marker (About panel and
+        # update status), so it must follow tauri.conf.json, not a fixed string.
+        script = (ROOT / "scripts" / "build-windows-msix-store.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            '@{ distribution = "store"; packageVersion = $TauriConfig.version }', script
+        )
+
     def test_windows_msi_uses_installer_safe_version(self) -> None:
         config = json.loads((ROOT / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(
             encoding="utf-8"
