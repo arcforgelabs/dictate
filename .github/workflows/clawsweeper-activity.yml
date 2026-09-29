@@ -15,8 +15,16 @@ permissions: {}
 
 # Public repositories cannot call this org’s private reusable workflow.
 # Inline the same tested adapter from arcforgelabs/.github at 64502a82262d6ce71fdd14cbeb2469bd7eeae0ae.
+# Public repositories cannot call this org’s private reusable workflow.
+# Inline the same tested adapter from arcforgelabs/.github at 7f08e9849439006068c1fde22ae270b0a0c4b996.
 jobs:
   notify:
+    # Ignore routine/bot comments before allocating a runner. Python validates the
+    # exact command and event again before any credential is used.
+    if: >-
+      ${{ github.event_name != 'issue_comment' ||
+          (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+           startsWith(github.event.comment.body, '@clawsweeper')) }}
     # No repository checkout and no pull-request code executes with the hook token.
     runs-on: ubuntu-24.04
     timeout-minutes: 3
