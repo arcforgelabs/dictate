@@ -16,7 +16,7 @@ permissions: {}
 # Public repositories cannot call this org’s private reusable workflow.
 # Inline the same tested adapter from arcforgelabs/.github at 64502a82262d6ce71fdd14cbeb2469bd7eeae0ae.
 # Public repositories cannot call this org’s private reusable workflow.
-# Inline the same tested adapter from arcforgelabs/.github at 7f08e9849439006068c1fde22ae270b0a0c4b996.
+# Inline the same tested adapter from arcforgelabs/.github at 85f645608b59c76fc0ec66ffa0b2eaa165f54502.
 jobs:
   notify:
     # Ignore routine/bot comments before allocating a runner. Python validates the
@@ -55,7 +55,7 @@ jobs:
               target = urllib.parse.urlsplit(url)
               if target.scheme != 'https' or target.hostname != 'team.arcforge.au' or target.port not in (None, 443) or target.username is not None or target.password is not None or target.path != '/hooks/agent' or target.query or target.fragment:
                   raise ValueError('Unexpected hook destination')
-              return urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST', headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','Idempotency-Key':payload['idempotencyKey']})
+              return urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST', headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','User-Agent':'ArcForge-ClawSweeper/1.0','Idempotency-Key':payload['idempotencyKey']})
 
           def review_request(event_name, event, repository, run_id):
               if not re.fullmatch(r'arcforgelabs/[A-Za-z0-9_.-]+', repository):
