@@ -13,9 +13,99 @@ on:
 
 permissions: {}
 
+# Public repositories cannot call this org’s private reusable workflow.
+# Inline the same tested adapter from arcforgelabs/.github at 64502a82262d6ce71fdd14cbeb2469bd7eeae0ae.
 jobs:
   notify:
-    uses: arcforgelabs/.github/.github/workflows/clawsweeper-activity.yml@a36a1b2865949b30f22232ec35a6b6cd79334865
-    secrets:
-      CLAWSWEEPER_OPENCLAW_HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
-      CLAWSWEEPER_OPENCLAW_HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
+    # No repository checkout and no pull-request code executes with the hook token.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    concurrency:
+      group: clawsweeper-activity-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Request a review of the current item
+        env:
+          HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
+          HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
+        run: |
+          python3 - <<'PYTHON'
+          # review-event-adapter:start
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.request
+          import urllib.parse
+          from pathlib import Path
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise ValueError('Hook redirects are forbidden')
+
+          def hook_request(url, token, payload):
+              target = urllib.parse.urlsplit(url)
+              if target.scheme != 'https' or target.hostname != 'team.arcforge.au' or target.port not in (None, 443) or target.username is not None or target.password is not None or target.path != '/hooks/agent' or target.query or target.fragment:
+                  raise ValueError('Unexpected hook destination')
+              return urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST', headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','Idempotency-Key':payload['idempotencyKey']})
+
+          def review_request(event_name, event, repository, run_id):
+              if not re.fullmatch(r'arcforgelabs/[A-Za-z0-9_.-]+', repository):
+                  raise ValueError('Unexpected repository')
+              if event.get('repository', {}).get('full_name') != repository:
+                  raise ValueError('Event repository differs')
+              if repository == 'arcforgelabs/arc-forge-field':
+                  return None
+              action = event.get('action')
+              kind = None
+              if event_name == 'issues' and action in ('opened', 'reopened'):
+                  item = event.get('issue', {})
+                  kind = 'issue'
+              elif event_name == 'pull_request_target' and action in ('opened', 'reopened', 'ready_for_review', 'synchronize', 'edited'):
+                  item = event.get('pull_request', {})
+                  if type(item.get('draft')) is not bool:
+                      return None
+                  if action == 'edited' and 'body' not in event.get('changes', {}):
+                      return None
+                  kind = 'pull request'
+              elif event_name == 'issue_comment' and action == 'created':
+                  item = event.get('issue', {})
+                  comment = event.get('comment', {})
+                  if comment.get('author_association') not in ('OWNER', 'MEMBER', 'COLLABORATOR'):
+                      return None
+                  if not re.fullmatch(r'@clawsweeper(?:\[bot\])?\s+(?:review|re-review)\s*', comment.get('body', ''), re.IGNORECASE):
+                      return None
+                  kind = 'pull request' if isinstance(item.get('pull_request'), dict) else 'issue'
+              else:
+                  return None
+              number = item.get('number')
+              if type(number) is not int or number < 1 or item.get('state') != 'open':
+                  return None
+              # No titles, bodies or arbitrary comment text enter the model instruction.
+              message = '\n'.join([
+                  'You are ingesting general GitHub activity for ClawSweeper.',
+                  f'Event: {event_name}.{action}',
+                  f'Repository: {repository}',
+                  f'Subject: {kind} #{number}',
+                  f'URL: https://github.com/{repository}/' + ('pull/' if kind == 'pull request' else 'issues/') + str(number),
+                  'Request a fresh review following the gateway workspace AGENTS.md. Delegate to the item session and return NO_REPLY.',
+              ])
+              key = hashlib.sha256(f'{repository}:{event_name}:{action}:{number}:{run_id}'.encode()).hexdigest()
+              return {'name':'GitHub review request','agentId':'clawsweeper','deliver':False,'idempotencyKey':key,'thinking':'low','timeoutSeconds':60,'waitForCompletion':True,'message':message}
+          # review-event-adapter:end
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          payload = review_request(os.environ['GITHUB_EVENT_NAME'], event, os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          if payload is None:
+              print('No review requested for this event')
+              raise SystemExit(0)
+          request = hook_request(os.environ['HOOK_URL'], os.environ['HOOK_TOKEN'], payload)
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=75) as response:
+                  result = json.load(response)
+          except Exception as error:
+              # Do not print the hook URL/token or server response body.
+              raise SystemExit('Gateway review request failed: '+type(error).__name__) from None
+          if not isinstance(result, dict) or result.get('ok') is not True:
+              raise SystemExit('Gateway did not accept the review request')
+          print('Gateway accepted review request')
+          PYTHON
