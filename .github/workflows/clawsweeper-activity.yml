@@ -16,7 +16,7 @@ permissions: {}
 # Public repositories cannot call this org’s private reusable workflow.
 # Inline the same tested adapter from arcforgelabs/.github at 64502a82262d6ce71fdd14cbeb2469bd7eeae0ae.
 # Public repositories cannot call this org’s private reusable workflow.
-# Inline the same tested adapter from arcforgelabs/.github at 85f645608b59c76fc0ec66ffa0b2eaa165f54502.
+# Inline the same tested adapter from arcforgelabs/.github at 4192baffa33b6460284d63516991841f21b23325.
 jobs:
   notify:
     # Ignore routine/bot comments before allocating a runner. Python validates the
@@ -100,6 +100,13 @@ jobs:
               ])
               key = hashlib.sha256(f'{repository}:{event_name}:{action}:{number}:{run_id}'.encode()).hexdigest()
               return {'name':'GitHub review request','agentId':'clawsweeper','deliver':False,'idempotencyKey':key,'thinking':'low','timeoutSeconds':60,'waitForCompletion':True,'message':message}
+          def assert_hook_completed(result):
+              if not isinstance(result, dict) or result.get('ok') is not True:
+                  raise ValueError('Gateway did not accept the review request')
+              completion = result.get('completion')
+              if not isinstance(completion, dict) or completion.get('status') != 'ok':
+                  raise ValueError('Gateway review dispatch did not complete successfully')
+
           # review-event-adapter:end
           event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
           payload = review_request(os.environ['GITHUB_EVENT_NAME'], event, os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
@@ -113,7 +120,9 @@ jobs:
           except Exception as error:
               # Do not print the hook URL/token or server response body.
               raise SystemExit('Gateway review request failed: '+type(error).__name__) from None
-          if not isinstance(result, dict) or result.get('ok') is not True:
-              raise SystemExit('Gateway did not accept the review request')
-          print('Gateway accepted review request')
+          try:
+              assert_hook_completed(result)
+          except ValueError as error:
+              raise SystemExit(str(error)) from None
+          print('Gateway review dispatch completed')
           PYTHON
