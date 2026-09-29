@@ -1,0 +1,18 @@
+# Feeds new issues and ready PRs to the clawsweeper agent (arcforgelabs/.github
+# clawsweeper-activity.yml, upstream ClawSweeper notifier). Logs stay in this repo.
+name: ClawSweeper activity
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target: # reusable workflow checks out only public upstream code, never this PR
+    types: [opened, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  notify:
+    uses: arcforgelabs/.github/.github/workflows/clawsweeper-activity.yml@ca118efca819c90dd128f81700410bd69d38a026 # arcforgelabs/.github main
+    secrets:
+      CLAWSWEEPER_OPENCLAW_HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
+      CLAWSWEEPER_OPENCLAW_HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
