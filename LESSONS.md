@@ -10,8 +10,9 @@
 - Generous VAD padding (`speech_pad_ms`) and long silence windows (`min_silence_duration_ms`) feed
   more non-speech tail audio into the model, increasing the chance of hallucinations.
 
-**Fix**
-- In `src/dictate/stt/faster_whisper_backend.py`, pass:
+**Fix** (in the faster-whisper backend, removed on 2026-09-30; kept for any
+future Whisper-style decoder)
+- Pass:
   - `condition_on_previous_text=False` (prevents chaining on prior model output)
   - `no_speech_threshold=0.6` (suppresses low-confidence no-speech segments)
   - Tightened VAD: `speech_pad_ms=50` and `min_silence_duration_ms=300`

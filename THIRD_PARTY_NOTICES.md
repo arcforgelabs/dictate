@@ -32,8 +32,6 @@ from the upstream projects linked.
 | --- | --- | --- | --- |
 | pynput | LGPL-3.0 | Hotkeys and typing, Linux X11 and Windows | <https://github.com/moses-palmer/pynput> |
 | python-xlib | LGPL-2.1-or-later | Linux X11 | <https://github.com/python-xlib/python-xlib> |
-| FFmpeg libraries bundled in the PyAV wheel, built with libx264 and libx265 | GPL-2.0-or-later as built | faster-whisper audio decoding | <https://ffmpeg.org>, <https://github.com/PyAV-Org/PyAV> |
-| GnuTLS, Nettle, GMP, libunistring (bundled with PyAV's FFmpeg) | LGPL-2.1+/LGPL-3.0+ (GMP, Nettle, libunistring dual-licensed with GPL-2.0+) | as above | <https://gnutls.org>, <https://www.lysator.liu.se/~nisse/nettle/>, <https://gmplib.org>, <https://www.gnu.org/software/libunistring/> |
 | certifi | MPL-2.0 | TLS root certificates for update checks and model downloads | <https://github.com/certifi/python-certifi> |
 | tqdm | MPL-2.0 AND MIT | Progress reporting in model libraries | <https://github.com/tqdm/tqdm> |
 
@@ -43,10 +41,6 @@ from the upstream projects linked.
 | --- | --- | --- |
 | onnx-asr | MIT | <https://github.com/istupakov/onnx-asr> |
 | ONNX Runtime | MIT | <https://github.com/microsoft/onnxruntime> |
-| faster-whisper | MIT | <https://github.com/SYSTRAN/faster-whisper> |
-| CTranslate2 | MIT | <https://github.com/OpenNMT/CTranslate2> |
-| PyAV | BSD-3-Clause (bundled FFmpeg: see above) | <https://github.com/PyAV-Org/PyAV> |
-| tokenizers | Apache-2.0 | <https://github.com/huggingface/tokenizers> |
 | huggingface_hub, hf-xet | Apache-2.0 | <https://github.com/huggingface/huggingface_hub> |
 
 ## Meeting mode (beta)
@@ -83,6 +77,8 @@ from the upstream projects linked.
 | evdev (Linux) | BSD-3-Clause | <https://github.com/gvalkov/python-evdev> |
 | python-dateutil | Apache-2.0 OR BSD-3-Clause | <https://github.com/dateutil/dateutil> |
 | charset-normalizer | MIT | <https://github.com/jawah/charset_normalizer> |
+| requests, urllib3, idna | Apache-2.0, MIT, BSD-3-Clause | <https://github.com/psf/requests> |
+| pyperclip (Windows) | BSD-3-Clause | <https://github.com/asweigart/pyperclip> |
 | GCC runtime libraries (libgcc, libstdc++, libgomp, libgfortran, libquadmath) | GPL-3.0 with the GCC Runtime Library Exception | <https://gcc.gnu.org> |
 
 On Linux, Dictate uses the system PortAudio library (MIT), installed as a

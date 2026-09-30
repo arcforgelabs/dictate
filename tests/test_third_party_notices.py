@@ -29,6 +29,9 @@ class ThirdPartyNoticesTests(unittest.TestCase):
             "python-xlib | LGPL-2.1-or-later",
         ):
             self.assertIn(required, notices)
+        # faster-whisper and the PyAV/FFmpeg build it pulled in no longer ship.
+        for removed in ("faster-whisper", "CTranslate2", "PyAV", "FFmpeg", "libx264"):
+            self.assertNotIn(removed, notices)
 
     def test_every_bundled_model_has_a_cc_by_attribution(self) -> None:
         for model in BUNDLED_MODELS:

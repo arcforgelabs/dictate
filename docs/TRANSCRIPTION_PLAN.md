@@ -19,8 +19,9 @@ Ship a clean local-first transcription stack where:
 2. Meeting mode always produces a speaker-attributed transcript.
 3. Parakeet is the local ASR foundation across CPU, NVIDIA GPU, and AMD GPU
    lanes.
-4. Whisper/faster-whisper are treated as temporary migration scaffolding and are
-   removed from product lanes once Parakeet coverage is complete.
+4. Whisper is gone: faster-whisper, WhisperX and whisper.cpp were removed on
+   2026-09-30. Parakeet v2 (English) and v3 (25 European languages) cover
+   dictation.
 5. AMD GPU support is first-class, not a fallback footnote.
 
 ## Deployable Goal
@@ -124,8 +125,8 @@ or similar engine terms.
 | English AMD GPU | Parakeet v2 through AMD runtime | Fresh default when Parakeet is available; explicit provider readiness wired | First-class AMD lane. |
 | Multilingual AMD GPU | Parakeet v3 through AMD runtime | Model wired, representative AMD validation still required | First-class AMD lane. |
 
-Current `faster-whisper/large-v3` support is a bridge for this workstation, not
-the product direction.
+The `faster-whisper/large-v3` bridge for this workstation was removed on
+2026-09-30.
 
 ## Implementation Status
 
@@ -300,8 +301,8 @@ Current AMD readiness behavior:
 4. Linux AMD remains ROCm/MIGraphX-provider based because the exact ONNX Runtime
    build is machine/distribution dependent. The acceptance gate is still the
    actual exposed provider, not the presence of a package name.
-5. `faster-whisper --device amd` is rejected because Dictate only has CPU/CUDA
-   coverage for that temporary backend.
+5. (Removed 2026-09-30: the faster-whisper AMD rejection went with the
+   backend.)
 6. Startup preflight blocks an explicit AMD request if the runtime cannot
    actually satisfy it, avoiding a silent CPU fallback.
 7. `parakeet-tdt-0.6b-v3` is available as the planned multilingual Parakeet
@@ -385,7 +386,7 @@ Current foundation:
 
 1. `SttCapabilities.supports_speaker_attribution` marks backends that can return
    speaker-attributed output.
-2. WhisperX and the Parakeet speaker backends declare speaker-attribution
+2. The Parakeet speaker backends declare speaker-attribution
    support because they expose `transcribe_diarized(...)`.
 3. `DictationEngine.transcribe(..., require_speaker_attribution=True)` fails
    closed instead of falling back to plain ASR.
@@ -481,8 +482,8 @@ Remaining app-level gates:
 
 1. Validate segment and speaker rendering against real meeting fixtures, not
    only mock/dev output.
-2. Keep WhisperX visible only as an advanced/experimental backend while
-   Parakeet speaker-attribution lanes are incomplete.
+2. WhisperX was removed on 2026-09-30; the Parakeet speaker-attribution
+   lanes are the only Meeting backends.
 3. A `.deb` update downloads and verifies while the app stays open. Install
    and restart are a second click. The Windows lifecycle smoke still covers
    its own installer path.
@@ -676,8 +677,8 @@ src/dictate/ui_server.py` succeeded; and `uv run dictate doctor --quick
 --type-backend pynput` exited `0` with `STT backend: parakeet` and `STT model:
 parakeet-tdt-0.6b-v2` on 2026-07-05. Fresh local startup defaults now choose
 Parakeet v2 for CPU, CUDA, and AMD when the Parakeet runtime is importable;
-faster-whisper remains an explicit or bridge fallback when Parakeet is
-unavailable.
+faster-whisper was the fallback when Parakeet was unavailable until it was
+removed on 2026-09-30; Parakeet is now a core dependency.
 
 Latest Windows fresh-install Parakeet default evidence:
 `scripts/windows-vm-smoke.sh --vm win11-dev --mode install --timeout 1800
@@ -1111,11 +1112,11 @@ src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
    - Finish Dictate timestamp/speaker-turn reconciliation in the UI/export
      surfaces and benchmark timestamp quality.
 
-4. **Remove Whisper product dependency**
-   - Keep current faster-whisper code only while Parakeet coverage is incomplete.
-   - Remove Whisper/faster-whisper from product lanes after Parakeet CPU, CUDA,
-     AMD, multilingual, timestamp, and packaging gates pass.
-   - Keep benchmark comparison rows as historical evidence only.
+4. **Remove Whisper product dependency** — done 2026-09-30, ahead of the
+   Parakeet AMD and multilingual benchmark gates, by owner decision. The desktop
+   UI already forced Parakeet, and faster-whisper pulled a GPL FFmpeg build
+   (through PyAV) into the bundle. Benchmark comparison rows stay as historical
+   evidence only.
 
 ## Model Landscape Review (2026-09-20)
 
@@ -1134,8 +1135,8 @@ figure and only useful as a relative ordering.
 | nvidia/parakeet-tdt-0.6b-v3 (shipped multilingual) | 4.86 | 6076 | 0.6B | CC-BY-4.0 | Keep. |
 | ibm-granite/granite-speech-5.0-470m-turboctc | 5.04 | 12946 | 0.47B | Apache-2.0 | Released 2026-08-25. 2x Parakeet throughput, English only, CTC with no timestamps, needs transformers>=5.16 or community ONNX. Watch. |
 | nvidia/nemotron-speech-streaming-en-0.6b | 5.25 | 1167 | 0.6B | NVIDIA Open | Cache-aware streaming, 80 ms-1.1 s chunks. Streaming candidate. |
-| distil-whisper/distil-large-v3.5 | 5.40 | 879 | 0.8B | MIT | Better than our faster-whisper `turbo` (6.36) at the same speed, English only. Added as a selectable bridge model (`distil-large-v3.5`), not the default. |
-| openai/whisper-large-v3-turbo (faster-whisper `turbo`) | 6.36 | 797 | 0.8B | MIT | Bridge lane only. |
+| distil-whisper/distil-large-v3.5 | 5.40 | 879 | 0.8B | MIT | Better than our faster-whisper `turbo` (6.36) at the same speed, English only. Was a selectable bridge model; removed with faster-whisper on 2026-09-30. |
+| openai/whisper-large-v3-turbo (faster-whisper `turbo`) | 6.36 | 797 | 0.8B | MIT | Former bridge lane; removed 2026-09-30. |
 | nvidia/nemotron-3.5-asr-streaming-0.6b | 7.88 | 1345 | 0.6B | OpenMDW-1.1 | 40 locales, streaming. Multilingual streaming candidate; accuracy below v3. |
 
 ### Parakeet Unified 0.6b evaluation
