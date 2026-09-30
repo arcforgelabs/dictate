@@ -1,6 +1,6 @@
 # Dictate Privacy Policy Source Copy
 
-Date: 2026-09-26
+Date: 2026-09-30
 
 This is the repository source copy for the public Dictate privacy page at
 `https://arcforge.au/privacy/dictate`. Publish the current contents there when
@@ -9,46 +9,64 @@ the page is next updated.
 ## Everything stays on the device
 
 Dictate transcribes speech on the user's own machine. There is no account, no
-subscription, no API key, and no hosted transcription. Microphone audio never
-leaves the device, and Arc Forge does not receive dictation text, audio, or
-transcripts at all.
+subscription, no provider API key, and no hosted transcription. Microphone audio
+never leaves the device, and Arc Forge does not receive dictation text, audio,
+or transcripts at all.
 
-Microphone audio is used only while you dictate and is not kept. Dictation
-history, notes, custom words, spelling substitutions and app preferences are
-stored in the operating-system user data directory:
+Microphone audio is used only while you dictate and is not kept. A Meeting
+recording (beta) is written to a temporary file while it is processed, then
+deleted. Dictation history, notes, custom words, spelling substitutions and app
+preferences are stored in the operating-system user data directory:
 
 - Linux: `~/.config/dictate/` and `~/.local/share/dictate/`
 - Windows: `%APPDATA%\dictate\` and `%LOCALAPPDATA%\dictate\`
 
-Users can export local data from the app, and can remove it by uninstalling
-Dictate and deleting that directory.
+`dictate export-local` exports history and notes to JSON. The Linux and Windows
+uninstall scripts remove that data when run with `--remove-user-data` /
+`-RemoveUserData`; removing the Linux `.deb` package leaves it in place, and it
+can be deleted by hand.
 
 ## What does reach the network
 
 Transcription itself never touches the network. Only these do, and none of
 them carry dictation content:
 
-- **Model downloads, only outside the installed app.** The installed app ships
-  with its speech model (Parakeet), so it downloads nothing to transcribe.
-  Source installs, and other local models chosen from the command line,
-  download model files from the model host (Hugging Face) once. That sends the
-  usual information any file download does, such as an IP address, and no audio
-  or transcript.
-- **Update checks.** Dictate asks GitHub whether a newer release exists, and
-  downloads it when the user chooses to update. This carries the current
-  version and update channel, and no dictation content.
-- **Microsoft Store.** Installs from the Store are subject to Microsoft's own
-  handling of install and update telemetry. Arc Forge does not receive
-  dictation content through it.
+- **Update checks.** Installs outside the Microsoft Store ask GitHub's release
+  and tag endpoints whether a newer version exists when Dictate starts; the beta
+  channel also asks the npm registry. Applying an update downloads the release
+  from GitHub, or for source installs the update script from jsDelivr. These
+  requests carry the usual information any web request does, such as an IP
+  address, and no dictation content.
+- **Model downloads, only outside the installed app.** The desktop app ships
+  with the models it uses (Parakeet for dictation, pyannote Community-1 for
+  Meeting), so it downloads nothing to transcribe. Source installs, and models
+  chosen from the command line that are not bundled, download model files from
+  Hugging Face once. Source installs using Meeting may read a Hugging Face token
+  from the environment or the Hugging Face token file to fetch the gated
+  pyannote model.
+- **Microsoft Store.** Installs from the Store are updated by the Store and
+  subject to Microsoft's own install and update telemetry. Arc Forge does not
+  receive dictation content through it.
 
-Dictate has no analytics, no crash reporting, and no usage telemetry.
+Dictate has no analytics, no crash reporting, and no usage telemetry, and turns
+off the telemetry its bundled libraries would otherwise send: pyannote.audio's
+usage metrics (on by default upstream) and Hugging Face Hub telemetry are
+disabled before either library loads.
 
 ## Diagnostics
 
-Dictate writes local log files for troubleshooting. Logs can contain file
-paths, model names and error text. They are never transmitted. Dictation text
-can be sensitive, so users should check logs before attaching them to a bug
-report.
+Dictate writes local log files for troubleshooting. Logs contain app status,
+file paths, model names, environment details and error text. They do not contain
+dictated text: a finished dictation or note is logged as its length only. Logs
+are never transmitted. Users should still check them for private names or a
+Hugging Face token before attaching them to a bug report.
+
+## Third-party software
+
+Dictate bundles open-source libraries and models under their own licences,
+including the Parakeet and pyannote models (CC-BY-4.0). Notices ship with the
+app as `THIRD_PARTY_NOTICES.md` and are published at
+`https://arcforge.au/legal/notices`.
 
 ## Changes
 

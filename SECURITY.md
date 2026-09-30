@@ -14,7 +14,7 @@ Use GitHub private vulnerability reporting for this repository when it is availa
 
 ## Do Not Post Publicly
 
-- Provider API keys or credential material.
+- Credential material, such as a Hugging Face token.
 - Personal hotwords, private names, customer terms, or sensitive dictation text.
 - Full logs unless you have checked and removed secrets.
 - Exploit details for an unpatched issue.
@@ -25,7 +25,7 @@ Dictate is a local desktop app. A trusted local user intentionally installing, c
 
 These advisories are accepted for now. They share a common cause: they all come
 from the optional `[whisperx]` extra's pinned dependency stack, none of them are
-shipped in the release artifact, and none are reachable from untrusted input in
+shipped in the release artifacts, and none are reachable from untrusted input in
 how Dictate uses them.
 
 Why they cannot simply be upgraded: **whisperx 3.8.6 (the latest published
@@ -36,9 +36,12 @@ cannot move to the patched 5.x line (transformers 5 requires
 it rather than drop it to force the upgrades.
 
 Common mitigating facts for all entries below:
-- `[whisperx]` (and `[gpu]`) are **not** in the shipped `.deb`/AppImage, which is
-  frozen from `[x11,wayland]`; the default product uses faster-whisper
-  (CTranslate2), which pulls none of these packages.
+- `[whisperx]` (and `[gpu]`) are **not** in the shipped `.deb`/AppImage/MSI,
+  which are frozen from `[x11,wayland,meeting]` (`packaging/build-engine.sh`).
+  Dictation defaults to Parakeet (ONNX Runtime). The `meeting` extra does ship
+  torch, but it resolves to the current CPU build (2.14 in 2026.9.27), not the
+  2.8 line whisperx pins, so it already carries the 2.9.1 and 2.10.0 torch
+  fixes listed below.
 - Dictate is a local app processing the user's own audio — there is no untrusted
   remote input feeding these libraries.
 

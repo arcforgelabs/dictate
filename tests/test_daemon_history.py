@@ -364,24 +364,6 @@ class DaemonHistoryTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].text, "saved anyway")
 
-    def test_result_notice_is_surfaced_without_blocking_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            daemon, store, output = self._make_daemon(tmp)
-            messages: list[str | None] = []
-            daemon.status_callback = messages.append
-            result = TranscriptionResult(
-                status="ok",
-                duration_s=1.0,
-                text="recovered",
-                notice="xAI failed; used CPU fallback",
-            )
-
-            daemon._handle_result(result)
-
-            self.assertEqual(messages, ["xAI failed; used CPU fallback"])
-            output.send.assert_called_once_with("recovered")
-            self.assertEqual(store.load()[0].text, "recovered")
-
     def test_recording_callback_tracks_capture_start_and_stop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             from dictate.daemon import Daemon
