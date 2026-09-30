@@ -16,7 +16,11 @@ class PasteOutputTests(unittest.TestCase):
     def test_paste_output_copies_before_sending_shortcut(self) -> None:
         clipboard = Mock()
         typing = XdotoolOutput()
-        with patch("dictate.outputs._send_paste_shortcut") as shortcut:
+        # Pin the focused window: a terminal-like window on the host would switch
+        # this to a Shift+Insert plain-text paste.
+        with patch("dictate.outputs._send_paste_shortcut") as shortcut, patch(
+            "dictate.outputs._focused_window_wants_plain_paste", return_value=False
+        ):
             PasteOutput(typing, clipboard).send("complete dictation")
 
         clipboard.send.assert_called_once_with("complete dictation")

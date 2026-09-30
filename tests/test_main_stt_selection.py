@@ -16,6 +16,22 @@ from dictate.stt import SttCapabilities
 from dictate.stt import factory as stt_factory
 
 
+VFIO_4090_LSPCI = """
+01:00.0 VGA compatible controller: NVIDIA Corporation AD102 [GeForce RTX 4090]
+\tKernel driver in use: vfio-pci
+"""
+
+
+def _host_without_passthrough_gpu():
+    """Keep the real host's lspci out of runtime-profile tests.
+
+    ``_resolve_startup_runtime`` downgrades CUDA to CPU when the machine's
+    NVIDIA GPU is bound to vfio for a VM, so an unpatched test passes or fails
+    depending on the workstation it runs on.
+    """
+    return patch.object(main_module.subprocess, "check_output", side_effect=OSError("no lspci"))
+
+
 class FakeOnceStt:
     backend_name = "fake"
     model_name = "fake-model"
@@ -238,7 +254,7 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(io.StringIO()), _host_without_passthrough_gpu():
             device, compute_type = main_module._resolve_startup_runtime(
                 args=args,
                 cli_args=[],
@@ -247,6 +263,24 @@ class MainSttSelectionTests(unittest.TestCase):
 
         self.assertEqual(device, "cuda")
         self.assertEqual(compute_type, "float16")
+
+    def test_saved_cuda_profile_drops_to_cpu_when_the_gpu_is_passed_through(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), patch.object(
+            main_module.subprocess, "check_output", return_value=VFIO_4090_LSPCI
+        ):
+            device, compute_type = main_module._resolve_startup_runtime(
+                args=args,
+                cli_args=[],
+                config=Config(stt_device="cuda", stt_compute_type="float16"),
+            )
+
+        self.assertEqual(device, "cpu")
+        self.assertEqual(compute_type, "float16")
+        self.assertIn("bound to vfio", stderr.getvalue())
 
     def test_saved_amd_runtime_profile_is_valid(self) -> None:
         parser = main_module.build_parser()
@@ -286,7 +320,7 @@ class MainSttSelectionTests(unittest.TestCase):
         parser = main_module.build_parser()
         args = parser.parse_args([])
 
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(io.StringIO()), _host_without_passthrough_gpu():
             device, compute_type = main_module._resolve_startup_runtime(
                 args=args,
                 cli_args=[],
