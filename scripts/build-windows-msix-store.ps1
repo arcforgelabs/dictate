@@ -160,7 +160,10 @@ function Assert-MsixPackage {
                 "engine\dictate-distribution.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
-                "engine\models\pyannote-speaker-diarization-community-1\config.*"
+                "engine\models\pyannote-speaker-diarization-community-1\config.*",
+                "engine\THIRD_PARTY_NOTICES.md",
+                "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md",
+                "engine\models\pyannote-speaker-diarization-community-1\ATTRIBUTION.md"
             )
         ) {
             $PayloadPath = Join-Path $InspectDir $Payload
@@ -184,7 +187,10 @@ function Assert-MsixStagePayload {
             "engine\dictate-engine.exe",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
-            "engine\models\pyannote-speaker-diarization-community-1\config.*"
+            "engine\models\pyannote-speaker-diarization-community-1\config.*",
+            "engine\THIRD_PARTY_NOTICES.md",
+            "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md",
+            "engine\models\pyannote-speaker-diarization-community-1\ATTRIBUTION.md"
         )
     ) {
         $PayloadPath = Join-Path $StageDir $Payload

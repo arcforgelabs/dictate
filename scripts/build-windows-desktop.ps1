@@ -156,6 +156,13 @@ Invoke-Native "downloading pyannote Community-1 model snapshot" $VenvPython @(
     $PyannoteModelDir
 )
 
+Write-Host "staging third-party notices and model attributions"
+Invoke-Native "staging third-party notices" $VenvPython @(
+    (Join-Path $Root "scripts\stage-notices.py"),
+    "--engine-dir",
+    $StageDir
+)
+
 Write-Host "ensuring the Tauri CLI is available"
 Invoke-Native "installing UI shell dependencies" "npm" @("--prefix", "ui-shell", "install")
 Invoke-Native "checking Tauri CLI" "npm" @("--prefix", "ui-shell", "exec", "--", "tauri", "--version")

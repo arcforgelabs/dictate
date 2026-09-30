@@ -117,7 +117,8 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     # GUI toolkits the headless sidecar never needs — keep the binary lean.
-    excludes=["gi", "tkinter", "matplotlib", "PyQt5", "PyQt6", "PySide6"],
+    # readline links GNU Readline (GPL-3.0) and is only for interactive shells.
+    excludes=["gi", "tkinter", "matplotlib", "PyQt5", "PyQt6", "PySide6", "readline"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
