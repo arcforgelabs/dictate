@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Privacy
+
+- Meeting mode no longer sends usage metrics to pyannote. pyannote.audio,
+  the speaker-labelling library, reports pipeline use to otel.pyannote.ai by
+  default; Dictate now turns that off, along with Hugging Face Hub telemetry,
+  before either library loads. Dictate makes no analytics requests.
+- Logs no longer contain what you dictated. Finished dictations and notes are
+  logged as their length; the words appear only in an interactive terminal.
+
+### Added
+
+- Third-party notices ship with the app: `THIRD_PARTY_NOTICES.md`, the GNU
+  licence texts, and an attribution file beside each bundled model.
+
 ## 2026-09-27
 
 ### Fixed
