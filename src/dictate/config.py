@@ -55,7 +55,7 @@ class Config:
 
     @property
     def hotwords_str(self) -> str | None:
-        """Hotwords as a single space-separated string for faster-whisper."""
+        """Hotwords as a single space-separated string for the lexicon layer."""
         return " ".join(self.hotwords) if self.hotwords else None
 
     def hotwords_for_backend(self, backend: str) -> str | None:

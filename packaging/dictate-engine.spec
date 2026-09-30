@@ -1,7 +1,7 @@
 # PyInstaller spec for the frozen Dictate engine sidecar.
 #
-# Bundles the Python runtime + STT stack (faster-whisper / ctranslate2 /
-# onnxruntime / av) plus the local Meeting runtime. The desktop builds stage
+# Bundles the Python runtime + STT stack (onnx-asr / onnxruntime) plus the
+# local Meeting runtime. The desktop builds stage
 # Parakeet v2 int8 and pyannote Community-1 beside the engine so the default
 # English ASR and Meeting mode do not need customer Hugging Face credentials.
 #
@@ -35,7 +35,7 @@ WINDOWED = os.name == "nt"
 datas, binaries, hiddenimports = [], [], []
 
 # The native-heavy packages PyInstaller's stock hooks don't fully capture.
-for pkg in ("ctranslate2", "faster_whisper", "av", "onnxruntime", "tokenizers", "huggingface_hub"):
+for pkg in ("onnxruntime", "huggingface_hub"):
     d, b, h = collect_all(pkg)
     datas += filter_pyinstaller_binaries(d)
     binaries += filter_pyinstaller_binaries(b)

@@ -11,9 +11,8 @@ Usage:
     dictate doctor ...        Diagnose environment/runtime setup
     dictate export-local ...  Export local dictations and notes to JSON
     dictate prepare-model ... Prepare/download a model before activation
-    dictate --stt-backend faster-whisper
     dictate --type-backend wtype  Force typing backend for daemon mode
-    dictate --model large-v3-turbo  Use a different STT model
+    dictate --model parakeet-tdt-0.6b-v3  Use a different STT model
     dictate --add-hotword X   Save a hotword for improved recognition
     dictate --list-hotwords   List saved hotwords
 """
@@ -68,13 +67,13 @@ from dictate.stt import (
     ComputeType,
     PARAKEET_MODELS,
     STT_BACKENDS,
-    WHISPERX_MODELS,
     SpeechToText,
     SttBackend,
     create_speech_to_text,
     resolve_default_local_backend,
-    resolve_default_local_model,
     resolve_model_name,
+    saved_meeting_selection,
+    saved_stt_selection,
 )
 from dictate.version import RELEASE_VERSION
 
@@ -113,17 +112,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stt-backend",
         choices=STT_BACKENDS,
-        default="faster-whisper",
-        help="Speech-to-text backend (fresh local default: parakeet when available)",
+        default="parakeet",
+        help="Speech-to-text backend (default: parakeet)",
     )
     parser.add_argument(
         "--model",
         default=None,
         help=(
             "Model name. "
-            f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
-            "faster-whisper examples: turbo, small. "
-            f"whisperx examples: {', '.join(WHISPERX_MODELS)}."
+            f"parakeet examples: {', '.join(PARAKEET_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -426,21 +423,21 @@ def _resolve_startup_stt(
     backend_flag = _flag_in_args(cli_args, "--stt-backend")
     model_flag = _flag_in_args(cli_args, "--model")
     device = _startup_device(args=args, cli_args=cli_args, config=config)
-    if not backend_flag and not model_flag and config.stt_backend in STT_BACKENDS:
-        model_name = _resolve_saved_model_name(config.stt_backend, config.stt_model, device)
+    saved_backend, saved_model = saved_stt_selection(config.stt_backend, config.stt_model)
+    if not backend_flag and not model_flag and saved_backend is not None:
+        model_name = resolve_model_name(saved_backend, saved_model)
         print(
-            f"Using saved STT selection: backend='{config.stt_backend}' model='{model_name}'",
+            f"Using saved STT selection: backend='{saved_backend}' model='{model_name}'",
             file=sys.stderr,
         )
-        return (config.stt_backend, model_name)
+        return (saved_backend, model_name)
     if not backend_flag and not model_flag and config.stt_backend:
+        # Includes the removed Whisper backends (faster-whisper, whisperx).
         print(
-            f"Ignoring invalid saved STT backend '{config.stt_backend}' in config.",
+            f"Ignoring unsupported saved STT backend '{config.stt_backend}' in config.",
             file=sys.stderr,
         )
-    # No saved/flagged selection: pick the hardware-aware default local backend
-    # (Parakeet English across CPU/CUDA/AMD when available) rather than the
-    # argparse compatibility default.
+    # No saved/flagged selection: use the default local backend (Parakeet).
     if not backend_flag and not model_flag:
         backend, model_name = resolve_default_local_backend(device)
         print(
@@ -449,28 +446,7 @@ def _resolve_startup_stt(
         )
         return (backend, model_name)
     backend: SttBackend = args.stt_backend
-    if model_flag:
-        model_name = resolve_model_name(backend, args.model)
-    else:
-        model_name = _resolve_saved_model_name(backend, args.model, device)
-    return (backend, model_name)
-
-
-
-def _resolve_saved_model_name(
-    backend: SttBackend,
-    configured_model: str | None,
-    device: ComputeDevice = "auto",
-) -> str:
-    if configured_model:
-        return resolve_model_name(backend, configured_model)
-    return _default_model_for_backend(backend, device)
-
-
-def _default_model_for_backend(backend: SttBackend, device: ComputeDevice = "auto") -> str:
-    if backend == "faster-whisper":
-        return resolve_default_local_model(device)
-    return resolve_model_name(backend, None)
+    return (backend, resolve_model_name(backend, args.model))
 
 
 def _startup_device(
@@ -479,10 +455,10 @@ def _startup_device(
     cli_args: Sequence[str],
     config: Config,
 ) -> ComputeDevice:
-    """Resolve the effective compute device (no printing) for default-model gating.
+    """Resolve the effective compute device (no printing) for default selection.
 
     Mirrors the device-selection half of ``_resolve_startup_runtime`` so the local
-    default model can be chosen with the same device the daemon will actually use.
+    default is chosen for the same device the daemon will actually use.
     """
     device_flag = _flag_in_args(cli_args, "--device")
     if not device_flag and config.stt_device in COMPUTE_DEVICES:
@@ -926,7 +902,7 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     # ---- set-model ---------------------------------------------------------
     if args.cmd == "set-model":
         cfg = load_config()
-        backend = cfg.stt_backend or "faster-whisper"
+        backend = saved_stt_selection(cfg.stt_backend, cfg.stt_model)[0] or "parakeet"
         set_stt_selection(backend, args.model_id)
         print(f"ok: model={args.model_id} (backend={backend})")
         return 0
@@ -1029,12 +1005,12 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     # ---- show --------------------------------------------------------------
     if args.cmd == "show":
         cfg = load_config()
-        backend = cfg.stt_backend or "faster-whisper"
-        model = cfg.stt_model or "(default)"
-        meeting_backend = cfg.meeting_stt_backend or "parakeet-pyannote"
-        if meeting_backend not in STT_BACKENDS:
-            meeting_backend = "parakeet-pyannote"
-        meeting_model = resolve_model_name(meeting_backend, cfg.meeting_stt_model)
+        saved_backend, saved_model = saved_stt_selection(cfg.stt_backend, cfg.stt_model)
+        backend = saved_backend or "parakeet"
+        model = saved_model or "(default)"
+        meeting_backend, meeting_model = saved_meeting_selection(
+            cfg.meeting_stt_backend, cfg.meeting_stt_model
+        )
         prefs = _config_load_ui_prefs()
         print(f"stt_backend: {backend}")
         print(f"model: {model}")

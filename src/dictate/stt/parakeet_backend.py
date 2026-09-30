@@ -13,8 +13,8 @@ packaging quirks are handled here:
   onnxruntime releases (e.g. 1.24.1, and 1.27's strict external-data path check)
   fail to load HuggingFace's symlinked cache. We load from a **flat** model
   directory (real files, no symlinks) which avoids the check.
-- **English only**: v2 is English-only; the factory keeps Whisper as the
-  multilingual fallback.
+- **Languages**: v2 (the default) is English-only; v3 adds 25 European
+  languages.
 """
 
 from __future__ import annotations

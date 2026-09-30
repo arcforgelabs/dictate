@@ -237,21 +237,9 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(state["models"][0]["backend"], "parakeet")
             self.assertTrue(state["models"][0]["local"])
             local_models = [
-                model["model"] for model in state["models"] if model["backend"] == "faster-whisper"
+                model["model"] for model in state["models"] if model["backend"] == "parakeet"
             ]
-            self.assertEqual(
-                local_models,
-                [
-                    "tiny",
-                    "base",
-                    "small",
-                    "medium",
-                    "large-v3",
-                    "turbo",
-                    "large-v3-turbo",
-                    "distil-large-v3.5",
-                ],
-            )
+            self.assertEqual(local_models, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"])
             backends = {m["backend"] for m in state["models"]}
             self.assertEqual(
                 backends,
@@ -260,8 +248,6 @@ class UiBackendStateTests(unittest.TestCase):
                     "parakeet-pyannote",
                     "parakeet-diarizen",
                     "parakeet-sortformer",
-                    "faster-whisper",
-                    "whisperx",
                 },
             )
             # default shortcut + activation
@@ -302,13 +288,6 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(capable["model"]["model"], "parakeet-tdt-0.6b-v2")
             self.assertEqual(capable["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
 
-        with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"), \
-                 patch("dictate.ui_server.resolve_default_local_backend", return_value=("faster-whisper", "small")):
-                weak = _backend(d).get_state()
-            self.assertEqual(weak["model"]["model"], "small")
-            self.assertEqual(weak["model"]["id"], "faster-whisper/small")
-
     def test_removed_cloud_backend_migrates_to_parakeet_on_state_load(self) -> None:
         # A saved hosted backend (xAI and the others removed in 2026.9.20) is
         # not what the daemon runs. Hydrating state must report Parakeet, not
@@ -327,21 +306,36 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(cfg.stt_backend, "parakeet")
             self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
 
-    def test_stale_regular_local_model_migrates_to_parakeet_on_state_load(self) -> None:
-        # Legacy regular dictation backends are UI-stale state and should be
-        # rewritten to the shipped private default when the UI hydrates.
+    def test_removed_whisper_backends_migrate_to_parakeet_on_state_load(self) -> None:
+        # faster-whisper / whisperx were removed; a saved selection is stale state
+        # and is rewritten to the Parakeet default, never keeping a Whisper model.
+        from dictate import config as config_mod
+
+        for saved in (("faster-whisper", "turbo"), ("faster-whisper", "base"), ("whisperx", "large-v3")):
+            with self.subTest(saved=saved), tempfile.TemporaryDirectory() as d:
+                backend = _backend(d)
+                config_mod.set_stt_selection(*saved, path=backend.config_path)
+                state = backend.get_state()
+                cfg = config_mod.load_config(backend.config_path)
+                self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
+                self.assertEqual(state["providerHealth"]["preferred"], "parakeet")
+                self.assertEqual(cfg.stt_backend, "parakeet")
+                self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
+
+    def test_unset_backend_with_legacy_whisper_model_reports_parakeet_default(self) -> None:
+        # An unset backend used to mean faster-whisper, so a saved model is a
+        # Whisper name that must not be carried into Parakeet.
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            config_mod.set_stt_selection("faster-whisper", "base", path=backend.config_path)
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="turbo"):
-                state = backend.get_state()
-            cfg = config_mod.load_config(backend.config_path)
-            self.assertEqual(state["model"]["backend"], "parakeet")
-            self.assertEqual(state["model"]["model"], "parakeet-tdt-0.6b-v2")
-            self.assertEqual(cfg.stt_backend, "parakeet")
-            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
+            backend.config_path.write_text("stt_model: turbo\n", encoding="utf-8")
+            state = backend.get_state()
+            report = backend.run_doctor()
+            model_check = next(c for c in report["checks"] if c["label"] == "Model loads")
+            self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v2")
+            self.assertEqual(model_check["sub"], "parakeet · parakeet-tdt-0.6b-v2")
+            self.assertIsNone(config_mod.load_config(backend.config_path).stt_backend)
 
     def test_state_load_migration_leaves_meeting_selection_untouched(self) -> None:
         from dictate import config as config_mod
@@ -355,45 +349,38 @@ class UiBackendStateTests(unittest.TestCase):
             cfg = config_mod.load_config(backend.config_path)
 
             self.assertEqual(state["model"]["backend"], "parakeet")
-            self.assertEqual(state["meetingModel"]["backend"], "whisperx")
-            self.assertEqual(state["meetingModel"]["model"], "large-v3")
+            # A removed Meeting backend reports the pyannote default without
+            # rewriting the saved Meeting selection.
+            self.assertEqual(state["meetingModel"]["backend"], "parakeet-pyannote")
+            self.assertEqual(state["meetingModel"]["model"], "parakeet-tdt-0.6b-v2")
             self.assertEqual(cfg.stt_backend, "parakeet")
             self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
             self.assertEqual(cfg.meeting_stt_backend, "whisperx")
             self.assertEqual(cfg.meeting_stt_model, "large-v3")
 
-    def test_faster_whisper_selection_is_migrated_on_state_load(self) -> None:
-        # Legacy regular dictation selections are normalized through the UI state
-        # path before they can persist, so the config is corrected to Parakeet.
+    def test_whisper_selection_from_client_is_rejected(self) -> None:
+        # A stale client sending the old hardcoded "faster-whisper/turbo" intent
+        # must not persist a backend this build no longer ships.
         from dictate import config as config_mod
 
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            # Client sends the old hardcoded "faster-whisper/turbo" intent.
-            backend.patch_config({"model": {"backend": "faster-whisper", "model": "turbo"}})
-            cfg = config_mod.load_config(backend.config_path)
-            self.assertEqual(cfg.stt_backend, "parakeet")
-            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
+            with self.assertRaises(ApiError) as raised:
+                backend.patch_config({"model": {"backend": "faster-whisper", "model": "turbo"}})
+            self.assertEqual(raised.exception.status, 400)
+            self.assertIsNone(config_mod.load_config(backend.config_path).stt_backend)
 
-    def test_models_default_flag_tracks_resolved_local_tier(self) -> None:
-        # P3-1: the models list "default" flag for faster-whisper matches the
-        # effective (resolved) tier, not the aspirational registry default.
+    def test_models_default_flag_marks_parakeet_default(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
-                state = _backend(d).get_state()
-            fw = [m for m in state["models"] if m["backend"] == "faster-whisper"]
-            defaults = [m["model"] for m in fw if m["default"]]
-            self.assertEqual(defaults, ["small"])
+            state = _backend(d).get_state()
+            defaults = [m["model"] for m in state["models"] if m["backend"] == "parakeet" and m["default"]]
+            self.assertEqual(defaults, ["parakeet-tdt-0.6b-v2"])
 
-    def test_run_doctor_reports_resolved_local_model(self) -> None:
-        # P3-2: doctor's "Model loads" check reports the resolved tier on a fresh
-        # weak-box config, matching what the daemon runs.
+    def test_run_doctor_reports_parakeet_default_model(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.ui_server.resolve_default_local_model", return_value="small"):
-                report = _backend(d).run_doctor()
+            report = _backend(d).run_doctor()
             model_check = next(c for c in report["checks"] if c["label"] == "Model loads")
-            self.assertIn("small", model_check["sub"])
-            self.assertNotIn("turbo", model_check["sub"])
+            self.assertEqual(model_check["sub"], "parakeet · parakeet-tdt-0.6b-v2")
 
 
     def test_set_model_via_dict(self) -> None:
@@ -525,15 +512,15 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             history_store = HistoryStore(Path(d) / "history.json")
             note_store = NoteStore(Path(d) / "notes")
-            note_id = note_store.create_note(provider="faster-whisper", model="turbo")
+            note_id = note_store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             note_store.append_segment(
                 note_id,
                 NoteSegment(
                     seq=0,
                     t_start=0.0,
                     t_end=1.0,
-                    provider="faster-whisper",
-                    model="turbo",
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
                     text="saved note",
                 ),
             )

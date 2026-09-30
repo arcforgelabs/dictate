@@ -22,14 +22,14 @@ class NoteStoreTests(unittest.TestCase):
     def test_append_and_assemble_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo", recording_id=7)
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2", recording_id=7)
             store.append_segment(
                 note_id,
-                NoteSegment(seq=0, t_start=0.0, t_end=12.0, provider="faster-whisper", model="turbo", text="hello"),
+                NoteSegment(seq=0, t_start=0.0, t_end=12.0, provider="parakeet", model="parakeet-tdt-0.6b-v2", text="hello"),
             )
             store.append_segment(
                 note_id,
-                NoteSegment(seq=1, t_start=12.0, t_end=24.0, provider="faster-whisper", model="turbo", text="world"),
+                NoteSegment(seq=1, t_start=12.0, t_end=24.0, provider="parakeet", model="parakeet-tdt-0.6b-v2", text="world"),
             )
             self.assertEqual(store.assembled_text(note_id), "hello world")
             store.mark_ready(note_id, duration_s=24.0)
@@ -86,7 +86,7 @@ class NoteStoreTests(unittest.TestCase):
     def test_list_notes_returns_newest_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            first = store.create_note(provider="faster-whisper", model="turbo")
+            first = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             second = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
 
             notes = store.list_notes()
@@ -96,10 +96,10 @@ class NoteStoreTests(unittest.TestCase):
     def test_recover_interrupted_marks_stale_notes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             store.append_segment(
                 note_id,
-                NoteSegment(seq=0, t_start=0.0, t_end=1.0, provider="faster-whisper", model="turbo", text="saved"),
+                NoteSegment(seq=0, t_start=0.0, t_end=1.0, provider="parakeet", model="parakeet-tdt-0.6b-v2", text="saved"),
             )
             recovered = store.recover_interrupted()
             self.assertIn(note_id, recovered)
@@ -110,7 +110,7 @@ class NoteStoreTests(unittest.TestCase):
     def test_archive_note_hides_from_list_but_keeps_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             store.mark_ready(note_id, duration_s=1.0)
 
             self.assertTrue(store.archive_note(note_id))
@@ -124,7 +124,7 @@ class NoteStoreTests(unittest.TestCase):
     def test_unarchive_note_restores_visible_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             store.mark_ready(note_id, duration_s=1.0)
             self.assertTrue(store.archive_note(note_id))
             self.assertEqual(store.list_notes(), [])
@@ -168,7 +168,7 @@ class NoteStoreTests(unittest.TestCase):
     def test_archive_and_unarchive_still_work_for_legitimate_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             store.mark_ready(note_id, duration_s=1.0)
 
             self.assertTrue(store.archive_note(note_id))
@@ -184,7 +184,7 @@ class NoteStoreTests(unittest.TestCase):
     def test_delete_note_removes_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(provider="faster-whisper", model="turbo")
+            note_id = store.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2")
             self.assertTrue(store.delete_note(note_id))
             self.assertIsNone(store.load_note(note_id))
             self.assertFalse(store.delete_note(note_id))

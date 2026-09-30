@@ -6,6 +6,7 @@ import numpy as np
 
 from dictate.engine import DictationEngine
 from dictate.stt import SpeechToText, SttCapabilities, TranscriptSegment
+from dictate.stt.parakeet_backend import ParakeetSpeechToText
 
 
 class _DummyNoHotwordsSpeechToText(SpeechToText):
@@ -258,6 +259,27 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertEqual(result.text, "Testing canary one two three")
         self.assertIsNone(stt.received_hotwords)
 
+    def test_post_mode_corrects_hotwords_on_parakeet_capabilities(self) -> None:
+        # Parakeet has no native hotword decoding; hybrid still post-corrects.
+        class _ParakeetShaped(_DummyNoHotwordsSpeechToText):
+            backend_name = "parakeet"
+            capabilities = ParakeetSpeechToText.capabilities
+
+            def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+                super().transcribe(audio, language, hotwords, prompt_context)
+                return "Testing canery one two three"
+
+        for mode in ("post", "hybrid"):
+            with self.subTest(mode=mode):
+                stt = _ParakeetShaped()
+                engine = DictationEngine(stt=stt, hotwords="canary", lexicon_mode=mode)
+
+                result = engine.transcribe(np.ones(8000, dtype=np.float32), language="en")
+
+                self.assertEqual(result.text, "Testing canary one two three")
+                self.assertIsNone(stt.received_hotwords)
+                self.assertIsNone(stt.received_prompt_context)
+
     def test_post_mode_applies_explicit_replacement_map(self) -> None:
         stt = _DummyHotwordsSpeechToText(response_text="Testing kinneri one two three")
         engine = DictationEngine(
@@ -288,7 +310,7 @@ class DictationEngineCapabilityTests(unittest.TestCase):
 class _PromptOnlyStreamingStt(SpeechToText):
     """Streaming backend that accepts initial_prompt/long_form but NOT decode_profile."""
 
-    backend_name = "faster-whisper"
+    backend_name = "fake-prompt-streaming"
     capabilities = SttCapabilities(supports_hotwords=True, supports_streaming_chunks=True)
     model_name = "base"
 

@@ -512,12 +512,12 @@ class Daemon:
                     with self._engine_lock:
                         engine = self._engine_for_mode_locked(mode)
                         stt = engine.stt
-                        note_streaming = (
-                            mode == "note" and stt.backend_name == "faster-whisper"
-                        )
+                        # Notes and dictation stream chunks only on a backend that can
+                        # carry context across them; Parakeet decodes the whole clip.
+                        chunk_capable = bool(stt.capabilities.supports_streaming_chunks)
+                        note_streaming = mode == "note" and chunk_capable
                         streaming_enabled = (
-                            (mode == "dictation" and bool(stt.capabilities.supports_streaming_chunks))
-                            or note_streaming
+                            (mode == "dictation" and chunk_capable) or note_streaming
                         )
                         # Dictation, when streaming-capable, uses the same silence-aligned
                         # overlap accumulator as notes (shorter windows) instead of the
@@ -1554,7 +1554,7 @@ class Daemon:
         if mode != "note":
             return False
         with self._engine_lock:
-            return self.engine.stt.backend_name == "faster-whisper"
+            return bool(self.engine.stt.capabilities.supports_streaming_chunks)
 
     def _is_note_streaming(self, recording_id: int) -> bool:
         with self._queue_lock:

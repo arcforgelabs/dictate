@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -15,7 +14,6 @@ from dictate.stt.base import (
     SttBackend,
     SttCapabilities,
 )
-from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
 from dictate.stt.parakeet_backend import ParakeetSpeechToText, parakeet_available
 from dictate.stt.parakeet_pyannote_backend import (
     PYANNOTE_COMMUNITY_MODEL,
@@ -34,7 +32,6 @@ from dictate.stt.parakeet_speaker_backend import (
     sortformer_available,
     sortformer_model_source,
 )
-from dictate.stt.whisperx_backend import WhisperXSpeechToText, whisperx_available
 
 def passthrough_blocks_cuda(pci_text: str) -> bool:
     """True when every NVIDIA display GPU is bound to vfio for a VM.
@@ -61,29 +58,18 @@ def device_for_host(device: str, pci_text: str) -> str:
 
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
-    "faster-whisper": "turbo",
     "parakeet": "parakeet-tdt-0.6b-v2",
     "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
     "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
     "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
-    "whisperx": "large-v3",
 }
-FASTER_WHISPER_MODELS: tuple[str, ...] = (
-    "tiny",
-    "base",
-    "small",
-    "medium",
-    "large-v3",
-    "turbo",
-    "large-v3-turbo",
-    # English-only distil model: ~1 WER point better than turbo at the same speed.
-    "distil-large-v3.5",
-)
 PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
 PARAKEET_PYANNOTE_MODELS: tuple[str, ...] = PARAKEET_MODELS
 PARAKEET_DIARIZEN_MODELS: tuple[str, ...] = PARAKEET_MODELS
 PARAKEET_SORTFORMER_MODELS: tuple[str, ...] = PARAKEET_MODELS
-WHISPERX_MODELS: tuple[str, ...] = ("large-v3", "large-v3-turbo", "turbo")
+DEFAULT_MEETING_BACKEND: SttBackend = "parakeet-pyannote"
+
+
 @dataclass(frozen=True, slots=True)
 class BackendSpec:
     backend: SttBackend
@@ -95,18 +81,6 @@ class BackendSpec:
 
 
 BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
-    "faster-whisper": BackendSpec(
-        backend="faster-whisper",
-        default_model=DEFAULT_MODELS["faster-whisper"],
-        model_examples=FASTER_WHISPER_MODELS,
-        description="CTranslate2-optimized Whisper inference.",
-        capabilities=FasterWhisperSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: FasterWhisperSpeechToText(
-            model_name=model,
-            device=device,
-            compute_type=compute_type,
-        ),
-    ),
     "parakeet": BackendSpec(
         backend="parakeet",
         default_model=DEFAULT_MODELS["parakeet"],
@@ -155,18 +129,6 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
             compute_type=compute_type,
         ),
     ),
-    "whisperx": BackendSpec(
-        backend="whisperx",
-        default_model=DEFAULT_MODELS["whisperx"],
-        model_examples=WHISPERX_MODELS,
-        description="Local WhisperX transcription, alignment, and pyannote diarization.",
-        capabilities=WhisperXSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: WhisperXSpeechToText(
-            model_name=model,
-            device=device,
-            compute_type=compute_type,
-        ),
-    ),
 }
 STT_BACKENDS: tuple[SttBackend, ...] = tuple(BACKEND_REGISTRY.keys())
 
@@ -182,135 +144,46 @@ def resolve_model_name(backend: SttBackend, model: str | None = None) -> str:
     return model or BACKEND_REGISTRY[backend].default_model
 
 
-# faster-whisper turbo (int8) needs ~1.5 GB resident; 8 GB total RAM is the
-# documented minimum, so gate turbo on ~7.5 GB + a reasonably wide CPU. Weaker
-# boxes fall back to "small" so a fresh CPU config never OOMs/swaps.
-_TURBO_MIN_RAM_BYTES = int(7.5 * 1024**3)
-_TURBO_MIN_CPU_COUNT = 8
-
-
-def _cuda_available_for_faster_whisper() -> bool:
-    """True when CTranslate2 reports at least one usable CUDA device."""
-    try:
-        import ctranslate2
-    except Exception:  # noqa: BLE001
-        return False
-    try:
-        return int(ctranslate2.get_cuda_device_count()) > 0
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _total_system_ram_bytes() -> int | None:
-    """Best-effort cross-platform total physical RAM in bytes (no third-party deps).
-
-    Returns ``None`` when detection is not possible, so callers can fall back to a
-    conservative heuristic rather than guessing high and OOM-ing a weak machine.
-    """
-    # Linux and macOS expose physical pages via sysconf.
-    try:
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        phys_pages = os.sysconf("SC_PHYS_PAGES")
-        if page_size > 0 and phys_pages > 0:
-            return int(page_size) * int(phys_pages)
-    except (ValueError, OSError, AttributeError):
-        pass
-    # Linux fallback: parse /proc/meminfo MemTotal (kB).
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as meminfo:
-            for line in meminfo:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        pass
-    # Windows: GlobalMemoryStatusEx via ctypes.
-    if sys.platform.startswith("win"):
-        try:
-            import ctypes
-
-            class _MemoryStatusEx(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong),
-                    ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong),
-                    ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong),
-                    ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
-
-            stat = _MemoryStatusEx()
-            stat.dwLength = ctypes.sizeof(_MemoryStatusEx)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
-                return int(stat.ullTotalPhys)
-        except Exception:  # noqa: BLE001
-            pass
-    # macOS fallback (if sysconf was unavailable): sysctl hw.memsize.
-    if sys.platform == "darwin":
-        try:
-            import subprocess
-
-            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"])  # noqa: S603,S607
-            return int(out.strip())
-        except Exception:  # noqa: BLE001
-            pass
-    return None
-
-
-def resolve_default_local_model(device: ComputeDevice = "auto") -> str:
-    """Single hardware-aware default for the local (faster-whisper) model.
-
-    This is the one place that decides turbo-vs-small so startup, tray reset,
-    doctor, and the UI all agree. It is SEPARATE from ``resolve_model_name`` (the
-    aspirational registry default) — an explicit saved config model still wins at
-    the call sites, which pass ``model`` to ``resolve_model_name`` instead.
-    """
-    override = os.environ.get("DICTATE_FORCE_LOCAL_MODEL")
-    if override:
-        return override
-    if device == "cuda":
-        return "turbo"
-    if device == "auto" and _cuda_available_for_faster_whisper():
-        return "turbo"
-    # device == "cpu"/"amd", or "auto" with no CUDA: gate turbo on machine capability.
-    # faster-whisper does not have an AMD GPU runtime here; readiness blocks an
-    # explicit AMD request before model load.
-    cpu_count = os.cpu_count() or 0
-    ram_bytes = _total_system_ram_bytes()
-    if ram_bytes is None:
-        # RAM unknown: fall back to a cpu-count-only heuristic; if that is also
-        # unknown, stay conservative.
-        return "turbo" if cpu_count >= _TURBO_MIN_CPU_COUNT else "small"
-    if ram_bytes >= _TURBO_MIN_RAM_BYTES and cpu_count >= _TURBO_MIN_CPU_COUNT:
-        return "turbo"
-    return "small"
-
-
 def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBackend, str]:
     """The default (backend, model) for a fresh local config on this machine.
 
-    English-first: on CPU we default to Parakeet, which is both faster and more
-    accurate than Whisper for English. CUDA and AMD also default to Parakeet
-    when the runtime is importable; readiness/doctor then verifies that the
-    requested accelerator provider actually exists instead of silently accepting
-    CPU fallback. A saved config selection always wins over this default.
+    Parakeet is the only dictation backend, on CPU, CUDA and AMD alike;
+    readiness/doctor verifies that a requested accelerator provider actually
+    exists instead of silently accepting CPU fallback. A saved config selection
+    always wins over this default.
     """
-    override = os.environ.get("DICTATE_FORCE_LOCAL_BACKEND")
-    if override in {"parakeet", "faster-whisper"}:
-        backend: SttBackend = override  # type: ignore[assignment]
-        return backend, DEFAULT_MODELS[backend]
-    if parakeet_available():
-        return "parakeet", DEFAULT_MODELS["parakeet"]
-    if device == "cuda" or (device == "auto" and _cuda_available_for_faster_whisper()):
-        return "faster-whisper", "turbo"
-    return "faster-whisper", resolve_default_local_model(device)
+    del device
+    return "parakeet", DEFAULT_MODELS["parakeet"]
+
+
+def saved_stt_selection(
+    backend: str | None,
+    model: str | None,
+) -> tuple[SttBackend | None, str | None]:
+    """Validate a dictation backend/model pair read from config.yaml.
+
+    Configs written before the Whisper backends were removed can still say
+    ``faster-whisper`` or ``whisperx`` with a Whisper model such as ``turbo``
+    (an unset backend used to mean faster-whisper too). Anything that is not a
+    registered backend is treated as unset, and its model is dropped with it so
+    a Whisper model name is never handed to Parakeet.
+    """
+    if backend not in BACKEND_REGISTRY:
+        return None, None
+    return backend, model  # type: ignore[return-value]
+
+
+def saved_meeting_selection(backend: str | None, model: str | None) -> tuple[SttBackend, str]:
+    """The Meeting backend/model from config.yaml, falling back to parakeet-pyannote."""
+    saved_backend, saved_model = saved_stt_selection(backend, model)
+    if saved_backend is None:
+        saved_backend = DEFAULT_MEETING_BACKEND
+    return saved_backend, resolve_model_name(saved_backend, saved_model)
 
 
 def create_speech_to_text(
     *,
-    backend: SttBackend = "faster-whisper",
+    backend: SttBackend = "parakeet",
     model: str | None = None,
     device: ComputeDevice = "auto",
     compute_type: ComputeType = "int8",
@@ -330,19 +203,6 @@ def check_backend_readiness(
     model_name = resolve_model_name(backend, model)
     report.notes.append(f"STT backend: {backend}")
     report.notes.append(f"STT model: {model_name}")
-
-    if backend == "faster-whisper":
-        try:
-            import faster_whisper  # noqa: F401
-        except Exception:  # noqa: BLE001
-            report.errors.append("faster-whisper package is not importable.")
-        if device == "amd":
-            report.errors.append(
-                "AMD GPU device requested for faster-whisper, but this backend only has "
-                "CPU/CUDA coverage in Dictate. Use Parakeet for the AMD GPU lane."
-            )
-        if device in {"cuda", "auto"}:
-            _check_cuda_with_ctranslate2(report, requested_device=device)
 
     if backend == "parakeet":
         if model_name not in PARAKEET_MODELS:
@@ -371,37 +231,8 @@ def check_backend_readiness(
     if backend == "parakeet-sortformer":
         _check_parakeet_sortformer(report, model_name=model_name, device=device)
 
-    if backend == "whisperx":
-        _check_whisperx(report, model_name=model_name, device=device)
-
     return report
 
-
-
-def _check_whisperx(
-    report: BackendReadiness,
-    *,
-    model_name: str,
-    device: ComputeDevice,
-) -> None:
-    if model_name not in WHISPERX_MODELS:
-        report.warnings.append(
-            f"WhisperX model '{model_name}' is not one of the built-in examples."
-        )
-    if whisperx_available():
-        report.notes.append("WhisperX package importable.")
-    else:
-        report.errors.append(
-            'WhisperX package is not importable. Install with: uv pip install -e ".[whisperx]"'
-        )
-    if not any(
-        os.environ.get(name)
-        for name in ("DICTATE_HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
-    ):
-        report.warnings.append(
-            "WhisperX diarization requires a Hugging Face token for pyannote models."
-        )
-    _check_cuda_with_torch(report, requested_device=device)
 
 
 def _check_parakeet_pyannote(
@@ -553,29 +384,6 @@ def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: Comput
     if cuda_available:
         device_name = torch.cuda.get_device_name(0)
         report.notes.append(f"CUDA detected: {device_name}")
-
-
-def _check_cuda_with_ctranslate2(
-    report: BackendReadiness,
-    *,
-    requested_device: ComputeDevice,
-) -> None:
-    try:
-        import ctranslate2
-    except Exception:  # noqa: BLE001
-        if requested_device == "cuda":
-            report.errors.append("CUDA was requested but ctranslate2 is not importable.")
-        return
-
-    cuda_count = int(ctranslate2.get_cuda_device_count())
-    if requested_device == "cuda" and cuda_count <= 0:
-        report.errors.append("CUDA device requested but CTranslate2 reports zero CUDA devices.")
-    elif requested_device == "auto" and cuda_count <= 0:
-        report.warnings.append(
-            "No CUDA devices detected by CTranslate2; faster-whisper will run on CPU."
-        )
-    elif cuda_count > 0:
-        report.notes.append(f"CTranslate2 CUDA devices detected: {cuda_count}")
 
 
 def _check_amd_with_onnxruntime(
