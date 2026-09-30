@@ -195,7 +195,6 @@ def _download_model_files(target: Path, spec: _ParakeetModelSpec, files: tuple[s
             spec.hf_repo,
             filename=name,
             local_dir=str(target),
-            local_dir_use_symlinks=False,
         )
 
 

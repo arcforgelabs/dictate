@@ -18,9 +18,9 @@ dependencies = [
     # minor so the CPU and CUDA lanes share one runtime.
     "onnx-asr>=0.12.0",
     "onnxruntime>=1.30,<1.31",
-    # Parakeet model download (hf_hub_download). 1.x drops the
-    # local_dir_use_symlinks argument the flat-directory staging passes.
-    "huggingface-hub>=0.36,<1",
+    # Parakeet model download (hf_hub_download into a flat local_dir). Came in
+    # transitively through faster-whisper until that was removed.
+    "huggingface-hub>=0.36",
 ]
 
 [project.optional-dependencies]
