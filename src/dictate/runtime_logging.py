@@ -41,6 +41,36 @@ class _TeeStderr:
         return bool(self.primary is not None and getattr(self.primary, "isatty", lambda: False)())
 
 
+def echo_dictated_text(label: str, text: str) -> None:
+    """Show dictated text on an interactive terminal, but never write it to a log.
+
+    stderr is mirrored into ``latest.log``, and when the app is launched from a
+    desktop session it is usually captured by the system journal as well. Only a
+    real terminal gets the words; everything else gets the length.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return
+    full = f"\r  {label}: {text}\n"
+    redacted = f"\r  {label}: [{len(text)} characters, not logged]\n"
+    if isinstance(stream, _TeeStderr):
+        if stream.primary is not None:
+            stream.primary.write(full if _is_tty(stream.primary) else redacted)
+            stream.primary.flush()
+        stream.secondary.write(redacted)
+        stream.secondary.flush()
+        return
+    stream.write(full if _is_tty(stream) else redacted)
+    stream.flush()
+
+
+def _is_tty(stream: Any) -> bool:
+    try:
+        return bool(stream.isatty())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def run_with_startup_logging(main_fn: Callable[[], int]) -> int:
     """Run CLI entrypoint with stderr mirrored to a persistent log file."""
     original_stderr = sys.stderr
