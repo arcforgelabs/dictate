@@ -1,5 +1,8 @@
-# Feeds new issues and ready PRs to the clawsweeper agent (arcforgelabs/.github
-# clawsweeper-activity.yml, upstream ClawSweeper notifier). Logs stay in this repo.
+# Sends issue activity and current-PR review requests to ClawSweeper on Arc Haven.
+# Inline copy of arcforgelabs/.github clawsweeper-activity.yml at
+# 0e2e1a9d91355fbe076746a7330b8f7bf99a62cb: dictate is public and GitHub does not
+# let public repositories call reusable workflows from the private .github repo.
+# Keep the adapter block identical to that source when refreshing the pin.
 name: ClawSweeper activity
 
 on:
@@ -7,7 +10,6 @@ on:
     types: [opened, reopened]
   pull_request_target: # trusted event adapter performs no checkout
     types: [opened, reopened, ready_for_review, synchronize, edited]
-
   issue_comment:
     types: [created]
 
@@ -15,8 +17,189 @@ permissions: {}
 
 jobs:
   notify:
-    uses: arcforgelabs/.github/.github/workflows/clawsweeper-activity.yml@0e2e1a9d91355fbe076746a7330b8f7bf99a62cb # arcforgelabs/.github main
-    secrets:
-      CLAWSWEEPER_OPENCLAW_HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
-      CLAWSWEEPER_OPENCLAW_HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
-      CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+    # Public repository: only org members and collaborators reach the gateway.
+    # Python validates the exact command and event again before any credential is used.
+    if: >-
+      ${{ (github.event_name == 'issue_comment' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+           startsWith(github.event.comment.body, '@clawsweeper')) ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+          (github.event_name == 'issues' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) }}
+    # No repository checkout and no pull-request code executes with the hook token.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    concurrency:
+      group: clawsweeper-activity-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Request a review of the current item
+        env:
+          DURABLE_QUEUE: ${{ vars.CLAWSWEEPER_DURABLE_QUEUE }}
+          QUEUE_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+          HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
+          HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
+        run: |
+          python3 - <<'PYTHON'
+          # review-event-adapter:start
+          import hashlib
+          import hmac
+          import time
+          import json
+          import os
+          import re
+          import urllib.request
+          import urllib.parse
+          from pathlib import Path
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise ValueError('Hook redirects are forbidden')
+
+          def hook_request(url, token, payload):
+              target = urllib.parse.urlsplit(url)
+              if target.scheme != 'https' or target.hostname != 'team.arcforge.au' or target.port not in (None, 443) or target.username is not None or target.password is not None or target.path != '/hooks/agent' or target.query or target.fragment:
+                  raise ValueError('Unexpected hook destination')
+              return urllib.request.Request(url, data=json.dumps(payload).encode(), method='POST', headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','User-Agent':'ArcForge-ClawSweeper/1.0','Idempotency-Key':payload['idempotencyKey']})
+
+          def review_request(event_name, event, repository, run_id):
+              if not re.fullmatch(r'arcforgelabs/[A-Za-z0-9_.-]+', repository):
+                  raise ValueError('Unexpected repository')
+              if event.get('repository', {}).get('full_name') != repository:
+                  raise ValueError('Event repository differs')
+              if repository == 'arcforgelabs/arc-forge-field':
+                  return None
+              action = event.get('action')
+              kind = None
+              if event_name == 'issues' and action in ('opened', 'reopened'):
+                  item = event.get('issue', {})
+                  kind = 'issue'
+              elif event_name == 'pull_request_target' and action in ('opened', 'reopened', 'ready_for_review', 'synchronize', 'edited'):
+                  item = event.get('pull_request', {})
+                  if type(item.get('draft')) is not bool:
+                      return None
+                  if action == 'edited' and 'body' not in event.get('changes', {}):
+                      return None
+                  kind = 'pull request'
+              elif event_name == 'issue_comment' and action == 'created':
+                  item = event.get('issue', {})
+                  comment = event.get('comment', {})
+                  if comment.get('author_association') not in ('OWNER', 'MEMBER', 'COLLABORATOR'):
+                      return None
+                  if not re.fullmatch(r'@clawsweeper(?:\[bot\])?\s+(?:review|re-review)\s*', comment.get('body', ''), re.IGNORECASE):
+                      return None
+                  kind = 'pull request' if isinstance(item.get('pull_request'), dict) else 'issue'
+              else:
+                  return None
+              number = item.get('number')
+              if type(number) is not int or number < 1 or item.get('state') != 'open':
+                  return None
+              # No titles, bodies or arbitrary comment text enter the model instruction.
+              message = '\n'.join([
+                  'You are ingesting general GitHub activity for ClawSweeper.',
+                  f'Event: {event_name}.{action}',
+                  f'Repository: {repository}',
+                  f'Subject: {kind} #{number}',
+                  f'URL: https://github.com/{repository}/' + ('pull/' if kind == 'pull request' else 'issues/') + str(number),
+                  'Request a fresh review following the gateway workspace AGENTS.md. Delegate to the item session and return NO_REPLY.',
+              ])
+              key = hashlib.sha256(f'{repository}:{event_name}:{action}:{number}:{run_id}'.encode()).hexdigest()
+              return {'name':'GitHub review request','agentId':'clawsweeper','deliver':False,'idempotencyKey':key,'thinking':'low','timeoutSeconds':60,'waitForCompletion':True,'message':message}
+          # Receipts are bounded host provenance, not child liveness or review completion.
+          MAX_ACCEPTED_DELEGATIONS = 32
+          MAX_RUN_ID_LENGTH = 128
+
+          def valid_run_id(value):
+              if not isinstance(value, str) or not 1 <= len(value) <= MAX_RUN_ID_LENGTH:
+                  return False
+              return re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]*', value) is not None
+
+          def child_acceptance_count(result, completion):
+              receipts = completion.get('acceptedDelegations')
+              if type(receipts) is not list or len(receipts) > MAX_ACCEPTED_DELEGATIONS:
+                  raise ValueError('Gateway review dispatch receipt is malformed')
+              if not receipts:
+                  return 0
+              parent = result.get('runId')
+              if not valid_run_id(parent):
+                  raise ValueError('Gateway review dispatch receipt is malformed')
+              accepted = 0
+              for receipt in receipts:
+                  if type(receipt) is not dict:
+                      raise ValueError('Gateway review dispatch receipt is malformed')
+                  child = receipt.get('runId')
+                  if not valid_run_id(child) or child == parent:
+                      raise ValueError('Gateway review dispatch receipt is malformed')
+                  if 'expectsCompletionMessage' in receipt and type(receipt.get('expectsCompletionMessage')) is not bool:
+                      raise ValueError('Gateway review dispatch receipt is malformed')
+                  accepted += 1
+              return accepted
+
+          def dispatch_outcome(result):
+              if type(result) is not dict or result.get('ok') is not True:
+                  raise ValueError('Gateway did not accept the review request')
+              completion = result.get('completion')
+              if type(completion) is not dict:
+                  raise ValueError('Gateway review dispatch did not complete successfully')
+              status = completion.get('status')
+              if status == 'ok':
+                  if 'acceptedDelegations' in completion:
+                      child_acceptance_count(result, completion)
+                  return {'outcome':'parent_dispatch','message':'Gateway review dispatch acknowledged','warning':None}
+              if status == 'error' and 'acceptedDelegations' in completion and child_acceptance_count(result, completion) >= 1:
+                  return {'outcome':'child_acceptance','message':'Gateway review dispatch acknowledged from an accepted child delegation','warning':'Gateway parent completion status is error'}
+              raise ValueError('Gateway review dispatch did not complete successfully')
+
+          # review-event-adapter:end
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          payload = review_request(os.environ['GITHUB_EVENT_NAME'], event, os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          if payload is None:
+              print('No review requested for this event')
+              raise SystemExit(0)
+          # Reuse the validated event filter above. Issues retain their advisory hook;
+          # PRs opt into the upstream durable queue without starting a chat session.
+          pr = event.get('pull_request')
+          issue_pr = event.get('issue', {}).get('pull_request')
+          if os.environ.get('DURABLE_QUEUE') == '1' and (pr or issue_pr):
+              secret = os.environ.get('QUEUE_SECRET')
+              if not secret:
+                  raise SystemExit('Durable queue credential is missing')
+              item = pr or event['issue']
+              decision = {'targetRepo': os.environ['GITHUB_REPOSITORY'],
+                  'targetBranch': (pr or {}).get('base', {}).get('ref') or event['repository']['default_branch'],
+                  'itemNumber': item['number'], 'itemKind':'pull_request', 'sourceEvent':'pull_request',
+                  'sourceAction': event['action'] if pr else 'comment_review', 'supersedesInProgress':True}
+              if pr:
+                  decision.update(sourceHeadSha=pr['head']['sha'],sourceBaseSha=pr['base']['sha'],sourceIsDraft=pr['draft'],sourceUpdatedAt=pr['updated_at'])
+              data = json.dumps({'delivery_id':payload['idempotencyKey'], 'decision':decision},separators=(',',':')).encode()
+              signed = hmac.new(secret.encode(),data,hashlib.sha256).hexdigest()
+              for attempt in range(4):
+                  req = urllib.request.Request('https://clawsweeper.arcforge.au/internal/exact-review/enqueue',data=data,
+                      headers={'User-Agent':'ArcForge-ClawSweeper/1.0','Content-Type':'application/json','x-clawsweeper-exact-review-signature':'sha256='+signed},method='POST')
+                  try:
+                      with urllib.request.build_opener(NoRedirect()).open(req,timeout=30) as response:
+                          receipt=json.load(response)
+                      if receipt.get('ok') is not True:
+                          raise ValueError('Queue did not acknowledge persistence')
+                      print('Review persisted in the durable queue')
+                      raise SystemExit(0)
+                  except (urllib.error.URLError, TimeoutError):
+                      if attempt == 3:
+                          raise SystemExit('Durable queue intake unavailable after four attempts') from None
+                      time.sleep(2**attempt)
+          request = hook_request(os.environ['HOOK_URL'], os.environ['HOOK_TOKEN'], payload)
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=75) as response:
+                  result = json.load(response)
+          except Exception as error:
+              # Do not print the hook URL/token or server response body.
+              raise SystemExit('Gateway review request failed: '+type(error).__name__) from None
+          try:
+              outcome = dispatch_outcome(result)
+          except ValueError as error:
+              raise SystemExit(str(error)) from None
+          if outcome['warning']:
+              print('::warning::' + outcome['warning'])
+          print(outcome['message'])
+          PYTHON
