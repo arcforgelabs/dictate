@@ -165,11 +165,15 @@ class SttRegistryTests(unittest.TestCase):
             any("no AMD-capable execution provider" in item for item in [*report.notes, *report.warnings])
         )
 
-    def test_pyproject_exposes_windows_amd_extra(self) -> None:
+    def test_pyproject_ships_no_gpu_runtime(self) -> None:
         pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-        amd_deps = pyproject["project"]["optional-dependencies"]["amd"]
-        self.assertTrue(any("onnxruntime-directml" in dependency for dependency in amd_deps))
-        self.assertTrue(any("platform_machine == 'AMD64'" in dependency for dependency in amd_deps))
+        project = pyproject["project"]
+        self.assertNotIn("gpu", project["optional-dependencies"])
+        self.assertNotIn("amd", project["optional-dependencies"])
+        dependencies = [*project["dependencies"], *sum(project["optional-dependencies"].values(), [])]
+        for dependency in dependencies:
+            self.assertNotIn("onnxruntime-gpu", dependency)
+            self.assertNotIn("onnxruntime-directml", dependency)
 
     def test_pyproject_exposes_meeting_extra_for_pyannote_lane(self) -> None:
         pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))

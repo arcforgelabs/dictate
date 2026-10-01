@@ -5,11 +5,16 @@ param(
     [switch]$NoStartup,
     [switch]$Meeting,
     [switch]$RecreateVenv,
+    # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
     [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ForceCuda -or $NoCuda) {
+    Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function Test-PythonVersion {
@@ -95,41 +100,19 @@ function Ensure-VcRuntime {
     }
 }
 
-function Test-NvidiaGpu {
-    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if ($nvidiaSmi) {
-        return $true
-    }
-
-    try {
-        $controllers = Get-CimInstance Win32_VideoController -ErrorAction Stop
-        foreach ($controller in $controllers) {
-            $name = [string]$controller.Name
-            $compatibility = [string]$controller.AdapterCompatibility
-            $pnpDeviceId = [string]$controller.PNPDeviceID
-            if (
-                $name -match "NVIDIA" -or
-                $compatibility -match "NVIDIA" -or
-                $pnpDeviceId -match "VEN_10DE"
-            ) {
-                return $true
-            }
-        }
-    } catch {
-        return $false
-    }
-
-    return $false
-}
-
-function Ensure-OnnxCudaRuntime {
+function Remove-RetiredGpuRuntime {
     param([string]$PythonExe)
 
-    # onnxruntime-gpu 1.27+ bundles CUDA 13 runtime DLLs, which need NVIDIA
-    # driver 580 or newer. Older drivers fall back to CPU at model load.
-    Write-Host "==> Installing ONNX Runtime CUDA provider (CUDA 13; NVIDIA driver 580+)"
-    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "uninstall", "-y", "onnxruntime") -Description "Removing CPU-only ONNX Runtime"
-    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "install", "--upgrade", "onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31") -Description "Installing ONNX Runtime GPU with CUDA/cuDNN DLLs"
+    # Installs from before 2026-10-01 may carry a GPU build of ONNX Runtime.
+    # It shares files with the CPU onnxruntime package, so remove both and let
+    # the package install below lay down a clean CPU runtime.
+    $probe = "import importlib.metadata as m; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; print(' '.join(n for n in ('onnxruntime-gpu', 'onnxruntime-directml') if n in names))"
+    $retired = (& $PythonExe -c $probe | Out-String).Trim()
+    if (-not $retired) {
+        return
+    }
+    Write-Host "==> Removing retired GPU ONNX Runtime ($retired); Dictate runs on the CPU only"
+    Invoke-Checked -Exe $PythonExe -ArgumentList (@("-m", "pip", "uninstall", "-y") + ($retired -split " ") + @("onnxruntime")) -Description "Removing retired GPU ONNX Runtime"
 }
 
 function Get-AppDataConfigPath {
@@ -424,17 +407,13 @@ if (-not (Test-Path $venvPython)) {
 }
 
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
+Remove-RetiredGpuRuntime -PythonExe $venvPython
 $installExtras = @("windows")
 if ($Meeting) {
     $installExtras += "meeting"
 }
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
-
-$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))
-if ($installCuda) {
-    Ensure-OnnxCudaRuntime -PythonExe $venvPython
-}
 
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
@@ -453,9 +432,6 @@ if (-not $NoPrepareTurbo) {
 
 if (-not $NoVerify) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--quick", "--type-backend", "pynput") -Description "Running Dictate doctor"
-    if ($installCuda) {
-        Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda", "--quick", "--type-backend", "pynput") -Description "Running Dictate CUDA doctor"
-    }
 }
 
 Write-Host ""

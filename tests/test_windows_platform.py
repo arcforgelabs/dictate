@@ -210,16 +210,9 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertIn("[switch]$NoStartup", script)
         self.assertIn("[switch]$Meeting", script)
-        self.assertIn("[switch]$ForceCuda", script)
-        self.assertIn("[switch]$NoCuda", script)
         self.assertIn('$installExtras = @("windows")', script)
         self.assertIn('$installExtras += "meeting"', script)
         self.assertIn('$installTarget = "${PSScriptRoot}[$($installExtras -join', script)
-        self.assertIn("function Test-NvidiaGpu", script)
-        self.assertIn("function Ensure-OnnxCudaRuntime", script)
-        self.assertIn('onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31', script)
-        self.assertIn('$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))', script)
-        self.assertIn('"dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
         self.assertIn('"%SCRIPT_DIR%dictate.exe" --type-backend pynput %*', script)
@@ -400,17 +393,54 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("https://aka.ms/vs/17/release/vc_redist.x64.exe", script)
         self.assertIn("Ensure-VcRuntime", script)
 
-    def test_hosted_windows_wrappers_pass_cuda_options_through(self) -> None:
+    def test_windows_installers_install_no_gpu_runtime(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        install_script = (root / "install.ps1").read_text(encoding="utf-8")
-        update_script = (root / "update.ps1").read_text(encoding="utf-8")
-        source_update_script = (root / "update-windows.ps1").read_text(encoding="utf-8")
+        installer = (root / "install-windows.ps1").read_text(encoding="utf-8")
 
-        for script in (install_script, update_script, source_update_script):
-            self.assertIn("[switch]$ForceCuda", script)
-            self.assertIn("[switch]$NoCuda", script)
-            self.assertIn('if ($ForceCuda) {', script)
-            self.assertIn('if ($NoCuda) {', script)
+        for removed in ("Test-NvidiaGpu", "Ensure-OnnxCudaRuntime", "$installCuda", '"--device", "cuda"'):
+            self.assertNotIn(removed, installer)
+        self.assertNotIn('"install", "--upgrade", "onnxruntime-gpu', installer)
+        # The only GPU package names left are the ones the cleanup removes from
+        # installs made before Dictate went CPU-only.
+        self.assertIn("function Remove-RetiredGpuRuntime", installer)
+        self.assertIn("('onnxruntime-gpu', 'onnxruntime-directml')", installer)
+        self.assertLess(
+            installer.index("Remove-RetiredGpuRuntime -PythonExe $venvPython"),
+            installer.index('"pip", "install", "-e", $installTarget'),
+        )
+        for name in ("install.ps1", "update.ps1", "update-windows.ps1", "install-windows-wizard.ps1"):
+            script = (root / name).read_text(encoding="utf-8").lower()
+            for marker in ("onnxruntime-gpu", "directml", "cuda doctor", "nvidia"):
+                self.assertNotIn(marker, script, name)
+
+    def test_windows_scripts_accept_and_ignore_retired_cuda_switches(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for name in ("install.ps1", "update.ps1", "update-windows.ps1", "install-windows.ps1"):
+            script = (root / name).read_text(encoding="utf-8")
+            # Kept as parameters so existing update commands still bind.
+            self.assertIn("[switch]$ForceCuda", script, name)
+            self.assertIn("[switch]$NoCuda", script, name)
+            self.assertIn('Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."', script, name)
+            self.assertNotIn('+= "-ForceCuda"', script, name)
+            self.assertNotIn('+= "-NoCuda"', script, name)
+
+    def test_linux_installer_ignores_retired_gpu_flags(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        script = (root / "install.sh").read_text(encoding="utf-8")
+        self.assertNotIn("INSTALL_GPU", script)
+        self.assertNotIn('EXTRAS+=("gpu")', script)
+
+        # Parsing stops at --help before any install step runs.
+        completed = subprocess.run(
+            ["bash", str(root / "install.sh"), "--gpu", "--no-gpu", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Ignoring --gpu: Dictate runs on the CPU only.", completed.stderr)
+        self.assertIn("Ignoring --no-gpu: Dictate runs on the CPU only.", completed.stderr)
+        self.assertNotIn("--gpu", completed.stdout)
 
     def test_doctor_fix_items_include_vc_runtime_hint(self) -> None:
         report = types.SimpleNamespace(
