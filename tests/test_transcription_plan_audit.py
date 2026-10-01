@@ -18,7 +18,7 @@ spec.loader.exec_module(audit_module)
 
 
 class TranscriptionPlanAuditTests(unittest.TestCase):
-    def test_audit_reports_synthetic_cuda_pass_and_external_blockers(self) -> None:
+    def test_audit_reports_meeting_blocker_without_gpu_gates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _write_minimal_plan(root)
@@ -46,18 +46,16 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
 
         self.assertEqual(gates["canonical_plan"].status, "pass")
         self.assertEqual(gates["benchmark_fixture_tooling"].status, "pass")
-        self.assertEqual(gates["cuda_vs_cpu_synthetic"].status, "pass")
-        self.assertEqual(gates["cuda_multilingual_synthetic"].status, "pass")
-        self.assertEqual(gates["cuda_human_promotion"].status, "blocked")
         self.assertEqual(gates["meeting_speaker_attribution"].status, "blocked")
         self.assertIn("parakeet-pyannote", gates["meeting_speaker_attribution"].detail)
         self.assertIn("parakeet-diarizen", gates["meeting_speaker_attribution"].detail)
         self.assertIn("parakeet-sortformer", gates["meeting_speaker_attribution"].detail)
-        self.assertEqual(gates["amd_radeon_performance"].status, "blocked")
         self.assertEqual(gates["update_scope_decision"].status, "pass")
         self.assertTrue(audit_module.has_blockers(gates.values()))
+        # CPU only: CUDA and AMD evidence no longer gates readiness.
+        self.assertFalse({name for name in gates if name.startswith(("cuda_", "amd_"))})
 
-    def test_audit_accepts_promoted_meeting_and_amd_artifacts(self) -> None:
+    def test_audit_accepts_promoted_meeting_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _write_minimal_plan(root)
@@ -117,59 +115,7 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
-        self.assertEqual(gates["cuda_human_promotion"].status, "pass")
         self.assertEqual(gates["meeting_speaker_attribution"].status, "pass")
-        self.assertEqual(gates["amd_radeon_performance"].status, "pass")
-
-    def test_readiness_report_maps_missing_amd_artifacts_to_human_test_blockers(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
-                device="cpu",
-                rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-human-gated.json",
-                device="cuda",
-                rtfx=14.0,
-                model="parakeet-tdt-0.6b-v2",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-human-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_meeting_failure(root)
-            _write_single_meeting_success(root, "parakeet-sortformer")
-
-            items = {item.name: item for item in audit_module.readiness_report(audit_module.audit(root))}
-
-        self.assertEqual(items["NVIDIA English"].status, "ready")
-        self.assertEqual(items["NVIDIA multilingual"].status, "ready")
-        self.assertEqual(items["Meeting"].status, "ready")
-        self.assertEqual(items["AMD English"].status, "blocked")
-        self.assertEqual(items["AMD multilingual"].status, "blocked")
-        self.assertIn("parakeet-v2-amd-human-gated.json", items["AMD English"].detail)
 
     def test_readiness_report_marks_all_acceptance_items_ready_when_gates_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,100 +210,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
         self.assertEqual(gates["meeting_speaker_attribution"].status, "pass")
         self.assertIn("parakeet-sortformer DER", gates["meeting_speaker_attribution"].detail)
         self.assertIn("remaining candidates", gates["meeting_speaker_attribution"].detail)
-
-    def test_audit_rejects_single_generic_amd_artifact(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
-                device="cpu",
-                rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-amd-radeon.json",
-                device="amd",
-                rtfx=12.0,
-                boundary_pairs=4,
-            )
-            _write_meeting_success(root)
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        self.assertEqual(gates["amd_radeon_performance"].status, "blocked")
-        self.assertIn("parakeet-v2-amd-human-gated.json", gates["amd_radeon_performance"].detail)
-
-    def test_audit_rejects_amd_artifacts_without_amd_hardware_provenance(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
-                device="cpu",
-                rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-human-gated.json",
-                device="cuda",
-                rtfx=14.0,
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-human-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-amd-human-gated.json",
-                device="amd",
-                rtfx=12.0,
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-amd-human-gated.json",
-                device="amd",
-                rtfx=13.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_meeting_success(root)
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        self.assertEqual(gates["amd_radeon_performance"].status, "blocked")
-        self.assertIn("no AMD/Radeon hardware provenance", gates["amd_radeon_performance"].detail)
 
     def test_audit_rejects_lane_runner_without_preflight_markers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

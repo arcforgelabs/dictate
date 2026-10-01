@@ -31,11 +31,10 @@ def audit(root: Path) -> list[Gate]:
     gates = [
         _plan_doc_gate(root),
         _fixture_tooling_gate(root),
-        _cuda_cpu_comparison_gate(root),
-        _cuda_multilingual_gate(root),
-        _cuda_human_promotion_gate(root),
+        # CUDA and AMD lanes are no longer supported (CPU only); their gates
+        # are not readiness blockers. Removal of the gate code is tracked in
+        # the GPU extraction issues.
         _meeting_promotion_gate(root),
-        _amd_performance_gate(root),
         _windows_vm_evidence_gate(root),
         _update_scope_gate(root),
     ]
@@ -74,42 +73,6 @@ def readiness_report(gates: Iterable[Gate]) -> list[ReadinessItem]:
             gates=["canonical_plan", "benchmark_fixture_tooling"],
         ),
         ReadinessItem(
-            name="NVIDIA English",
-            status=status_for(["cuda_vs_cpu_synthetic", "cuda_human_promotion"]),
-            detail=detail_for(
-                ["cuda_vs_cpu_synthetic", "cuda_human_promotion"],
-                "CUDA Parakeet v2 has same-fixture speed evidence plus curated-human promotion artifacts.",
-            ),
-            gates=["cuda_vs_cpu_synthetic", "cuda_human_promotion"],
-        ),
-        ReadinessItem(
-            name="NVIDIA multilingual",
-            status=status_for(["cuda_multilingual_synthetic", "cuda_human_promotion"]),
-            detail=detail_for(
-                ["cuda_multilingual_synthetic", "cuda_human_promotion"],
-                "Parakeet v3 CUDA has timestamped synthetic evidence and curated-human promotion coverage.",
-            ),
-            gates=["cuda_multilingual_synthetic", "cuda_human_promotion"],
-        ),
-        ReadinessItem(
-            name="AMD English",
-            status=status_for(["amd_radeon_performance"]),
-            detail=detail_for(
-                ["amd_radeon_performance"],
-                "Parakeet v2 AMD Radeon artifact is present and above the CPU baseline.",
-            ),
-            gates=["amd_radeon_performance"],
-        ),
-        ReadinessItem(
-            name="AMD multilingual",
-            status=status_for(["amd_radeon_performance"]),
-            detail=detail_for(
-                ["amd_radeon_performance"],
-                "Parakeet v3 AMD Radeon artifact is present and above the CPU baseline.",
-            ),
-            gates=["amd_radeon_performance"],
-        ),
-        ReadinessItem(
             name="Meeting",
             status=status_for(["meeting_speaker_attribution"]),
             detail=detail_for(
@@ -132,7 +95,7 @@ def readiness_report(gates: Iterable[Gate]) -> list[ReadinessItem]:
             status=status_for(["windows_vm_package_evidence"]),
             detail=detail_for(
                 ["windows_vm_package_evidence"],
-                "Windows install, lifecycle, AMD DirectML readiness, no-bundle build, and MSIX evidence are documented.",
+                "Windows install, lifecycle, no-bundle build, and MSIX evidence are documented.",
             ),
             gates=["windows_vm_package_evidence"],
         ),
@@ -708,7 +671,6 @@ def _windows_vm_evidence_gate(root: Path) -> Gate:
         "mode install --timeout 1800",
         "mode lifecycle --timeout 2400",
         "mode build --timeout 1800",
-        "mode amd --timeout 1800",
         "mode msix --timeout 2400",
         "dictate-ui-shell.exe",
         "engine\\dictate-engine.exe",
@@ -723,7 +685,7 @@ def _windows_vm_evidence_gate(root: Path) -> Gate:
     return Gate(
         "windows_vm_package_evidence",
         "pass",
-        "current Windows install/lifecycle/build/AMD/MSIX VM evidence is documented",
+        "current Windows install/lifecycle/build/MSIX VM evidence is documented",
     )
 
 

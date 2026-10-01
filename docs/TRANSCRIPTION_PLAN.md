@@ -17,12 +17,16 @@ Ship a clean local-first transcription stack where:
 
 1. Push-to-talk dictation and plain recordings use the same verbatim ASR path.
 2. Meeting mode always produces a speaker-attributed transcript.
-3. Parakeet is the local ASR foundation across CPU, NVIDIA GPU, and AMD GPU
-   lanes.
+3. Parakeet on the CPU is the local ASR foundation. Dictate does not support
+   GPUs: NVIDIA CUDA and AMD lanes were dropped on 2026-10-01 to focus on CPU
+   latency on the machines people already have. Removing the remaining GPU code
+   is tracked in #110, #111 and #112; GPU may return later as a separate
+   decision.
 4. Whisper is gone: faster-whisper, WhisperX and whisper.cpp were removed on
    2026-09-30. Parakeet v2 (English) and v3 (25 European languages) cover
    dictation.
-5. AMD GPU support is first-class, not a fallback footnote.
+5. Latency from releasing the shortcut to text appearing, measured on everyday
+   CPU machines, is the performance target.
 
 ## Deployable Goal
 
@@ -30,9 +34,8 @@ Set this document as the active scoped deployment goal for local transcription
 and release evidence:
 
 > Implement `docs/TRANSCRIPTION_PLAN.md` end to end so Dictate is ready for
-> human testing on machines with the capabilities named here, including local
-> CPU, NVIDIA CUDA, AMD GPU readiness, meeting speaker attribution, and a
-> Windows build verified in the local VM lab.
+> human testing on everyday CPU machines, including meeting speaker
+> attribution and a Windows build verified in the local VM lab.
 
 This document is the source of truth only for the scoped transcription/model
 deployment. Older goal, model-research, and cost-planning notes are archived or
@@ -64,10 +67,11 @@ Current verified state:
 1. Linux source/local install is usable for human testing on this workstation.
 2. Fresh CPU English installs default to Parakeet v2 where the runtime is
    available.
-3. Parakeet CUDA loaded and passed doctor, model-prepare, and silence-smoke
-   checks on the CUDA 12 lane (onnxruntime-gpu 1.23.2). The GPU has since moved
-   out of the Linux host into the `win11-gpu` GPU-passthrough VM (with WSL2),
-   and the CUDA 13 lane (onnxruntime 1.30) has not yet been run there.
+3. GPU lanes are no longer supported (2026-10-01). Last evidence, for the
+   record: Parakeet v2 int8 loaded on CUDA 13 (onnxruntime-gpu 1.30, RTX 4090 in
+   `win11-gpu` WSL2) on 2026-10-01, but only after working around a broken GPU
+   install path (#109, closed), and with 742 CPU/GPU memcpy nodes, so int8 on
+   CUDA was not a clear win.
 4. The Windows `win11-dev` VM passes source install, update, uninstall, and
    desktop build smokes, including Store MSIX packaging.
 5. The Windows human-test artifacts currently proven in the local VM are the
@@ -80,22 +84,20 @@ Current verified state:
 
 Deployment blockers before calling this plan complete:
 
-1. Promote Parakeet CUDA from synthetic benchmark evidence to curated human
-   speech benchmark evidence suitable for a product lane.
-2. Validate AMD GPU execution on representative Linux ROCm/MIGraphX and Windows
-   DirectML or AMD-capable ONNX Runtime machines.
-3. Benchmark and promote at least one local speaker-attribution lane for
-   Meeting mode.
-4. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
+1. Measure end-to-end dictation latency on CPU on the two daily machines
+   (X Forge and the Framework laptop) and tune where the numbers point.
+2. Benchmark and promote at least one local speaker-attribution lane for
+   Meeting mode, on CPU.
+3. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
    initial Parakeet+pyannote Community-1 backend against the same meeting
    fixtures.
-5. Ship integrated timestamp/segment/speaker metadata instead of string-only
+4. Ship integrated timestamp/segment/speaker metadata instead of string-only
    transcripts all the way through the meeting UI/export workflow. The backend,
    engine, daemon, note-store, live expanded-note UI, and Markdown export
    foundation now exists, and persisted notes rehydrate with speaker/timestamp
    segments after restart. Notes search and list-level Markdown export are
    segment-aware. Timestamp quality validation remains.
-6. Decide the public Windows promotion path: current VM evidence proves the
+5. Decide the public Windows promotion path: current VM evidence proves the
    no-bundle executable and MSIX packaging paths; MSI/NSIS direct-download
    bundling is still not promoted.
 7. Staged update preparation is deferred out of the human-test release. The
@@ -119,16 +121,18 @@ or similar engine terms.
 | Lane | Target | Status | Decision |
 | --- | --- | --- | --- |
 | English CPU | Parakeet v2, `nvidia/parakeet-tdt-0.6b-v2` | Wired today through ONNX/onnx-asr CPU path | Default English local lane. |
-| English NVIDIA GPU | Parakeet v2 through CUDA-capable runtime | Fresh default when Parakeet is available; wired for smoke, not benchmark-promoted | Same English model, GPU runtime for speed. |
-| Multilingual NVIDIA GPU | Parakeet v3, `nvidia/parakeet-tdt-0.6b-v3` | Wired for model selection, not benchmark-promoted | Strategic multilingual local lane. |
-| Multilingual CPU | Parakeet v3 | Feasibility benchmark | Use only if CPU latency is acceptable. |
-| English AMD GPU | Parakeet v2 through AMD runtime | Fresh default when Parakeet is available; explicit provider readiness wired | First-class AMD lane. |
-| Multilingual AMD GPU | Parakeet v3 through AMD runtime | Model wired, representative AMD validation still required | First-class AMD lane. |
+| Multilingual CPU | Parakeet v3, `nvidia/parakeet-tdt-0.6b-v3` | Feasibility benchmark | Use only if CPU latency is acceptable. |
+
+NVIDIA CUDA and AMD (ROCm/MIGraphX, DirectML) lanes were dropped on
+2026-10-01. Their code is still present until #110, #111 and #112 land; treat
+it as unsupported, and do not add GPU evidence gates.
 
 The `faster-whisper/large-v3` bridge for this workstation was removed on
 2026-09-30.
 
 ## Implementation Status
+
+The GPU paragraphs below are history: GPU lanes were dropped on 2026-10-01.
 
 As of 2026-07-05, Dictate accepts `amd` as an explicit compute-device lane in
 the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
