@@ -26,9 +26,11 @@ if command -v uv >/dev/null 2>&1; then
   VPY="$BUILD_VENV/bin/python"
   # Linux .deb must stay under GitHub's 2 GiB release-asset limit. Default
   # PyTorch wheels pull CUDA/nvidia/triton (~4+ GiB). Pin the CPU index first so
-  # the meeting extra resolves against it.
+  # the meeting extra resolves against it. torchaudio must come from the same
+  # index: the PyPI build links libcudart, cannot import beside CPU torch, and
+  # then PyInstaller silently skips pyannote's model modules (Meeting breaks).
   if [ "$(uname -s)" = "Linux" ]; then
-    uv pip install --python "$VPY" torch --index-url https://download.pytorch.org/whl/cpu --quiet
+    uv pip install --python "$VPY" torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
   fi
   uv pip install --python "$VPY" -e "$ROOT[x11,wayland,meeting]" pyinstaller --quiet
 else
@@ -36,7 +38,7 @@ else
   VPY="$BUILD_VENV/bin/python"
   "$VPY" -m pip install --upgrade pip --quiet
   if [ "$(uname -s)" = "Linux" ]; then
-    "$VPY" -m pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet
+    "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
   fi
   "$VPY" -m pip install -e "$ROOT[x11,wayland,meeting]" pyinstaller --quiet
 fi

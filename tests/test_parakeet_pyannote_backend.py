@@ -160,6 +160,26 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
         self.assertEqual(fake_asr.segment_lengths, [16000, 16000])
         self.assertEqual(out, "Speaker 1: text-16000\nSpeaker 2: text-16000")
 
+    def test_pipeline_gets_in_memory_waveform_not_a_file(self) -> None:
+        stt = ParakeetPyannoteSpeechToText()
+        stt._asr = _FakeAsr()  # type: ignore[assignment]
+        seen: list[object] = []
+
+        def pipeline(audio: object) -> list[dict[str, object]]:
+            seen.append(audio)
+            return []
+
+        stt._pipeline = pipeline
+        stt.transcribe_diarized(np.full(16000, 2.0, dtype=np.float32))
+
+        self.assertEqual(len(seen), 1)
+        audio = seen[0]
+        self.assertIsInstance(audio, dict)
+        assert isinstance(audio, dict)
+        self.assertEqual(audio["sample_rate"], 16000)
+        self.assertEqual(tuple(audio["waveform"].shape), (1, 16000))
+        self.assertEqual(float(audio["waveform"].max()), 1.0)
+
     def test_transcribe_diarized_segments_offsets_parakeet_subsegment_timestamps(self) -> None:
         stt = ParakeetPyannoteSpeechToText()
         fake_asr = _FakeSegmentAsr()
