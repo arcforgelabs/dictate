@@ -74,6 +74,10 @@ jobs:
           }
           Write-Output "Windows release gate passed for v${version}: $($passed.url)"
 
+      - name: Restore bundled-model and wheel caches
+        if: inputs.mode == 'draft'
+        uses: ./.github/actions/cache-build-inputs
+
       - name: Build Store MSIX
         if: inputs.mode == 'draft'
         shell: pwsh

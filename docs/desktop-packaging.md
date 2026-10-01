@@ -47,7 +47,20 @@ Hugging Face appears in the build pipeline only because pyannote Community-1 is
 a gated upstream model. The build needs access to the already-approved model
 once, before packaging, so it can copy the model snapshot into
 `ui-shell/src-tauri/engine/models/`. Parakeet v2 int8 is public and does not
-need a private token. Runtime customer installs must prefer the bundled model
+need a private token.
+
+Both models are pinned to the Hugging Face commits in
+`packaging/model-revisions.json`. The staging scripts fetch each one once into
+the build model cache (`~/.cache/dictate-build-models/<owner>--<repo>@<revision>`,
+or `DICTATE_MODEL_CACHE_DIR`) and copy it into the stage dir, so the token is
+needed only on a cache miss; the build checks this before the slow steps
+(`scripts/prepare-pyannote-community-model.py --check-cache`). In CI the
+`.github/actions/cache-build-inputs` action restores that cache, keyed on the
+revisions file, plus the pip/uv wheel cache (CPU torch included). Release tags
+read caches saved on `master`, so after bumping a revision, run a bundle
+workflow (for example Desktop bundle or Windows desktop bundle) from `master`
+to warm the cache before tagging. To bump a model, update its commit in
+`packaging/model-revisions.json`. Runtime customer installs must prefer the bundled model
 paths and must not ask customers for Hugging Face credentials for the shipped
 default dictation or Meeting paths.
 

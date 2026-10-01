@@ -1,0 +1,45 @@
+name: Cache desktop build inputs
+description: >-
+  Restore (and on success save) what a desktop bundle build would otherwise
+  download every run: the bundled models at their pinned revisions and the
+  Python wheels, CPU torch included. A model cache hit needs no Hugging Face
+  token. Tag builds read caches saved on the default branch, so a bundle build
+  dispatched from master after a revision bump warms the cache for releases.
+
+inputs:
+  python-version:
+    description: Python version of the build venv; part of the wheel cache key.
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    # The cache dir names each model <owner>--<repo>@<revision>, and the key is
+    # exactly the pinned revisions, so a hit stages byte-identical files.
+    - name: Cache bundled models
+      uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
+      with:
+        path: ~/.cache/dictate-build-models
+        key: dictate-build-models-${{ runner.os }}-${{ hashFiles('packaging/model-revisions.json') }}
+
+    # build-engine.sh installs with uv when present, pip otherwise.
+    - name: Cache Python wheels (Linux)
+      if: runner.os != 'Windows'
+      uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.cache/uv
+        key: dictate-build-wheels-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        restore-keys: |
+          dictate-build-wheels-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Cache Python wheels (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: dictate-build-wheels-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        restore-keys: |
+          dictate-build-wheels-${{ runner.os }}-py${{ inputs.python-version }}-

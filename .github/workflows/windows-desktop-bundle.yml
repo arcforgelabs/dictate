@@ -38,6 +38,9 @@ jobs:
         shell: pwsh
         run: choco install wixtoolset nsis -y --no-progress
 
+      - name: Restore bundled-model and wheel caches
+        uses: ./.github/actions/cache-build-inputs
+
       - name: Build the Windows desktop bundle
         shell: pwsh
         env:

@@ -15,10 +15,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 BUILD_VENV="$HERE/.build-venv"
 
-if [ -z "${DICTATE_HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-${HF_TOKEN:-}}}" ]; then
-  echo "✗ staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN" >&2
-  exit 1
-fi
+# Bundled models come from the build model cache (~/.cache/dictate-build-models,
+# or DICTATE_MODEL_CACHE_DIR) at the revisions pinned in
+# packaging/model-revisions.json. The gated pyannote snapshot needs a Hugging
+# Face token only on a cache miss; fail before the slow venv build if it would.
+echo "▶ checking the bundled model cache"
+"$PYTHON" "$ROOT/scripts/prepare-pyannote-community-model.py" --check-cache
 
 echo "▶ creating isolated build venv"
 if command -v uv >/dev/null 2>&1; then

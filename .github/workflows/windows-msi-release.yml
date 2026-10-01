@@ -69,6 +69,9 @@ jobs:
         shell: pwsh
         run: choco install wixtoolset -y --no-progress
 
+      - name: Restore bundled-model and wheel caches
+        uses: ./.github/actions/cache-build-inputs
+
       - name: Build Windows MSI
         shell: pwsh
         env:

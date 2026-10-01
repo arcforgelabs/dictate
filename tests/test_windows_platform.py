@@ -241,13 +241,17 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("parakeet-tdt-0.6b-v2-onnx", script)
         self.assertIn("prepare-pyannote-community-model.py", script)
         self.assertIn("pyannote-speaker-diarization-community-1", script)
-        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", script)
-        self.assertLess(script.index("Hugging Face token via DICTATE_HF_TOKEN"), script.index("building the front-end"))
+        # The token is needed only on a model-cache miss; the preflight runs
+        # before the slow build so a miss without a token still fails fast.
+        self.assertNotIn("$HuggingFaceToken", script)
+        self.assertIn('"--check-cache"', script)
+        self.assertLess(script.index('"--check-cache"'), script.index("building the front-end"))
         self.assertIn("[x11,wayland,meeting]", engine_script)
         self.assertIn("prepare-parakeet-v2-int8-model.py", engine_script)
         self.assertIn("prepare-pyannote-community-model.py", engine_script)
-        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", engine_script)
-        self.assertLess(engine_script.index("Hugging Face token via DICTATE_HF_TOKEN"), engine_script.index("creating isolated build venv"))
+        self.assertNotIn("${DICTATE_HF_TOKEN", engine_script)
+        self.assertIn("prepare-pyannote-community-model.py\" --check-cache", engine_script)
+        self.assertLess(engine_script.index("--check-cache"), engine_script.index("creating isolated build venv"))
         self.assertIn('grep -q appimage', linux_script)
         self.assertIn("unset DICTATE_ONEFILE", linux_script)
         self.assertIn("cp -a packaging/dist/dictate-engine/. ui-shell/src-tauri/engine/", linux_script)
@@ -783,6 +787,47 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msix_store_bundle)
         self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msstore_publish)
         self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", unstable)
+
+    def test_bundle_workflows_restore_model_and_wheel_caches_before_building(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflows = root / ".github" / "workflows"
+        token_line = "DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}"
+        cache_step = "uses: ./.github/actions/cache-build-inputs"
+        for name in (
+            "release.yml",
+            "desktop-bundle.yml",
+            "windows-desktop-bundle.yml",
+            "windows-msi-release.yml",
+            "windows-msix-store-bundle.yml",
+            "msstore-publish-msix.yml",
+            "npm-unstable.yml",
+        ):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            self.assertEqual(workflow.count(cache_step), workflow.count(token_line), name)
+            position = 0
+            for _ in range(workflow.count(token_line)):
+                cache_at = workflow.index(cache_step, position)
+                token_at = workflow.index(token_line, position)
+                self.assertLess(cache_at, token_at, name)
+                position = token_at + 1
+
+        action = (root / ".github" / "actions" / "cache-build-inputs" / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("path: ~/.cache/dictate-build-models", action)
+        self.assertIn("hashFiles('packaging/model-revisions.json')", action)
+        self.assertIn("hashFiles('pyproject.toml', 'uv.lock')", action)
+
+    def test_bundled_model_revisions_are_pinned_commits(self) -> None:
+        import json
+        import re
+
+        root = Path(__file__).resolve().parents[1]
+        revisions = json.loads((root / "packaging" / "model-revisions.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(revisions),
+            {"istupakov/parakeet-tdt-0.6b-v2-onnx", "pyannote/speaker-diarization-community-1"},
+        )
+        for repo, revision in revisions.items():
+            self.assertRegex(revision, re.compile(r"^[0-9a-f]{40}$"), repo)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,12 @@
 - Third-party notices ship with the app: `THIRD_PARTY_NOTICES.md`, the GNU
   licence texts, and an attribution file beside each bundled model.
 
+### Changed
+
+- Desktop builds bundle the Parakeet and pyannote models at pinned revisions
+  and reuse cached models and Python wheels, so a release no longer waits on
+  (or needs a Hugging Face token for) downloads that have not changed.
+
 ## 2026-09-27
 
 ### Fixed

@@ -28,13 +28,6 @@ Set-StrictMode -Version Latest
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
-$HuggingFaceToken = @($env:DICTATE_HF_TOKEN, $env:HUGGINGFACE_HUB_TOKEN, $env:HF_TOKEN) |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($HuggingFaceToken)) {
-    throw "Staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-}
-
 if ([string]::IsNullOrWhiteSpace($Bundles)) {
     $Bundles = "msi,nsis"
 }
@@ -71,6 +64,15 @@ Write-Host "preflight"
 Require-Command $Python
 Require-Command "npm"
 Require-Command "cargo"
+
+# Bundled models come from the build model cache (~/.cache/dictate-build-models,
+# or DICTATE_MODEL_CACHE_DIR) at the revisions pinned in
+# packaging/model-revisions.json. The gated pyannote snapshot needs a Hugging
+# Face token only on a cache miss; fail before the slow build if it would.
+Invoke-Native "checking the bundled model cache" $Python @(
+    (Join-Path $Root "scripts\prepare-pyannote-community-model.py"),
+    "--check-cache"
+)
 
 Write-Host "building the front-end (ui/ -> dist/)"
 try {

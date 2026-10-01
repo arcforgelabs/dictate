@@ -54,6 +54,9 @@ jobs:
           $winappDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & $winappPath --version
 
+      - name: Restore bundled-model and wheel caches
+        uses: ./.github/actions/cache-build-inputs
+
       - name: Build Store MSIX
         shell: pwsh
         env:

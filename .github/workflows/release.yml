@@ -300,6 +300,9 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Restore bundled-model and wheel caches
+        uses: ./.github/actions/cache-build-inputs
+
       - name: Build the desktop bundle (freezes engine + builds .deb)
         env:
           DICTATE_BUNDLES: "deb"
@@ -350,6 +353,9 @@ jobs:
       - name: Install Windows bundling dependencies
         shell: pwsh
         run: choco install wixtoolset nsis -y --no-progress
+
+      - name: Restore bundled-model and wheel caches
+        uses: ./.github/actions/cache-build-inputs
 
       - name: Build the Windows desktop bundle
         shell: pwsh

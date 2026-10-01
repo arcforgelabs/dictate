@@ -198,13 +198,47 @@ def _download_model_files(target: Path, spec: _ParakeetModelSpec, files: tuple[s
         )
 
 
-def prepare_parakeet_v2_int8_model(output: str | Path) -> Path:
-    """Stage the bundled Parakeet v2 int8 runtime files into a flat directory."""
+def prepare_parakeet_v2_int8_model(
+    output: str | Path,
+    *,
+    revision: str | None = None,
+    cache_dir: str | Path | None = None,
+) -> Path:
+    """Stage the bundled Parakeet v2 int8 runtime files into a flat directory.
+
+    ``revision`` pins the Hugging Face commit, so a build names exactly what it
+    bundles. With ``cache_dir`` the files are fetched once into
+    ``<cache_dir>/<owner>--<repo>@<revision>`` and copied from there: a warm
+    cache stages without touching the network. Only the runtime files are
+    copied, never Hugging Face's download metadata.
+    """
+    spec = _MODEL_SPECS["parakeet-tdt-0.6b-v2"]
     target = Path(output).expanduser().resolve()
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
-    _download_model_files(target, _MODEL_SPECS["parakeet-tdt-0.6b-v2"], _INT8_FILES)
+
+    source = target
+    if cache_dir is not None:
+        cache_name = f"{spec.hf_repo.replace('/', '--')}@{revision or 'main'}"
+        source = Path(cache_dir).expanduser().resolve() / cache_name
+        source.mkdir(parents=True, exist_ok=True)
+
+    if _model_files_present(source, _INT8_FILES):
+        logger.info("Parakeet v2 int8 cache hit: %s", source)
+    else:
+        from huggingface_hub import hf_hub_download
+
+        logger.info("Parakeet v2 int8 cache miss: downloading %s@%s", spec.hf_repo, revision or "main")
+        for name in _INT8_FILES:
+            dest = source / name
+            if dest.is_file() and dest.stat().st_size > 0:
+                continue
+            hf_hub_download(spec.hf_repo, filename=name, revision=revision, local_dir=str(source))
+
+    if source != target:
+        for name in _INT8_FILES:
+            shutil.copy2(source / name, target / name)
     return target
 
 

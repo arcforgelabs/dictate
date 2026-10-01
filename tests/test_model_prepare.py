@@ -10,6 +10,12 @@ from dictate.stt.parakeet_backend import _INT8_FILES, prepare_parakeet_v2_int8_m
 from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText
 
 
+def _fake_hf_download(repo_id: str, *, filename: str, revision: str | None, local_dir: str) -> str:
+    path = Path(local_dir) / filename
+    path.write_bytes(f"{repo_id}@{revision}/{filename}".encode())
+    return str(path)
+
+
 class FakeFailingStt:
     backend_name = "fake"
     model_name = "fake"
@@ -95,14 +101,32 @@ class ModelPrepareTests(unittest.TestCase):
     def test_prepare_parakeet_v2_int8_model_targets_exact_int8_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "engine" / "models" / "parakeet-tdt-0.6b-v2-onnx"
-            with patch("dictate.stt.parakeet_backend._download_model_files") as download:
-                result = prepare_parakeet_v2_int8_model(output)
+            with patch("huggingface_hub.hf_hub_download", side_effect=_fake_hf_download) as download:
+                result = prepare_parakeet_v2_int8_model(output, revision="abc123")
 
         self.assertEqual(result, output.resolve())
-        download.assert_called_once()
-        args, _kwargs = download.call_args
-        self.assertEqual(Path(args[0]), output.resolve())
-        self.assertEqual(args[2], _INT8_FILES)
+        self.assertEqual([call.kwargs["filename"] for call in download.call_args_list], list(_INT8_FILES))
+        for call in download.call_args_list:
+            self.assertEqual(call.args[0], "istupakov/parakeet-tdt-0.6b-v2-onnx")
+            self.assertEqual(call.kwargs["revision"], "abc123")
+            self.assertEqual(Path(call.kwargs["local_dir"]), output.resolve())
+
+    def test_prepare_parakeet_v2_int8_model_downloads_into_cache_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "cache"
+            first = Path(temp_dir) / "first"
+            second = Path(temp_dir) / "second"
+            with patch("huggingface_hub.hf_hub_download", side_effect=_fake_hf_download) as download:
+                prepare_parakeet_v2_int8_model(first, revision="abc123", cache_dir=cache)
+                self.assertEqual(download.call_count, len(_INT8_FILES))
+                prepare_parakeet_v2_int8_model(second, revision="abc123", cache_dir=cache)
+                self.assertEqual(download.call_count, len(_INT8_FILES))
+
+            cached = cache / "istupakov--parakeet-tdt-0.6b-v2-onnx@abc123"
+            for name in _INT8_FILES:
+                self.assertEqual((first / name).read_bytes(), (cached / name).read_bytes())
+                self.assertEqual((second / name).read_bytes(), (cached / name).read_bytes())
+            self.assertEqual(sorted(p.name for p in second.iterdir()), sorted(_INT8_FILES))
 
     def test_parakeet_pyannote_prepare_loads_asr_and_pyannote_pipeline(self) -> None:
         stt = ParakeetPyannoteSpeechToText()
