@@ -8,6 +8,7 @@ from typing import Literal
 import numpy as np
 
 from dictate.lexicon import (
+    DEFAULT_LEXICON_MODE,
     LexiconMode,
     apply_post_corrections,
     build_lexicon_plan,
@@ -37,7 +38,7 @@ class DictationEngine:
         sample_rate: int = 16000,
         min_duration_s: float = 0.3,
         hotwords: str | None = None,
-        lexicon_mode: LexiconMode = "native",
+        lexicon_mode: LexiconMode = DEFAULT_LEXICON_MODE,
         lexicon_replacements: dict[str, str] | None = None,
     ):
         self.stt = stt

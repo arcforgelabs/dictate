@@ -11,6 +11,13 @@ if TYPE_CHECKING:
 
 LexiconMode = Literal["native", "prompt", "post", "hybrid"]
 LEXICON_MODES: tuple[LexiconMode, ...] = ("native", "prompt", "post", "hybrid")
+# No current backend decodes hotwords natively, so "native" would silently ignore
+# saved hotwords. "hybrid" uses native/prompt biasing where a backend has it and
+# post-correction otherwise; it only changes text when hotwords or replacements exist.
+DEFAULT_LEXICON_MODE: LexiconMode = "hybrid"
+# Hotwords shorter than this are matched exactly, never fuzzily: one edit away from
+# a four-letter word is usually another everyday word ("page" vs "Sage").
+_MIN_FUZZY_HOTWORD_LEN = 5
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
 
 
@@ -25,7 +32,7 @@ class LexiconPlan:
 def normalize_lexicon_mode(value: str | None) -> LexiconMode:
     if value in LEXICON_MODES:
         return value  # type: ignore[return-value]
-    return "native"
+    return DEFAULT_LEXICON_MODE
 
 
 def parse_hotwords(hotwords: str | None) -> tuple[str, ...]:
@@ -79,6 +86,11 @@ def apply_post_corrections(
         return text
 
     hotword_map = {word.lower(): word for word in hotwords}
+    fuzzy_map = {
+        lowered: word
+        for lowered, word in hotword_map.items()
+        if len(lowered) >= _MIN_FUZZY_HOTWORD_LEN
+    }
 
     def replace_token(match: re.Match[str]) -> str:
         token = match.group(0)
@@ -87,17 +99,31 @@ def apply_post_corrections(
         if lowered in replacements:
             return replacements[lowered]
         if lowered in hotword_map:
-            return hotword_map[lowered]
+            canonical = hotword_map[lowered]
+            return canonical if _may_recase(token, canonical) else token
 
-        # Conservative fallback: allow one-edit typo repair against configured hotwords.
-        # This fixes common near-misses (for example "canery" -> "canary") without
-        # aggressively rewriting unrelated words.
+        # Conservative fallback: allow one-edit typo repair against configured hotwords
+        # of five letters or more. This fixes common near-misses (for example
+        # "canery" -> "canary") without rewriting everyday short words.
         if len(token) < 4:
             return token
-        candidate = _nearest_hotword(lowered, hotword_map)
+        candidate = _nearest_hotword(lowered, fuzzy_map)
         return candidate if candidate is not None else token
 
     return _WORD_RE.sub(replace_token, text)
+
+
+def _may_recase(token: str, canonical: str) -> bool:
+    """Whether an exact (case-insensitive) hit may take the hotword's spelling.
+
+    Short title-case hotwords ("Mark", "Rust", "Sage") are also everyday words; the
+    recogniser already capitalises names, so a lowercase hit is almost always the
+    everyday word and is left alone. Short acronyms of three letters or more
+    ("GST", "SLA") are still recased.
+    """
+    if token == canonical or len(canonical) >= _MIN_FUZZY_HOTWORD_LEN:
+        return True
+    return canonical.isupper() and len(canonical) >= 3
 
 
 def _nearest_hotword(token: str, hotword_map: dict[str, str]) -> str | None:

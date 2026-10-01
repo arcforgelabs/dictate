@@ -49,7 +49,12 @@ from dictate.config import (
 from dictate.doctor import run_doctor
 from dictate.engine import DictationEngine
 from dictate.hotkey import DEFAULT_PUSH_TO_TALK_COMBO, HotkeyParseError, format_hotkey_combo, normalize_push_to_talk_combo
-from dictate.lexicon import LEXICON_MODES, LexiconMode, normalize_lexicon_mode
+from dictate.lexicon import (
+    DEFAULT_LEXICON_MODE,
+    LEXICON_MODES,
+    LexiconMode,
+    normalize_lexicon_mode,
+)
 from dictate.model_prepare import run_prepare_model
 from dictate.outputs import (
     BackendUnavailableError,
@@ -143,8 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lexicon-mode",
         choices=LEXICON_MODES,
-        default="native",
-        help="Lexical adaptation mode: native, prompt, post, hybrid (default: native)",
+        default=DEFAULT_LEXICON_MODE,
+        help=(
+            "Lexical adaptation mode: native, prompt, post, hybrid "
+            f"(default: {DEFAULT_LEXICON_MODE}). hybrid post-corrects saved hotwords "
+            "when the backend cannot decode them natively."
+        ),
     )
     parser.add_argument(
         "--push-to-talk-combo",
@@ -693,7 +702,8 @@ def _resolve_hotwords(
         print(
             (
                 f"Warning: backend '{stt.backend_name}' does not support hotwords; "
-                "ignoring configured hotwords."
+                "ignoring configured hotwords. Use --lexicon-mode hybrid to apply them "
+                "as post-correction."
             ),
             file=sys.stderr,
         )

@@ -240,6 +240,13 @@ Windows:
 Repo defaults intentionally ship with `hotwords: []`. Hotwords are user-specific
 and should not be packaged into the public repo default config.
 
+Parakeet cannot bias decoding towards hotwords, so the default lexicon mode,
+`hybrid`, applies them as post-correction: a word that matches a hotword takes
+its spelling, and a word one letter away from a hotword of five or more letters
+is repaired. Shorter hotwords only match exactly, and short title-case ones
+("Mark") never recase an everyday lowercase word. With no saved hotwords or
+replacements the text is untouched. `--lexicon-mode native` turns this off.
+
 ## Safety
 
 - Audio and transcripts stay on the device. There is no hosted transcription

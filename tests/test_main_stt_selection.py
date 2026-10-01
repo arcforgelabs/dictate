@@ -344,6 +344,18 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertNotIn("PatientSurname", output)
         self.assertNotIn("SecretClient", output)
 
+    def test_lexicon_mode_defaults_to_hybrid_without_flag_or_saved_mode(self) -> None:
+        parser = main_module.build_parser()
+        args = parser.parse_args([])
+        with contextlib.redirect_stderr(io.StringIO()):
+            lexicon_mode = main_module._resolve_startup_lexicon_mode(
+                args=args,
+                cli_args=[],
+                config=Config(),
+            )
+
+        self.assertEqual(lexicon_mode, "hybrid")
+
     def test_cli_lexicon_mode_overrides_saved_mode(self) -> None:
         parser = main_module.build_parser()
         args = parser.parse_args(["--lexicon-mode", "post"])

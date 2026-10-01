@@ -26,7 +26,7 @@ from dictate.hotkey_backend import (
     HotkeyBackendUnavailableError,
     create_hotkey_backend,
 )
-from dictate.lexicon import LexiconMode
+from dictate.lexicon import DEFAULT_LEXICON_MODE, LexiconMode
 from dictate.outputs import TextOutput
 from dictate.runtime_logging import echo_dictated_text
 from dictate.stt import SpeechToText, TranscriptSegment
@@ -50,7 +50,7 @@ class Daemon:
         output: TextOutput,
         language: str | None = None,
         hotwords: str | None = None,
-        lexicon_mode: LexiconMode = "native",
+        lexicon_mode: LexiconMode = DEFAULT_LEXICON_MODE,
         lexicon_replacements: dict[str, str] | None = None,
         history_store: HistoryStore | None = None,
         note_store: NoteStore | None = None,

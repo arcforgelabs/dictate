@@ -187,7 +187,7 @@ class TrayIcon:
         local_menu.append(Gtk.SeparatorMenuItem())
         self._append_local_runtime_items(local_menu)
         # Parakeet has no native hotword decoding; saved hotwords apply through
-        # the post/hybrid lexicon modes.
+        # post-correction in the default hybrid lexicon mode.
         local_menu.append(Gtk.SeparatorMenuItem())
         hotwords_item = Gtk.MenuItem(label="Hotwords")
         hotwords_item.connect("activate", self._on_manage_hotwords, LOCAL_BACKEND)

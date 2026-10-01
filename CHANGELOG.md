@@ -11,6 +11,16 @@
 - Logs no longer contain what you dictated. Finished dictations and notes are
   logged as their length; the words appear only in an interactive terminal.
 
+### Changed
+
+- Saved hotwords work again. The default lexicon mode is now `hybrid`, so
+  hotwords are applied as post-correction on Parakeet, which cannot use them
+  while decoding; before, the default `native` mode ignored them with a
+  warning. Post-correction is also stricter: hotwords under five letters match
+  exactly instead of fuzzily, so "page" no longer becomes "Sage". Text is
+  unchanged for anyone without saved hotwords or replacements. Set
+  `lexicon_mode: native` to keep the old behaviour.
+
 ### Removed
 
 - GPU support. Dictate runs on the CPU only; NVIDIA CUDA and AMD lanes are
