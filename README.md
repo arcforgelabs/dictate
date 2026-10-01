@@ -282,6 +282,7 @@ to try the latest code, not as the everyday install.
 
 - [Windows 11 support](docs/windows-11.md)
 - [Transcription deployment plan](docs/TRANSCRIPTION_PLAN.md)
+- [Dictation latency: how to measure, baseline, levers](docs/latency.md)
 - [Release/versioning](docs/release-versioning.md)
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Microsoft Store automation](docs/msstore-automation.md)

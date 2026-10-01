@@ -86,6 +86,8 @@ Deployment blockers before calling this plan complete:
 
 1. Measure end-to-end dictation latency on CPU on the two daily machines
    (X Forge and the Framework laptop) and tune where the numbers point.
+   The harness and the X Forge baseline are in [latency.md](latency.md); the
+   Framework laptop is not measured yet, and the levers are not yet tuned.
 2. Benchmark and promote at least one local speaker-attribution lane for
    Meeting mode, on CPU.
 3. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
