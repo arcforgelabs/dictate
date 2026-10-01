@@ -5,14 +5,18 @@ name: ClawSweeper activity
 on:
   issues:
     types: [opened, reopened]
-  pull_request_target: # reusable workflow checks out only public upstream code, never this PR
-    types: [opened, reopened, ready_for_review]
+  pull_request_target: # trusted event adapter performs no checkout
+    types: [opened, reopened, ready_for_review, synchronize, edited]
+
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
 jobs:
   notify:
-    uses: arcforgelabs/.github/.github/workflows/clawsweeper-activity.yml@ca118efca819c90dd128f81700410bd69d38a026 # arcforgelabs/.github main
+    uses: arcforgelabs/.github/.github/workflows/clawsweeper-activity.yml@0e2e1a9d91355fbe076746a7330b8f7bf99a62cb # arcforgelabs/.github main
     secrets:
       CLAWSWEEPER_OPENCLAW_HOOK_URL: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_URL }}
       CLAWSWEEPER_OPENCLAW_HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
+      CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
