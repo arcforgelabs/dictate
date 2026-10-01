@@ -619,6 +619,24 @@ def _check_amd_with_onnxruntime(
         )
 
 
+def _onnxruntime_cpu_shadows_gpu() -> bool:
+    """True when the CPU and GPU ONNX Runtime wheels are both installed.
+
+    They install into the same ``onnxruntime`` package, so whichever was
+    written last wins; the core ``onnxruntime`` dependency usually does.
+    """
+    from importlib import metadata
+
+    installed = set()
+    for name in ("onnxruntime", "onnxruntime-gpu"):
+        try:
+            metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+        installed.add(name)
+    return installed == {"onnxruntime", "onnxruntime-gpu"}
+
+
 def _check_cuda_with_onnxruntime(
     report: BackendReadiness,
     *,
@@ -654,9 +672,14 @@ def _check_cuda_with_onnxruntime(
         return
 
     if requested_device == "cuda":
-        report.errors.append(
-            "CUDA device requested for Parakeet but ONNX Runtime has no CUDAExecutionProvider."
-        )
+        message = "CUDA device requested for Parakeet but ONNX Runtime has no CUDAExecutionProvider."
+        if _onnxruntime_cpu_shadows_gpu():
+            message += (
+                " Both onnxruntime and onnxruntime-gpu are installed, and the CPU build's files "
+                "won. Run: pip uninstall -y onnxruntime && pip install --force-reinstall "
+                '--no-deps "onnxruntime-gpu>=1.30,<1.31"'
+            )
+        report.errors.append(message)
     elif providers:
         report.notes.append(
             "ONNX Runtime providers detected, but CUDAExecutionProvider is not enabled: "

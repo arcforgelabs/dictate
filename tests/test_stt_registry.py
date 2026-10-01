@@ -208,6 +208,42 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any("pyannote.audio" in dependency for dependency in meeting_deps))
         self.assertTrue(any("torch" in dependency for dependency in meeting_deps))
 
+    def test_parakeet_cuda_readiness_names_the_cpu_gpu_onnxruntime_clash(self) -> None:
+        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
+        with (
+            patch("dictate.stt.factory.parakeet_available", return_value=True),
+            patch("dictate.stt.factory._onnxruntime_cpu_shadows_gpu", return_value=True),
+            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
+        ):
+            report = check_backend_readiness(
+                backend="parakeet",
+                model="parakeet-tdt-0.6b-v2",
+                device="cuda",
+            )
+        cuda_errors = [error for error in report.errors if "CUDAExecutionProvider" in error]
+        self.assertEqual(len(cuda_errors), 1)
+        self.assertIn("pip uninstall -y onnxruntime", cuda_errors[0])
+
+    def test_onnxruntime_clash_needs_both_distributions(self) -> None:
+        from importlib import metadata
+
+        from dictate.stt import factory
+
+        def versions(installed):
+            def version(name):
+                if name in installed:
+                    return "1.30.0"
+                raise metadata.PackageNotFoundError(name)
+
+            return version
+
+        with patch("importlib.metadata.version", side_effect=versions({"onnxruntime", "onnxruntime-gpu"})):
+            self.assertTrue(factory._onnxruntime_cpu_shadows_gpu())
+        with patch("importlib.metadata.version", side_effect=versions({"onnxruntime-gpu"})):
+            self.assertFalse(factory._onnxruntime_cpu_shadows_gpu())
+        with patch("importlib.metadata.version", side_effect=versions({"onnxruntime"})):
+            self.assertFalse(factory._onnxruntime_cpu_shadows_gpu())
+
     def test_parakeet_amd_readiness_accepts_migraphx_provider(self) -> None:
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: [

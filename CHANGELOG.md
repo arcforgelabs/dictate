@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- GPU installs use the GPU. `install.sh --gpu` left the CPU build of ONNX
+  Runtime in charge, so Parakeet never saw CUDA. On Windows, the installer's
+  CUDA step could delete ONNX Runtime's files outright when it ran again
+  during an update, breaking transcription. Both installers now remove the
+  CPU build and reinstall the GPU build's files, and `dictate doctor` names
+  the clash when it finds both installed.
+
 ## 2026-09-27
 
 ### Fixed

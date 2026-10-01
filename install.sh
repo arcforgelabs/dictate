@@ -23,6 +23,8 @@ SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
 INSTALL_GPU="${DICTATE_INSTALL_GPU:-0}"
+# Keep in step with the gpu extra in pyproject.toml.
+ONNXRUNTIME_GPU_SPEC="onnxruntime-gpu>=1.30,<1.31"
 INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"
 INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -238,6 +240,16 @@ uv venv "$INSTALL_DIR/venv" --python "$PYTHON_BIN" --system-site-packages --quie
 
 echo "Installing dictate from $PIP_TARGET ..."
 uv pip install "$PIP_TARGET" --python "$INSTALL_DIR/venv/bin/python" --quiet
+
+if [ "$INSTALL_GPU" -eq 1 ]; then
+  # onnxruntime (a core dependency) and onnxruntime-gpu install into the same
+  # onnxruntime/ package, and the CPU build's files win, so CUDA never shows
+  # up. Drop the CPU build, then rewrite the GPU build's files it shared.
+  echo "Selecting the CUDA build of ONNX Runtime ..."
+  uv pip uninstall onnxruntime --python "$INSTALL_DIR/venv/bin/python" --quiet
+  uv pip install --reinstall-package onnxruntime-gpu --no-deps "$ONNXRUNTIME_GPU_SPEC" \
+    --python "$INSTALL_DIR/venv/bin/python" --quiet
+fi
 
 echo "Linking binaries ..."
 mkdir -p "$BIN_DIR"
