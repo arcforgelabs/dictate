@@ -12,11 +12,12 @@ from pathlib import Path
 
 from dictate.stt import (
     BACKEND_REGISTRY,
-    COMPUTE_DEVICES,
+    COMPUTE_TYPES,
     STT_BACKENDS,
     check_backend_readiness,
     create_speech_to_text,
     resolve_model_name,
+    saved_compute_type,
 )
 
 
@@ -33,8 +34,23 @@ class SttRegistryTests(unittest.TestCase):
         )
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
 
-    def test_compute_devices_include_amd_lane(self) -> None:
-        self.assertEqual(COMPUTE_DEVICES, ("cpu", "cuda", "amd", "auto"))
+    def test_compute_types_are_cpu_only(self) -> None:
+        self.assertEqual(COMPUTE_TYPES, ("int8", "float32"))
+
+    def test_saved_gpu_only_compute_type_loads_as_int8(self) -> None:
+        self.assertEqual(saved_compute_type("float32"), "float32")
+        self.assertEqual(saved_compute_type("int8"), "int8")
+        self.assertEqual(saved_compute_type("float16"), "int8")
+        self.assertEqual(saved_compute_type(None), "int8")
+        self.assertEqual(saved_compute_type("bogus"), "int8")
+
+    def test_engine_takes_no_device(self) -> None:
+        with self.assertRaises(TypeError):
+            create_speech_to_text(backend="parakeet", device="cpu")  # type: ignore[call-arg]
+        with self.assertRaises(TypeError):
+            check_backend_readiness(  # type: ignore[call-arg]
+                backend="parakeet", model=None, device="cpu"
+            )
 
     def test_resolve_model_name_defaults(self) -> None:
         self.assertEqual(resolve_model_name("parakeet-pyannote", None), "parakeet-tdt-0.6b-v2")
@@ -46,22 +62,18 @@ class SttRegistryTests(unittest.TestCase):
         parakeet = create_speech_to_text(
             backend="parakeet",
             model="parakeet-tdt-0.6b-v2",
-            device="cpu",
         )
         parakeet_pyannote = create_speech_to_text(
             backend="parakeet-pyannote",
             model="parakeet-tdt-0.6b-v2",
-            device="cpu",
         )
         parakeet_diarizen = create_speech_to_text(
             backend="parakeet-diarizen",
             model="parakeet-tdt-0.6b-v2",
-            device="cpu",
         )
         parakeet_sortformer = create_speech_to_text(
             backend="parakeet-sortformer",
             model="parakeet-tdt-0.6b-v2",
-            device="cpu",
         )
         self.assertEqual(parakeet.backend_name, "parakeet")
         self.assertEqual(parakeet_pyannote.backend_name, "parakeet-pyannote")
@@ -91,7 +103,7 @@ class SttRegistryTests(unittest.TestCase):
 
             assert "parakeet" in STT_BACKENDS
             stt = create_speech_to_text(
-                backend="parakeet", model="parakeet-tdt-0.6b-v2", device="cpu"
+                backend="parakeet", model="parakeet-tdt-0.6b-v2"
             )
             assert stt.backend_name == "parakeet"
             """
@@ -109,61 +121,31 @@ class SttRegistryTests(unittest.TestCase):
         report = check_backend_readiness(
             backend="parakeet",
             model="parakeet-tdt-0.6b-v2",
-            device="cpu",
         )
         self.assertTrue(any(note.startswith("STT backend:") for note in report.notes))
         self.assertTrue(any(note.startswith("STT model:") for note in report.notes))
 
-    def test_parakeet_amd_readiness_requires_onnx_amd_provider(self) -> None:
-        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
-        with (
-            patch("dictate.stt.factory.parakeet_available", return_value=True),
-            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
-        ):
-            report = check_backend_readiness(
-                backend="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                device="amd",
-            )
-        self.assertTrue(
-            any("no AMD-capable execution provider" in error for error in report.errors)
+    def test_readiness_ignores_accelerator_providers(self) -> None:
+        # CPU only: readiness never inspects or reports accelerator providers,
+        # whatever onnxruntime build happens to be installed.
+        fake_ort = types.SimpleNamespace(
+            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"]
         )
-        self.assertTrue(any("DirectML" in error or "ROCm/MIGraphX" in error for error in report.errors))
-
-    def test_parakeet_auto_readiness_does_not_require_amd_provider(self) -> None:
-        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
-        with (
-            patch("dictate.stt.factory.parakeet_available", return_value=True),
-            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
-        ):
-            report = check_backend_readiness(
-                backend="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                device="auto",
+        for backend in ("parakeet", "parakeet-pyannote"):
+            with (
+                patch("dictate.stt.factory.parakeet_available", return_value=True),
+                patch("dictate.stt.factory.pyannote_available", return_value=True),
+                patch("dictate.stt.factory.pyannote_token", return_value="token"),
+                patch("dictate.stt.factory.pyannote_model_source", return_value="remote/model"),
+                patch.dict("sys.modules", {"onnxruntime": fake_ort}),
+            ):
+                report = check_backend_readiness(backend=backend, model="parakeet-tdt-0.6b-v2")
+            self.assertFalse(report.errors, backend)
+            self.assertFalse(report.warnings, backend)
+            self.assertFalse(
+                any("ExecutionProvider" in note for note in report.notes),
+                backend,
             )
-        self.assertFalse(report.errors)
-        self.assertFalse(
-            any("no AMD-capable execution provider" in item for item in [*report.notes, *report.warnings])
-        )
-
-    def test_parakeet_pyannote_auto_readiness_does_not_require_amd_provider(self) -> None:
-        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
-        with (
-            patch("dictate.stt.factory.parakeet_available", return_value=True),
-            patch("dictate.stt.factory.pyannote_available", return_value=True),
-            patch("dictate.stt.factory.pyannote_token", return_value="token"),
-            patch("dictate.stt.factory.pyannote_model_source", return_value="remote/model"),
-            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
-        ):
-            report = check_backend_readiness(
-                backend="parakeet-pyannote",
-                model="parakeet-tdt-0.6b-v2",
-                device="auto",
-            )
-        self.assertFalse(report.errors)
-        self.assertFalse(
-            any("no AMD-capable execution provider" in item for item in [*report.notes, *report.warnings])
-        )
 
     def test_pyproject_exposes_windows_amd_extra(self) -> None:
         pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -188,25 +170,6 @@ class SttRegistryTests(unittest.TestCase):
         # Parakeet's model download used to arrive transitively via faster-whisper.
         self.assertTrue(any(dep.startswith("huggingface-hub") for dep in project["dependencies"]))
 
-    def test_parakeet_amd_readiness_accepts_migraphx_provider(self) -> None:
-        fake_ort = types.SimpleNamespace(
-            get_available_providers=lambda: [
-                "MIGraphXExecutionProvider",
-                "CPUExecutionProvider",
-            ]
-        )
-        with (
-            patch("dictate.stt.factory.parakeet_available", return_value=True),
-            patch.dict("sys.modules", {"onnxruntime": fake_ort}),
-        ):
-            report = check_backend_readiness(
-                backend="parakeet",
-                model="parakeet-tdt-0.6b-v2",
-                device="amd",
-            )
-        self.assertFalse(report.errors)
-        self.assertTrue(any("MIGraphXExecutionProvider" in note for note in report.notes))
-
     def test_parakeet_pyannote_readiness_reports_missing_optional_package(self) -> None:
         with (
             patch("dictate.stt.factory.parakeet_available", return_value=True),
@@ -215,7 +178,6 @@ class SttRegistryTests(unittest.TestCase):
             report = check_backend_readiness(
                 backend="parakeet-pyannote",
                 model="parakeet-tdt-0.6b-v2",
-                device="cpu",
             )
         self.assertTrue(any("pyannote.audio is not importable" in error for error in report.errors))
 
@@ -229,7 +191,6 @@ class SttRegistryTests(unittest.TestCase):
             report = check_backend_readiness(
                 backend="parakeet-pyannote",
                 model="parakeet-tdt-0.6b-v2",
-                device="cpu",
             )
         self.assertTrue(any("is gated" in error for error in report.errors))
 
@@ -244,7 +205,6 @@ class SttRegistryTests(unittest.TestCase):
                 report = check_backend_readiness(
                     backend="parakeet-pyannote",
                     model="parakeet-tdt-0.6b-v2",
-                    device="cpu",
                 )
         self.assertFalse(report.errors)
         self.assertTrue(any("pyannote model path" in note for note in report.notes))
@@ -257,7 +217,6 @@ class SttRegistryTests(unittest.TestCase):
             report = check_backend_readiness(
                 backend="parakeet-diarizen",
                 model="parakeet-tdt-0.6b-v2",
-                device="cpu",
             )
         self.assertTrue(any("DiariZen Meeting backend" in error for error in report.errors))
         self.assertTrue(any("DiariZen model" in note for note in report.notes))
@@ -270,7 +229,6 @@ class SttRegistryTests(unittest.TestCase):
             report = check_backend_readiness(
                 backend="parakeet-sortformer",
                 model="parakeet-tdt-0.6b-v2",
-                device="cpu",
             )
         self.assertTrue(any("Sortformer Meeting backend" in error for error in report.errors))
         self.assertTrue(any("Sortformer model" in note for note in report.notes))

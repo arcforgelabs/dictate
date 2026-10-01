@@ -1,9 +1,8 @@
 hotwords: []
 push_to_talk_combo: ctrl_r
 stt_compute_type: int8
-stt_device: auto
 # Leave stt_backend/stt_model unset for the local default: English Parakeet v2
-# on CPU, CUDA, and AMD. Accelerator readiness is checked by doctor/preflight.
+# on CPU.
 # Set stt_backend/stt_model explicitly to override:
 # stt_backend: parakeet
 # stt_model: parakeet-tdt-0.6b-v2

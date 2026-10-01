@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from dictate.stt.base import (
-    ONNX_AMD_PROVIDERS,
-    ComputeDevice,
+    COMPUTE_TYPES,
     ComputeType,
     SpeechToText,
     SttBackend,
@@ -33,29 +32,6 @@ from dictate.stt.parakeet_speaker_backend import (
     sortformer_model_source,
 )
 
-def passthrough_blocks_cuda(pci_text: str) -> bool:
-    """True when every NVIDIA display GPU is bound to vfio for a VM.
-
-    An RTX 4090 handed to the Windows VM is not a free dictation device.
-    Another NVIDIA GPU that is still on the nvidia driver stays usable.
-    """
-    blocks = [
-        block
-        for block in pci_text.split("\n\n")
-        if "NVIDIA" in block and ("VGA" in block or "3D" in block)
-    ]
-    if not blocks:
-        return False
-    return all("vfio-pci" in block for block in blocks)
-
-
-def device_for_host(device: str, pci_text: str) -> str:
-    if device not in {"auto", "cuda"}:
-        return device
-    if passthrough_blocks_cuda(pci_text):
-        return "cpu"
-    return device
-
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "parakeet": "parakeet-tdt-0.6b-v2",
@@ -77,7 +53,7 @@ class BackendSpec:
     model_examples: tuple[str, ...]
     description: str
     capabilities: SttCapabilities
-    builder: Callable[[str, ComputeDevice, ComputeType], SpeechToText]
+    builder: Callable[[str, ComputeType], SpeechToText]
 
 
 BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
@@ -87,9 +63,8 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         model_examples=PARAKEET_MODELS,
         description="NVIDIA Parakeet-TDT English ASR via ONNX (fast, accurate on CPU).",
         capabilities=ParakeetSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: ParakeetSpeechToText(
+        builder=lambda model, compute_type: ParakeetSpeechToText(
             model_name=model,
-            device=device,
             compute_type=compute_type,
         ),
     ),
@@ -99,9 +74,8 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         model_examples=PARAKEET_PYANNOTE_MODELS,
         description="Local Meeting backend: Parakeet ASR with pyannote Community-1 speakers.",
         capabilities=ParakeetPyannoteSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: ParakeetPyannoteSpeechToText(
+        builder=lambda model, compute_type: ParakeetPyannoteSpeechToText(
             model_name=model,
-            device=device,
             compute_type=compute_type,
         ),
     ),
@@ -111,9 +85,8 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         model_examples=PARAKEET_DIARIZEN_MODELS,
         description="Local Meeting backend: Parakeet ASR with DiariZen speaker attribution.",
         capabilities=ParakeetDiariZenSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: ParakeetDiariZenSpeechToText(
+        builder=lambda model, compute_type: ParakeetDiariZenSpeechToText(
             model_name=model,
-            device=device,
             compute_type=compute_type,
         ),
     ),
@@ -123,9 +96,8 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         model_examples=PARAKEET_SORTFORMER_MODELS,
         description="Local Meeting backend: Parakeet ASR with NVIDIA Sortformer speaker attribution.",
         capabilities=ParakeetSortformerSpeechToText.capabilities,
-        builder=lambda model, device, compute_type: ParakeetSortformerSpeechToText(
+        builder=lambda model, compute_type: ParakeetSortformerSpeechToText(
             model_name=model,
-            device=device,
             compute_type=compute_type,
         ),
     ),
@@ -144,15 +116,12 @@ def resolve_model_name(backend: SttBackend, model: str | None = None) -> str:
     return model or BACKEND_REGISTRY[backend].default_model
 
 
-def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBackend, str]:
-    """The default (backend, model) for a fresh local config on this machine.
+def resolve_default_local_backend() -> tuple[SttBackend, str]:
+    """The default (backend, model) for a fresh local config.
 
-    Parakeet is the only dictation backend, on CPU, CUDA and AMD alike;
-    readiness/doctor verifies that a requested accelerator provider actually
-    exists instead of silently accepting CPU fallback. A saved config selection
+    Parakeet on CPU is the only dictation backend. A saved config selection
     always wins over this default.
     """
-    del device
     return "parakeet", DEFAULT_MODELS["parakeet"]
 
 
@@ -173,6 +142,18 @@ def saved_stt_selection(
     return backend, model  # type: ignore[return-value]
 
 
+def saved_compute_type(value: str | None) -> ComputeType:
+    """The compute type from config.yaml, falling back to int8.
+
+    Configs written while GPU lanes existed can say ``float16``, which only
+    meant something on a GPU (Parakeet already loaded int8 for it). Anything
+    that is not a CPU compute type loads as int8.
+    """
+    if value in COMPUTE_TYPES:
+        return value  # type: ignore[return-value]
+    return "int8"
+
+
 def saved_meeting_selection(backend: str | None, model: str | None) -> tuple[SttBackend, str]:
     """The Meeting backend/model from config.yaml, falling back to parakeet-pyannote."""
     saved_backend, saved_model = saved_stt_selection(backend, model)
@@ -185,19 +166,17 @@ def create_speech_to_text(
     *,
     backend: SttBackend = "parakeet",
     model: str | None = None,
-    device: ComputeDevice = "auto",
     compute_type: ComputeType = "int8",
 ) -> SpeechToText:
     spec = BACKEND_REGISTRY[backend]
     model_name = resolve_model_name(backend, model)
-    return spec.builder(model_name, device, compute_type)
+    return spec.builder(model_name, compute_type)
 
 
 def check_backend_readiness(
     *,
     backend: SttBackend,
     model: str | None,
-    device: ComputeDevice,
 ) -> BackendReadiness:
     report = BackendReadiness()
     model_name = resolve_model_name(backend, model)
@@ -217,29 +196,23 @@ def check_backend_readiness(
                 'Parakeet backend selected but onnx-asr is not importable. '
                 'Install with: uv pip install "onnx-asr[cpu,hub]"'
             )
-        if device in {"cuda", "auto"}:
-            _check_cuda_with_onnxruntime(report, requested_device=device)
-        if device == "amd":
-            _check_amd_with_onnxruntime(report, requested_device=device)
 
     if backend == "parakeet-pyannote":
-        _check_parakeet_pyannote(report, model_name=model_name, device=device)
+        _check_parakeet_pyannote(report, model_name=model_name)
 
     if backend == "parakeet-diarizen":
-        _check_parakeet_diarizen(report, model_name=model_name, device=device)
+        _check_parakeet_diarizen(report, model_name=model_name)
 
     if backend == "parakeet-sortformer":
-        _check_parakeet_sortformer(report, model_name=model_name, device=device)
+        _check_parakeet_sortformer(report, model_name=model_name)
 
     return report
-
 
 
 def _check_parakeet_pyannote(
     report: BackendReadiness,
     *,
     model_name: str,
-    device: ComputeDevice,
 ) -> None:
     if model_name not in PARAKEET_PYANNOTE_MODELS:
         report.errors.append(
@@ -268,26 +241,14 @@ def _check_parakeet_pyannote(
             "then set DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN. For offline "
             "use, set DICTATE_PYANNOTE_MODEL_PATH to a local model checkout."
         )
-    if device in {"cuda", "auto", "amd"}:
-        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
-        if device == "amd":
-            report.warnings.append(
-                "pyannote runs through PyTorch. On AMD, this requires a ROCm-enabled "
-                "PyTorch build that reports availability through torch.cuda."
-            )
-    if device in {"cuda", "auto"}:
-        _check_cuda_with_onnxruntime(report, requested_device=device)
-    if device == "amd":
-        _check_amd_with_onnxruntime(report, requested_device=device)
 
 
 def _check_parakeet_diarizen(
     report: BackendReadiness,
     *,
     model_name: str,
-    device: ComputeDevice,
 ) -> None:
-    _check_parakeet_speaker_foundation(report, model_name=model_name, device=device, models=PARAKEET_DIARIZEN_MODELS)
+    _check_parakeet_speaker_foundation(report, model_name=model_name, models=PARAKEET_DIARIZEN_MODELS)
     if diarizen_available():
         report.notes.append("DiariZen runtime importable.")
     else:
@@ -300,22 +261,14 @@ def _check_parakeet_diarizen(
         report.notes.append(f"DiariZen model path: {source}")
     else:
         report.notes.append(f"DiariZen model: {source or DIARIZEN_MODEL}")
-    if device in {"cuda", "auto", "amd"}:
-        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
-        if device == "amd":
-            report.warnings.append(
-                "DiariZen runs through PyTorch. On AMD, this requires a ROCm-enabled "
-                "PyTorch build that reports availability through torch.cuda."
-            )
 
 
 def _check_parakeet_sortformer(
     report: BackendReadiness,
     *,
     model_name: str,
-    device: ComputeDevice,
 ) -> None:
-    _check_parakeet_speaker_foundation(report, model_name=model_name, device=device, models=PARAKEET_SORTFORMER_MODELS)
+    _check_parakeet_speaker_foundation(report, model_name=model_name, models=PARAKEET_SORTFORMER_MODELS)
     if sortformer_available():
         report.notes.append("NVIDIA NeMo ASR runtime importable.")
     else:
@@ -328,20 +281,12 @@ def _check_parakeet_sortformer(
         report.notes.append(f"Sortformer model path: {source}")
     else:
         report.notes.append(f"Sortformer model: {source or SORTFORMER_MODEL}")
-    if device in {"cuda", "auto", "amd"}:
-        _check_cuda_with_torch(report, requested_device="auto" if device == "amd" else device)
-        if device == "amd":
-            report.warnings.append(
-                "Sortformer runs through PyTorch. On AMD, this requires a ROCm-enabled "
-                "PyTorch build that reports availability through torch.cuda."
-            )
 
 
 def _check_parakeet_speaker_foundation(
     report: BackendReadiness,
     *,
     model_name: str,
-    device: ComputeDevice,
     models: tuple[str, ...],
 ) -> None:
     if model_name not in models:
@@ -355,118 +300,4 @@ def _check_parakeet_speaker_foundation(
         report.errors.append(
             'Parakeet backend selected but onnx-asr is not importable. '
             'Install with: uv pip install "onnx-asr[cpu,hub]"'
-        )
-    if device in {"cuda", "auto"}:
-        _check_cuda_with_onnxruntime(report, requested_device=device)
-    if device == "amd":
-        _check_amd_with_onnxruntime(report, requested_device=device)
-
-
-
-
-def _check_cuda_with_torch(report: BackendReadiness, *, requested_device: ComputeDevice) -> None:
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        report.warnings.append("PyTorch is not importable; skipping CUDA capability check.")
-        return
-
-    cuda_available = bool(torch.cuda.is_available())
-    if requested_device == "cuda" and not cuda_available:
-        report.errors.append("CUDA device requested but torch.cuda.is_available() is False.")
-        return
-    if requested_device == "auto" and not cuda_available:
-        report.warnings.append(
-            "CUDA is not available; backend will run on CPU if it supports CPU execution."
-        )
-        return
-
-    if cuda_available:
-        device_name = torch.cuda.get_device_name(0)
-        report.notes.append(f"CUDA detected: {device_name}")
-
-
-def _check_amd_with_onnxruntime(
-    report: BackendReadiness,
-    *,
-    requested_device: ComputeDevice,
-) -> None:
-    try:
-        import onnxruntime as ort
-    except Exception:  # noqa: BLE001
-        if requested_device == "amd":
-            report.errors.append(
-                "AMD GPU device requested but onnxruntime is not importable."
-            )
-        return
-
-    try:
-        providers = tuple(str(provider) for provider in ort.get_available_providers())
-    except Exception as exc:  # noqa: BLE001
-        if requested_device == "amd":
-            report.errors.append(f"Could not inspect ONNX Runtime execution providers: {exc}")
-        return
-
-    matched = tuple(provider for provider in ONNX_AMD_PROVIDERS if provider in providers)
-    if matched:
-        report.notes.append(f"ONNX Runtime AMD-capable provider detected: {matched[0]}")
-        return
-
-    if requested_device == "amd":
-        report.errors.append(
-            "AMD GPU device requested but ONNX Runtime has no AMD-capable execution "
-            f"provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}. "
-            "On Windows, install Dictate with the 'amd' extra for DirectML. On Linux, "
-            "install a ROCm/MIGraphX-capable ONNX Runtime build before selecting "
-            "--device amd."
-        )
-    elif providers:
-        report.notes.append(
-            "ONNX Runtime providers detected, but no AMD-capable provider is enabled: "
-            + ", ".join(providers)
-        )
-
-
-def _check_cuda_with_onnxruntime(
-    report: BackendReadiness,
-    *,
-    requested_device: ComputeDevice,
-) -> None:
-    try:
-        import onnxruntime as ort
-    except Exception:  # noqa: BLE001
-        if requested_device == "cuda":
-            report.errors.append(
-                "CUDA device requested for Parakeet but onnxruntime is not importable."
-            )
-        return
-
-    preload = getattr(ort, "preload_dlls", None)
-    if callable(preload):
-        try:
-            preload()
-        except Exception as exc:  # noqa: BLE001
-            if requested_device == "cuda":
-                report.errors.append(f"Could not preload ONNX Runtime CUDA libraries: {exc}")
-            return
-
-    try:
-        providers = tuple(str(provider) for provider in ort.get_available_providers())
-    except Exception as exc:  # noqa: BLE001
-        if requested_device == "cuda":
-            report.errors.append(f"Could not inspect ONNX Runtime execution providers: {exc}")
-        return
-
-    if "CUDAExecutionProvider" in providers:
-        report.notes.append("ONNX Runtime CUDA provider detected: CUDAExecutionProvider")
-        return
-
-    if requested_device == "cuda":
-        report.errors.append(
-            "CUDA device requested for Parakeet but ONNX Runtime has no CUDAExecutionProvider."
-        )
-    elif providers:
-        report.notes.append(
-            "ONNX Runtime providers detected, but CUDAExecutionProvider is not enabled: "
-            + ", ".join(providers)
         )

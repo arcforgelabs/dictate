@@ -18,13 +18,14 @@ from dictate.runtime_logging import (
     resolve_log_paths,
 )
 from dictate.stt import (
-    COMPUTE_DEVICES,
     PARAKEET_DIARIZEN_MODELS,
     PARAKEET_MODELS,
     PARAKEET_PYANNOTE_MODELS,
     PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
+    add_retired_device_argument,
     create_speech_to_text,
+    note_retired_device,
     resolve_model_name,
 )
 from dictate.startup import (
@@ -53,12 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}."
         ),
     )
-    parser.add_argument(
-        "--device",
-        choices=COMPUTE_DEVICES,
-        default="auto",
-        help="Compute device to validate",
-    )
+    add_retired_device_argument(parser)
     parser.add_argument(
         "--type-backend",
         choices=["auto", "xdotool", "wtype", "ydotool", "pynput"],
@@ -96,6 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
 def run_doctor(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    note_retired_device(args.device)
 
     model_name = resolve_model_name(args.stt_backend, args.model)
     report = run_preflight(
@@ -105,7 +102,6 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
         push_to_talk_combo=args.push_to_talk_combo,
         stt_backend=args.stt_backend,
         stt_model=model_name,
-        stt_device=args.device,
     )
 
     if args.fix:
@@ -118,7 +114,6 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
             report,
             backend=args.stt_backend,
             model_name=model_name,
-            device=args.device,
         )
 
     fixes = _fix_items(report)
@@ -206,21 +201,20 @@ def _desktop_exec_target_missing(path) -> str | None:  # noqa: ANN001
     return None
 
 
-def _check_model_load(report, *, backend: str, model_name: str, device: str) -> None:  # noqa: ANN001
+def _check_model_load(report, *, backend: str, model_name: str) -> None:  # noqa: ANN001
     stt = None
     try:
         stt = create_speech_to_text(
             backend=backend,  # type: ignore[arg-type]
             model=model_name,
-            device=device,  # type: ignore[arg-type]
         )
         _ = stt.model
         report.notes.append(
-            f"Model load OK: backend='{backend}' model='{model_name}' device='{device}'"
+            f"Model load OK: backend='{backend}' model='{model_name}'"
         )
     except Exception as exc:  # noqa: BLE001
         report.errors.append(
-            f"Model load failed for backend='{backend}' model='{model_name}' on '{device}': {exc}"
+            f"Model load failed for backend='{backend}' model='{model_name}': {exc}"
         )
     finally:
         if stt is not None:
@@ -269,7 +263,6 @@ def _seed_config_if_missing() -> None:
     # than pinning a doctor-time decision into config.
     CONFIG_PATH.write_text(
         "push_to_talk_combo: ctrl_r\n"
-        "stt_device: auto\n"
         "stt_compute_type: int8\n",
         encoding="utf-8",
     )
@@ -357,8 +350,6 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
             )
         if "Log directory is not writable" in warning or "fallback log directory" in warning:
             items.append("Run `dictate doctor --fix` to recreate writable log/config directories.")
-        if "CUDA" in warning:
-            items.append("Use Local / CPU in controls, or install Dictate with the 'gpu' extra.")
     for error in report.errors:
         if "onnx-asr is not importable" in error:
             if sys.platform.startswith("win"):

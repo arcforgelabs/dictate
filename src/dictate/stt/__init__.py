@@ -1,15 +1,15 @@
 """Speech-to-text backend exports."""
 
 from dictate.stt.base import (
-    COMPUTE_DEVICES,
     COMPUTE_TYPES,
-    ComputeDevice,
     ComputeType,
     SpeechToText,
     SttBackend,
     SttCapabilities,
     TranscriptSegment,
-    ONNX_AMD_PROVIDERS,
+    add_retired_device_argument,
+    is_cpu_device_name,
+    note_retired_device,
 )
 from dictate.stt.factory import (
     BACKEND_REGISTRY,
@@ -25,6 +25,7 @@ from dictate.stt.factory import (
     create_speech_to_text,
     resolve_default_local_backend,
     resolve_model_name,
+    saved_compute_type,
     saved_meeting_selection,
     saved_stt_selection,
 )
@@ -39,16 +40,13 @@ __all__ = [
     "BACKEND_REGISTRY",
     "DEFAULT_MEETING_BACKEND",
     "DEFAULT_MODELS",
-    "ONNX_AMD_PROVIDERS",
     "PARAKEET_DIARIZEN_MODELS",
     "PARAKEET_PYANNOTE_MODELS",
     "PARAKEET_SORTFORMER_MODELS",
     "PARAKEET_MODELS",
     "STT_BACKENDS",
     "BackendReadiness",
-    "COMPUTE_DEVICES",
     "COMPUTE_TYPES",
-    "ComputeDevice",
     "ComputeType",
     "ParakeetSpeechToText",
     "ParakeetPyannoteSpeechToText",
@@ -58,10 +56,14 @@ __all__ = [
     "SttBackend",
     "SttCapabilities",
     "TranscriptSegment",
+    "add_retired_device_argument",
     "check_backend_readiness",
     "create_speech_to_text",
+    "is_cpu_device_name",
+    "note_retired_device",
     "resolve_default_local_backend",
     "resolve_model_name",
+    "saved_compute_type",
     "saved_meeting_selection",
     "saved_stt_selection",
 ]

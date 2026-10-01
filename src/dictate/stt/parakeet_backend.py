@@ -30,8 +30,6 @@ import numpy as np
 
 from dictate.platform_paths import user_data_dir
 from dictate.stt.base import (
-    ONNX_AMD_PROVIDERS,
-    ComputeDevice,
     ComputeType,
     SpeechToText,
     SttCapabilities,
@@ -127,54 +125,13 @@ def _ensure_model(model_name: str, quantization: str | None) -> Path:
     return target
 
 
-def _available_onnx_providers() -> tuple[str, ...]:
-    import onnxruntime as ort
-
-    return tuple(str(provider) for provider in ort.get_available_providers())
-
-
-def _preload_cuda_dlls() -> None:
-    import onnxruntime as ort
-
-    preload = getattr(ort, "preload_dlls", None)
-    if callable(preload):
-        preload()
-
-
-def _providers_for_device(device: ComputeDevice) -> list[str] | None:
-    if device == "auto":
-        return None
-    if device == "cpu":
-        return ["CPUExecutionProvider"]
-
-    if device == "cuda":
-        _preload_cuda_dlls()
-    available = _available_onnx_providers()
-    if device == "cuda":
-        if "CUDAExecutionProvider" not in available:
-            raise RuntimeError(
-                "Parakeet CUDA requested but ONNX Runtime does not expose CUDAExecutionProvider. "
-                "Install the gpu extra (onnxruntime-gpu with CUDA 13 runtime wheels) and make "
-                "sure the NVIDIA driver is 580 or newer."
-            )
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-    if device == "amd":
-        provider = next((name for name in ONNX_AMD_PROVIDERS if name in available), None)
-        if provider is None:
-            raise RuntimeError(
-                "Parakeet AMD requested but ONNX Runtime does not expose an AMD-capable "
-                f"execution provider. Expected one of: {', '.join(ONNX_AMD_PROVIDERS)}."
-            )
-        return [provider, "CPUExecutionProvider"]
-
-    raise RuntimeError(f"Unsupported Parakeet device '{device}'.")
+# Dictate runs on CPU only; never let onnxruntime pick an accelerator provider.
+_CPU_PROVIDERS: tuple[str, ...] = ("CPUExecutionProvider",)
 
 
 def _quantization_for_compute_type(compute_type: ComputeType) -> str | None:
     # onnx-asr accepts None for the plain fp32 files and "int8" for the int8
-    # files. Passing "float16" makes it look for encoder-model?float16.onnx,
-    # which the Parakeet ONNX repos do not publish.
+    # files.
     if compute_type == "float32":
         return None
     return "int8"
@@ -226,7 +183,6 @@ class ParakeetSpeechToText(SpeechToText):
     def __init__(
         self,
         model_name: str = "parakeet-tdt-0.6b-v2",
-        device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ):
         if model_name not in _MODEL_SPECS:
@@ -235,7 +191,6 @@ class ParakeetSpeechToText(SpeechToText):
                 f"Supported today: {', '.join(_MODEL_SPECS)}."
             )
         self.model_name = model_name
-        self.device = device
         self.compute_type = compute_type
         self.quantization = _quantization_for_compute_type(compute_type)
         self._model: Any | None = None
@@ -247,19 +202,17 @@ class ParakeetSpeechToText(SpeechToText):
 
             spec = _MODEL_SPECS[self.model_name]
             model_dir = _ensure_model(self.model_name, self.quantization)
-            providers = _providers_for_device(self.device)
             logger.info(
-                "Loading Parakeet %s (%s) from %s on %s",
+                "Loading Parakeet %s (%s) from %s on CPU",
                 self.model_name,
                 self.quantization or "fp32",
                 model_dir,
-                self.device,
             )
             self._model = onnx_asr.load_model(
                 spec.onnx_asr_name,
                 str(model_dir),
                 quantization=self.quantization,
-                providers=providers,
+                providers=list(_CPU_PROVIDERS),
             )
             logger.info("Parakeet model loaded")
         return self._model

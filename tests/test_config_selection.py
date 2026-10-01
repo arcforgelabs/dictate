@@ -14,7 +14,6 @@ from dictate.config import (
     set_installed_package_version,
     set_push_to_talk_combo,
     set_meeting_stt_selection,
-    set_stt_runtime_profile,
     set_stt_selection,
     set_update_channel,
 )
@@ -31,12 +30,6 @@ class ConfigSelectionTests(unittest.TestCase):
                 model="gemini-3-flash-preview",
                 path=config_path,
             )
-            set_stt_runtime_profile(
-                device="cuda",
-                compute_type="float16",
-                path=config_path,
-            )
-
             config = load_config(path=config_path)
             self.assertEqual(config.hotwords, ["AcmeWidget"])
             self.assertEqual(config.hotwords_for_backend("gemini"), "AcmeWidget")
@@ -44,6 +37,20 @@ class ConfigSelectionTests(unittest.TestCase):
             self.assertIsNone(config.push_to_talk_key)
             self.assertEqual(config.stt_backend, "gemini")
             self.assertEqual(config.stt_model, "gemini-3-flash-preview")
+
+    def test_gpu_era_runtime_keys_still_load(self) -> None:
+        # Dictate runs on CPU only. A config written while GPU lanes existed
+        # still loads; startup ignores the retired device with a notice.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "hotwords: [AcmeWidget]\nstt_device: cuda\nstt_compute_type: float16\n",
+                encoding="utf-8",
+            )
+
+            config = load_config(path=config_path)
+
+            self.assertEqual(config.hotwords, ["AcmeWidget"])
             self.assertEqual(config.stt_device, "cuda")
             self.assertEqual(config.stt_compute_type, "float16")
 

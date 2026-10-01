@@ -10,7 +10,6 @@ from typing import Any, Callable
 import numpy as np
 
 from dictate.stt.base import (
-    ComputeDevice,
     ComputeType,
     SpeechToText,
     SttCapabilities,
@@ -75,17 +74,14 @@ class _ParakeetSpeakerSpeechToText(SpeechToText):
         self,
         *,
         model_name: str,
-        device: ComputeDevice,
         compute_type: ComputeType,
         speaker_model_source: Callable[[], str],
     ) -> None:
         self.model_name = model_name
-        self.device = device
         self.compute_type = compute_type
         self._speaker_model_source = speaker_model_source
         self._asr = ParakeetSpeechToText(
             model_name=model_name,
-            device=device,
             compute_type=compute_type,
         )
         self._speaker_pipeline: Any | None = None
@@ -181,12 +177,10 @@ class ParakeetDiariZenSpeechToText(_ParakeetSpeakerSpeechToText):
     def __init__(
         self,
         model_name: str = "parakeet-tdt-0.6b-v2",
-        device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ) -> None:
         super().__init__(
             model_name=model_name,
-            device=device,
             compute_type=compute_type,
             speaker_model_source=diarizen_model_source,
         )
@@ -217,7 +211,7 @@ class ParakeetDiariZenSpeechToText(_ParakeetSpeakerSpeechToText):
             ) from exc
         source = _existing_path_or_ref(diarizen_model_source())
         pipeline = DiariZenPipeline.from_pretrained(source)
-        _move_torch_pipeline_to_device(pipeline, self.device)
+        _keep_on_cpu(pipeline)
         self._speaker_pipeline = pipeline
         return pipeline
 
@@ -230,12 +224,10 @@ class ParakeetSortformerSpeechToText(_ParakeetSpeakerSpeechToText):
     def __init__(
         self,
         model_name: str = "parakeet-tdt-0.6b-v2",
-        device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ) -> None:
         super().__init__(
             model_name=model_name,
-            device=device,
             compute_type=compute_type,
             speaker_model_source=sortformer_model_source,
         )
@@ -265,7 +257,7 @@ class ParakeetSortformerSpeechToText(_ParakeetSpeakerSpeechToText):
             model = nemo_asr.models.ASRModel.from_pretrained(model_name=source)
         except TypeError:
             model = nemo_asr.models.ASRModel.from_pretrained(source)
-        _move_torch_pipeline_to_device(model, self.device)
+        _keep_on_cpu(model)
         self._speaker_pipeline = model
         return model
 
@@ -362,15 +354,13 @@ def _existing_path_or_ref(source: str) -> str:
     return str(path) if path.exists() else source
 
 
-def _move_torch_pipeline_to_device(pipeline: Any, device: ComputeDevice) -> None:
-    if device == "cpu":
+def _keep_on_cpu(pipeline: Any) -> None:
+    """Dictate runs on CPU only; undo a loader that picked an accelerator itself."""
+    mover = getattr(pipeline, "to", None)
+    if not callable(mover):
         return
     try:
         import torch
     except Exception:  # noqa: BLE001
         return
-    if device in {"cuda", "amd"} or (device == "auto" and torch.cuda.is_available()):
-        if torch.cuda.is_available():
-            mover = getattr(pipeline, "to", None)
-            if callable(mover):
-                mover(torch.device("cuda"))
+    mover(torch.device("cpu"))

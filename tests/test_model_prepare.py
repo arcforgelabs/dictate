@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dictate.model_prepare import _create_loaded_stt, _prepare_backend_resources, _should_retry_on_cpu
+from dictate.model_prepare import _create_loaded_stt, _prepare_backend_resources, run_prepare_model
+from dictate.model_state import is_model_prepared
 from dictate.stt.parakeet_backend import _INT8_FILES, prepare_parakeet_v2_int8_model
 from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText
 
@@ -59,17 +61,35 @@ class FakeParakeetAsr:
 
 
 class ModelPrepareTests(unittest.TestCase):
-    def test_retry_on_cpu_when_cuda_busy_for_auto(self) -> None:
-        exc = RuntimeError("CUDA failed with error CUDA-capable device(s) is/are busy or unavailable")
-        self.assertTrue(_should_retry_on_cpu(exc, requested_device="auto"))
+    def test_retired_device_flag_is_ignored_and_prepares_on_cpu(self) -> None:
+        stt = FakePreparedStt()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "model-state.json"
 
-    def test_retry_on_cpu_when_cuda_oom_for_cuda_device(self) -> None:
-        exc = RuntimeError("CUDA failed with error out of memory")
-        self.assertTrue(_should_retry_on_cpu(exc, requested_device="cuda"))
+            def mark_prepared(**kwargs):
+                from dictate.model_state import mark_model_prepared
 
-    def test_no_retry_on_cpu_for_non_cuda_devices(self) -> None:
-        exc = RuntimeError("CUDA failed with error CUDA-capable device(s) is/are busy or unavailable")
-        self.assertFalse(_should_retry_on_cpu(exc, requested_device="cpu"))
+                mark_model_prepared(**kwargs, path=state_path)
+
+            with (
+                patch("dictate.model_prepare.create_speech_to_text", return_value=stt) as create,
+                patch("dictate.model_prepare.mark_model_prepared", side_effect=mark_prepared),
+                patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            ):
+                code = run_prepare_model(
+                    ["--stt-backend", "parakeet", "--device", "cuda", "--compute-type", "int8"]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertNotIn("device", create.call_args.kwargs)
+            self.assertIn("Ignoring --device cuda: Dictate runs on CPU only.", stderr.getvalue())
+            self.assertTrue(
+                is_model_prepared("parakeet", "parakeet-tdt-0.6b-v2", "int8", path=state_path)
+            )
+
+    def test_prepare_rejects_gpu_only_compute_type(self) -> None:
+        with patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+            run_prepare_model(["--stt-backend", "parakeet", "--compute-type", "float16"])
 
     def test_create_loaded_stt_releases_backend_when_model_load_fails(self) -> None:
         stt = FakeFailingStt()
@@ -78,7 +98,6 @@ class ModelPrepareTests(unittest.TestCase):
                 _create_loaded_stt(
                     backend="parakeet",
                     model="parakeet-tdt-0.6b-v2",
-                    device="auto",
                     compute_type="int8",
                 )
 

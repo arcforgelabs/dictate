@@ -52,6 +52,7 @@ from dictate.stt.factory import (
     create_speech_to_text,
     resolve_default_local_backend,
     resolve_model_name,
+    saved_compute_type,
     saved_meeting_selection,
     saved_stt_selection,
 )
@@ -262,7 +263,7 @@ class UiBackend:
         """
         backend, model = saved_stt_selection(cfg.stt_backend, cfg.stt_model)
         if backend is None:
-            return resolve_default_local_backend(cfg.stt_device or "auto")
+            return resolve_default_local_backend()
         return backend, resolve_model_name(backend, model)
 
     def _load_ui_config(self) -> config_mod.Config:
@@ -275,7 +276,7 @@ class UiBackend:
         """
         cfg = config_mod.load_config(self.config_path)
         if cfg.stt_backend and saved_stt_selection(cfg.stt_backend, cfg.stt_model)[0] is None:
-            backend, model = resolve_default_local_backend(cfg.stt_device or "auto")
+            backend, model = resolve_default_local_backend()
             config_mod.set_stt_selection(backend, model, path=self.config_path)
             cfg = config_mod.load_config(self.config_path)
         return cfg
@@ -299,11 +300,6 @@ class UiBackend:
             "shortcut": self._shortcut(cfg, prefs),
             "hotwords": list(cfg.hotwords),
             "history": self.get_history(),
-            "device": {
-                "name": "Default device",
-                "device": cfg.stt_device or "auto",
-                "compute": cfg.stt_compute_type or "int8",
-            },
             "updateChannel": release_channel(),
             "installedPackageVersion": self._safe(
                 lambda: update_status_mod.displayed_package_version(cfg.installed_package_version),
@@ -438,8 +434,6 @@ class UiBackend:
 
         if "model" in payload:
             self._set_model(payload["model"])
-        if "device" in payload:
-            self._set_device(payload["device"])
         if "shortcut" in payload:
             self._set_shortcut(payload["shortcut"])
         if "prefs" in payload:
@@ -462,14 +456,6 @@ class UiBackend:
             raise ApiError(400, f"unknown backend: {backend!r}")
         resolved = resolve_model_name(backend, name)
         config_mod.set_stt_selection(backend, resolved, path=self.config_path)
-
-    def _set_device(self, device: Any) -> None:
-        if not isinstance(device, dict):
-            raise ApiError(400, "device must be an object")
-        cfg = config_mod.load_config(self.config_path)
-        dev = device.get("device", cfg.stt_device or "auto")
-        compute = device.get("compute", cfg.stt_compute_type or "int8")
-        config_mod.set_stt_runtime_profile(str(dev), str(compute), path=self.config_path)
 
     def _set_shortcut(self, shortcut: Any) -> None:
         combo = None
@@ -625,7 +611,6 @@ class UiBackend:
         readiness = check_backend_readiness(
             backend=backend,
             model=model,
-            device=cfg.stt_device or "auto",
         )
         capabilities = BACKEND_REGISTRY[backend].capabilities
         if not capabilities.supports_speaker_attribution:
@@ -661,8 +646,7 @@ class UiBackend:
         stt = create_speech_to_text(
             backend=backend,
             model=model,
-            device=cfg.stt_device or "auto",
-            compute_type=cfg.stt_compute_type or "int8",
+            compute_type=saved_compute_type(cfg.stt_compute_type),
         )
         set_meeting(stt, hotwords=cfg.hotwords_for_backend(backend))
 

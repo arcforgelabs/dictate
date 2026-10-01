@@ -49,7 +49,7 @@ class ParakeetRegistrationTests(unittest.TestCase):
 
     def test_factory_builds_without_loading_model(self) -> None:
         stt = create_speech_to_text(
-            backend="parakeet", model="parakeet-tdt-0.6b-v2", device="cpu", compute_type="int8"
+            backend="parakeet", model="parakeet-tdt-0.6b-v2", compute_type="int8"
         )
         self.assertEqual(stt.backend_name, "parakeet")
         self.assertEqual(stt.compute_type, "int8")
@@ -59,20 +59,9 @@ class ParakeetRegistrationTests(unittest.TestCase):
         stt = create_speech_to_text(
             backend="parakeet",
             model="parakeet-tdt-0.6b-v3",
-            device="cpu",
             compute_type="int8",
         )
         self.assertEqual(stt.model_name, "parakeet-tdt-0.6b-v3")
-        self.assertIsNone(stt._model)
-
-    def test_factory_builds_cuda_lane_without_loading_model(self) -> None:
-        stt = create_speech_to_text(
-            backend="parakeet",
-            model="parakeet-tdt-0.6b-v2",
-            device="cuda",
-            compute_type="int8",
-        )
-        self.assertEqual(stt.device, "cuda")
         self.assertIsNone(stt._model)
 
     def test_factory_rejects_unknown_model(self) -> None:
@@ -80,7 +69,6 @@ class ParakeetRegistrationTests(unittest.TestCase):
             create_speech_to_text(
                 backend="parakeet",
                 model="parakeet-tdt-unknown",
-                device="cpu",
                 compute_type="int8",
             )
 
@@ -152,17 +140,13 @@ class ParakeetTranscribeTests(unittest.TestCase):
         stt.release()
         self.assertIsNone(stt._model)
 
-    def test_model_load_passes_selected_provider(self) -> None:
+    def test_model_load_pins_cpu_provider(self) -> None:
         fake_onnx_asr = types.SimpleNamespace(load_model=Mock(return_value=_FakeOnnxModel("ok")))
-        stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2", device="cuda")
+        stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2")
 
         with (
             patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
             patch("dictate.stt.parakeet_backend._ensure_model", return_value=Path("/tmp/model")),
-            patch(
-                "dictate.stt.parakeet_backend._providers_for_device",
-                return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
-            ),
         ):
             self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
 
@@ -174,24 +158,13 @@ class ParakeetTranscribeTests(unittest.TestCase):
             kwargs,
             {
                 "quantization": "int8",
-                "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+                "providers": ["CPUExecutionProvider"],
             },
         )
-
-    def test_float16_compute_uses_supported_int8_quantization(self) -> None:
-        stt = ParakeetSpeechToText(
-            model_name="parakeet-tdt-0.6b-v2",
-            device="cuda",
-            compute_type="float16",
-        )
-
-        self.assertEqual(stt.compute_type, "float16")
-        self.assertEqual(stt.quantization, "int8")
 
     def test_float32_compute_uses_unquantized_files(self) -> None:
         stt = ParakeetSpeechToText(
             model_name="parakeet-tdt-0.6b-v2",
-            device="cuda",
             compute_type="float32",
         )
 
@@ -206,7 +179,7 @@ class ParakeetTranscribeTests(unittest.TestCase):
                 patch("dictate.stt.parakeet_backend._download_model_files") as download,
                 patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
             ):
-                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2", device="cpu")
+                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v2")
                 self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
 
         download.assert_not_called()
@@ -224,7 +197,7 @@ class ParakeetTranscribeTests(unittest.TestCase):
                 patch("dictate.stt.parakeet_backend._download_model_files") as download,
                 patch.dict(sys.modules, {"onnx_asr": fake_onnx_asr}),
             ):
-                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v3", device="cpu")
+                stt = ParakeetSpeechToText(model_name="parakeet-tdt-0.6b-v3")
                 self.assertIs(stt.model, fake_onnx_asr.load_model.return_value)
 
         download.assert_called_once()
@@ -239,14 +212,14 @@ class ParakeetReadinessTests(unittest.TestCase):
         from dictate.stt import check_backend_readiness
 
         with patch("dictate.stt.factory.parakeet_available", return_value=False):
-            report = check_backend_readiness(backend="parakeet", model=None, device="cpu")
+            report = check_backend_readiness(backend="parakeet", model=None)
         self.assertTrue(any("onnx-asr is not importable" in e for e in report.errors))
 
     def test_readiness_ok_when_available(self) -> None:
         from dictate.stt import check_backend_readiness
 
         with patch("dictate.stt.factory.parakeet_available", return_value=True):
-            report = check_backend_readiness(backend="parakeet", model=None, device="cpu")
+            report = check_backend_readiness(backend="parakeet", model=None)
         self.assertEqual(report.errors, [])
 
     def test_readiness_accepts_v3_when_available(self) -> None:
@@ -256,22 +229,8 @@ class ParakeetReadinessTests(unittest.TestCase):
             report = check_backend_readiness(
                 backend="parakeet",
                 model="parakeet-tdt-0.6b-v3",
-                device="cpu",
             )
         self.assertEqual(report.errors, [])
-
-    def test_readiness_requires_cuda_onnx_provider_for_cuda(self) -> None:
-        from dictate.stt import check_backend_readiness
-
-        fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
-        with patch("dictate.stt.factory.parakeet_available", return_value=True):
-            with patch.dict(sys.modules, {"onnxruntime": fake_ort}):
-                report = check_backend_readiness(
-                    backend="parakeet",
-                    model="parakeet-tdt-0.6b-v2",
-                    device="cuda",
-                )
-        self.assertTrue(any("CUDAExecutionProvider" in error for error in report.errors))
 
 
 if __name__ == "__main__":

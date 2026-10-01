@@ -21,7 +21,6 @@ import argparse
 import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 from types import FrameType
@@ -59,19 +58,20 @@ from dictate.outputs import (
     resolve_typing_backend,
 )
 from dictate.process_lock import ProcessLock, daemon_lock_path
-from dictate.stt.factory import device_for_host
 from dictate.stt import (
-    COMPUTE_DEVICES,
     COMPUTE_TYPES,
-    ComputeDevice,
     ComputeType,
     PARAKEET_MODELS,
     STT_BACKENDS,
     SpeechToText,
     SttBackend,
+    add_retired_device_argument,
     create_speech_to_text,
+    is_cpu_device_name,
+    note_retired_device,
     resolve_default_local_backend,
     resolve_model_name,
+    saved_compute_type,
     saved_meeting_selection,
     saved_stt_selection,
 )
@@ -123,17 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
             f"parakeet examples: {', '.join(PARAKEET_MODELS)}."
         ),
     )
-    parser.add_argument(
-        "--device",
-        choices=COMPUTE_DEVICES,
-        default="auto",
-        help="Compute device: cpu, cuda, amd, auto",
-    )
+    add_retired_device_argument(parser)
     parser.add_argument(
         "--compute-type",
         choices=COMPUTE_TYPES,
         default="int8",
-        help="Model compute type (default: int8)",
+        help="Model compute type on CPU (default: int8)",
     )
     parser.add_argument(
         "--language",
@@ -227,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     config = load_config()
     stt_backend, model_name = _resolve_startup_stt(args=args, cli_args=cli_args, config=config)
-    stt_device, stt_compute_type = _resolve_startup_runtime(
+    stt_compute_type = _resolve_startup_compute_type(
         args=args,
         cli_args=cli_args,
         config=config,
@@ -251,12 +246,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             push_to_talk_combo=push_to_talk_combo,
             stt_backend=stt_backend,
             stt_model=model_name,
-            stt_device=stt_device,
         )
         stt = _load_stt_or_exit(
             stt_backend=stt_backend,
             model_name=model_name,
-            device=stt_device,
             compute_type=stt_compute_type,
         )
         language = _resolve_language(stt, args.language)
@@ -286,12 +279,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             push_to_talk_combo=push_to_talk_combo,
             stt_backend=stt_backend,
             stt_model=model_name,
-            stt_device=stt_device,
         )
         stt = _load_stt_or_exit(
             stt_backend=stt_backend,
             model_name=model_name,
-            device=stt_device,
             compute_type=stt_compute_type,
         )
         language = _resolve_language(stt, args.language)
@@ -422,7 +413,6 @@ def _resolve_startup_stt(
 ) -> tuple[SttBackend, str]:
     backend_flag = _flag_in_args(cli_args, "--stt-backend")
     model_flag = _flag_in_args(cli_args, "--model")
-    device = _startup_device(args=args, cli_args=cli_args, config=config)
     saved_backend, saved_model = saved_stt_selection(config.stt_backend, config.stt_model)
     if not backend_flag and not model_flag and saved_backend is not None:
         model_name = resolve_model_name(saved_backend, saved_model)
@@ -439,7 +429,7 @@ def _resolve_startup_stt(
         )
     # No saved/flagged selection: use the default local backend (Parakeet).
     if not backend_flag and not model_flag:
-        backend, model_name = resolve_default_local_backend(device)
+        backend, model_name = resolve_default_local_backend()
         print(
             f"Using automatic STT selection: backend='{backend}' model='{model_name}'",
             file=sys.stderr,
@@ -449,73 +439,40 @@ def _resolve_startup_stt(
     return (backend, resolve_model_name(backend, args.model))
 
 
-def _startup_device(
+def _resolve_startup_compute_type(
     *,
     args,  # noqa: ANN001
     cli_args: Sequence[str],
     config: Config,
-) -> ComputeDevice:
-    """Resolve the effective compute device (no printing) for default selection.
+) -> ComputeType:
+    """The CPU compute type, from the CLI or config.yaml.
 
-    Mirrors the device-selection half of ``_resolve_startup_runtime`` so the local
-    default is chosen for the same device the daemon will actually use.
+    Dictate runs on CPU only. A ``--device`` flag or a saved ``stt_device`` from
+    a GPU-era config is ignored with a one-line notice (``cpu`` and ``auto`` are
+    silent), and a saved GPU-only compute type loads as int8.
     """
-    device_flag = _flag_in_args(cli_args, "--device")
-    if not device_flag and config.stt_device in COMPUTE_DEVICES:
-        return config.stt_device  # type: ignore[return-value]
-    return args.device
-
-
-def _resolve_startup_runtime(
-    *,
-    args,  # noqa: ANN001
-    cli_args: Sequence[str],
-    config: Config,
-) -> tuple[ComputeDevice, ComputeType]:
-    device_flag = _flag_in_args(cli_args, "--device")
-    compute_flag = _flag_in_args(cli_args, "--compute-type")
-
-    device: ComputeDevice = args.device
-    if not device_flag and config.stt_device in COMPUTE_DEVICES:
-        device = config.stt_device  # type: ignore[assignment]
-        print(f"Using saved STT device: {device}", file=sys.stderr)
-    elif not device_flag and config.stt_device:
+    if args.device is not None:
+        note_retired_device(args.device)
+    elif config.stt_device and not is_cpu_device_name(config.stt_device):
         print(
-            f"Ignoring invalid saved STT device '{config.stt_device}' in config.",
+            f"Ignoring saved STT device '{config.stt_device}': Dictate runs on CPU only.",
             file=sys.stderr,
         )
 
-    compute_type: ComputeType = args.compute_type
-    if not compute_flag and config.stt_compute_type in COMPUTE_TYPES:
-        compute_type = config.stt_compute_type  # type: ignore[assignment]
+    if _flag_in_args(cli_args, "--compute-type"):
+        return args.compute_type
+    if not config.stt_compute_type:
+        return args.compute_type
+    compute_type = saved_compute_type(config.stt_compute_type)
+    if compute_type == config.stt_compute_type:
         print(f"Using saved STT compute type: {compute_type}", file=sys.stderr)
-    elif not compute_flag and config.stt_compute_type:
+    else:
         print(
-            f"Ignoring invalid saved STT compute type '{config.stt_compute_type}' in config.",
+            f"Ignoring saved STT compute type '{config.stt_compute_type}' in config; "
+            f"using {compute_type}.",
             file=sys.stderr,
         )
-
-    device = _device_leaving_passthrough_gpu(device)
-    return (device, compute_type)
-
-
-def _device_leaving_passthrough_gpu(device: ComputeDevice) -> ComputeDevice:
-    """Keep a GPU that is passed through to a VM off the dictation path."""
-    try:
-        pci_text = subprocess.check_output(
-            ["lspci", "-nnk"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return device
-    chosen = device_for_host(device, pci_text)
-    if chosen != device:
-        print(
-            "STT device is cpu. The NVIDIA GPU is bound to vfio for the Windows VM.",
-            file=sys.stderr,
-        )
-    return chosen  # type: ignore[return-value]
+    return compute_type
 
 
 def _resolve_startup_lexicon_mode(
@@ -607,7 +564,6 @@ def _run_preflight_or_exit(
     push_to_talk_combo: str,
     stt_backend: SttBackend,
     stt_model: str,
-    stt_device: ComputeDevice,
 ) -> None:
     from dictate.preflight import run_preflight
 
@@ -618,7 +574,6 @@ def _run_preflight_or_exit(
         push_to_talk_combo=push_to_talk_combo,
         stt_backend=stt_backend,
         stt_model=stt_model,
-        stt_device=stt_device,
     )
     for note in report.notes:
         print(f"Preflight: {note}", file=sys.stderr)
@@ -634,19 +589,17 @@ def _load_stt_or_exit(
     *,
     stt_backend: SttBackend,
     model_name: str,
-    device: ComputeDevice,
     compute_type: ComputeType,
 ) -> SpeechToText:
     stt = create_speech_to_text(
         backend=stt_backend,
         model=model_name,
-        device=device,
         compute_type=compute_type,
     )
     print(
         (
             f"Loading STT backend '{stt_backend}' model '{model_name}' "
-            f"on '{device}' ({compute_type})..."
+            f"on CPU ({compute_type})..."
         ),
         file=sys.stderr,
     )

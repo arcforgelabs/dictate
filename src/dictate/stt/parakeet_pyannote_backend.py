@@ -12,7 +12,6 @@ from typing import Any
 import numpy as np
 
 from dictate.stt.base import (
-    ComputeDevice,
     ComputeType,
     SpeechToText,
     SttCapabilities,
@@ -106,15 +105,12 @@ class ParakeetPyannoteSpeechToText(SpeechToText):
     def __init__(
         self,
         model_name: str = "parakeet-tdt-0.6b-v2",
-        device: ComputeDevice = "auto",
         compute_type: ComputeType = "int8",
     ) -> None:
         self.model_name = model_name
-        self.device = device
         self.compute_type = compute_type
         self._asr = ParakeetSpeechToText(
             model_name=model_name,
-            device=device,
             compute_type=compute_type,
         )
         self._pipeline: Any | None = None
@@ -222,21 +218,8 @@ class ParakeetPyannoteSpeechToText(SpeechToText):
             )
         model_ref = str(source_path if source_path.exists() else source)
         pipeline = Pipeline.from_pretrained(model_ref, token=token)
-        _move_pipeline_to_device(pipeline, self.device)
         self._pipeline = pipeline
         return pipeline
-
-
-def _move_pipeline_to_device(pipeline: Any, device: ComputeDevice) -> None:
-    if device == "cpu":
-        return
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return
-    if device in {"cuda", "amd"} or (device == "auto" and torch.cuda.is_available()):
-        if torch.cuda.is_available():
-            pipeline.to(torch.device("cuda"))
 
 
 def _slice_audio(audio: np.ndarray, start: float, end: float) -> np.ndarray:

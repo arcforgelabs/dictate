@@ -6,13 +6,11 @@ from dictate.stt import factory as stt_factory
 
 
 class ResolveDefaultLocalBackendTests(unittest.TestCase):
-    def test_every_device_defaults_to_parakeet(self) -> None:
-        for device in ("cpu", "cuda", "amd", "auto"):
-            with self.subTest(device=device):
-                self.assertEqual(
-                    stt_factory.resolve_default_local_backend(device),
-                    ("parakeet", "parakeet-tdt-0.6b-v2"),
-                )
+    def test_defaults_to_parakeet(self) -> None:
+        self.assertEqual(
+            stt_factory.resolve_default_local_backend(),
+            ("parakeet", "parakeet-tdt-0.6b-v2"),
+        )
 
 
 class SavedSelectionMigrationTests(unittest.TestCase):

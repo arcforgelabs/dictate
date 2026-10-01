@@ -56,7 +56,7 @@ class ModelStateTests(unittest.TestCase):
             legacy_path = Path(temp_dir) / "legacy" / "model-state.json"
             legacy_path.parent.mkdir(parents=True)
             legacy_path.write_text(
-                json.dumps({"prepared": ["nemo-canary|nvidia/canary-1b|cuda|int8"], "errors": {}}),
+                json.dumps({"prepared": ["nemo-canary|nvidia/canary-1b|cpu|int8"], "errors": {}}),
                 encoding="utf-8",
             )
             self.assertFalse(new_path.exists())
@@ -68,7 +68,7 @@ class ModelStateTests(unittest.TestCase):
             ):
                 state = model_state.load_model_state(path=new_path)
 
-            self.assertIn("nemo-canary|nvidia/canary-1b|cuda|int8", state.prepared)
+            self.assertIn("nemo-canary|nvidia/canary-1b|cpu|int8", state.prepared)
             # Read-only fallback: neither file was created/modified.
             self.assertFalse(new_path.exists())
             self.assertTrue(legacy_path.is_file())
@@ -113,7 +113,6 @@ class ModelStateTests(unittest.TestCase):
             mark_model_failed(
                 backend="nemo-canary",
                 model="nvidia/canary-1b",
-                device="cuda",
                 compute_type="int8",
                 error_message="échec du téléchargement — délai dépassé",
                 path=state_path,
@@ -122,7 +121,6 @@ class ModelStateTests(unittest.TestCase):
                 get_model_error(
                     backend="nemo-canary",
                     model="nvidia/canary-1b",
-                    device="cuda",
                     compute_type="int8",
                     path=state_path,
                 ),
@@ -135,7 +133,6 @@ class ModelStateTests(unittest.TestCase):
             mark_model_prepared(
                 backend="nemo-canary",
                 model="nvidia/canary-1b-flash",
-                device="auto",
                 compute_type="int8",
                 path=state_path,
             )
@@ -143,10 +140,33 @@ class ModelStateTests(unittest.TestCase):
                 is_model_prepared(
                     backend="nemo-canary",
                     model="nvidia/canary-1b-flash",
-                    device="auto",
                     compute_type="int8",
                     path=state_path,
                 )
+            )
+
+    def test_cpu_prepared_records_from_before_cpu_only_stay_valid(self) -> None:
+        # Keys used to carry the compute device. CPU records keep matching.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "model-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "prepared": [
+                            "parakeet|parakeet-tdt-0.6b-v2|cpu|int8",
+                            "parakeet|parakeet-tdt-0.6b-v3|cuda|int8",
+                        ],
+                        "errors": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(
+                is_model_prepared("parakeet", "parakeet-tdt-0.6b-v2", "int8", path=state_path)
+            )
+            self.assertFalse(
+                is_model_prepared("parakeet", "parakeet-tdt-0.6b-v3", "int8", path=state_path)
             )
 
     def test_mark_failed_clears_ready_flag_and_records_error(self) -> None:
@@ -155,14 +175,12 @@ class ModelStateTests(unittest.TestCase):
             mark_model_prepared(
                 backend="nemo-canary",
                 model="nvidia/canary-1b",
-                device="cuda",
                 compute_type="int8",
                 path=state_path,
             )
             mark_model_failed(
                 backend="nemo-canary",
                 model="nvidia/canary-1b",
-                device="cuda",
                 compute_type="int8",
                 error_message="download timeout",
                 path=state_path,
@@ -171,7 +189,6 @@ class ModelStateTests(unittest.TestCase):
                 is_model_prepared(
                     backend="nemo-canary",
                     model="nvidia/canary-1b",
-                    device="cuda",
                     compute_type="int8",
                     path=state_path,
                 )
@@ -180,7 +197,6 @@ class ModelStateTests(unittest.TestCase):
                 get_model_error(
                     backend="nemo-canary",
                     model="nvidia/canary-1b",
-                    device="cuda",
                     compute_type="int8",
                     path=state_path,
                 ),

@@ -8,11 +8,12 @@ from typing import Sequence
 
 from dictate.model_state import mark_model_failed, mark_model_prepared
 from dictate.stt import (
-    COMPUTE_DEVICES,
     COMPUTE_TYPES,
     STT_BACKENDS,
     SpeechToText,
+    add_retired_device_argument,
     create_speech_to_text,
+    note_retired_device,
     resolve_model_name,
 )
 
@@ -30,12 +31,7 @@ def run_prepare_model(argv: Sequence[str]) -> int:
         default=None,
         help="Model name override (backend default when omitted)",
     )
-    parser.add_argument(
-        "--device",
-        choices=COMPUTE_DEVICES,
-        default="auto",
-        help="Compute device for model load validation",
-    )
+    add_retired_device_argument(parser)
     parser.add_argument(
         "--compute-type",
         choices=COMPUTE_TYPES,
@@ -43,63 +39,35 @@ def run_prepare_model(argv: Sequence[str]) -> int:
         help="Compute type for backend initialization",
     )
     args = parser.parse_args(list(argv))
+    note_retired_device(args.device)
 
     model_name = resolve_model_name(args.stt_backend, args.model)
     print(
-        f"Preparing STT backend '{args.stt_backend}' model '{model_name}' on '{args.device}' ({args.compute_type})...",
+        f"Preparing STT backend '{args.stt_backend}' model '{model_name}' ({args.compute_type})...",
         file=sys.stderr,
     )
     stt: SpeechToText | None = None
     try:
         stt = _create_loaded_stt(
-            backend=args.stt_backend,  # type: ignore[arg-type]
+            backend=args.stt_backend,
             model=model_name,
-            device=args.device,  # type: ignore[arg-type]
-            compute_type=args.compute_type,  # type: ignore[arg-type]
+            compute_type=args.compute_type,
         )
     except Exception as exc:  # noqa: BLE001
-        if _should_retry_on_cpu(exc, requested_device=args.device):
-            print(
-                "Primary prepare load failed on CUDA/auto; retrying on CPU to complete downloads...",
-                file=sys.stderr,
-            )
-            retry_stt: SpeechToText | None = None
-            try:
-                retry_stt = _create_loaded_stt(
-                    backend=args.stt_backend,  # type: ignore[arg-type]
-                    model=model_name,
-                    device="cpu",  # type: ignore[arg-type]
-                    compute_type="int8",  # type: ignore[arg-type]
-                )
-            except Exception as retry_exc:  # noqa: BLE001
-                mark_model_failed(
-                    backend=args.stt_backend,
-                    model=model_name,
-                    device=args.device,
-                    compute_type=args.compute_type,
-                    error_message=str(retry_exc),
-                )
-                print(f"Model preparation failed: {retry_exc}", file=sys.stderr)
-                return 2
-            finally:
-                _release_stt(retry_stt)
-        else:
-            mark_model_failed(
-                backend=args.stt_backend,
-                model=model_name,
-                device=args.device,
-                compute_type=args.compute_type,
-                error_message=str(exc),
-            )
-            print(f"Model preparation failed: {exc}", file=sys.stderr)
-            return 2
+        mark_model_failed(
+            backend=args.stt_backend,
+            model=model_name,
+            compute_type=args.compute_type,
+            error_message=str(exc),
+        )
+        print(f"Model preparation failed: {exc}", file=sys.stderr)
+        return 2
     finally:
         _release_stt(stt)
 
     mark_model_prepared(
         backend=args.stt_backend,
         model=model_name,
-        device=args.device,
         compute_type=args.compute_type,
     )
     print("Model preparation complete.", file=sys.stderr)
@@ -110,13 +78,11 @@ def _create_loaded_stt(
     *,
     backend: str,
     model: str,
-    device: str,
     compute_type: str,
 ) -> SpeechToText:
     stt = create_speech_to_text(
         backend=backend,  # type: ignore[arg-type]
         model=model,
-        device=device,  # type: ignore[arg-type]
         compute_type=compute_type,  # type: ignore[arg-type]
     )
     try:
@@ -142,20 +108,3 @@ def _release_stt(stt: SpeechToText | None) -> None:
         stt.release()
     except Exception:  # noqa: BLE001
         pass
-
-
-def _should_retry_on_cpu(exc: Exception, *, requested_device: str) -> bool:
-    if requested_device not in {"auto", "cuda"}:
-        return False
-    message = str(exc).lower()
-    return any(
-        token in message
-        for token in (
-            "cuda-capable device(s) is/are busy or unavailable",
-            "cuda is not available",
-            "cuda failed",
-            "cuda unavailable",
-            "cuda out of memory",
-            "out of memory",
-        )
-    )

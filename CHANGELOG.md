@@ -17,6 +17,8 @@
   no longer supported. The GPU install flags and extras still exist until
   they are removed, but are not maintained and are known to be broken
   (`install.sh --gpu` never enabled CUDA).
+- Device selection. The engine, tray and settings have no CPU/GPU choice; a
+  saved `stt_device` or a `--device` flag is ignored with a one-line notice.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A

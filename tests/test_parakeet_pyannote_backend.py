@@ -142,7 +142,6 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
     def test_factory_shape_without_loading_heavy_runtime(self) -> None:
         stt = ParakeetPyannoteSpeechToText(
             model_name="parakeet-tdt-0.6b-v3",
-            device="cuda",
             compute_type="int8",
         )
         self.assertEqual(stt.backend_name, "parakeet-pyannote")
@@ -235,7 +234,7 @@ class ParakeetPyannoteBackendTests(unittest.TestCase):
                 patch.dict(os.environ, {"DICTATE_PYANNOTE_MODEL_PATH": temp_dir}, clear=True),
                 patch.dict(sys.modules, {"pyannote": fake_pyannote, "pyannote.audio": fake_audio}),
             ):
-                stt = ParakeetPyannoteSpeechToText(device="cpu")
+                stt = ParakeetPyannoteSpeechToText()
                 self.assertIs(stt._pyannote_pipeline(), fake_pipeline)
 
         self.assertEqual(calls, [(str(Path(temp_dir)), None)])

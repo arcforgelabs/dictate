@@ -152,67 +152,71 @@ class MainSttSelectionTests(unittest.TestCase):
         self.assertEqual(load_stt.call_args.kwargs["model_name"], "parakeet-tdt-0.6b-v2")
         self.assertEqual(preflight.call_args.kwargs["stt_backend"], "parakeet")
 
-    def test_saved_runtime_profile_used_when_cli_does_not_override(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with contextlib.redirect_stderr(io.StringIO()):
-            device, compute_type = main_module._resolve_startup_runtime(
+    def _compute_type(self, cli_args: list[str], config: Config) -> tuple[str, str]:
+        args = main_module.build_parser().parse_args(cli_args)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            compute_type = main_module._resolve_startup_compute_type(
                 args=args,
-                cli_args=[],
-                config=Config(stt_device="cuda", stt_compute_type="float16"),
+                cli_args=cli_args,
+                config=config,
             )
+        return compute_type, stderr.getvalue()
 
-        self.assertEqual(device, "cuda")
-        self.assertEqual(compute_type, "float16")
+    def test_saved_gpu_device_loads_as_cpu_with_one_line_notice(self) -> None:
+        for device in ("cuda", "amd"):
+            with self.subTest(device=device):
+                compute_type, stderr = self._compute_type(
+                    [], Config(stt_device=device, stt_compute_type="int8")
+                )
 
-    def test_saved_amd_runtime_profile_is_valid(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+                self.assertEqual(compute_type, "int8")
+                self.assertEqual(
+                    stderr.strip().splitlines()[0],
+                    f"Ignoring saved STT device '{device}': Dictate runs on CPU only.",
+                )
 
-        with contextlib.redirect_stderr(io.StringIO()):
-            device, compute_type = main_module._resolve_startup_runtime(
-                args=args,
-                cli_args=[],
-                config=Config(stt_device="amd", stt_compute_type="int8"),
-            )
+    def test_saved_cpu_or_auto_device_is_silent(self) -> None:
+        for device in ("cpu", "auto"):
+            with self.subTest(device=device):
+                _compute_type, stderr = self._compute_type([], Config(stt_device=device))
 
-        self.assertEqual(device, "amd")
+                self.assertNotIn("device", stderr)
+
+    def test_saved_gpu_only_compute_type_loads_as_int8(self) -> None:
+        compute_type, stderr = self._compute_type(
+            [], Config(stt_device="cuda", stt_compute_type="float16")
+        )
+
         self.assertEqual(compute_type, "int8")
+        self.assertIn("Ignoring saved STT compute type 'float16' in config; using int8.", stderr)
 
-    def test_cli_accepts_amd_runtime_profile(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args(["--device", "amd"])
+    def test_saved_cpu_compute_type_is_used(self) -> None:
+        compute_type, _stderr = self._compute_type([], Config(stt_compute_type="float32"))
 
-        self.assertEqual(args.device, "amd")
-
-    def test_cli_runtime_flags_override_saved_profile(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args(["--device", "cpu", "--compute-type", "float32"])
-
-        with contextlib.redirect_stderr(io.StringIO()):
-            device, compute_type = main_module._resolve_startup_runtime(
-                args=args,
-                cli_args=["--device", "cpu", "--compute-type", "float32"],
-                config=Config(stt_device="cuda", stt_compute_type="float16"),
-            )
-
-        self.assertEqual(device, "cpu")
         self.assertEqual(compute_type, "float32")
 
-    def test_invalid_saved_runtime_profile_falls_back_to_cli_defaults(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+    def test_cli_device_flag_still_parses_and_is_ignored(self) -> None:
+        compute_type, stderr = self._compute_type(
+            ["--device", "cpu", "--compute-type", "float32"],
+            Config(stt_device="cuda", stt_compute_type="int8"),
+        )
 
-        with contextlib.redirect_stderr(io.StringIO()):
-            device, compute_type = main_module._resolve_startup_runtime(
-                args=args,
-                cli_args=[],
-                config=Config(stt_device="bad-device", stt_compute_type="bad-compute"),
-            )
+        self.assertEqual(compute_type, "float32")
+        self.assertEqual(stderr, "")
 
-        self.assertEqual(device, "auto")
+    def test_cli_gpu_device_flag_is_ignored_with_notice(self) -> None:
+        compute_type, stderr = self._compute_type(["--device", "cuda"], Config())
+
         self.assertEqual(compute_type, "int8")
+        self.assertEqual(stderr.strip(), "Ignoring --device cuda: Dictate runs on CPU only.")
+
+    def test_device_flag_is_hidden_from_help(self) -> None:
+        self.assertNotIn("--device", main_module.build_parser().format_help())
+
+    def test_cli_rejects_gpu_only_compute_type(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main_module.build_parser().parse_args(["--compute-type", "float16"])
 
     def test_run_once_releases_stt_resources(self) -> None:
         stt = FakeOnceStt()

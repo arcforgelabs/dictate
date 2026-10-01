@@ -46,6 +46,7 @@ class Config:
     stt_model: str | None = None
     meeting_stt_backend: str | None = None
     meeting_stt_model: str | None = None
+    # Retired: Dictate runs on CPU only. Read so startup can say it is ignored.
     stt_device: str | None = None
     stt_compute_type: str | None = None
     update_channel: str | None = None
@@ -232,14 +233,6 @@ def set_stt_model(model: str, path: Path = CONFIG_PATH) -> None:
     """Persist the STT model without changing the saved backend."""
     data = _load_raw(path)
     data["stt_model"] = model
-    _save_raw(data, path)
-
-
-def set_stt_runtime_profile(device: str, compute_type: str, path: Path = CONFIG_PATH) -> None:
-    """Persist selected STT runtime profile for tray startup defaults."""
-    data = _load_raw(path)
-    data["stt_device"] = device
-    data["stt_compute_type"] = compute_type
     _save_raw(data, path)
 
 

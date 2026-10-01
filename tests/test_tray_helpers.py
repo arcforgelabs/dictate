@@ -34,53 +34,45 @@ def _import_tray_with_fake_gi():
         return importlib.import_module("dictate.tray")
 
 
-def _profile_self(*, active_backend: str, active_model: str) -> types.SimpleNamespace:
-    return types.SimpleNamespace(
-        _syncing_profile_menu=False,
-        _prepare_in_progress=False,
-        _switch_in_progress=False,
-        _active_backend=active_backend,
-        _active_model=active_model,
-        _stt_device="cuda",
-        _stt_compute_type="int8",
-        _requires_preparation=lambda **_kw: False,
-        _start_switch=MagicMock(),
-        _start_prepare_for_switch=MagicMock(),
-        _set_active_profile_menu_item=MagicMock(),
-        _set_switch_status=MagicMock(),
-    )
-
-
 class TrayHelperTests(unittest.TestCase):
-    def test_local_backend_preserves_auto_device(self) -> None:
+    def test_local_backend_keeps_cpu_compute_type(self) -> None:
         tray = _import_tray_with_fake_gi()
 
-        self.assertEqual(tray._device_for_backend("parakeet", "auto"), "auto")
-        self.assertEqual(tray._device_for_backend("parakeet", "cuda"), "cuda")
-        self.assertEqual(tray._device_for_backend("parakeet-pyannote", "cuda"), "auto")
+        self.assertEqual(tray._compute_type_for_backend("parakeet", "float32"), "float32")
+        self.assertEqual(tray._compute_type_for_backend("parakeet", "float16"), "int8")
+        self.assertEqual(tray._compute_type_for_backend("parakeet-pyannote", "float32"), "int8")
 
-    def test_profile_selection_switches_other_backend_to_local_default(self) -> None:
+    def test_tray_has_no_device_profiles(self) -> None:
         tray = _import_tray_with_fake_gi()
-        fake_self = _profile_self(active_backend="parakeet-pyannote", active_model="parakeet-tdt-0.6b-v3")
+
+        self.assertFalse(hasattr(tray, "LOCAL_RUNTIME_PROFILES"))
+        self.assertFalse(hasattr(tray.TrayIcon, "_on_profile_selected"))
+        self.assertFalse(hasattr(tray.TrayIcon, "_should_retry_switch_on_cpu"))
+
+    def test_model_selection_switches_without_a_device(self) -> None:
+        tray = _import_tray_with_fake_gi()
+        fake_self = types.SimpleNamespace(
+            _syncing_model_menu=False,
+            _prepare_in_progress=False,
+            _switch_in_progress=False,
+            _active_backend="parakeet",
+            _active_model="parakeet-tdt-0.6b-v2",
+            _stt_compute_type="int8",
+            _requires_preparation=lambda **_kw: False,
+            _start_switch=MagicMock(),
+            _start_prepare_for_switch=MagicMock(),
+            _set_active_model_menu_item=MagicMock(),
+            _set_switch_status=MagicMock(),
+        )
         item = types.SimpleNamespace(get_active=lambda: True)
 
-        tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
+        tray.TrayIcon._on_model_selected(fake_self, item, "parakeet", "parakeet-tdt-0.6b-v3")
 
-        fake_self._start_switch.assert_called_once()
-        kwargs = fake_self._start_switch.call_args.kwargs
-        self.assertEqual(kwargs["backend"], "parakeet")
-        self.assertEqual(kwargs["model"], "parakeet-tdt-0.6b-v2")
-        self.assertEqual(kwargs["device"], "cpu")
-
-    def test_profile_selection_keeps_active_local_model(self) -> None:
-        tray = _import_tray_with_fake_gi()
-        fake_self = _profile_self(active_backend="parakeet", active_model="parakeet-tdt-0.6b-v3")
-        item = types.SimpleNamespace(get_active=lambda: True)
-
-        tray.TrayIcon._on_profile_selected(fake_self, item, "cpu", "int8")
-
-        fake_self._start_switch.assert_called_once()
-        self.assertEqual(fake_self._start_switch.call_args.kwargs["model"], "parakeet-tdt-0.6b-v3")
+        fake_self._start_switch.assert_called_once_with(
+            backend="parakeet",
+            model="parakeet-tdt-0.6b-v3",
+            compute_type="int8",
+        )
 
 
 if __name__ == "__main__":
