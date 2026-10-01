@@ -17,14 +17,9 @@ JSON artifacts consumed by docs/TRANSCRIPTION_PLAN.md and the plan audit.
 
 Lanes:
   cpu                 Parakeet v2 English CPU
-  cuda                Parakeet v2 English NVIDIA CUDA
-  cuda-multilingual   Parakeet v3 multilingual NVIDIA CUDA
-  cuda-human          Parakeet v2 English NVIDIA CUDA on curated human speech
-  cuda-human-v3       Parakeet v3 multilingual NVIDIA CUDA on curated human speech
-  amd                 Parakeet v2 English AMD runtime
-  amd-multilingual    Parakeet v3 multilingual AMD runtime
-  amd-human           Parakeet v2 English AMD runtime on curated human speech
-  amd-human-v3        Parakeet v3 multilingual AMD runtime on curated human speech
+  cpu-multilingual    Parakeet v3 multilingual CPU
+  cpu-human           Parakeet v2 English CPU on curated human speech
+  cpu-human-v3        Parakeet v3 multilingual CPU on curated human speech
   meeting             Parakeet + pyannote Meeting speaker attribution
   meeting-diarizen    Parakeet + DiariZen Meeting speaker attribution
   meeting-sortformer  Parakeet + NVIDIA Sortformer Meeting speaker attribution
@@ -33,7 +28,9 @@ Lanes:
                       Parakeet + DiariZen Meeting on curated human meeting audio
   meeting-sortformer-human
                       Parakeet + Sortformer Meeting on curated human meeting audio
-  all                 Run every lane above
+  all                 Run every synthetic lane above (no *-human lanes)
+
+Every lane runs on the CPU; Dictate does not support GPUs.
 
 Environment:
   DICTATE_BENCHMARK_CMD  Command used to invoke Dictate. Defaults to
@@ -49,8 +46,8 @@ Environment:
 
 Preflight:
   Each selected lane runs "dictate doctor --quick" first for the exact
-  backend/model/device. This fails fast when CUDA, AMD providers, or the
-  gated Meeting speaker model are unavailable. Use --skip-preflight only when
+  backend/model on the CPU. This fails fast when the Parakeet runtime or the
+  gated Meeting speaker model is unavailable. Use --skip-preflight only when
   deliberately collecting a failed benchmark artifact.
 EOF
 }
@@ -82,7 +79,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$lane" in
-  cpu|cuda|cuda-multilingual|cuda-human|cuda-human-v3|amd|amd-multilingual|amd-human|amd-human-v3|meeting|meeting-diarizen|meeting-sortformer|meeting-human|meeting-diarizen-human|meeting-sortformer-human|all) ;;
+  cpu|cpu-multilingual|cpu-human|cpu-human-v3|meeting|meeting-diarizen|meeting-sortformer|meeting-human|meeting-diarizen-human|meeting-sortformer-human|all) ;;
   *)
     echo "Unknown lane: $lane" >&2
     usage >&2
@@ -120,8 +117,7 @@ generate_fixtures() {
 
 run_preflight() {
   local backend="$1"
-  local device="$2"
-  local model="$3"
+  local model="$2"
 
   if [[ "$preflight" -eq 0 ]]; then
     return 0
@@ -130,21 +126,20 @@ run_preflight() {
   run_cmd "${python_cmd[@]}" doctor \
     --stt-backend "$backend" \
     --model "$model" \
-    --device "$device" \
+    --device cpu \
     --quick \
     --type-backend pynput
 }
 
 run_parakeet_lane() {
-  local device="$1"
-  local model="$2"
-  local artifact="$3"
-  local label="$4"
-  local fixture_class="${5:-synthetic}"
-  local manifest="${6:-$repo_root/benchmark-fixtures/flite-long/manifest-3x.csv}"
-  local audio_root="${7:-$repo_root/benchmark-fixtures/flite-long}"
+  local model="$1"
+  local artifact="$2"
+  local label="$3"
+  local fixture_class="${4:-synthetic}"
+  local manifest="${5:-$repo_root/benchmark-fixtures/flite-long/manifest-3x.csv}"
+  local audio_root="${6:-$repo_root/benchmark-fixtures/flite-long}"
 
-  run_preflight parakeet "$device" "$model"
+  run_preflight parakeet "$model"
   if [[ "$fixture_class" == "synthetic" ]]; then
     generate_fixtures long
   fi
@@ -154,7 +149,7 @@ run_parakeet_lane() {
     --audio-root "$audio_root" \
     --stt-backend parakeet \
     --model "$model" \
-    --device "$device" \
+    --device cpu \
     --language en \
     --fixture-class "$fixture_class" \
     --require-timestamp-metrics \
@@ -173,7 +168,7 @@ run_meeting_lane() {
   local manifest="${5:-$repo_root/benchmark-fixtures/flite-meeting-smoke/manifest.csv}"
   local audio_root="${6:-$repo_root/benchmark-fixtures/flite-meeting-smoke}"
 
-  run_preflight "$backend" cuda parakeet-tdt-0.6b-v2
+  run_preflight "$backend" parakeet-tdt-0.6b-v2
   if [[ "$fixture_class" == "synthetic" ]]; then
     generate_fixtures meeting
   fi
@@ -183,7 +178,7 @@ run_meeting_lane() {
     --audio-root "$audio_root" \
     --stt-backend "$backend" \
     --model parakeet-tdt-0.6b-v2 \
-    --device cuda \
+    --device cpu \
     --language en \
     --fixture-class "$fixture_class" \
     --diarize \
@@ -244,92 +239,65 @@ meeting_human_audio_root() {
 run_lane() {
   case "$1" in
     cpu)
-      run_parakeet_lane cpu parakeet-tdt-0.6b-v2 \
+      run_parakeet_lane parakeet-tdt-0.6b-v2 \
         parakeet-v2-cpu-flite-long-3x-gated.json \
         local-cpu-flite-long-3x-gated
       ;;
-    cuda)
-      run_parakeet_lane cuda parakeet-tdt-0.6b-v2 \
-        parakeet-v2-cuda-flite-long-3x-gated.json \
-        local-cuda-flite-long-3x-gated
+    cpu-multilingual)
+      run_parakeet_lane parakeet-tdt-0.6b-v3 \
+        parakeet-v3-cpu-flite-long-3x-gated.json \
+        local-cpu-parakeet-v3-flite-long-3x-gated
       ;;
-    cuda-multilingual)
-      run_parakeet_lane cuda parakeet-tdt-0.6b-v3 \
-        parakeet-v3-cuda-flite-long-3x-gated.json \
-        local-cuda-parakeet-v3-flite-long-3x-gated
-      ;;
-    cuda-human)
-      run_parakeet_lane cuda parakeet-tdt-0.6b-v2 \
-        parakeet-v2-cuda-human-gated.json \
-        local-cuda-human-gated \
+    cpu-human)
+      run_parakeet_lane parakeet-tdt-0.6b-v2 \
+        parakeet-v2-cpu-human-gated.json \
+        local-cpu-human-gated \
         curated-human "$(human_manifest)" "$(human_audio_root)"
       ;;
-    cuda-human-v3)
-      run_parakeet_lane cuda parakeet-tdt-0.6b-v3 \
-        parakeet-v3-cuda-human-gated.json \
-        local-cuda-parakeet-v3-human-gated \
-        curated-human "$(human_manifest)" "$(human_audio_root)"
-      ;;
-    amd)
-      run_parakeet_lane amd parakeet-tdt-0.6b-v2 \
-        parakeet-v2-amd-flite-long-3x-gated.json \
-        local-amd-flite-long-3x-gated
-      ;;
-    amd-multilingual)
-      run_parakeet_lane amd parakeet-tdt-0.6b-v3 \
-        parakeet-v3-amd-flite-long-3x-gated.json \
-        local-amd-parakeet-v3-flite-long-3x-gated
-      ;;
-    amd-human)
-      run_parakeet_lane amd parakeet-tdt-0.6b-v2 \
-        parakeet-v2-amd-human-gated.json \
-        local-amd-human-gated \
-        curated-human "$(human_manifest)" "$(human_audio_root)"
-      ;;
-    amd-human-v3)
-      run_parakeet_lane amd parakeet-tdt-0.6b-v3 \
-        parakeet-v3-amd-human-gated.json \
-        local-amd-parakeet-v3-human-gated \
+    cpu-human-v3)
+      run_parakeet_lane parakeet-tdt-0.6b-v3 \
+        parakeet-v3-cpu-human-gated.json \
+        local-cpu-parakeet-v3-human-gated \
         curated-human "$(human_manifest)" "$(human_audio_root)"
       ;;
     meeting)
       run_meeting_lane parakeet-pyannote \
-        parakeet-pyannote-cuda-flite-meeting.json \
-        local-cuda-pyannote-flite-meeting-gated
+        parakeet-pyannote-cpu-flite-meeting.json \
+        local-cpu-pyannote-flite-meeting-gated
       ;;
     meeting-diarizen)
       run_meeting_lane parakeet-diarizen \
-        parakeet-diarizen-cuda-flite-meeting.json \
-        local-cuda-diarizen-flite-meeting-gated
+        parakeet-diarizen-cpu-flite-meeting.json \
+        local-cpu-diarizen-flite-meeting-gated
       ;;
     meeting-sortformer)
       run_meeting_lane parakeet-sortformer \
-        parakeet-sortformer-cuda-flite-meeting.json \
-        local-cuda-sortformer-flite-meeting-gated
+        parakeet-sortformer-cpu-flite-meeting.json \
+        local-cpu-sortformer-flite-meeting-gated
       ;;
     meeting-human)
       run_meeting_lane parakeet-pyannote \
-        parakeet-pyannote-cuda-human-meeting.json \
-        local-cuda-pyannote-human-meeting-gated \
+        parakeet-pyannote-cpu-human-meeting.json \
+        local-cpu-pyannote-human-meeting-gated \
         curated-human "$(meeting_human_manifest)" "$(meeting_human_audio_root)"
       ;;
     meeting-diarizen-human)
       run_meeting_lane parakeet-diarizen \
-        parakeet-diarizen-cuda-human-meeting.json \
-        local-cuda-diarizen-human-meeting-gated \
+        parakeet-diarizen-cpu-human-meeting.json \
+        local-cpu-diarizen-human-meeting-gated \
         curated-human "$(meeting_human_manifest)" "$(meeting_human_audio_root)"
       ;;
     meeting-sortformer-human)
       run_meeting_lane parakeet-sortformer \
-        parakeet-sortformer-cuda-human-meeting.json \
-        local-cuda-sortformer-human-meeting-gated \
+        parakeet-sortformer-cpu-human-meeting.json \
+        local-cpu-sortformer-human-meeting-gated \
         curated-human "$(meeting_human_manifest)" "$(meeting_human_audio_root)"
       ;;
   esac
 }
 
 if [[ "$lane" == "all" ]]; then
-  for item in cpu cuda cuda-multilingual amd amd-multilingual meeting meeting-diarizen meeting-sortformer; do
+  for item in cpu cpu-multilingual meeting meeting-diarizen meeting-sortformer; do
     run_lane "$item"
   done
 else

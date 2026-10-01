@@ -17,6 +17,9 @@
   no longer supported. The GPU install flags and extras still exist until
   they are removed, but are not maintained and are known to be broken
   (`install.sh --gpu` never enabled CUDA).
+- GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
+  CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
+  GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A
