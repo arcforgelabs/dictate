@@ -246,5 +246,28 @@ class RuntimeLoggingTests(unittest.TestCase):
             runtime_logging.echo_dictated_text("Typed", "anything")
 
 
+    def test_closing_mirrored_stderr_does_not_raise(self) -> None:
+        # A library closing sys.stderr at exit used to raise AttributeError.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_dir = Path(temp_dir) / "logs"
+            with patch.object(runtime_logging, "LOG_DIR", log_dir), patch.object(
+                runtime_logging, "LATEST_LOG_PATH", log_dir / "latest.log"
+            ), patch.object(runtime_logging, "LAST_FAILURE_LOG_PATH", log_dir / "last_failure.log"), patch(
+                "sys.stderr", new_callable=StringIO
+            ):
+                def close_stderr() -> int:
+                    import sys
+
+                    print("before close", file=sys.stderr)
+                    sys.stderr.close()
+                    return 0
+
+                code = runtime_logging.run_with_startup_logging(close_stderr)
+
+            self.assertEqual(code, 0)
+            latest = (log_dir / "latest.log").read_text(encoding="utf-8")
+            self.assertIn("before close", latest)
+            self.assertIn("dictate: exit code 0", latest)
+
 if __name__ == "__main__":
     unittest.main()

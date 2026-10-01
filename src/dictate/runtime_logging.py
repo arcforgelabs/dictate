@@ -61,6 +61,12 @@ class _TeeStderr:
             self.primary.flush()
         self.secondary.flush()
 
+    def close(self) -> None:
+        # Libraries sometimes close sys.stderr at exit. The terminal stream and
+        # the log file belong to their owners (run_with_startup_logging closes
+        # the log), so only flush.
+        self.flush()
+
     def isatty(self) -> bool:
         return bool(self.primary is not None and getattr(self.primary, "isatty", lambda: False)())
 
