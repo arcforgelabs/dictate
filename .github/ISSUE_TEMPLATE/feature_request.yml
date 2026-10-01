@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a change to what Dictate does.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dictate is local-only voice-to-text: dictation now, meetings later.
+        Requests are judged against [VISION.md](https://github.com/arcforgelabs/dictate/blob/master/VISION.md),
+        including its "What we will not merge" list.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who hits it, and when. Describe the problem before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should change?
+    validations:
+      required: true
+  - type: textarea
+    id: vision
+    attributes:
+      label: How does this fit VISION.md?
+      description: Name the part of VISION.md it serves. Say if it touches anything on the "What we will not merge" list.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
