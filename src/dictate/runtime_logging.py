@@ -2,19 +2,43 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
+import stat
 import sys
+import tempfile
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from dictate.platform_paths import fallback_log_dir, user_data_dir
+from dictate.platform_paths import fallback_log_dir, is_windows, user_data_dir
 
 LOG_DIR = user_data_dir() / "logs"
 LATEST_LOG_PATH = LOG_DIR / "latest.log"
 LAST_FAILURE_LOG_PATH = LOG_DIR / "last_failure.log"
 FALLBACK_LOG_DIR = fallback_log_dir()
+
+# Where Dictate wrote logs before platform_paths existed (before May 2026). An
+# old install can have left logs there even when today's dirs differ because
+# XDG_DATA_HOME or TMPDIR is set.
+if is_windows():
+    LEGACY_LOG_DIRS: tuple[Path, ...] = (Path.home() / ".local" / "share" / "dictate" / "logs",)
+else:
+    LEGACY_LOG_DIRS = (
+        Path.home() / ".local" / "share" / "dictate" / "logs",
+        Path("/tmp") / "dictate-logs",
+    )
+LOG_FILE_NAMES = ("latest.log", "last_failure.log")
+
+# Up to 2026.9.27 a finished dictation or note went to stderr, and so into
+# latest.log, as "Typed: <words>" or "Saved note: <words>". Everything after the
+# label up to the end of the line is dictated text.
+_DICTATED_LINE = re.compile(
+    r"\b(?P<label>Typed|Saved note): (?P<text>[^\n]*?)(?P<eol>\r?)(?=\n|\Z)"
+)
+_REDACTED_TEXT = re.compile(r"\[\d+ characters, not logged\]")
 
 
 class _TeeStderr:
@@ -79,10 +103,15 @@ def run_with_startup_logging(main_fn: Callable[[], int]) -> int:
         return _run_main(main_fn)
 
     latest_log_path, last_failure_log_path = log_paths
+    # Opening latest.log for writing below discards its old contents, so the
+    # active one is skipped; every other Dictate log is scrubbed first.
+    scrub_warnings = scrub_dictated_text_from_logs(skip=(latest_log_path,))
 
     with latest_log_path.open("w", encoding="utf-8", buffering=1) as log_file:
         sys.stderr = _TeeStderr(original_stderr, log_file)
         _write_header()
+        for warning in scrub_warnings:
+            print(warning, file=sys.stderr)
         exit_code = 0
         try:
             result = main_fn()
@@ -116,6 +145,93 @@ def resolve_log_paths() -> tuple[Path, Path] | None:
         except Exception:  # noqa: BLE001
             continue
     return None
+
+
+def scrub_dictated_text_from_logs(skip: tuple[Path, ...] = ()) -> list[str]:
+    """Redact dictated text left in logs by Dictate 2026.9.27 and earlier.
+
+    Rewrites ``Typed: <words>`` and ``Saved note: <words>`` in Dictate's own log
+    files to the ``[N characters, not logged]`` form. Redacted lines are left
+    alone and a clean file is not rewritten, so this runs on every start and is
+    a no-op after the first. Never raises; returns warnings that name the file
+    but never quote it.
+    """
+    warnings: list[str] = []
+    seen = {_normalized(path) for path in skip}
+    for log_dir in (LOG_DIR, FALLBACK_LOG_DIR, *LEGACY_LOG_DIRS):
+        for name in LOG_FILE_NAMES:
+            path = log_dir / name
+            key = _normalized(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                _scrub_log_file(path)
+            except Exception as exc:  # noqa: BLE001
+                # Name the failure, never its message: a decode error quotes the bytes.
+                if isinstance(exc, OSError) and exc.strerror:
+                    reason = exc.strerror
+                else:
+                    reason = type(exc).__name__
+                warnings.append(
+                    f"dictate: could not remove dictated text from older log {path}: {reason}"
+                )
+    return warnings
+
+
+def redact_dictated_text(content: str) -> str:
+    """Return ``content`` with old-format dictated text replaced by its length."""
+
+    def _replace(match: re.Match[str]) -> str:
+        text = match.group("text")
+        if not text or _REDACTED_TEXT.fullmatch(text):
+            return match.group(0)
+        return f"{match.group('label')}: [{len(text)} characters, not logged]{match.group('eol')}"
+
+    return _DICTATED_LINE.sub(_replace, content)
+
+
+def _scrub_log_file(path: Path) -> bool:
+    """Redact one log file in place. Returns True if it was rewritten."""
+    try:
+        dir_info = os.lstat(path.parent)
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    # Only regular files we own, in a real directory we own. The fallback dir
+    # sits in a shared temp dir; following a planted symlink would read, and
+    # copy, a file outside Dictate's logs.
+    if not stat.S_ISDIR(dir_info.st_mode) or not stat.S_ISREG(info.st_mode):
+        return False
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None and (info.st_uid != getuid() or dir_info.st_uid != getuid()):
+        return False
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    # surrogateescape round-trips any non-UTF-8 bytes unchanged.
+    read_fd = os.open(path, flags)
+    with os.fdopen(read_fd, "r", encoding="utf-8", errors="surrogateescape", newline="") as handle:
+        content = handle.read()
+    scrubbed = redact_dictated_text(content)
+    if scrubbed == content:
+        return False
+
+    # Write a sibling and swap it in, so a crash never leaves a half-written log.
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".scrub-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(
+            tmp_fd, "w", encoding="utf-8", errors="surrogateescape", newline=""
+        ) as handle:
+            handle.write(scrubbed)
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+    return True
+
+
+def _normalized(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(path))
 
 
 def _run_main(main_fn: Callable[[], int]) -> int:
