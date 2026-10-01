@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -367,6 +368,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env={**os.environ, "PYTHON": sys.executable},
                 timeout=60,
             )
             if completed.returncode != 0 and "flite" in completed.stderr:
@@ -402,6 +404,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env={**os.environ, "PYTHON": sys.executable},
                 timeout=30,
             )
             if completed.returncode != 0 and "flite" in completed.stderr:
@@ -440,6 +443,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env={**os.environ, "PYTHON": sys.executable},
                 timeout=60,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)

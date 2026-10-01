@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The manifest writers need numpy; callers in a venv pass PYTHON.
+python="${PYTHON:-python3}"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="${1:-$repo_root/benchmark-fixtures/flite-long}"
 manifest="$out_dir/manifest.csv"
@@ -29,7 +32,7 @@ ffmpeg -hide_banner -loglevel error -y \
   -f lavfi -i "flite=text='$fixture_text':voice=kal" \
   -ar 16000 -ac 1 -sample_fmt s16 "$audio"
 
-python3 - "$manifest" "$repeat_manifest" "$audio" "$fixture_text" <<'PY'
+"$python" - "$manifest" "$repeat_manifest" "$audio" "$fixture_text" <<'PY'
 from __future__ import annotations
 
 import csv

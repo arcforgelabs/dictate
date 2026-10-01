@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The manifest writers need numpy; callers in a venv pass PYTHON.
+python="${PYTHON:-python3}"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="${1:-$repo_root/benchmark-fixtures/flite-meeting-smoke}"
 manifest="$out_dir/manifest.csv"
@@ -69,7 +72,7 @@ ffmpeg -hide_banner -loglevel error -y \
   -f concat -safe 0 -i "$concat_list" \
   -ar 16000 -ac 1 -sample_fmt s16 "$audio"
 
-python3 - "$manifest" "$audio" "$speaker1_a" "$speaker2_a" "$speaker1_b" "$silence" <<'PY'
+"$python" - "$manifest" "$audio" "$speaker1_a" "$speaker2_a" "$speaker1_b" "$silence" <<'PY'
 from __future__ import annotations
 
 import csv
