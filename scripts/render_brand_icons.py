@@ -33,6 +33,24 @@ TAURI_ICONS = ROOT / "ui-shell" / "src-tauri" / "icons"
 STORE_LOGOS = ROOT / "docs" / "msstore" / "assets" / "logos"
 MSIX_ASSETS = ROOT / "packaging" / "msix" / "assets"
 
+# MSIX manifest logos, as resource-qualified files that the build indexes into
+# resources.pri. The taskbar, Start and title bar draw Square44x44Logo from the
+# targetsize-*_altform-unplated variants; without them Windows paints the icon
+# on a square accent-coloured plate instead of keeping the tile's transparent
+# rounded corners.
+MSIX_SCALES = (100, 125, 150, 200, 400)
+MSIX_TARGET_SIZES = (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256)
+MSIX_LOGOS = [
+    *[(f"StoreLogo.scale-{s}.png", round(50 * s / 100)) for s in MSIX_SCALES],
+    *[(f"Square150x150Logo.scale-{s}.png", round(150 * s / 100)) for s in MSIX_SCALES],
+    *[(f"Square44x44Logo.scale-{s}.png", round(44 * s / 100)) for s in MSIX_SCALES],
+    *[
+        (f"Square44x44Logo.targetsize-{t}{altform}.png", t)
+        for t in MSIX_TARGET_SIZES
+        for altform in ("", "_altform-unplated", "_altform-lightunplated")
+    ],
+]
+
 # (svg source, png target, size) rendered 1:1.
 PNG_TARGETS = [
     (ASSETS / "dictate.svg", ASSETS / "dictate.png", 256),
@@ -47,9 +65,7 @@ PNG_TARGETS = [
     # Microsoft Store listing uploads (docs/msstore-listing.md) …
     *[(ASSETS / "dictate.svg", STORE_LOGOS / f"dictate-store-logo-{s}.png", s) for s in (71, 150, 300, 512, 600, 1080, 1240)],
     # … and the MSIX manifest logos (packaging/msix/Package.appxmanifest.in).
-    (ASSETS / "dictate.svg", MSIX_ASSETS / "StoreLogo.png", 50),
-    (ASSETS / "dictate.svg", MSIX_ASSETS / "Square44x44Logo.png", 44),
-    (ASSETS / "dictate.svg", MSIX_ASSETS / "Square150x150Logo.png", 150),
+    *[(ASSETS / "dictate.svg", MSIX_ASSETS / name, size) for name, size in MSIX_LOGOS],
 ]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 # (svg source, ico target) — one multi-resolution .ico per source.
