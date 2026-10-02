@@ -111,7 +111,7 @@ jobs:
           T="$RUNNER_TEMP/trace"
           # script(1) gives the engine a real terminal on stderr, so the TTY and
           # log sides of the stderr tee can both be checked.
-          script -qefc "strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg -e signal=none \
+          script -qefc "strace -f -qq -e trace=execve,connect,sendto,sendmsg,sendmmsg -e signal=none \
             -o '$T/strace.txt' python scripts/ci_privacy_trace.py meeting \
             --audio '$RUNNER_TEMP/fixture/flite_meeting.wav' --report '$T/meeting.json'" \
             "$T/terminal.txt"

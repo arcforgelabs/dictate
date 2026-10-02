@@ -227,13 +227,13 @@ def cmd_meeting(args: argparse.Namespace) -> int:
     return int(exit_code)
 
 
-def _inet_syscalls(strace_path: Path) -> list[str]:
+def _strace_lines(strace_path: Path) -> list[str]:
     if not strace_path.exists():
         raise SystemExit(f"missing strace output: {strace_path}")
     return [
         line.strip()
         for line in strace_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        if "sa_family=AF_INET" in line
+        if line.strip()
     ]
 
 
@@ -241,7 +241,11 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     trace_dir: Path = args.trace_dir
     baseline = json.loads((trace_dir / "baseline.json").read_text(encoding="utf-8"))
     meeting = json.loads((trace_dir / "meeting.json").read_text(encoding="utf-8"))
-    inet = _inet_syscalls(trace_dir / "strace.txt")
+    traced = _strace_lines(trace_dir / "strace.txt")
+    # execve is traced only to show strace was attached to the engine process.
+    engine_exec = [line for line in traced if "execve(" in line and "ci_privacy_trace.py" in line]
+    traced_pids = {line.split(maxsplit=1)[0] for line in traced if line[:1].isdigit()}
+    inet = [line for line in traced if "sa_family=AF_INET" in line]
     note = (trace_dir / "note.txt").read_text(encoding="utf-8")
     terminal = (trace_dir / "terminal.txt").read_text(encoding="utf-8", errors="replace")
     first_line = note.splitlines()[0] if note else ""
@@ -255,6 +259,7 @@ def cmd_summarize(args: argparse.Namespace) -> int:
         }),
         ("meeting: pyannote metrics disabled", meeting["pyannote_metrics_enabled"] is False),
         ("meeting: 0 Python-level network attempts", meeting["python_network_attempts"] == 0),
+        ("meeting: strace -f was attached to the engine process", bool(engine_exec)),
         ("meeting: 0 AF_INET/AF_INET6 connect/send syscalls (strace -f)", not inet),
         ("meeting: no ONNX Runtime telemetry store", meeting["onnxruntime_telemetry_store_exists"] is False),
         ("log: finished note recorded as a character count", meeting["log_has_redacted_note_line"]),
@@ -273,6 +278,7 @@ def cmd_summarize(args: argparse.Namespace) -> int:
         f"| `otel.pyannote.ai` lookups | {baseline['otel_pyannote_lookups']} | {meeting['otel_pyannote_lookups']} |",
         f"| Python-level network attempts | {baseline['python_network_attempts']} | {meeting['python_network_attempts']} |",
         f"| AF_INET/AF_INET6 syscalls (strace -f) | not traced | {len(inet)} |",
+        f"| strace -f: traced syscall lines / processes+threads | not traced | {len(traced)} / {len(traced_pids)} |",
         f"| pyannote metrics enabled | {baseline['pyannote_metrics_enabled']} | {meeting['pyannote_metrics_enabled']} |",
         f"| Speakers | {baseline['speakers_found']} | {meeting['speakers']} |",
         "",
