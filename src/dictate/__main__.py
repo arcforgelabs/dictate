@@ -136,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--compute-type",
         choices=COMPUTE_TYPES,
         default="int8",
-        help="faster-whisper compute type (ignored by hosted API backends)",
+        help="Model compute type (default: int8)",
     )
     parser.add_argument(
         "--language",
@@ -710,8 +710,7 @@ def _resolve_hotwords(
     words = list(config.hotwords)
     if cli_hotwords:
         words.extend(_parse_csv_words(cli_hotwords))
-    separator = "\n" if stt.backend_name == "xai" else " "
-    hotwords_str = separator.join(words) if words else None
+    hotwords_str = " ".join(words) if words else None
     if not hotwords_str:
         return None
     if lexicon_mode == "native" and not stt.capabilities.supports_hotwords:
@@ -1112,8 +1111,6 @@ def _run_once(
             raise SystemExit(1) from exc
 
         result = engine.transcribe(audio, language=language)
-        if result.notice:
-            print(result.notice, file=sys.stderr)
         if result.status == "empty":
             print("No audio captured", file=sys.stderr)
             raise SystemExit(1)

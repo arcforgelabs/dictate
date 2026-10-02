@@ -28,6 +28,7 @@ from dictate.hotkey_backend import (
 )
 from dictate.lexicon import LexiconMode
 from dictate.outputs import TextOutput
+from dictate.runtime_logging import echo_dictated_text
 from dictate.stt import SpeechToText, TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -409,10 +410,6 @@ class Daemon:
             previous_stt = self.engine.stt
             self.engine.stt = stt
             self.engine.set_hotwords(hotwords)
-            try:
-                self.engine.release_api_fallback()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Failed to release fallback STT resources: {exc}", file=sys.stderr)
         if previous_stt is not None and previous_stt is not stt:
             try:
                 previous_stt.release()
@@ -441,10 +438,6 @@ class Daemon:
                 self.meeting_engine.stt = stt
                 if hotwords is not None:
                     self.meeting_engine.set_hotwords(hotwords)
-            try:
-                self.meeting_engine.release_api_fallback()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Failed to release meeting fallback STT resources: {exc}", file=sys.stderr)
         if previous_stt is not None and previous_stt is not stt:
             try:
                 previous_stt.release()
@@ -791,8 +784,6 @@ class Daemon:
                         transcript_reason="stale-backend",
                     )
                     return
-                if result.notice:
-                    self._surface_status(result.notice)
                 if result.status == "error":
                     self._fail_recording_session(
                         chunk.recording_id,
@@ -831,8 +822,6 @@ class Daemon:
             )
             return
         try:
-            if result.notice:
-                self._surface_status(result.notice)
             if result.status == "error":
                 self._fail_recording_session(
                     chunk.recording_id,
@@ -874,8 +863,6 @@ class Daemon:
         try:
             if self._is_recording_failed(recording_id):
                 return
-            if result.notice:
-                self._surface_status(result.notice)
 
             if result.status == "error":
                 message = result.error or "unknown transcription error"
@@ -918,7 +905,7 @@ class Daemon:
                 recording_id=recording_id,
                 stale=False,
             )
-            print(f"\r  Typed: {assembled_text}", file=sys.stderr)
+            echo_dictated_text("Typed", assembled_text)
         finally:
             self._clear_recording_state(recording_id)
 
@@ -1381,7 +1368,7 @@ class Daemon:
             recording_id=recording_id,
             stale=False,
         )
-        print(f"\r  Typed: {assembled_text}", file=sys.stderr)
+        echo_dictated_text("Typed", assembled_text)
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
         note_id: str | None = None
@@ -1432,7 +1419,7 @@ class Daemon:
             created_at=created_at,
             segments=segments_payload,
         )
-        print(f"\r  Saved note: {note_text}", file=sys.stderr)
+        echo_dictated_text("Saved note", note_text)
 
     def _fail_recording_session(
         self,
@@ -1712,13 +1699,11 @@ class Daemon:
                     decode_profile=decode_profile,
                 )
 
-            # On-device decode params: note recordings keep the lighter master
-            # profile even when they fall back to CPU (unchanged note behavior).
+            # Note and meeting recordings use the lighter note decode profile.
             decode_profile = "note" if mode in {"note", "meeting"} else "quality"
 
             # --- Local decode ---
-            # One remote attempt; on failure the engine falls back to CPU and
-            # sets result.notice. Meeting is the only mode that asks for speaker
+            # Meeting is the only mode that asks for speaker
             # attribution; note recordings use the same plain ASR contract as
             # push-to-talk dictation.
             diarize = mode == "meeting"

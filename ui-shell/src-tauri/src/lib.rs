@@ -230,6 +230,21 @@ fn engine_binary_names() -> &'static [&'static str] {
     }
 }
 
+/// Opt-outs for third-party library telemetry, set on every engine the shell
+/// starts. The engine sets these itself on import; this covers any engine,
+/// including an older or custom one, before its first import runs.
+const ENGINE_PRIVACY_ENV: [(&str, &str); 3] = [
+    ("PYANNOTE_METRICS_ENABLED", "0"),
+    ("HF_HUB_DISABLE_TELEMETRY", "1"),
+    ("ORT_DISABLE_TELEMETRY", "1"),
+];
+
+fn engine_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.envs(ENGINE_PRIVACY_ENV);
+    cmd
+}
+
 /// Start the engine: the bundled sidecar as a headless dictation daemon that
 /// also serves the control API; otherwise a PATH fallback for dev/pip installs.
 fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
@@ -247,7 +262,7 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
     let shell_path = env::current_exe().ok();
     // 1) Packaged: one process dictates + serves.
     if let Some(bin) = bundled_engine(app) {
-        let mut cmd = Command::new(&bin);
+        let mut cmd = engine_command(&bin);
         cmd.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
         cmd.env("DICTATE_SHELL_VERSION", shell_version);
         if let Some(model_path) = bundled_parakeet_model(app) {
@@ -269,7 +284,7 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         if !custom.trim().is_empty() {
             let mut parts = custom.split_whitespace();
             if let Some(first) = parts.next() {
-                let mut cmd = Command::new(first);
+                let mut cmd = engine_command(first);
                 cmd.args(parts).env("DICTATE_SHELL_VERSION", shell_version);
                 if let Some(path) = shell_path.as_ref() {
                     cmd.env("DICTATE_SHELL_PATH", path);
@@ -285,7 +300,7 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
     //    control API. Preferred over the control-only `dictate-ui-server`, which
     //    only makes sense when a separate `dictate` tray is already dictating
     //    (and that case is handled earlier by an existing live handshake).
-    let mut dictate = Command::new("dictate");
+    let mut dictate = engine_command("dictate");
     dictate.arg("--no-tray").env("DICTATE_UI_SERVER", "1");
     dictate.env("DICTATE_SHELL_VERSION", shell_version);
     if let Some(path) = shell_path.as_ref() {
@@ -295,7 +310,7 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         *slot = Some(child);
         return;
     }
-    let mut ui_server = Command::new("dictate-ui-server");
+    let mut ui_server = engine_command("dictate-ui-server");
     ui_server.env("DICTATE_SHELL_VERSION", shell_version);
     if let Some(path) = shell_path.as_ref() {
         ui_server.env("DICTATE_SHELL_PATH", path);

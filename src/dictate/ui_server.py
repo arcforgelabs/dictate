@@ -153,34 +153,6 @@ def _meeting_blocking_warning(warnings: list[str]) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
-# Provider health — thread-safe runtime outcome tracker
-# --------------------------------------------------------------------------- #
-class _ProviderHealthState:
-    """Thread-safe tracker for the last online-provider transcription outcome.
-
-    Updated by ``UiBackend.connect_engine_health`` when the engine reports a
-    result. The UI reads it via ``get_state()``; changes are also pushed via SSE.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._healthy: bool = True
-        self._reason: str | None = None
-
-    def report(self, healthy: bool, reason: str | None = None) -> bool:
-        """Update state. Returns ``True`` if the state changed."""
-        with self._lock:
-            changed = self._healthy != healthy or self._reason != reason
-            self._healthy = healthy
-            self._reason = reason
-            return changed
-
-    def get(self) -> tuple[bool, str | None]:
-        with self._lock:
-            return self._healthy, self._reason
-
-
-# --------------------------------------------------------------------------- #
 # Preferences store (UI-only settings the engine does not persist itself)
 # --------------------------------------------------------------------------- #
 class UiPrefsStore:
@@ -279,7 +251,6 @@ class UiBackend:
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
     daemon: Any | None = None
-    provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
     # Injectable hooks (default to the real implementations).
     check_update_status: Callable[[], update_status_mod.UpdateStatus] = (
         update_status_mod.check_update_status
@@ -909,29 +880,6 @@ class UiBackend:
             "since": None,
         }
 
-
-    def connect_engine_health(self, engine: Any) -> None:
-        """Wire this backend's health tracker as the engine's ``health_sink``.
-
-        Installs a callback that updates ``provider_health`` and pushes a
-        ``provider-health`` SSE event on every state change.
-        """
-        ph = self.provider_health
-        broker = self.broker
-
-        def _sink(healthy: bool, reason: str | None) -> None:
-            changed = ph.report(healthy, reason)
-            if changed and broker is not None:
-                broker.publish(
-                    "provider-health",
-                    healthy=bool(healthy),
-                    status=reason or "ok",
-                )
-
-        try:
-            engine.health_sink = _sink
-        except Exception:  # noqa: BLE001
-            logger.warning("Could not wire health sink to engine")
 
     def _require_daemon(self) -> Any:
         if self.daemon is None:

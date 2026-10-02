@@ -52,6 +52,8 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 "$VPY" "$ROOT/scripts/prepare-parakeet-v2-int8-model.py" --output "$STAGE_DIR/models/parakeet-tdt-0.6b-v2-onnx"
 "$VPY" "$ROOT/scripts/prepare-pyannote-community-model.py" --output "$STAGE_DIR/models/pyannote-speaker-diarization-community-1"
+echo "▶ staging third-party notices and model attributions"
+"$VPY" "$ROOT/scripts/stage-notices.py" --engine-dir "$STAGE_DIR"
 
 # onefile -> dist/dictate-engine ; onedir -> dist/dictate-engine/dictate-engine
 if [ "${DICTATE_ONEFILE:-}" = "1" ]; then
