@@ -42,16 +42,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg strace
 
-      - name: Install Dictate with the meeting extra (CPU torch, as the release build does)
+      - name: Install Dictate with the meeting extra (CPU torch, versions from uv.lock)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # The CPU index keeps the CUDA wheels out. torch, torchaudio and
+          # torchcodec are ABI-coupled, so take the set uv.lock resolves together.
+          python -m pip install "torch==2.8.0" "torchaudio==2.8.0" \
+            --index-url https://download.pytorch.org/whl/cpu
           # onnx: lets the ONNX Runtime telemetry-store test run instead of skipping.
-          python -m pip install -e ".[meeting]" onnx
+          python -m pip install -e ".[meeting]" "pyannote.audio==4.0.7" "torchcodec==0.7.0" "onnx==1.22.0"
           python -m pip list 2>/dev/null | grep -Ei '^(torch|torchaudio|torchcodec|pyannote\.audio|onnxruntime|onnx|opentelemetry-sdk) '
 
       - name: Telemetry and log tests (none may skip)
         run: |
+          set -o pipefail
           python -m unittest -v tests.test_third_party_telemetry tests.test_runtime_logging 2>&1 \
             | tee "$RUNNER_TEMP/unittest.txt"
           if grep -q "skipped" "$RUNNER_TEMP/unittest.txt"; then
@@ -131,4 +135,5 @@ jobs:
             ${{ runner.temp }}/trace/meeting.json
             ${{ runner.temp }}/trace/strace.txt
             ${{ runner.temp }}/trace/latest.log
+            ${{ runner.temp }}/trace/terminal.txt
             ${{ runner.temp }}/unittest.txt

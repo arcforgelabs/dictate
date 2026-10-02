@@ -95,7 +95,10 @@ class ThirdPartyTelemetryTests(unittest.TestCase):
                     [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])],
                     [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])],
                 )
-                model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+                # Pin the IR version: a newer onnx stamps one onnxruntime 1.30 rejects.
+                model = helper.make_model(
+                    graph, opset_imports=[helper.make_opsetid("", 13)], ir_version=10
+                )
                 session = ort.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
                 session.run(None, {"x": np.zeros(1, dtype=np.float32)})
                 print(sorted(os.listdir(os.path.expanduser("~/.cache"))) if os.path.isdir(os.path.expanduser("~/.cache")) else [])
