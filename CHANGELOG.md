@@ -8,6 +8,11 @@
   the speaker-labelling library, reports pipeline use to otel.pyannote.ai by
   default; Dictate now turns that off, along with Hugging Face Hub telemetry,
   before either library loads. Dictate makes no analytics requests.
+- Transcription no longer reports to Microsoft. ONNX Runtime, which runs the
+  Parakeet model, has Microsoft's telemetry client built in: it kept a device
+  ID and an event queue under `~/.cache/Microsoft/DeveloperTools` and uploaded
+  to mobile.events.data.microsoft.com. Dictate now sets
+  `ORT_DISABLE_TELEMETRY=1`, so it does neither.
 - Logs no longer contain what you dictated. Finished dictations and notes are
   logged as their length; the words appear only in an interactive terminal.
 

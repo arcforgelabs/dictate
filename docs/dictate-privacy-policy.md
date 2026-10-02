@@ -49,9 +49,15 @@ them carry dictation content:
   receive dictation content through it.
 
 Dictate has no analytics, no crash reporting, and no usage telemetry, and turns
-off the telemetry its bundled libraries would otherwise send: pyannote.audio's
-usage metrics (on by default upstream) and Hugging Face Hub telemetry are
-disabled before either library loads.
+off the telemetry its bundled libraries would otherwise send, before any of them
+load: ONNX Runtime's Microsoft telemetry (the engine that runs Parakeet; it keeps
+a device ID and uploads usage events to Microsoft by default), pyannote.audio's
+usage metrics (on by default upstream) and Hugging Face Hub telemetry.
+
+Dictate 2026.9.27 and earlier did not turn these off. Those versions sent ONNX
+Runtime usage events (session creation, graph optimisation and run timings,
+with a device ID) to Microsoft whenever they transcribed, and Meeting mode
+reported pipeline use to pyannote. Neither included audio or transcript text.
 
 ## Diagnostics
 
