@@ -337,6 +337,27 @@ class UiBackendStateTests(unittest.TestCase):
             self.assertEqual(model_check["sub"], "parakeet · parakeet-tdt-0.6b-v2")
             self.assertIsNone(config_mod.load_config(backend.config_path).stt_backend)
 
+    def test_unset_backend_with_parakeet_model_keeps_that_model(self) -> None:
+        # config/default-config.yaml offers a model-only line for multilingual
+        # dictation; it must not fall back to English v2.
+        from dictate import config as config_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+            backend.config_path.write_text(
+                "stt_model: parakeet-tdt-0.6b-v3\nmeeting_stt_model: parakeet-tdt-0.6b-v3\n",
+                encoding="utf-8",
+            )
+            state = backend.get_state()
+            report = backend.run_doctor()
+            model_check = next(c for c in report["checks"] if c["label"] == "Model loads")
+            cfg = config_mod.load_config(backend.config_path)
+            self.assertEqual(state["model"]["id"], "parakeet/parakeet-tdt-0.6b-v3")
+            self.assertEqual(state["meetingModel"]["id"], "parakeet-pyannote/parakeet-tdt-0.6b-v3")
+            self.assertEqual(model_check["sub"], "parakeet · parakeet-tdt-0.6b-v3")
+            self.assertIsNone(cfg.stt_backend)
+            self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v3")
+
     def test_state_load_migration_leaves_meeting_selection_untouched(self) -> None:
         from dictate import config as config_mod
 

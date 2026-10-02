@@ -21,7 +21,8 @@
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A
-  config that still names a Whisper backend or model falls back to Parakeet.
+  config that still names a Whisper backend or model falls back to Parakeet
+  v2; a config that sets only `stt_model: parakeet-tdt-0.6b-v3` keeps v3.
   The engine no longer bundles CTranslate2 or PyAV, and with PyAV goes the
   GPL-licensed FFmpeg build (libx264/libx265) it carried.
 
