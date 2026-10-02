@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The manifest writers need numpy; callers in a venv pass PYTHON.
+python="${PYTHON:-python3}"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="${1:-$repo_root/benchmark-curated/open-speech-harvard}"
 
@@ -32,7 +35,7 @@ ffmpeg -y -hide_banner -loglevel error \
 
 duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$target_wav")"
 reference="The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background. It's easy to tell the depth of a well. These days a chicken leg is a rare dish. Rice is often served in round bowls. The juice of lemons makes fine punch. The box was thrown beside the parked truck. The hogs were fed chopped corn and garbage. Four hours of steady work faced us. A large size in stockings is hard to sell."
-segments_json="$(python3 - "$reference" "$duration" <<'PY'
+segments_json="$("$python" - "$reference" "$duration" <<'PY'
 import json
 import sys
 
@@ -42,7 +45,7 @@ print(json.dumps([{"text": text, "start": 0.0, "end": round(duration, 3)}]))
 PY
 )"
 
-python3 - "$manifest" "$reference" "$segments_json" <<'PY'
+"$python" - "$manifest" "$reference" "$segments_json" <<'PY'
 import csv
 import sys
 from pathlib import Path
