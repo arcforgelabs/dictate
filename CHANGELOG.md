@@ -46,6 +46,15 @@
 - Third-party notices ship with the app: `THIRD_PARTY_NOTICES.md`, the GNU
   licence texts, and an attribution file beside each bundled model.
 
+### Fixed
+
+- The window connects to its engine even when the engine is slow to start.
+  It used to wait 8 seconds and then stay on "Dictate engine is not
+  connected" for good, even after the engine came up; the Windows Store
+  build's engine took about 11 seconds on a cold start. It now keeps checking
+  and connects as soon as the engine is ready, without freezing while it
+  waits.
+
 ## 2026-09-27
 
 ### Fixed
