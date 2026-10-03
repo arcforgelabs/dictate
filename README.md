@@ -185,11 +185,11 @@ advanced users and tests can still select an explicit local engine through CLI
 options and `dictate config`.
 
 Dictate runs on the CPU. GPU support (NVIDIA CUDA, AMD) was dropped on
-2026-10-01 to focus on CPU latency. The `gpu` and `amd` extras and the
-installers' GPU flags still exist but are unsupported, and are being removed
-(#110, #112). The engine has no device choice: a saved GPU device in
-`config.yaml` moves to CPU on upgrade, and `--device` is still accepted so old
-scripts run, and is ignored.
+2026-10-01 to focus on CPU latency. The installers no longer install a GPU
+runtime; their old GPU flags are accepted and ignored so existing update
+commands keep working. The engine has no device choice: a saved GPU device in
+`config.yaml` moves to CPU on upgrade, and `--device` is still accepted so the
+installers and old scripts run, and is ignored.
 
 - The Meeting button and the dictation-list filter are beta-channel chrome.
   The normal channel is dictation only. Meeting uses a dedicated

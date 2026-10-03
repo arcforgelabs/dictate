@@ -13,7 +13,7 @@ channel) lives in the `dictate config` CLI.
 - Clipboard output: `dictate --once --copy` through `pyperclip`.
 - Push-to-talk tray app: `dictate --type-backend pynput`.
 - Headless push-to-talk daemon: `dictate --no-tray --type-backend pynput`.
-- Speech-to-text: Parakeet through ONNX Runtime on the CPU. GPU (CUDA, DirectML) is not supported.
+- Speech-to-text: Parakeet through ONNX Runtime on the CPU. GPU acceleration is not supported.
 
 The Windows tray uses the native notification area. The Linux GTK/Ayatana tray remains a separate implementation.
 

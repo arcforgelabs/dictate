@@ -20,14 +20,16 @@
 ### Removed
 
 - GPU support. Dictate runs on the CPU only; NVIDIA CUDA and AMD lanes are
-  no longer supported. The GPU install flags and extras still exist until
-  they are removed, but are not maintained and are known to be broken
-  (`install.sh --gpu` never enabled CUDA).
+  no longer supported.
+- The GPU install paths: the `gpu` and `amd` extras, `install.sh --gpu`, and
+  the Windows installer's CUDA step. Updating removes a leftover GPU ONNX
+  Runtime from a Windows install, and old flags (`--gpu`, `-ForceCuda`,
+  `-NoCuda`) are ignored with a notice.
 - Device selection. The engine, tray and settings have no CPU/GPU choice. On
   upgrade, a saved `stt_device` is removed from `config.yaml` and a saved
   `float16` compute type becomes `int8`, with a one-line notice when a GPU was
   chosen; everything else in the config is kept. A `--device` flag is still
-  accepted so existing scripts run, and is ignored.
+  accepted so existing scripts and installers run, and is ignored.
 - GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
   CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
   GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.

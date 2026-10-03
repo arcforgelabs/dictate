@@ -7,11 +7,16 @@ param(
     [switch]$NoStartup,
     [switch]$Wizard,
     [switch]$RecreateVenv,
+    # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
     [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ForceCuda -or $NoCuda) {
+    Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $DictateVersion = "2026.9.27"
 
@@ -72,8 +77,6 @@ try {
         if ($NoShortcut) { $installerArgs += "-NoShortcut" }
         if ($NoStartup) { $installerArgs += "-NoStartup" }
         if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
-        if ($ForceCuda) { $installerArgs += "-ForceCuda" }
-        if ($NoCuda) { $installerArgs += "-NoCuda" }
     }
 
     Write-Host "==> Running Dictate Windows installer"

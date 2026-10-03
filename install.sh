@@ -22,7 +22,6 @@ PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
-INSTALL_GPU="${DICTATE_INSTALL_GPU:-0}"
 INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"
 INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -35,7 +34,7 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--user|--system] [--gpu] [--meeting] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
+Usage: $0 [--user|--system] [--meeting] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
 Default: --user.
 
@@ -48,9 +47,6 @@ missing.
 
 --system installs a Linux desktop package into system paths using apt/pkexec or
 sudo. It is intentionally explicit because it requires administrator approval.
-
---gpu installs Dictate's GPU optional dependencies for local CUDA/ONNX Runtime
-testing on capable machines.
 
 --meeting installs Dictate's pyannote/torch optional dependencies for the
 parakeet-pyannote Meeting lane. DiariZen and Sortformer still require their
@@ -126,11 +122,9 @@ while [ "$#" -gt 0 ]; do
     --no-ui)
       INSTALL_UI=0
       ;;
-    --gpu)
-      INSTALL_GPU=1
-      ;;
-    --no-gpu)
-      INSTALL_GPU=0
+    --gpu|--no-gpu)
+      # Retired with GPU support; accepted so older update commands still run.
+      echo "Ignoring $1: Dictate runs on the CPU only." >&2
       ;;
     --meeting)
       INSTALL_MEETING=1
@@ -179,9 +173,6 @@ elif [ "$SESSION_BACKEND" = "wayland" ]; then
   EXTRAS+=("wayland")
 elif [ "$SESSION_BACKEND" = "unknown" ]; then
   EXTRAS+=("x11" "wayland")
-fi
-if [ "$INSTALL_GPU" -eq 1 ]; then
-  EXTRAS+=("gpu")
 fi
 if [ "$INSTALL_MEETING" -eq 1 ]; then
   EXTRAS+=("meeting")

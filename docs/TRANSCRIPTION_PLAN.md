@@ -20,9 +20,9 @@ Ship a clean local-first transcription stack where:
 2. Meeting mode always produces a speaker-attributed transcript.
 3. Parakeet on the CPU is the local ASR foundation. Dictate does not support
    GPUs: NVIDIA CUDA and AMD lanes were dropped on 2026-10-01 to focus on CPU
-   latency on the machines people already have. Removing the remaining GPU code
-   is tracked in #110, #111 and #112; GPU may return later as a separate
-   decision.
+   latency on the machines people already have. Removing the remaining GPU
+   code, the engine's device selection, is tracked in #111; GPU may return
+   later as a separate decision.
 4. Whisper is gone: faster-whisper, WhisperX and whisper.cpp were removed on
    2026-09-30. Parakeet v2 (English) and v3 (25 European languages) cover
    dictation.
@@ -125,8 +125,8 @@ or similar engine terms.
 | Multilingual CPU | Parakeet v3, `nvidia/parakeet-tdt-0.6b-v3` | Feasibility benchmark | Use only if CPU latency is acceptable. |
 
 NVIDIA CUDA and AMD (ROCm/MIGraphX, DirectML) lanes were dropped on
-2026-10-01. Their code is still present until #110, #111 and #112 land; treat
-it as unsupported, and do not add GPU evidence gates.
+2026-10-01. The engine's device selection is still present until #111 lands;
+treat it as unsupported, and do not add GPU evidence gates.
 
 The `faster-whisper/large-v3` bridge for this workstation was removed on
 2026-09-30.
@@ -134,8 +134,8 @@ The `faster-whisper/large-v3` bridge for this workstation was removed on
 ## Implementation Status
 
 GPU history: the CUDA and AMD lanes were dropped on 2026-10-01. Their
-benchmark, evidence and audit tooling was removed with #112; the GPU install
-paths and the engine's device selection go with #110 and #111. Their last
+benchmark, evidence and audit tooling was removed with #112 and the GPU install
+paths with #110; the engine's device selection goes with #111. Their last
 evidence is in this file's git history before 2026-10-01.
 
 Parakeet v2 and v3 are wired through the ONNX/onnx-asr loader on the CPU.
@@ -262,9 +262,9 @@ AMD GPU lanes were dropped on 2026-10-01 with the rest of GPU support. There is
 no AMD acceptance gate, and the readiness audit no longer requires the AMD
 promotion artifacts (`benchmark-results/parakeet-v2-amd-human-gated.json` and
 `benchmark-results/parakeet-v3-amd-human-gated.json`). The AMD benchmark
-runners and the AMD audit gate were removed with #112. The `amd` extra and the
-DirectML and ROCm/MIGraphX provider checks are still in the tree, unsupported,
-until #110 and #111 remove them. Earlier revisions of this file hold the old
+runners and the AMD audit gate were removed with #112, and the `amd` extra with
+#110. The DirectML and ROCm/MIGraphX provider checks are still in the tree,
+unsupported, until #111 removes them. Earlier revisions of this file hold the old
 AMD runtime plan and gates.
 
 ## Meeting Stack
@@ -839,7 +839,8 @@ curated-human run passes (see the CPU Meeting evidence above).
    - Benchmark Parakeet v3 CPU feasibility.
    - Measure and tune release-to-text latency on everyday CPU machines.
    - The CUDA and AMD runtime tasks that were here were dropped on 2026-10-01;
-     removing their code is #110, #111 and #112.
+     their tooling and install paths went with #112 and #110, and the
+     engine's device selection goes with #111.
 
 3. **Meeting speaker attribution**
    - Validate DiariZen runtime loading and benchmark `parakeet-diarizen`.
@@ -925,8 +926,8 @@ noisy-input fixtures, not only clean read speech.
    check; Dictate stages Parakeet as flat real files, and an external-data
    model loads on 1.30 (verified 2026-09-20 on CPU). The CUDA lane was dropped
    on 2026-10-01 and is not re-validated.
-3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra is capped at
-   `<1.25`. Microsoft has retired that wheel. The Windows AMD lane would have
+3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra was capped at
+   `<1.25` until #110 removed it. Microsoft has retired that wheel. The Windows AMD lane would have
    needed a replacement runtime; that question closed when GPU lanes were
    dropped on 2026-10-01.
 4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
