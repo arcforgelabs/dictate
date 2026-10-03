@@ -42,8 +42,10 @@ setup beyond pressing record.
    work.
 2. **Meetings and long recordings.** Local, speaker-labelled transcripts. This
    is in the vision but comes after dictation, is low priority, and never
-   blocks a dictation release. Meeting features stay off the stable channel
-   until dictation is where it should be.
+   blocks a dictation release. Until dictation is where it should be, meeting
+   features ship only in Dictate Beta: a separate app, installed alongside the
+   stable one with its own data and updates. The stable app carries no beta
+   features and no beta code or libraries, switched off or otherwise.
 
 Work that makes dictation slower, heavier or harder to install for the sake of
 meetings is the wrong trade.
@@ -62,6 +64,8 @@ meetings is the wrong trade.
   not managed.
 - Meeting features that need anything beyond the local machine: bots that join
   calls, calendar or conferencing integrations, cloud diarization.
+- Beta features, or the code and libraries behind them, in the stable app,
+  including behind a toggle. They belong in Dictate Beta.
 - Features justified by selling. Dictate is not a commercial product; a feature
   earns its place by making local voice-to-text better.
 

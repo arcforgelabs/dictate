@@ -13,7 +13,8 @@ fits or conflicts with. Three outcomes:
 - **Aligned, current:** dictation work, or anything the "Order of work" puts
   first.
 - **Aligned, later:** meeting and long-recording work. Fine to keep open; it
-  must not block a dictation release or slow dictation down.
+  must not block a dictation release or slow dictation down, and it ships only
+  in Dictate Beta, never in the stable app.
 - **Not aligned:** conflicts with "Local only" or the "What we will not merge"
   list, or was started under a vision that has since changed. Recommend closing
   it with the `r: not-in-vision` label, quoting the conflicting line.
