@@ -125,8 +125,12 @@ def _input_device_candidates(sd: Any) -> list[int]:
             continue
         if any(token in name for token in _PREFERRED_INPUT_NAMES):
             add(index)
-    # Last resort: any device that can capture. Windows names its microphones
-    # after the hardware, so none match the preferred names above.
+    # Last resort, only when nothing above matched: any device that can
+    # capture. Windows names its microphones after the hardware, so none match
+    # the preferred names. Kept out of the list otherwise, so a default that
+    # rejects 16 kHz falls back to its own rate rather than to another mic.
+    if candidates:
+        return candidates
     for index, device in enumerate(devices):
         try:
             if int(device.get("max_input_channels", 0)) > 0:

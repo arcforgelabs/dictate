@@ -159,6 +159,21 @@ class ResolveInputCaptureTests(unittest.TestCase):
         device, rate = resolve_input_capture(sd, target_rate=16000)
         self.assertEqual((device, rate), (1, 16000))
 
+    def test_default_rejecting_16k_uses_its_own_rate_not_another_mic(self) -> None:
+        # The default only runs at 48 kHz; another microphone accepts 16 kHz.
+        # The user's default must win, captured at its native rate.
+        devices = [
+            {"name": "Microphone (Scarlett Solo USB)", "max_input_channels": 2, "default_samplerate": 48000.0},
+            {"name": "Microphone (2- RIG 800HX)", "max_input_channels": 2, "default_samplerate": 44100.0},
+        ]
+        sd = self._sd(
+            default=0,
+            devices=devices,
+            supported={(0, 16000): False, (0, 48000): True, (1, 16000): True},
+        )
+        device, rate = resolve_input_capture(sd, target_rate=16000)
+        self.assertEqual((device, rate), (0, 48000))
+
     def test_real_sounddevice_default_pair_is_indexable(self) -> None:
         try:
             import sounddevice
