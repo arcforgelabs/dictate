@@ -39,11 +39,19 @@ MSIX_ASSETS = ROOT / "packaging" / "msix" / "assets"
 # on a square accent-coloured plate instead of keeping the tile's transparent
 # rounded corners.
 MSIX_SCALES = (100, 125, 150, 200, 400)
+
+
+def _scaled(base: int, scale: int) -> int:
+    # Half-up, matching the Store scale table (50px at 125% is 63px); round()
+    # would round 62.5 to even.
+    return (base * scale + 50) // 100
+
+
 MSIX_TARGET_SIZES = (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256)
 MSIX_LOGOS = [
-    *[(f"StoreLogo.scale-{s}.png", round(50 * s / 100)) for s in MSIX_SCALES],
-    *[(f"Square150x150Logo.scale-{s}.png", round(150 * s / 100)) for s in MSIX_SCALES],
-    *[(f"Square44x44Logo.scale-{s}.png", round(44 * s / 100)) for s in MSIX_SCALES],
+    *[(f"StoreLogo.scale-{s}.png", _scaled(50, s)) for s in MSIX_SCALES],
+    *[(f"Square150x150Logo.scale-{s}.png", _scaled(150, s)) for s in MSIX_SCALES],
+    *[(f"Square44x44Logo.scale-{s}.png", _scaled(44, s)) for s in MSIX_SCALES],
     *[
         (f"Square44x44Logo.targetsize-{t}{altform}.png", t)
         for t in MSIX_TARGET_SIZES
