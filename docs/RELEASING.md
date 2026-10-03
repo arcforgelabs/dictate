@@ -21,7 +21,14 @@ what ships today is listed at the end and tracked in GitHub issues.
 
 Every channel is the same app. There is no separate beta app: a user switches
 channel on the install they have, and the choice is saved in `config.yaml` as
-`update_channel`.
+`update_channel`. Beta carries what is heading to the next stable release, and
+nothing else: unfinished or shelved features, such as Meetings (P3 in
+[`VISION.md`](../VISION.md)), are in no release, beta or stable, switched off
+or otherwise.
+
+On upgrade, a saved `update_channel: unstable` from the old prerelease lane
+becomes `beta`, and the old `set-update-channel` command is replaced by
+`dictate update --channel`. The old value is migrated, not kept as an alias.
 
 ```bash
 dictate update --channel stable
@@ -151,7 +158,7 @@ replacing packages.
 | ----- | ------ |
 | `YYYY.M.D`, the release date; same-day repackages `-N` | `YYYY.M.PATCH`, a release counter; corrections `-N`; betas `-beta.N` |
 | Prerelease channel named `unstable`: npm `unstable`, tags `vYYYY.M.D-unstable.<run>.<attempt>` | npm `beta`, tags `vYYYY.M.P-beta.N` |
-| The channel is fixed by the build (`release_channel()` reads the version string); the UI refuses to change it | The channel is a saved setting on any direct install; `dictate update --channel` |
+| The channel is fixed by the build (`release_channel()` reads the version string); the UI refuses to change it | The channel is a saved setting on any direct install; `dictate update --channel`; a saved `unstable` becomes `beta` on upgrade |
 | A separate side-by-side beta app was planned (#131) | One app; no separate beta app |
 | Releases tagged from `master` | `release/YYYY.M.P` branches with pinned tooling |
 | Unsigned annotated tags | Signed annotated tags, verified before publishing |
