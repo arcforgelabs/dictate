@@ -169,9 +169,10 @@ also want to remove config, logs, history, and downloaded model data.
 - Types dictated text into the focused app. A terminal, including the Grok
   CLI, receives that text with Shift+Insert so it is not filed as an attachment.
 - Leaves your clipboard as it was: the text is pasted through the clipboard,
-  then what you had copied is put back. On Windows the dictated text is kept
-  out of clipboard history (Win+V) and cloud clipboard. On Linux the most
-  useful single format comes back (an image, else text).
+  then what you had copied is put back. On Windows the dictated text carries
+  the markers Windows defines to leave content out of clipboard history (Win+V)
+  and cloud clipboard. On Linux the most useful single format comes back (an
+  image, else text).
 - Supports configurable push-to-talk
 - Presents a simple capture-first desktop UI
 - Supports launch on startup

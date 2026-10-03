@@ -18,6 +18,9 @@ from dictate.clipboard_keeper import ClipboardItem, best_restorable_type
 _READ_TIMEOUT_SECONDS = 1.0
 _READY_TIMEOUT_SECONDS = 1.0
 _REQUEST_RE = re.compile(r"Waiting for selection request number (\d+)")
+# wl-copy offers this type plus the plain-text aliases (text/plain, UTF8_STRING,
+# STRING, TEXT) for it, so pastes behave as an untyped wl-copy did.
+WAYLAND_TEXT_TYPE = "text/plain;charset=utf-8"
 
 
 def _output_error(message: str) -> Exception:
@@ -256,7 +259,7 @@ class WaylandClipboardSession:
     def write_text(self, text: str) -> None:
         payload = text.encode()
         try:
-            subprocess.run(["wl-copy"], input=payload, check=True)
+            subprocess.run(["wl-copy", "--type", WAYLAND_TEXT_TYPE], input=payload, check=True)
         except (OSError, subprocess.CalledProcessError) as exc:
             raise _output_error(f"clipboard command failed: {exc}") from exc
         self._written = payload
@@ -271,7 +274,8 @@ class WaylandClipboardSession:
         time.sleep(max(0.0, seconds))
 
     def changed_since_write(self) -> bool:
-        current = _wl_paste(["--no-newline", "--type", "text/plain;charset=utf-8"])
+        # Read back the exact type the write offered.
+        current = _wl_paste(["--no-newline", "--type", WAYLAND_TEXT_TYPE])
         return current != self._written
 
     def restore(self, snapshot: _SavedSelection) -> None:

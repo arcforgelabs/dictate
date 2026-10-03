@@ -545,9 +545,14 @@ class WindowsClipboardSession:
             return int(win.GetClipboardSequenceNumber()) != self._own_sequence
         return False
 
-    def restore(self, snapshot: WindowsSnapshot) -> None:
+    def restore(self, snapshot: WindowsSnapshot) -> bool:
+        """Put the snapshot back. False when someone copied while we waited to open."""
         win = self._win
         self._open()
+        # Opening may have pumped a WM_DESTROYCLIPBOARD from another app's copy.
+        if self._lost or win.GetClipboardOwner() != self.hwnd:
+            win.CloseClipboard()
+            return False
         self._restoring = True
         try:
             if not win.EmptyClipboard():
@@ -563,6 +568,7 @@ class WindowsClipboardSession:
         finally:
             win.CloseClipboard()
             self._restoring = False
+        return True
 
     def close(self) -> None:
         hwnd = getattr(self, "hwnd", 0)

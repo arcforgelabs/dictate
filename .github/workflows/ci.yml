@@ -120,6 +120,24 @@ jobs:
         shell: pwsh
         run: .\scripts\windows-user-smoke.ps1 -InstallRoot "$env:RUNNER_TEMP\DictateUserSmoke"
 
+  windows-11-clipboard-history:
+    # Windows Server runners report clipboard history as off even when it is
+    # turned on, so Win+V is checked on the Windows 11 runner. Only the
+    # stdlib-only clipboard path is imported; no full install is needed.
+    name: Windows 11 clipboard history (Win+V) smoke
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Paste a synthetic dictation and read Win+V history
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python python -EnableHistoryForTest
+
   npm:
     name: npm package check
     runs-on: ubuntu-latest

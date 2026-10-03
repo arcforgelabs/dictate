@@ -39,7 +39,8 @@ class ClipboardSession(Protocol):
 
     ``snapshot`` and ``restore`` exchange an opaque value. ``changed_since_write``
     is True when someone else replaced the dictated text, in which case the
-    keeper does not restore.
+    keeper does not restore. ``restore`` may return False when it finds such a
+    copy itself at the last moment.
     """
 
     has_read_signal: bool
@@ -58,7 +59,7 @@ class ClipboardSession(Protocol):
 
     def changed_since_write(self) -> bool: ...
 
-    def restore(self, snapshot: Any) -> None: ...
+    def restore(self, snapshot: Any) -> bool | None: ...
 
     def close(self) -> None: ...
 
@@ -219,8 +220,7 @@ class ClipboardKeeper:
             except BaseException:
                 # Nothing will read the text; put the old clipboard straight back.
                 if outcome.saved and not session.changed_since_write():
-                    session.restore(snapshot)
-                    outcome.restored = True
+                    self._restore(session, snapshot, outcome)
                 raise
             job.pasted.set()
 
@@ -230,10 +230,17 @@ class ClipboardKeeper:
             if session.changed_since_write():
                 outcome.kept_newer_copy = True
                 return
-            session.restore(snapshot)
-            outcome.restored = True
+            self._restore(session, snapshot, outcome)
         finally:
             session.close()
+
+    @staticmethod
+    def _restore(session: ClipboardSession, snapshot: Any, outcome: PasteOutcome) -> None:
+        # A session returns False when it found a newer copy at the last moment.
+        if session.restore(snapshot) is False:
+            outcome.kept_newer_copy = True
+        else:
+            outcome.restored = True
 
     def _wait_for_read(self, session: ClipboardSession, outcome: PasteOutcome) -> None:
         if not session.has_read_signal:

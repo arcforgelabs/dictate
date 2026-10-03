@@ -57,12 +57,18 @@ class WaylandSessionTests(unittest.TestCase):
         self.assertEqual(first.kwargs["input"], b"before")
         self.assertEqual(second.args[0], ["wl-copy", "--clear"])
 
-    def test_change_is_detected_by_reading_back_the_text(self) -> None:
+    def test_change_is_detected_by_reading_back_the_type_that_was_written(self) -> None:
         session = WaylandClipboardSession()
-        with patch("dictate.clipboard_linux.subprocess.run", return_value=completed()):
+        with patch("dictate.clipboard_linux.subprocess.run", return_value=completed()) as write:
             session.write_text("dictated")
-        with patch("dictate.clipboard_linux.subprocess.run", return_value=completed(b"dictated")):
+        self.assertEqual(write.call_args.args[0], ["wl-copy", "--type", "text/plain;charset=utf-8"])
+        self.assertEqual(write.call_args.kwargs["input"], b"dictated")
+        with patch("dictate.clipboard_linux.subprocess.run", return_value=completed(b"dictated")) as read:
             self.assertFalse(session.changed_since_write())
+        self.assertEqual(
+            read.call_args.args[0],
+            ["wl-paste", "--no-newline", "--type", "text/plain;charset=utf-8"],
+        )
         with patch("dictate.clipboard_linux.subprocess.run", return_value=completed(b"user copy")):
             self.assertTrue(session.changed_since_write())
         with patch("dictate.clipboard_linux.subprocess.run", return_value=completed(returncode=1)):

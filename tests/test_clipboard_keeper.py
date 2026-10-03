@@ -180,6 +180,24 @@ class ClipboardKeeperTests(unittest.TestCase):
         self.assertEqual(board.formats, {TEXT: b"user copy"})
         self.assertTrue(keeper.last_outcome.kept_newer_copy)
 
+    def test_a_copy_found_by_the_restore_itself_is_kept(self) -> None:
+        board = FakeBoard({TEXT: b"old"})
+
+        class LateCopySession(FakeSession):
+            def restore(self, snapshot):
+                # Someone copied between the keeper's check and the restore.
+                self.board.set("user", {TEXT: b"user copy"})
+                return False
+
+        session = LateCopySession(board, self.clock)
+        target = Target(board, self.clock, session, 0.02)
+        keeper = make_keeper(session, self.clock)
+        keeper.paste("dictated words", target.press_paste)
+
+        self.assertTrue(keeper.last_outcome.kept_newer_copy)
+        self.assertFalse(keeper.last_outcome.restored)
+        self.assertEqual(board.formats, {TEXT: b"user copy"})
+
     def test_restore_waits_for_a_target_that_reads_late(self) -> None:
         board = FakeBoard({TEXT: b"old"})
 

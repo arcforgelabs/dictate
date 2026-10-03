@@ -293,6 +293,41 @@ class WindowsClipboardRoundTripTests(unittest.TestCase):
         self.assertFalse(keeper.last_outcome.restored)
         self.assertEqual(cw.read_clipboard_formats().get(CF_UNICODETEXT), _unicode("user copy"))
 
+    def test_restore_does_not_overwrite_a_copy_made_while_it_waits_to_open(self) -> None:
+        self.put_mixed()
+        own_pid = os.getpid()
+        session = cw.WindowsClipboardSession(target_pids=lambda: {own_pid})
+        opened = threading.Event()
+
+        def user_copy() -> None:
+            win = cw.api()
+            holder = cw.WindowsClipboardSession()
+            try:
+                _open_with(win, holder.hwnd)
+                opened.set()
+                try:
+                    win.EmptyClipboard()
+                    win.SetClipboardData(CF_UNICODETEXT, cw._hglobal_from_bytes(win, _unicode("user copy")))
+                    time.sleep(0.2)
+                finally:
+                    win.CloseClipboard()
+            finally:
+                holder.close()
+
+        try:
+            snapshot = session.snapshot()
+            session.write_text(DICTATED)
+            copier = threading.Thread(target=user_copy)
+            copier.start()
+            self.assertTrue(opened.wait(5))
+            # The copier holds the clipboard open, so restore has to wait for it.
+            self.assertFalse(session.restore(snapshot))
+            copier.join(5)
+        finally:
+            session.close()
+
+        self.assertEqual(cw.read_clipboard_formats().get(CF_UNICODETEXT), _unicode("user copy"))
+
     def test_restore_waits_for_a_target_that_reads_late(self) -> None:
         before = self.put_mixed()
         target = TargetApp(delay=0.6)
