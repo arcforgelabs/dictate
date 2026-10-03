@@ -3,9 +3,11 @@
 Dictate turns speech into text on your own machine. Nothing you say leaves it.
 
 Its first job is dictation: press a shortcut, speak, and the text is typed into
-whatever app you are already using. Its second job, later, is longer
-recordings and meetings: a local, speaker-labelled transcript you can keep and
-export. Both are the same idea, voice to text locally, and nothing else.
+whatever app you are already using. It can also take a longer note: keep
+talking, and the text is saved to history to copy or export. Later, and only
+once dictation is where it should be, it may take on meetings: a local,
+speaker-labelled transcript. All of it is the same idea, voice to text
+locally, and nothing else.
 
 Install and usage: [`README.md`](README.md). How to contribute:
 [`CONTRIBUTING.md`](CONTRIBUTING.md). Reporting a security problem:
@@ -36,27 +38,25 @@ appearing is the number that matters most, measured on everyday laptops and
 desktops, not on a workstation. The text is accurate enough that fixing it is
 rare.
 
-Meetings, when they come, meet the same bar: one install, local, CPU, and no
-setup beyond pressing record.
-
 ## Order of work
 
-1. **Dictation.** Make it fast, accurate and dependable on Linux and Windows 11
-   desktops, and pleasant to install, update and remove. This is the current
-   work.
-2. **Meetings and long recordings.** Local, speaker-labelled transcripts. This
-   is in the vision but comes after dictation, is low priority, and never
-   blocks a dictation release. Until dictation is where it should be, meeting
-   features ship only in Dictate Beta: a separate app, installed alongside the
-   stable one with its own data and updates. The stable app carries no beta
-   features and no beta code or libraries, switched off or otherwise. That
-   split is the target, not yet the app: until
-   [#131](https://github.com/arcforgelabs/dictate/issues/131) lands, Meeting
-   is still in the current build, and fixing it there is later work, not out of
-   bounds.
+1. **A stable app and better dictation.** Make dictation fast, accurate and
+   dependable on Linux and Windows 11 desktops, and make the app pleasant to
+   install, update and remove. This is the current work and the focus of every
+   release.
+2. **Meetings and local speaker labelling (P3).** Not ready, and not a focus
+   for new releases. The Meeting work is set aside on the
+   [`archive/meeting-2026-10-03`](https://github.com/arcforgelabs/dictate/tree/archive/meeting-2026-10-03)
+   branch and tag ([#140](https://github.com/arcforgelabs/dictate/issues/140))
+   and removed from the app, so no release, beta or stable, carries its code,
+   models or libraries (torch, pyannote). It comes back only after
+   item 1, by pull request, meeting the same bar: one install, local, CPU, no
+   setup beyond pressing record.
 
-Work that makes dictation slower, heavier or harder to install for the sake of
-meetings is the wrong trade.
+Releases move through beta to stable. Beta is where the next stable release
+is tested; it is not a place to park unfinished features. Work that makes
+dictation slower, heavier or harder to install for the sake of meetings is the
+wrong trade.
 
 ## What we will not merge (for now)
 
@@ -68,12 +68,12 @@ meetings is the wrong trade.
 - A second general speech engine alongside Parakeet. A new engine replaces the
   current one when it is better on CPU; it is not added as an option.
 - Notes-app features: folders, tags, rich editing, AI summaries or rewrites.
-  History and meeting transcripts exist so text can be recovered and exported,
-  not managed.
-- Meeting features that need anything beyond the local machine: bots that join
-  calls, calendar or conferencing integrations, cloud diarization.
-- Adding beta features, or the code and libraries behind them, to the stable
-  app, including behind a toggle. They belong in Dictate Beta.
+  History exists so text can be recovered and exported, not managed.
+- Meeting and speaker-labelling work, until item 1 of "Order of work" is
+  done. After that, never: call bots, calendar or conferencing integrations,
+  or cloud diarization.
+- Features kept in the app but switched off, in beta or stable. A feature is
+  in a release, or it is not.
 - Features justified by selling. Dictate is not a commercial product; a feature
   earns its place by making local voice-to-text better.
 
