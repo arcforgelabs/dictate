@@ -82,11 +82,15 @@ class Daemon:
         self.audio_level_callback = audio_level_callback
         self.model_status_callback = model_status_callback
         # With model_loaded=False the speech model is still to be loaded by
-        # start_model_load(). Recording works meanwhile; the transcription worker
-        # holds queued audio until the load has finished.
+        # start_model_load(). Recording works meanwhile: every finished
+        # recording is held, in order and without the final-queue cap, and the
+        # transcription worker takes them once the load has finished.
         self._model_loaded = threading.Event()
         self._model_phase: ModelPhase = "ready" if model_loaded else "loading"
         self._model_error: str | None = None
+        self._held_lock = threading.Lock()
+        self._hold_final_chunks = not model_loaded
+        self._held_final_chunks: deque[AudioChunk] = deque()
         if model_loaded:
             self._model_loaded.set()
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
@@ -406,15 +410,16 @@ class Daemon:
     ) -> threading.Thread:
         """Load the speech model on a background thread.
 
-        ``load`` does the loading (default: touch ``stt.model``) and raises on
-        failure. Recording works while it runs: finished recordings wait in the
-        transcription queue and are transcribed once the model is ready. A
-        failed load fails those recordings with the load error, and later
-        recordings are refused with the same message.
+        For a daemon built with ``model_loaded=False``. ``load`` does the
+        loading (default: touch ``stt.model``) and raises on failure. Recording
+        works while it runs: finished recordings are held and transcribed once
+        the model is ready. A failed load fails those recordings with the load
+        error, and later recordings are refused with the same message.
         """
+        if self._model_loaded.is_set():
+            raise RuntimeError("the speech model load has already finished")
         with self._engine_lock:
             stt = self.engine.stt
-        self._model_loaded.clear()
         self._model_error = None
         self._model_phase = "loading"
         self._notify_model_status()
@@ -471,6 +476,24 @@ class Daemon:
         while not self._model_loaded.wait(timeout=0.1):
             if self._stop.is_set():
                 return
+        # Recordings finished during the load come first, oldest first; from
+        # here on new ones go through the normal final-audio queue.
+        with self._held_lock:
+            held = list(self._held_final_chunks)
+            self._held_final_chunks.clear()
+            self._hold_final_chunks = False
+        for chunk in held:
+            if self._stop.is_set():
+                return
+            # As in the loop below, earlier partial chunks (a paused note's
+            # audio) go before a final chunk.
+            while True:
+                try:
+                    partial = self._partial_audio_queue.get_nowait()
+                except queue.Empty:
+                    break
+                self._handle_partial_chunk(partial)
+            self._handle_final_chunk(chunk)
 
     def _notify_model_status(self) -> None:
         if self.model_status_callback is None:
@@ -1116,6 +1139,12 @@ class Daemon:
     def _queue_final_chunk(self, chunk: AudioChunk) -> bool:
         if chunk.recording_id != 0 and not self._recording_session_known(chunk.recording_id):
             return False
+        with self._held_lock:
+            if self._hold_final_chunks:
+                # The speech model is still loading: keep every finished
+                # recording, however many, until the worker can transcribe it.
+                self._held_final_chunks.append(chunk)
+                return True
         try:
             self._audio_queue.put_nowait(chunk)
             return True

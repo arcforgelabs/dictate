@@ -42,7 +42,7 @@ for _mod_name, _attrs in _stub_modules.items():
 from dictate import __main__ as main_module  # noqa: E402
 from dictate import ui_launcher, ui_server  # noqa: E402
 from dictate.config import Config  # noqa: E402
-from dictate.daemon import Daemon  # noqa: E402
+from dictate.daemon import FINAL_AUDIO_QUEUE_SIZE, Daemon  # noqa: E402
 from dictate.history import HistoryStore  # noqa: E402
 from dictate.note_store import NoteStore  # noqa: E402
 from dictate.stt import check_backend_readiness  # noqa: E402
@@ -79,19 +79,20 @@ class _SlowStt:
     def transcribe(self, audio, *args, **kwargs):  # noqa: ANN001
         del args, kwargs
         self.transcribe_calls.append((len(audio), self.loaded.is_set()))
-        return "queued words"
+        return f"words {len(audio)}"
 
     def release(self) -> None:
         self.released = True
 
 
 class _Recorder:
-    """Records one second of audio per press, with no device."""
+    """Records 1 s of audio on the first stop, 0.1 s more on each later one."""
 
     truncated = False
 
     def __init__(self) -> None:
         self.is_recording = False
+        self.stops = 0
 
     def start(self, on_chunk=None, recording_id=None, **kwargs) -> None:  # noqa: ANN001
         del on_chunk, recording_id, kwargs
@@ -99,7 +100,9 @@ class _Recorder:
 
     def stop(self) -> np.ndarray:
         self.is_recording = False
-        return np.full(16000, 0.1, dtype=np.float32)
+        samples = 16000 + 1600 * self.stops
+        self.stops += 1
+        return np.full(samples, 0.1, dtype=np.float32)
 
 
 class _Broker:
@@ -189,12 +192,12 @@ class DaemonModelLoadTests(unittest.TestCase):
         # Held, not dropped: nothing transcribed or typed yet, nothing failed.
         self.assertEqual(stt.transcribe_calls, [])
         self.output.send.assert_not_called()
-        self.assertEqual(daemon._audio_queue.qsize(), 1)
+        self.assertEqual(len(daemon._held_final_chunks), 1)
 
         stt.release_load.set()
         self.assertTrue(_wait_until(lambda: self.output.send.called))
 
-        self.output.send.assert_called_once_with("queued words")
+        self.output.send.assert_called_once_with("words 16000")
         self.assertEqual(stt.transcribe_calls, [(16000, True)])
         self.assertFalse(any("failed" in (s or "").lower() for s in self.statuses), self.statuses)
         self.assertFalse(any(event.get("stale") for event in self.transcripts), self.transcripts)
@@ -215,8 +218,51 @@ class DaemonModelLoadTests(unittest.TestCase):
         stt.release_load.set()
         self.assertTrue(_wait_until(lambda: bool(notes)))
         self.assertEqual(notes[0]["status"], "ok")
-        self.assertEqual(notes[0]["text"], "queued words")
+        self.assertEqual(notes[0]["text"], "words 16000")
         self.output.send.assert_not_called()
+
+    def test_more_recordings_than_the_final_queue_holds_are_all_kept(self) -> None:
+        stt = _SlowStt()
+        daemon = self._daemon(stt)
+        daemon._ensure_worker_started()
+        daemon.start_model_load()
+
+        presses = FINAL_AUDIO_QUEUE_SIZE + 3
+        for _ in range(presses):
+            self.assertTrue(daemon._start_recording())
+            daemon._finalize_recording()
+        self.assertEqual(len(daemon._held_final_chunks), presses)
+
+        stt.release_load.set()
+        self.assertTrue(_wait_until(lambda: self.output.send.call_count == presses))
+
+        typed = [call.args[0] for call in self.output.send.call_args_list]
+        self.assertEqual(typed, [f"words {16000 + 1600 * n}" for n in range(presses)])
+        self.assertEqual(self.statuses, [])
+
+        # After the load, recordings take the normal queue again.
+        self.assertTrue(daemon._start_recording())
+        daemon._finalize_recording()
+        self.assertTrue(_wait_until(lambda: self.output.send.call_count == presses + 1))
+        self.assertEqual(len(daemon._held_final_chunks), 0)
+
+    def test_note_paused_while_loading_keeps_its_paused_audio(self) -> None:
+        stt = _SlowStt()
+        daemon = self._daemon(stt)
+        notes: list[dict[str, object]] = []
+        daemon.note_callback = notes.append
+        daemon._ensure_worker_started()
+        daemon.start_model_load()
+
+        with patch("dictate.daemon.play_pause_cue"):
+            self.assertTrue(daemon.start_note_recording())
+            self.assertTrue(daemon.pause_note_recording())
+            self.assertTrue(daemon.stop_note_recording())
+
+        stt.release_load.set()
+        self.assertTrue(_wait_until(lambda: bool(notes)))
+        self.assertEqual(notes[0]["status"], "ok")
+        self.assertEqual(notes[0]["text"], "words 16000")
 
     def test_load_failure_fails_waiting_recordings_and_refuses_new_ones(self) -> None:
         stt = _SlowStt(fail_with=RuntimeError("model.onnx is missing"))
@@ -233,7 +279,7 @@ class DaemonModelLoadTests(unittest.TestCase):
             daemon.model_status,
             {"ready": False, "phase": "failed", "error": "model.onnx is missing"},
         )
-        self.assertTrue(_wait_until(lambda: daemon._audio_queue.qsize() == 0))
+        self.assertTrue(_wait_until(lambda: not daemon._hold_final_chunks))
         self.assertEqual(self.model_events[-1]["phase"], "failed")
         self.assertIn("Speech model failed to load: model.onnx is missing", self.statuses)
         stale = [event for event in self.transcripts if event.get("stale")]
