@@ -10,12 +10,12 @@ the docs.
 Judge every issue and pull request against `VISION.md`, and say which line it
 fits or conflicts with. Three outcomes:
 
-- **Aligned, current:** dictation work, or anything the "Order of work" puts
-  first.
-- **Aligned, later:** meeting and long-recording work. Fine to keep open; it
-  must not block a dictation release or slow dictation down, and it ships only
-  in Dictate Beta, never in the stable app. Until that split lands (#131),
-  fixes to the Meeting code already in the tree count here too.
+- **Aligned, current:** item 1 of the "Order of work": a stable app and better
+  dictation and notes, including removing the Meeting code from the app.
+- **Aligned, later (P3):** meeting and local speaker-labelling work. It is set
+  aside on the `archive/meeting-2026-10-03` branch and must not land in any
+  release, beta or stable, until item 1 is done. Keep such issues open with
+  the `P3` label; don't merge such pull requests yet.
 - **Not aligned:** conflicts with "Local only" or the "What we will not merge"
   list, or was started under a vision that has since changed. Recommend closing
   it with the `r: not-in-vision` label, quoting the conflicting line.
