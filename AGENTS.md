@@ -14,7 +14,8 @@ fits or conflicts with. Three outcomes:
   first.
 - **Aligned, later:** meeting and long-recording work. Fine to keep open; it
   must not block a dictation release or slow dictation down, and it ships only
-  in Dictate Beta, never in the stable app.
+  in Dictate Beta, never in the stable app. Until that split lands (#131),
+  fixes to the Meeting code already in the tree count here too.
 - **Not aligned:** conflicts with "Local only" or the "What we will not merge"
   list, or was started under a vision that has since changed. Recommend closing
   it with the `r: not-in-vision` label, quoting the conflicting line.

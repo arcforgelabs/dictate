@@ -45,7 +45,11 @@ setup beyond pressing record.
    blocks a dictation release. Until dictation is where it should be, meeting
    features ship only in Dictate Beta: a separate app, installed alongside the
    stable one with its own data and updates. The stable app carries no beta
-   features and no beta code or libraries, switched off or otherwise.
+   features and no beta code or libraries, switched off or otherwise. That
+   split is the target, not yet the app: until
+   [#131](https://github.com/arcforgelabs/dictate/issues/131) lands, Meeting
+   is still in the current build, and fixing it there is later work, not out of
+   bounds.
 
 Work that makes dictation slower, heavier or harder to install for the sake of
 meetings is the wrong trade.
@@ -64,8 +68,8 @@ meetings is the wrong trade.
   not managed.
 - Meeting features that need anything beyond the local machine: bots that join
   calls, calendar or conferencing integrations, cloud diarization.
-- Beta features, or the code and libraries behind them, in the stable app,
-  including behind a toggle. They belong in Dictate Beta.
+- Adding beta features, or the code and libraries behind them, to the stable
+  app, including behind a toggle. They belong in Dictate Beta.
 - Features justified by selling. Dictate is not a commercial product; a feature
   earns its place by making local voice-to-text better.
 
