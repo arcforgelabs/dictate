@@ -174,6 +174,18 @@ if ($EnableHistoryForTest) {
     Write-Step "Turning clipboard history on for this user (test machines only)"
     New-Item -Path "HKCU:\Software\Microsoft\Clipboard" -Force | Out-Null
     Set-ItemProperty -Path "HKCU:\Software\Microsoft\Clipboard" -Name "EnableClipboardHistory" -Value 1 -Type DWord
+    $os = Get-CimInstance Win32_OperatingSystem
+    Write-Host "    OS: $($os.Caption) $($os.Version)"
+    $policy = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -ErrorAction SilentlyContinue
+    Write-Host "    AllowClipboardHistory policy: $(if ($policy -and $null -ne $policy.AllowClipboardHistory) { $policy.AllowClipboardHistory } else { 'not set' })"
+    $services = @(Get-Service -Name "cbdhsvc*" -ErrorAction SilentlyContinue)
+    if ($services.Count -eq 0) {
+        Write-Host "    clipboard user service (cbdhsvc) not present"
+    }
+    foreach ($service in $services) {
+        Write-Host "    $($service.Name): $($service.Status)"
+        try { Restart-Service -Name $service.Name -Force -ErrorAction Stop } catch { Write-Host "    could not restart $($service.Name): $($_.Exception.Message)" }
+    }
     Start-Sleep -Seconds 2
 }
 

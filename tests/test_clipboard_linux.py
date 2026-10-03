@@ -95,6 +95,10 @@ class FakeXclip:
                         return
                     yield line
 
+            def close(self) -> None:
+                outer.stderr_closed = True
+
+        self.stderr_closed = False
         self.stdin = Stdin()
         self.stderr = Stderr()
 
@@ -187,6 +191,7 @@ class XclipWriterTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], b"before")
         session.close()
         self.assertIsNotNone(clipboard.poll())
+        self.assertTrue(clipboard.stderr_closed and primary.stderr_closed)
 
     def test_restoring_an_empty_selection_drops_ownership(self) -> None:
         procs: list[FakeXclip] = []

@@ -79,17 +79,23 @@ class _XclipWriter:
         stream = self._proc.stderr
         if stream is None:
             return
-        for raw in stream:
-            line = raw.decode(errors="replace")
-            if "Waiting for selection request" in line or "Waiting for one selection" in line:
-                self._ready.set()
-            match = _REQUEST_RE.search(line)
-            if match:
-                with self._lock:
-                    self._served = max(self._served, int(match.group(1)) - 1)
-            if "Lost selection ownership" in line:
-                with self._lock:
-                    self._lost = True
+        try:
+            for raw in stream:
+                self._note(raw.decode(errors="replace"))
+        except (OSError, ValueError):
+            # The pipe was closed under us by terminate().
+            return
+
+    def _note(self, line: str) -> None:
+        if "Waiting for selection request" in line or "Waiting for one selection" in line:
+            self._ready.set()
+        match = _REQUEST_RE.search(line)
+        if match:
+            with self._lock:
+                self._served = max(self._served, int(match.group(1)) - 1)
+        if "Lost selection ownership" in line:
+            with self._lock:
+                self._lost = True
 
     @property
     def served(self) -> int:
@@ -109,6 +115,12 @@ class _XclipWriter:
                 self._proc.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+                self._proc.wait(timeout=1.0)
+        # The exited process closes its end; let the reader drain, then close ours.
+        self._reader.join(1.0)
+        stream = self._proc.stderr
+        if stream is not None:
+            stream.close()
 
 
 def _xclip_read(selection: str, target: str) -> bytes | None:
