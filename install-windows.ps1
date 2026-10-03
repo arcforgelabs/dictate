@@ -5,11 +5,16 @@ param(
     [switch]$NoStartup,
     [switch]$Meeting,
     [switch]$RecreateVenv,
+    # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
     [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ForceCuda -or $NoCuda) {
+    Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function Test-PythonVersion {
@@ -95,41 +100,37 @@ function Ensure-VcRuntime {
     }
 }
 
-function Test-NvidiaGpu {
-    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if ($nvidiaSmi) {
-        return $true
-    }
-
-    try {
-        $controllers = Get-CimInstance Win32_VideoController -ErrorAction Stop
-        foreach ($controller in $controllers) {
-            $name = [string]$controller.Name
-            $compatibility = [string]$controller.AdapterCompatibility
-            $pnpDeviceId = [string]$controller.PNPDeviceID
-            if (
-                $name -match "NVIDIA" -or
-                $compatibility -match "NVIDIA" -or
-                $pnpDeviceId -match "VEN_10DE"
-            ) {
-                return $true
-            }
-        }
-    } catch {
-        return $false
-    }
-
-    return $false
-}
-
-function Ensure-OnnxCudaRuntime {
+function Remove-RetiredGpuRuntime {
     param([string]$PythonExe)
 
-    # onnxruntime-gpu 1.27+ bundles CUDA 13 runtime DLLs, which need NVIDIA
-    # driver 580 or newer. Older drivers fall back to CPU at model load.
-    Write-Host "==> Installing ONNX Runtime CUDA provider (CUDA 13; NVIDIA driver 580+)"
-    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "uninstall", "-y", "onnxruntime") -Description "Removing CPU-only ONNX Runtime"
-    Invoke-Checked -Exe $PythonExe -ArgumentList @("-m", "pip", "install", "--upgrade", "onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31") -Description "Installing ONNX Runtime GPU with CUDA/cuDNN DLLs"
+    # Installs from before 2026-10-01 may carry a GPU build of ONNX Runtime.
+    # It shares files with the CPU onnxruntime package, so remove both and let
+    # the package install below lay down a clean CPU runtime. Returns $true when
+    # a retired runtime was found, so the caller checks the CPU runtime after.
+    $probe = "import importlib.metadata as m; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; print(' '.join(n for n in ('onnxruntime-gpu', 'onnxruntime-directml') if n in names))"
+    $retired = (& $PythonExe -c $probe | Out-String).Trim()
+    if (-not $retired) {
+        return $false
+    }
+    Write-Host "==> Removing retired GPU ONNX Runtime ($retired); Dictate runs on the CPU only"
+    & $PythonExe -m pip uninstall -y @($retired -split " ") onnxruntime | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        # Keep going: the package install below still lays down the CPU
+        # runtime, and Assert-CpuOnnxRuntime stops the install if it is unusable.
+        Write-Warning "Removing the retired GPU ONNX Runtime failed with exit code $LASTEXITCODE; continuing with the CPU runtime install."
+    }
+    return $true
+}
+
+function Assert-CpuOnnxRuntime {
+    param([string]$PythonExe)
+
+    $check = "import importlib.metadata as m, onnxruntime as ort; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; left = [n for n in ('onnxruntime-gpu', 'onnxruntime-directml') if n in names]; assert not left, 'still installed: ' + ', '.join(left); assert 'CPUExecutionProvider' in ort.get_available_providers(); print('onnxruntime ' + ort.__version__ + ' on the CPU')"
+    Write-Host "==> Checking the CPU ONNX Runtime"
+    & $PythonExe -c $check | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "The CPU ONNX Runtime is not usable after removing the retired GPU runtime. Close Dictate and run this installer again with -RecreateVenv."
+    }
 }
 
 function Get-AppDataConfigPath {
@@ -424,16 +425,15 @@ if (-not (Test-Path $venvPython)) {
 }
 
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
+$removedRetiredGpuRuntime = Remove-RetiredGpuRuntime -PythonExe $venvPython
 $installExtras = @("windows")
 if ($Meeting) {
     $installExtras += "meeting"
 }
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
-
-$installCuda = $ForceCuda -or ((-not $NoCuda) -and (Test-NvidiaGpu))
-if ($installCuda) {
-    Ensure-OnnxCudaRuntime -PythonExe $venvPython
+if ($removedRetiredGpuRuntime) {
+    Assert-CpuOnnxRuntime -PythonExe $venvPython
 }
 
 Seed-Config
@@ -453,9 +453,6 @@ if (-not $NoPrepareTurbo) {
 
 if (-not $NoVerify) {
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--quick", "--type-backend", "pynput") -Description "Running Dictate doctor"
-    if ($installCuda) {
-        Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--device", "cuda", "--quick", "--type-backend", "pynput") -Description "Running Dictate CUDA doctor"
-    }
 }
 
 Write-Host ""

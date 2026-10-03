@@ -6,11 +6,16 @@ param(
     [switch]$ForceStartup,
     [switch]$RecreateVenv,
     [switch]$SkipGitPull,
+    # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
     [switch]$NoCuda
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ForceCuda -or $NoCuda) {
+    Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
 
 function Get-StartMenuProgramsDir {
     $programsDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -89,8 +94,6 @@ if ($NoPrepareTurbo) { $installerArgs += "-NoPrepareTurbo" }
 if ($NoShortcut) { $installerArgs += "-NoShortcut" }
 if ($NoStartup -or ((-not $ForceStartup) -and (-not (Test-Path (Get-StartupShortcutPath))))) { $installerArgs += "-NoStartup" }
 if ($RecreateVenv) { $installerArgs += "-RecreateVenv" }
-if ($ForceCuda) { $installerArgs += "-ForceCuda" }
-if ($NoCuda) { $installerArgs += "-NoCuda" }
 
 & powershell @installerArgs
 if ($LASTEXITCODE -ne 0) {

@@ -59,17 +59,9 @@ source of truth, update `scripts/prepare-pyannote-community-model.py` to stage
 from that artifact before falling back to Hugging Face; do not reintroduce a
 customer-time download.
 
-GPU provider packages are packaging inputs, not UI choices. The default bundled
-engine can run CPU Parakeet. NVIDIA builds that should exercise CUDA install the
-`gpu` extra (ONNX Runtime 1.30, CUDA 13 runtime wheels, NVIDIA driver 580+);
-CUDA validation runs on the `win11-gpu` GPU-passthrough VM, not the Linux
-build host. Windows AMD validation builds install the `amd` extra, which brings
-in ONNX Runtime DirectML 1.24.x (the last published DirectML wheel) and is
-verified by
-`dictate doctor --stt-backend parakeet --device amd --quick`. Linux AMD
-validation remains ROCm/MIGraphX-provider based and must use a runner or test
-machine with an ONNX Runtime build that exposes `MIGraphXExecutionProvider` or
-`ROCMExecutionProvider`.
+The bundled engine runs Parakeet on the CPU through the `onnxruntime` package.
+There are no GPU builds: the `gpu` and `amd` extras were removed when Dictate
+went CPU-only on 2026-10-01.
 
 ## Build / release flow
 
