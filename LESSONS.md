@@ -23,10 +23,14 @@ Hard-won, easy-to-trip-on details from building the `.deb`/`.rpm`/AppImage. Full
 runbook: [docs/desktop-packaging.md](docs/desktop-packaging.md). The ones that
 cost the most:
 
-- **Freeze the engine PyInstaller `onefile`, not onedir** — `linuxdeploy` (AppImage)
-  can't resolve PyInstaller's `$ORIGIN`-rpath mangled `_internal/*.so`
-  (`ERROR: Could not find dependency: libnettle-<hash>.so`). Onefile = one ELF in
-  the AppDir = no walk to fail. `.deb`/`.rpm` work either way.
+- **Freeze the engine PyInstaller `onedir`; `onefile` only for the AppImage** —
+  `linuxdeploy` (AppImage) can't resolve PyInstaller's `$ORIGIN`-rpath mangled
+  `_internal/*.so` (`ERROR: Could not find dependency: libnettle-<hash>.so`), so
+  the AppImage gets one self-extracting ELF. Everything else (`.deb`/`.rpm`, and
+  every Windows package: MSI, NSIS, Store MSIX) installs the onedir folder. A
+  onefile engine unpacks its whole runtime to a temp dir on every launch: the
+  333 MB Windows Store engine spent ~7 s doing that and missed the shell's 8 s
+  handshake wait (#131).
 - **Tauri icons must be RGBA PNG** or `generate_context!` panics (`assets/dictate.png`
   is `LA`).
 - **AppImage in CI** needs `APPIMAGE_EXTRACT_AND_RUN=1` + `NO_STRIP=true` +

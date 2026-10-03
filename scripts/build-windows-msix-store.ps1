@@ -243,6 +243,7 @@ function Assert-MsixPackage {
                 "resources.pri",
                 "Assets\Square44x44Logo.targetsize-24_altform-unplated.png",
                 "engine\dictate-engine.exe",
+                "engine\_internal\python3*.dll",
                 "engine\dictate-distribution.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
@@ -271,6 +272,7 @@ function Assert-MsixStagePayload {
         $Payload in @(
             "dictate-ui-shell.exe",
             "engine\dictate-engine.exe",
+            "engine\_internal\python3*.dll",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
             "engine\models\pyannote-speaker-diarization-community-1\config.*",
@@ -284,7 +286,28 @@ function Assert-MsixStagePayload {
             throw "MSIX staging failed: missing payload '$Payload'"
         }
     }
+
+    # The engine ships as a PyInstaller onedir folder: the exe plus _internal\.
+    # A lone exe would be the self-extracting onefile build, which unpacks itself
+    # on every launch.
+    if (-not (Test-Path (Join-Path $StageDir "engine\_internal") -PathType Container)) {
+        throw "MSIX staging failed: engine\_internal\ is missing; the engine must be the onedir build"
+    }
+
+    # Installed paths are C:\Program Files\WindowsApps\<package full name>\ plus
+    # these, so keep them well under the 260-char Windows path limit.
+    $Prefix = $StageDir.TrimEnd("\") + "\"
+    $Longest = Get-ChildItem -LiteralPath $StageDir -Recurse -File -Force |
+        ForEach-Object { $_.FullName.Substring($Prefix.Length) } |
+        Sort-Object Length -Descending |
+        Select-Object -First 1
+    Write-Host "longest MSIX payload path ($($Longest.Length) chars): $Longest"
+    if ($Longest.Length -gt $MaxMsixPayloadPathLength) {
+        throw "MSIX staging failed: payload path is $($Longest.Length) chars, over $MaxMsixPayloadPathLength`: $Longest"
+    }
 }
+
+$MaxMsixPayloadPathLength = 150
 
 Write-Host "preflight"
 $IsWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
