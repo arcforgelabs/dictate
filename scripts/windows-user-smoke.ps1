@@ -72,6 +72,24 @@ function Invoke-DoctorSmoke {
     }
 }
 
+function Get-OnnxRuntimeDistributions {
+    $probe = "import importlib.metadata as m; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; print(' '.join(sorted(names & {'onnxruntime', 'onnxruntime-gpu', 'onnxruntime-directml'})))"
+    $output = (& (Join-Path $ScriptsDir "python.exe") -c $probe | Out-String).Trim()
+    if (-not $output) {
+        return @()
+    }
+    return @($output -split " ")
+}
+
+function Write-OnnxRuntimeState {
+    param([string]$Label)
+    Write-Step "$Label`: ONNX Runtime distributions: $((Get-OnnxRuntimeDistributions) -join ', ')"
+    & (Join-Path $ScriptsDir "python.exe") -c "import onnxruntime as ort; print('import onnxruntime: ok, ' + ort.__version__)"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "import onnxruntime: failed (exit code $LASTEXITCODE)"
+    }
+}
+
 function Get-StartMenuProgramsDir {
     if ($env:APPDATA) {
         return (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs")
@@ -188,6 +206,35 @@ try {
     Invoke-DoctorSmoke "Run doctor repair" @("doctor", "--quick", "--fix", "--type-backend", "pynput")
     Assert-ShortcutTargetsTray -Path (Get-StartMenuShortcutPath)
     Assert-ShortcutTargetsTray -Path (Get-StartupShortcutPath)
+
+    # Installs from before 2026-10-01 on NVIDIA machines carry onnxruntime-gpu.
+    # Rebuild the broken state from #109: the GPU package over the CPU one,
+    # then the CPU package uninstalled, which deletes the files they share.
+    $venvPython = Join-Path $ScriptsDir "python.exe"
+    Invoke-Checked "Install retired onnxruntime-gpu over the CPU runtime" $venvPython @("-m", "pip", "install", "onnxruntime-gpu>=1.30,<1.31")
+    Invoke-Checked "Uninstall the CPU onnxruntime as the old CUDA step did" $venvPython @("-m", "pip", "uninstall", "-y", "onnxruntime")
+    Write-OnnxRuntimeState "Before the source update"
+    Assert-True ((Get-OnnxRuntimeDistributions) -contains "onnxruntime-gpu") "Expected onnxruntime-gpu to be installed before the source update"
+
+    # The source updater reuses .venv. -NoCuda is a retired flag that must be
+    # accepted and ignored.
+    Invoke-Checked "Run source updater over the retired GPU runtime" "powershell" @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        (Join-Path $SourceDir "update-windows.ps1"),
+        "-SkipGitPull",
+        "-NoPrepareTurbo",
+        "-NoVerify",
+        "-NoCuda"
+    )
+    Write-OnnxRuntimeState "After the source update"
+    $distributions = @(Get-OnnxRuntimeDistributions)
+    Assert-True ($distributions -notcontains "onnxruntime-gpu") "onnxruntime-gpu is still installed after the source update"
+    Assert-True ($distributions -contains "onnxruntime") "onnxruntime is not installed after the source update"
+    Invoke-Checked "Import the CPU ONNX Runtime" $venvPython @("-c", "import onnxruntime as ort; assert 'CPUExecutionProvider' in ort.get_available_providers(); print('onnxruntime ' + ort.__version__ + ' imports on the CPU')")
+    Assert-InstalledUserSurface
 
     Invoke-Checked "Run hosted Windows updater" "powershell" @(
         "-NoProfile",

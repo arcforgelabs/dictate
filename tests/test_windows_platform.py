@@ -406,9 +406,19 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("function Remove-RetiredGpuRuntime", installer)
         self.assertIn("('onnxruntime-gpu', 'onnxruntime-directml')", installer)
         self.assertLess(
-            installer.index("Remove-RetiredGpuRuntime -PythonExe $venvPython"),
+            installer.index("$removedRetiredGpuRuntime = Remove-RetiredGpuRuntime -PythonExe $venvPython"),
             installer.index('"pip", "install", "-e", $installTarget'),
         )
+        # A failed uninstall must not stop the CPU package install; the CPU
+        # runtime is checked after it instead.
+        cleanup = installer.split("function Remove-RetiredGpuRuntime", 1)[1].split("\nfunction ", 1)[0]
+        self.assertNotIn("Invoke-Checked", cleanup)
+        self.assertIn("Write-Warning", cleanup)
+        self.assertLess(
+            installer.index('"pip", "install", "-e", $installTarget'),
+            installer.index("    Assert-CpuOnnxRuntime -PythonExe $venvPython"),
+        )
+        self.assertIn("-RecreateVenv", installer.split("function Assert-CpuOnnxRuntime", 1)[1].split("\nfunction ", 1)[0])
         for name in ("install.ps1", "update.ps1", "update-windows.ps1", "install-windows-wizard.ps1"):
             script = (root / name).read_text(encoding="utf-8").lower()
             for marker in ("onnxruntime-gpu", "directml", "cuda doctor", "nvidia"):

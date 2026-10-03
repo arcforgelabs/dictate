@@ -105,14 +105,32 @@ function Remove-RetiredGpuRuntime {
 
     # Installs from before 2026-10-01 may carry a GPU build of ONNX Runtime.
     # It shares files with the CPU onnxruntime package, so remove both and let
-    # the package install below lay down a clean CPU runtime.
+    # the package install below lay down a clean CPU runtime. Returns $true when
+    # a retired runtime was found, so the caller checks the CPU runtime after.
     $probe = "import importlib.metadata as m; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; print(' '.join(n for n in ('onnxruntime-gpu', 'onnxruntime-directml') if n in names))"
     $retired = (& $PythonExe -c $probe | Out-String).Trim()
     if (-not $retired) {
-        return
+        return $false
     }
     Write-Host "==> Removing retired GPU ONNX Runtime ($retired); Dictate runs on the CPU only"
-    Invoke-Checked -Exe $PythonExe -ArgumentList (@("-m", "pip", "uninstall", "-y") + ($retired -split " ") + @("onnxruntime")) -Description "Removing retired GPU ONNX Runtime"
+    & $PythonExe -m pip uninstall -y @($retired -split " ") onnxruntime | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        # Keep going: the package install below still lays down the CPU
+        # runtime, and Assert-CpuOnnxRuntime stops the install if it is unusable.
+        Write-Warning "Removing the retired GPU ONNX Runtime failed with exit code $LASTEXITCODE; continuing with the CPU runtime install."
+    }
+    return $true
+}
+
+function Assert-CpuOnnxRuntime {
+    param([string]$PythonExe)
+
+    $check = "import importlib.metadata as m, onnxruntime as ort; names = {(d.metadata['Name'] or '').lower().replace('_', '-') for d in m.distributions()}; left = [n for n in ('onnxruntime-gpu', 'onnxruntime-directml') if n in names]; assert not left, 'still installed: ' + ', '.join(left); assert 'CPUExecutionProvider' in ort.get_available_providers(); print('onnxruntime ' + ort.__version__ + ' on the CPU')"
+    Write-Host "==> Checking the CPU ONNX Runtime"
+    & $PythonExe -c $check | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "The CPU ONNX Runtime is not usable after removing the retired GPU runtime. Close Dictate and run this installer again with -RecreateVenv."
+    }
 }
 
 function Get-AppDataConfigPath {
@@ -407,13 +425,16 @@ if (-not (Test-Path $venvPython)) {
 }
 
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
-Remove-RetiredGpuRuntime -PythonExe $venvPython
+$removedRetiredGpuRuntime = Remove-RetiredGpuRuntime -PythonExe $venvPython
 $installExtras = @("windows")
 if ($Meeting) {
     $installExtras += "meeting"
 }
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
+if ($removedRetiredGpuRuntime) {
+    Assert-CpuOnnxRuntime -PythonExe $venvPython
+}
 
 Seed-Config
 Write-LauncherScripts -ScriptsDir $scriptsDir
