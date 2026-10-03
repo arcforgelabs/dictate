@@ -8,14 +8,17 @@ the docs.
 ## Reviewing
 
 Judge every issue and pull request against `VISION.md`, and say which line it
-fits or conflicts with. Two outcomes:
+fits or conflicts with. Three outcomes:
 
-- **Aligned:** dictation and note work that the "Order of work" covers,
-  including removing Meeting code, which is off the roadmap.
+- **Aligned, current:** item 1 of the "Order of work": a stable app and better
+  dictation and notes, including removing the Meeting code from the app.
+- **Aligned, later (P3):** meeting and local speaker-labelling work. It is set
+  aside on the `archive/meeting-2026-10-03` branch and must not land in any
+  release, beta or stable, until item 1 is done. Keep such issues open with
+  the `P3` label; don't merge such pull requests yet.
 - **Not aligned:** conflicts with "Local only" or the "What we will not merge"
-  list (which includes any Meeting or speaker-labelling work), or was started
-  under a vision that has since changed. Recommend closing it with the
-  `r: not-in-vision` label, quoting the conflicting line.
+  list, or was started under a vision that has since changed. Recommend closing
+  it with the `r: not-in-vision` label, quoting the conflicting line.
 
 Product rejection stays a maintainer decision; reviewers recommend it.
 

@@ -2,10 +2,12 @@
 
 Dictate turns speech into text on your own machine. Nothing you say leaves it.
 
-Its job is dictation: press a shortcut, speak, and the text is typed into
+Its first job is dictation: press a shortcut, speak, and the text is typed into
 whatever app you are already using. It can also take a longer note: keep
-talking, and the text is saved to history to copy or export. That is the whole
-product, voice to text locally, and nothing else.
+talking, and the text is saved to history to copy or export. Later, and only
+once dictation is where it should be, it may take on meetings: a local,
+speaker-labelled transcript. All of it is the same idea, voice to text
+locally, and nothing else.
 
 Install and usage: [`README.md`](README.md). How to contribute:
 [`CONTRIBUTING.md`](CONTRIBUTING.md). Reporting a security problem:
@@ -38,14 +40,23 @@ rare.
 
 ## Order of work
 
-1. **Dictation.** Make it fast, accurate and dependable on Linux and Windows 11
-   desktops, and pleasant to install, update and remove. This is the work.
+1. **A stable app and better dictation.** Make dictation fast, accurate and
+   dependable on Linux and Windows 11 desktops, and make the app pleasant to
+   install, update and remove. This is the current work and the focus of every
+   release.
+2. **Meetings and local speaker labelling (P3).** Not ready, and not a focus
+   for new releases. The Meeting work is set aside on the
+   [`archive/meeting-2026-10-03`](https://github.com/arcforgelabs/dictate/tree/archive/meeting-2026-10-03)
+   branch and tag ([#140](https://github.com/arcforgelabs/dictate/issues/140))
+   and removed from the app, so no release, beta or stable, carries its code,
+   models or libraries (torch, pyannote). It comes back only after
+   item 1, by pull request, meeting the same bar: one install, local, CPU, no
+   setup beyond pressing record.
 
-Meetings and speaker-labelled transcripts are not on the roadmap. They were
-dropped on 2026-10-03 to keep Dictate small: the Meeting mode, its speaker
-labelling, its models and the libraries behind it (torch, pyannote) are being
-removed, along with the plan for a separate beta app to carry them. One app,
-one job.
+Releases move through beta to stable. Beta is where the next stable release
+is tested; it is not a place to park unfinished features. Work that makes
+dictation slower, heavier or harder to install for the sake of meetings is the
+wrong trade.
 
 ## What we will not merge (for now)
 
@@ -58,11 +69,11 @@ one job.
   current one when it is better on CPU; it is not added as an option.
 - Notes-app features: folders, tags, rich editing, AI summaries or rewrites.
   History exists so text can be recovered and exported, not managed.
-- Meeting features: meeting recording modes, speaker labelling (diarization),
-  call bots, calendar or conferencing integrations, and the libraries behind
-  them.
-- Features kept in the app but switched off, or a second build to carry them.
-  A feature is in Dictate, or it is not.
+- Meeting and speaker-labelling work, until item 1 of "Order of work" is
+  done. After that, never: call bots, calendar or conferencing integrations,
+  or cloud diarization.
+- Features kept in the app but switched off, in beta or stable. A feature is
+  in a release, or it is not.
 - Features justified by selling. Dictate is not a commercial product; a feature
   earns its place by making local voice-to-text better.
 
