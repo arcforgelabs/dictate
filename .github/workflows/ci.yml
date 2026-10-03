@@ -73,6 +73,18 @@ jobs:
         run: |
           .venv\Scripts\python.exe -m unittest discover -s tests -p "test_ui_server.py"
 
+      - name: Clipboard save and restore against a real X server (Xvfb + xclip)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xclip
+          xvfb-run -a python -m unittest -v tests.test_clipboard_linux
+
+      - name: Clipboard round trip around a paste on Windows (text, image, file list, history)
+        if: runner.os == 'Windows' && matrix.python-version == '3.12'
+        shell: pwsh
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python .venv\Scripts\python.exe -EnableHistoryForTest
+
       - name: Scrub a 2026.9.27-format log on startup (before/after) on Linux
         if: runner.os == 'Linux'
         run: python scripts/ci_legacy_log_scrub.py --root "$RUNNER_TEMP/legacy-log-scrub"

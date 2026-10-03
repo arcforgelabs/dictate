@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -9,6 +10,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from dictate.clipboard_keeper import (
+    ClipboardKeeper,
+    ClipboardKeeperUnavailable,
+    ClipboardSession,
+    default_clipboard_keeper,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class OutputError(RuntimeError):
@@ -99,17 +109,21 @@ class ClipboardOutput:
 
 @dataclass(slots=True)
 class PasteOutput:
-    """Insert completed text in one paste instead of simulating every character."""
+    """Insert completed text in one paste instead of simulating every character.
+
+    With a ``keeper`` the clipboard is saved before the paste and put back once
+    the target app has read the text, so a dictation leaves it as it was.
+    """
 
     typing_output: TextOutput
     clipboard_output: TextOutput
+    keeper: ClipboardKeeper | None = None
 
     @property
     def name(self) -> str:
         return f"paste/{self.typing_output.name}"
 
     def send(self, text: str) -> None:
-        self.clipboard_output.send(text)
         # Terminals such as the Grok CLI treat Ctrl+V as a media paste. A
         # clipboard that still carries the Dictate window's WebKit target
         # lands as an octet-stream chip instead of the words. Shift+Insert
@@ -118,6 +132,27 @@ class PasteOutput:
             isinstance(self.typing_output, XdotoolOutput)
             and _focused_window_wants_plain_paste()
         )
+        if self.keeper is not None:
+            def set_primary(session: ClipboardSession) -> None:
+                # Sessions that do not save PRIMARY (Wayland) keep the old
+                # behaviour: PRIMARY carries the text and is not restored.
+                if plain_text and not session.handles_primary and command_exists("xclip"):
+                    _set_x_selection("primary", text)
+
+            try:
+                self.keeper.paste(
+                    text,
+                    lambda: _send_paste_shortcut(self.typing_output, plain_text=plain_text),
+                    plain_text=plain_text,
+                    after_write=set_primary,
+                )
+                return
+            except ClipboardKeeperUnavailable as exc:
+                logger.warning(
+                    "Clipboard could not be saved (%s); pasting without restoring it.", exc
+                )
+
+        self.clipboard_output.send(text)
         if plain_text and command_exists("xclip"):
             _set_x_selection("primary", text)
         _send_paste_shortcut(self.typing_output, plain_text=plain_text)
@@ -217,18 +252,22 @@ def _build_typing_output(backend: str) -> TextOutput:
     raise BackendUnavailableError(f"unknown typing backend: {backend}")
 
 
+def _paste_output(typing_output: TextOutput) -> PasteOutput:
+    return PasteOutput(typing_output, ClipboardOutput(), default_clipboard_keeper())
+
+
 def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
     """Pick a backend and paste completed dictations into the focused control."""
     if preferred != "auto":
         if preferred == "pynput":
             if not python_module_available("pynput"):
                 raise BackendUnavailableError("requested typing backend 'pynput' is not installed")
-            return PasteOutput(PynputOutput(), ClipboardOutput())
+            return _paste_output(PynputOutput())
         if not command_exists(preferred):
             raise BackendUnavailableError(
                 f"requested typing backend '{preferred}' is not installed"
             )
-        return PasteOutput(_build_typing_output(preferred), ClipboardOutput())
+        return _paste_output(_build_typing_output(preferred))
 
     session = detect_session_type()
     if session == "windows":
@@ -243,9 +282,9 @@ def resolve_typing_backend(preferred: str = "auto") -> TextOutput:
     for candidate in candidates:
         if candidate == "pynput":
             if python_module_available("pynput"):
-                return PasteOutput(PynputOutput(), ClipboardOutput())
+                return _paste_output(PynputOutput())
         elif command_exists(candidate):
-            return PasteOutput(_build_typing_output(candidate), ClipboardOutput())
+            return _paste_output(_build_typing_output(candidate))
 
     raise BackendUnavailableError(
         "no typing backend found; install one of: xdotool, wtype, ydotool, pynput"
