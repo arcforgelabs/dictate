@@ -39,6 +39,8 @@ FINAL_AUDIO_QUEUE_SIZE = 4
 FINAL_WINDOW_QUEUE_SIZE = 128
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
+# Fallback poll while idle; queued work wakes the worker straight away.
+WORKER_IDLE_POLL_SECONDS = 0.1
 RecordingMode = Literal["dictation", "note"]
 
 
@@ -96,6 +98,8 @@ class Daemon:
         self._worker: threading.Thread | None = None
         self._audio_queue: queue.Queue[AudioChunk | None] = queue.Queue(maxsize=FINAL_AUDIO_QUEUE_SIZE)
         self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=FINAL_WINDOW_QUEUE_SIZE)
+        # Set whenever either queue gets work, so the worker starts at once.
+        self._work_ready = threading.Event()
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
         self._recording_parts: dict[int, list[str]] = {}
@@ -664,6 +668,9 @@ class Daemon:
 
     def _transcription_loop(self) -> None:
         while not self._stop.is_set():
+            # Cleared before the queues are checked, so a chunk queued after
+            # the check still wakes the wait below.
+            self._work_ready.clear()
             try:
                 chunk = self._partial_audio_queue.get_nowait()
             except queue.Empty:
@@ -671,11 +678,9 @@ class Daemon:
                 if final_chunk is None:
                     break
                 if final_chunk is _FINAL_CHUNK_EMPTY:
-                    try:
-                        chunk = self._partial_audio_queue.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
-                    self._handle_partial_chunk(chunk)
+                    # Woken as soon as either queue gets work; the clip queued
+                    # on key release used to wait for this poll (up to 100 ms).
+                    self._work_ready.wait(WORKER_IDLE_POLL_SECONDS)
                     continue
                 self._handle_final_chunk(final_chunk)
                 continue
@@ -974,6 +979,7 @@ class Daemon:
             return False
         try:
             self._partial_audio_queue.put_nowait(chunk)
+            self._work_ready.set()
             return True
         except queue.Full:
             if self._is_note_streaming(chunk.recording_id):
@@ -989,6 +995,7 @@ class Daemon:
                 pass
             try:
                 self._partial_audio_queue.put_nowait(chunk)
+                self._work_ready.set()
                 return True
             except queue.Full:
                 return False
@@ -1007,6 +1014,7 @@ class Daemon:
             return False
         try:
             self._audio_queue.put_nowait(chunk)
+            self._work_ready.set()
             return True
         except queue.Full:
             self._fail_recording_session(chunk.recording_id, "Transcription busy; final audio dropped")
@@ -1029,6 +1037,7 @@ class Daemon:
         except queue.Full:
             self._drain_final_audio_queue()
             self._audio_queue.put_nowait(None)
+        self._work_ready.set()
 
     def _drain_partial_audio_queue(self) -> int:
         dropped = 0
