@@ -3,17 +3,21 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
-    [switch]$Meeting,
     [switch]$RecreateVenv,
     # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
-    [switch]$NoCuda
+    [switch]$NoCuda,
+    # Retired with Meeting capture (#140); accepted and ignored likewise.
+    [switch]$Meeting
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($ForceCuda -or $NoCuda) {
     Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
+if ($Meeting) {
+    Write-Host "Ignoring -Meeting: Meeting capture is no longer part of Dictate (#140)."
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
@@ -427,9 +431,6 @@ if (-not (Test-Path $venvPython)) {
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
 $removedRetiredGpuRuntime = Remove-RetiredGpuRuntime -PythonExe $venvPython
 $installExtras = @("windows")
-if ($Meeting) {
-    $installExtras += "meeting"
-}
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
 if ($removedRetiredGpuRuntime) {

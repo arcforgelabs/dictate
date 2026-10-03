@@ -28,13 +28,6 @@ Set-StrictMode -Version Latest
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
-$HuggingFaceToken = @($env:DICTATE_HF_TOKEN, $env:HUGGINGFACE_HUB_TOKEN, $env:HF_TOKEN) |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($HuggingFaceToken)) {
-    throw "Staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-}
-
 if ([string]::IsNullOrWhiteSpace($Bundles)) {
     $Bundles = "msi,nsis"
 }
@@ -94,7 +87,7 @@ Invoke-Native "installing Windows build dependencies" $VenvPython @(
     "pip",
     "install",
     "-e",
-    "$Root[windows,meeting]",
+    "$Root[windows]",
     "pyinstaller",
     "--quiet"
 )
@@ -146,14 +139,6 @@ Invoke-Native "downloading Parakeet v2 int8 model files" $VenvPython @(
     (Join-Path $Root "scripts\prepare-parakeet-v2-int8-model.py"),
     "--output",
     $ParakeetModelDir
-)
-
-Write-Host "staging pyannote Community-1 for offline Meeting mode"
-$PyannoteModelDir = Join-Path $StageDir "models\pyannote-speaker-diarization-community-1"
-Invoke-Native "downloading pyannote Community-1 model snapshot" $VenvPython @(
-    (Join-Path $Root "scripts\prepare-pyannote-community-model.py"),
-    "--output",
-    $PyannoteModelDir
 )
 
 Write-Host "staging third-party notices and model attributions"

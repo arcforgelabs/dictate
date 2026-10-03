@@ -16,7 +16,6 @@ from dictate.config import (
     remove_lexicon_replacements,
     set_installed_package_version,
     set_push_to_talk_combo,
-    set_meeting_stt_selection,
     set_stt_selection,
     set_update_channel,
 )
@@ -147,22 +146,92 @@ class ConfigSelectionTests(unittest.TestCase):
             saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
             self.assertEqual(saved, {"hotwords": ["AcmeWidget"], "stt_compute_type": "int8"})
 
-    def test_set_meeting_stt_preferences_preserve_primary_selection(self) -> None:
+    def test_saved_meeting_settings_are_removed_on_upgrade(self) -> None:
+        # What 2026.9.27 wrote after "dictate config set-meeting-model" (#140).
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
-            set_stt_selection("parakeet", "parakeet-tdt-0.6b-v2", path=config_path)
-
-            set_meeting_stt_selection(
-                "parakeet-pyannote",
-                "parakeet-tdt-0.6b-v3",
-                path=config_path,
+            config_path.write_text(
+                "hotwords:\n- AcmeWidget\n"
+                "push_to_talk_combo: ctrl_r\n"
+                "stt_backend: parakeet\n"
+                "stt_model: parakeet-tdt-0.6b-v3\n"
+                "meeting_stt_backend: parakeet-pyannote\n"
+                "meeting_stt_model: parakeet-tdt-0.6b-v2\n",
+                encoding="utf-8",
             )
 
-            config = load_config(path=config_path)
+            with self.assertLogs("dictate.config", level="WARNING") as logs:
+                config = load_config(path=config_path)
+
+            self.assertEqual(len(logs.output), 1)
+            self.assertIn("Removed saved Meeting settings", logs.output[0])
+            self.assertNotIn("\n", logs.output[0])
             self.assertEqual(config.stt_backend, "parakeet")
-            self.assertEqual(config.stt_model, "parakeet-tdt-0.6b-v2")
-            self.assertEqual(config.meeting_stt_backend, "parakeet-pyannote")
-            self.assertEqual(config.meeting_stt_model, "parakeet-tdt-0.6b-v3")
+            self.assertEqual(config.stt_model, "parakeet-tdt-0.6b-v3")
+            self.assertEqual(config.hotwords, ["AcmeWidget"])
+            self.assertEqual(config.push_to_talk_combo, "ctrl_r")
+            saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                saved,
+                {
+                    "hotwords": ["AcmeWidget"],
+                    "push_to_talk_combo": "ctrl_r",
+                    "stt_backend": "parakeet",
+                    "stt_model": "parakeet-tdt-0.6b-v3",
+                },
+            )
+            # Migrated once: the next start is quiet.
+            with self.assertNoLogs("dictate.config", level="WARNING"):
+                load_config(path=config_path)
+
+    def test_meeting_backend_saved_for_dictation_moves_to_parakeet(self) -> None:
+        for backend in ("parakeet-pyannote", "parakeet-diarizen", "parakeet-sortformer"):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = Path(temp_dir) / "config.yaml"
+                config_path.write_text(
+                    f"stt_backend: {backend}\nstt_model: parakeet-tdt-0.6b-v3\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertLogs("dictate.config", level="WARNING") as logs:
+                    config = load_config(path=config_path)
+
+                self.assertEqual(config.stt_backend, "parakeet")
+                self.assertEqual(config.stt_model, "parakeet-tdt-0.6b-v3")
+                self.assertIn(f"Moved saved STT backend '{backend}' to parakeet", logs.output[0])
+                saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    saved, {"stt_backend": "parakeet", "stt_model": "parakeet-tdt-0.6b-v3"}
+                )
+
+    def test_malformed_meeting_settings_never_break_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "meeting_stt_backend: 42\nmeeting_stt_model:\n- odd\nhotwords: [Acme]\n",
+                encoding="utf-8",
+            )
+
+            with self.assertLogs("dictate.config", level="WARNING"):
+                config = load_config(path=config_path)
+
+            self.assertEqual(config.hotwords, ["Acme"])
+            saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, {"hotwords": ["Acme"]})
+
+    def test_setter_drops_meeting_settings_too(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "meeting_stt_backend: parakeet-pyannote\nmeeting_stt_model: parakeet-tdt-0.6b-v2\n",
+                encoding="utf-8",
+            )
+
+            with self.assertLogs("dictate.config", level="WARNING"):
+                add_hotwords(["AcmeWidget"], path=config_path)
+
+            saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, {"hotwords": ["AcmeWidget"]})
 
     def test_hotwords_for_backend_is_uniform_across_backends(self) -> None:
         """Transcription is local-only, so every backend gets the same space-joined

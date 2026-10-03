@@ -2,8 +2,9 @@ name: Desktop bundle (manual)
 
 # Manual builder for the Linux desktop bundle — lets us iterate on the .deb /
 # AppImage packaging (e.g. debug linuxdeploy) without cutting a release. Uploads
-# whatever artifacts are produced plus the full build log. It also runs one
-# Meeting pass (pyannote + Parakeet) through the frozen engine it just built.
+# whatever artifacts are produced plus the full build log. It also checks that
+# no removed runtime (torch, pyannote; #140) is in the package, and times a cold
+# start of the frozen engine to its first /api/state.
 on:
   workflow_dispatch:
     inputs:
@@ -19,30 +20,8 @@ permissions:
   contents: read
 
 jobs:
-  meeting-fixture:
-    # A separate runner, so the FFmpeg that renders the two-voice fixture is
-    # never on the machine that freezes and runs the engine. The engine ships
-    # without FFmpeg, and the Meeting smoke below must run that way too.
-    name: Two-voice Meeting fixture
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Render the flite two-voice fixture
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          bash scripts/generate-meeting-benchmark-fixtures.sh "$RUNNER_TEMP/fixture"
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: meeting-fixture
-          retention-days: 1
-          path: |
-            ${{ runner.temp }}/fixture/manifest.csv
-            ${{ runner.temp }}/fixture/flite_meeting.wav
-
   bundle:
     name: Build desktop bundle
-    needs: meeting-fixture
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -54,7 +33,7 @@ jobs:
           python-version: "3.12"
 
       - name: Free runner disk space
-        # The .deb stages the offline Parakeet model and the meeting runtime,
+        # The .deb stages the offline Parakeet model beside the frozen engine,
         # and tar/gzip needs a second copy; the stock image runs out mid-bundle.
         run: |
           df -h / | tail -1
@@ -79,61 +58,86 @@ jobs:
         env:
           DICTATE_BUNDLES: ${{ inputs.bundles }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
           NO_STRIP: "true"
           ARCH: "x86_64"
         run: |
           set -o pipefail
           ./scripts/build-linux-desktop.sh 2>&1 | tee /tmp/bundle.log
 
-      - name: Check the freeze imported torchaudio and pyannote.audio
+      - name: No torch or pyannote in the package (#140)
         run: |
-          if grep -E "Failed to collect submodules for '(torchaudio|pyannote\.audio)'" /tmp/bundle.log; then
-            echo "::error::PyInstaller could not import torchaudio or pyannote.audio, so Meeting's model modules are missing"
+          set -euo pipefail
+          ENGINE_DIR="$PWD/ui-shell/src-tauri/engine"
+          echo "engine resources: $(du -sh "$ENGINE_DIR" | cut -f1), $(find "$ENGINE_DIR" -type f | wc -l) files"
+          found="$(find "$ENGINE_DIR" \( -iname '*torch*' -o -iname '*pyannote*' \) | head -20)"
+          if [ -n "$found" ]; then
+            echo "::error::torch or pyannote files in the staged engine"
+            printf '%s\n' "$found"
             exit 1
           fi
-          echo "torchaudio and pyannote.audio imported at freeze time"
+          echo "staged engine: 0 torch/pyannote files"
+          shopt -s nullglob
+          for deb in ui-shell/src-tauri/target/release/bundle/deb/*.deb; do
+            listing="$(dpkg-deb -c "$deb")"
+            count="$(printf '%s\n' "$listing" | grep -ciE 'torch|pyannote' || true)"
+            echo "$(basename "$deb"): $(stat -c%s "$deb") bytes, $(printf '%s\n' "$listing" | wc -l) entries, ${count} torch/pyannote entries"
+            if [ "$count" != "0" ]; then
+              echo "::error::$(basename "$deb") contains torch or pyannote"
+              printf '%s\n' "$listing" | grep -iE 'torch|pyannote' | head -20
+              exit 1
+            fi
+          done
+          for image in ui-shell/src-tauri/target/release/bundle/appimage/*.AppImage; do
+            echo "$(basename "$image"): $(stat -c%s "$image") bytes"
+          done
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: meeting-fixture
-          path: ${{ runner.temp }}/fixture
-
-      - name: "Meeting through the frozen engine (pyannote + Parakeet, CPU, offline)"
-        env:
-          HOME: ${{ runner.temp }}/home-meeting
-          XDG_DATA_HOME: ${{ runner.temp }}/dictate-data
-          HF_HUB_OFFLINE: "1"
+      - name: Cold start of the frozen engine to its first /api/state
         run: |
-          mkdir -p "$HOME"
-          ENGINE_DIR="$PWD/ui-shell/src-tauri/engine"
-          # The packaged engine ships no FFmpeg; say whether the runner has one.
-          ldconfig -p | grep -E 'libav(codec|format)\.so' \
-            && echo "::warning::system FFmpeg libraries are visible to the engine" \
-            || echo "no system FFmpeg libraries visible to the engine"
-          DICTATE_PARAKEET_MODEL_PATH="$ENGINE_DIR/models/parakeet-tdt-0.6b-v2-onnx" \
-          DICTATE_PYANNOTE_MODEL_PATH="$ENGINE_DIR/models/pyannote-speaker-diarization-community-1" \
-            "$ENGINE_DIR/dictate-engine" benchmark \
-              --manifest "$RUNNER_TEMP/fixture/manifest.csv" \
-              --audio-root "$RUNNER_TEMP/fixture" \
-              --stt-backend parakeet-pyannote \
-              --model parakeet-tdt-0.6b-v2 \
-              --device cpu \
-              --diarize \
-              --require-speaker-attribution \
-              --require-der-metrics \
-              --max-mean-der 0.30 \
-              --json-output "$RUNNER_TEMP/meeting-frozen.json" \
-              --run-label ci-frozen-engine-cpu-flite-meeting
-
-      - name: Upload the Meeting smoke report
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: meeting-frozen-engine
-          retention-days: 14
-          path: ${{ runner.temp }}/meeting-frozen.json
-          if-no-files-found: warn
+          set -euo pipefail
+          ENGINE="$PWD/ui-shell/src-tauri/engine/dictate-engine"
+          COLD="$RUNNER_TEMP/cold-start"
+          export HOME="$COLD/home" XDG_DATA_HOME="$COLD/data" XDG_CONFIG_HOME="$COLD/config"
+          export DICTATE_PARAKEET_MODEL_PATH="$PWD/ui-shell/src-tauri/engine/models/parakeet-tdt-0.6b-v2-onnx"
+          mkdir -p "$HOME" "$XDG_DATA_HOME/dictate/notes/note_legacymeeting" "$XDG_CONFIG_HOME/dictate"
+          # An upgrade from 2026.9.27: a saved Meeting selection and one saved
+          # meeting transcript. Startup must migrate the first and keep the second.
+          printf 'meeting_stt_backend: parakeet-pyannote\nmeeting_stt_model: parakeet-tdt-0.6b-v2\n' \
+            > "$XDG_CONFIG_HOME/dictate/config.yaml"
+          printf '%s\n' '{"note_id": "note_legacymeeting", "mode": "meeting", "provider": "parakeet-pyannote", "model": "parakeet-tdt-0.6b-v2", "started_at": "2026-09-30T01:00:00+00:00", "ended_at": "2026-09-30T01:05:00+00:00", "duration_s": null, "status": "ready", "speaker_labels": true, "archived": false, "recording_id": 1, "error": null, "rev": 3, "updated_at": "2026-09-30T01:05:00+00:00"}' \
+            > "$XDG_DATA_HOME/dictate/notes/note_legacymeeting/note.json"
+          printf '%s\n' '{"seq": 0, "t_start": 0.0, "t_end": 1.0, "provider": "parakeet-pyannote", "model": "parakeet-tdt-0.6b-v2", "text": "hello", "speaker_id": "SPEAKER_00", "speaker_label": "Speaker 1"}' \
+            > "$XDG_DATA_HOME/dictate/notes/note_legacymeeting/segments.jsonl"
+          HANDSHAKE="$XDG_DATA_HOME/dictate/ui-server.json"
+          sync
+          echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
+          start="$(date +%s%N)"
+          "$ENGINE" ui-server >"$COLD/server.log" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 1200); do [ -s "$HANDSHAKE" ] && break; sleep 0.05; done
+          [ -s "$HANDSHAKE" ] || { echo "::error::no handshake after 60 s"; cat "$COLD/server.log"; exit 1; }
+          handshake="$(date +%s%N)"
+          URL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['url'])" "$HANDSHAKE")"
+          TOKEN="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])" "$HANDSHAKE")"
+          until curl -fsS -o "$COLD/state.json" -H "Authorization: Bearer $TOKEN" "$URL/api/state"; do
+            sleep 0.05
+          done
+          state="$(date +%s%N)"
+          curl -fsS -o /dev/null -w 'second /api/state: %{time_total} s\n' -H "Authorization: Bearer $TOKEN" "$URL/api/state"
+          echo "spawn to handshake: $(( (handshake - start) / 1000000 )) ms"
+          echo "spawn to first /api/state: $(( (state - start) / 1000000 )) ms"
+          python3 - "$COLD/state.json" "$XDG_CONFIG_HOME/dictate/config.yaml" <<'EOF'
+          import json, sys
+          state = json.load(open(sys.argv[1]))
+          config = open(sys.argv[2]).read()
+          assert "meetingModel" not in state and "meetingReadiness" not in state, sorted(state)
+          assert state["model"]["backend"] == "parakeet", state["model"]
+          assert "meeting" not in config, config
+          legacy = [item for item in state["history"] if item.get("id") == "note_legacymeeting"]
+          assert legacy and legacy[0]["text"] == "Speaker 1: hello", legacy
+          print("state: no meeting fields; saved Meeting settings migrated; saved meeting transcript listed:", legacy[0]["text"])
+          EOF
+          grep -i "meeting" "$COLD/server.log" || true
 
       - name: Upload artifacts (.deb / .AppImage)
         if: always()

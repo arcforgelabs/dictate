@@ -85,7 +85,9 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn(r"ui-shell\src-tauri\engine\*", script)
         self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\config.json", script)
         self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt", script)
-        self.assertIn(r"engine\models\pyannote-speaker-diarization-community-1\config.*", script)
+        # Meeting capture was removed (#140): its model must not ship.
+        self.assertNotIn(r"pyannote-speaker-diarization-community-1\config", script)
+        self.assertIn("a pyannote model is in the package", script)
 
     def test_store_marker_carries_the_release_version(self) -> None:
         # Store installs read their version from this marker (About panel and

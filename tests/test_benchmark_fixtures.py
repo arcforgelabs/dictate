@@ -30,28 +30,14 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
         for artifact in [
             "parakeet-v2-cpu-flite-long-3x-gated.json",
             "parakeet-v3-cpu-flite-long-3x-gated.json",
-            "parakeet-pyannote-cpu-flite-meeting.json",
-            "parakeet-diarizen-cpu-flite-meeting.json",
-            "parakeet-sortformer-cpu-flite-meeting.json",
         ]:
             self.assertIn(artifact, output)
         self.assertIn("doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device cpu", output)
-        self.assertIn(
-            "doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cpu",
-            output,
-        )
-        self.assertIn(
-            "doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cpu",
-            output,
-        )
-        self.assertIn(
-            "doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu",
-            output,
-        )
         for gpu_marker in ("cuda", "amd", "--device gpu"):
             self.assertNotIn(gpu_marker, output)
-        self.assertIn("--require-speaker-attribution", output)
-        self.assertIn("--require-der-metrics", output)
+        # Meeting was removed (#140): no speaker-attribution lanes.
+        for meeting_marker in ("meeting", "pyannote", "diarizen", "sortformer", "--diarize"):
+            self.assertNotIn(meeting_marker, output)
         self.assertIn("--max-mean-wer 0.60", output)
 
     def test_curated_human_fixture_generator_is_registered_for_cpu_promotion(self) -> None:
@@ -61,13 +47,13 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
         self.assertIn("Harvard Sentences List 1", text)
         self.assertIn("manifest.csv", text)
 
-    def test_curated_human_meeting_fixture_generator_is_registered_for_meeting_promotion(self) -> None:
-        text = Path("scripts/generate-curated-human-meeting-fixture.sh").read_text(encoding="utf-8")
-        self.assertIn("Open Speech Repository", text)
-        self.assertIn("OSR_us_000_0010_8k.wav", text)
-        self.assertIn("OSR_us_000_0030_8k.wav", text)
-        self.assertIn("Speaker 1", text)
-        self.assertIn("Speaker 2", text)
+    def test_meeting_fixture_generators_are_gone(self) -> None:
+        for name in (
+            "generate-meeting-benchmark-fixtures.sh",
+            "generate-curated-human-meeting-fixture.sh",
+            "prepare-pyannote-community-model.py",
+        ):
+            self.assertFalse(Path("scripts", name).exists(), name)
 
     def test_transcription_lane_runner_can_select_cpu_human_lane(self) -> None:
         command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
@@ -89,6 +75,20 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
     def test_transcription_lane_runner_rejects_removed_gpu_lanes(self) -> None:
         command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
         for lane in ("cuda", "cuda-human", "amd", "amd-human"):
+            completed = subprocess.run(
+                [*command, "--lane", lane, "--dry-run"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(completed.returncode, 2, lane)
+            self.assertIn(f"Unknown lane: {lane}", completed.stderr)
+
+    def test_transcription_lane_runner_rejects_removed_meeting_lanes(self) -> None:
+        command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
+        for lane in ("meeting", "meeting-human", "meeting-diarizen", "meeting-sortformer-human"):
             completed = subprocess.run(
                 [*command, "--lane", lane, "--dry-run"],
                 check=False,
@@ -127,7 +127,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
     def test_transcription_lane_runner_can_skip_preflight_for_failure_artifacts(self) -> None:
         command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
         completed = subprocess.run(
-            [*command, "--lane", "meeting", "--skip-preflight", "--dry-run"],
+            [*command, "--lane", "cpu", "--skip-preflight", "--dry-run"],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -137,7 +137,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn(" doctor ", completed.stdout)
-        self.assertIn("parakeet-pyannote-cpu-flite-meeting.json", completed.stdout)
+        self.assertIn("parakeet-v2-cpu-flite-long-3x-gated.json", completed.stdout)
 
     def test_transcription_evidence_collector_dry_run_lists_handoff_bundle_contents(self) -> None:
         command = _shell_script_command("scripts/collect-transcription-evidence.sh")
@@ -315,29 +315,22 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             "lane-readiness.txt",
             "promotion-status.txt",
             "cpu-parakeet-v2",
-            "meeting-sortformer",
             "machine.txt",
             "Compress-Archive",
             "parakeet-v2-cpu-flite-long-3x-gated.json",
             "parakeet-v3-cpu-flite-long-3x-gated.json",
-            "parakeet-pyannote-cpu-flite-meeting.json",
-            "parakeet-diarizen-cpu-flite-meeting.json",
-            "parakeet-sortformer-cpu-flite-meeting.json",
             "parakeet-v2-cpu-human-gated.json",
             "parakeet-v3-cpu-human-gated.json",
-            "parakeet-pyannote-cpu-human-meeting.json",
-            "parakeet-diarizen-cpu-human-meeting.json",
-            "parakeet-sortformer-cpu-human-meeting.json",
         ]:
             self.assertIn(marker, text)
         self.assertNotIn("Get-ChildItem Env:", text)
-        for gpu_marker in ("cuda", "amd", "nvidia", "gpu"):
-            self.assertNotIn(gpu_marker, text.lower())
+        for removed_marker in ("cuda", "amd", "nvidia", "gpu", "meeting", "pyannote"):
+            self.assertNotIn(removed_marker, text.lower())
 
-    def test_shell_transcription_evidence_collector_has_no_gpu_lanes(self) -> None:
+    def test_shell_transcription_evidence_collector_has_no_gpu_or_meeting_lanes(self) -> None:
         text = Path("scripts/collect-transcription-evidence.sh").read_text(encoding="utf-8")
-        for gpu_marker in ("cuda", "amd", "nvidia", "gpu"):
-            self.assertNotIn(gpu_marker, text.lower())
+        for removed_marker in ("cuda", "amd", "nvidia", "gpu", "meeting", "pyannote"):
+            self.assertNotIn(removed_marker, text.lower())
 
     def test_gitignore_excludes_default_evidence_bundle_directory(self) -> None:
         ignored = Path(".gitignore").read_text(encoding="utf-8").splitlines()
@@ -377,82 +370,6 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             self.assertEqual(len(sample.reference_segments), 1)
             self.assertAlmostEqual(sample.reference_segments[0].t_start or 0.0, 0.0)
             self.assertGreater(sample.reference_segments[0].t_end or 0.0, 30.0)
-
-    def test_generate_meeting_fixtures_writes_timestamped_speaker_manifest(self) -> None:
-        if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
-            self.skipTest("ffmpeg and ffprobe are required for fixture generation")
-
-        script = Path("scripts/generate-meeting-benchmark-fixtures.sh")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir) / "meeting"
-            completed = subprocess.run(
-                [str(script), str(out_dir)],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=30,
-            )
-            if completed.returncode != 0 and "flite" in completed.stderr:
-                self.skipTest(completed.stderr.strip())
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-
-            manifest = out_dir / "manifest.csv"
-            samples = load_manifest(manifest, out_dir, limit=0)
-
-        self.assertEqual(len(samples), 1)
-        self.assertEqual(samples[0].sample_id, "flite_meeting")
-        assert samples[0].reference_segments is not None
-        self.assertEqual(
-            [segment.speaker_label for segment in samples[0].reference_segments],
-            ["Speaker 1", "Speaker 2", "Speaker 1"],
-        )
-        self.assertTrue(
-            all(
-                segment.t_start is not None
-                and segment.t_end is not None
-                and segment.t_end > segment.t_start
-                for segment in samples[0].reference_segments
-            )
-        )
-
-    def test_generate_curated_human_meeting_fixture_writes_timestamped_speaker_manifest(self) -> None:
-        if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None or shutil.which("curl") is None:
-            self.skipTest("curl, ffmpeg, and ffprobe are required for curated fixture generation")
-
-        script = Path("scripts/generate-curated-human-meeting-fixture.sh")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir) / "meeting"
-            completed = subprocess.run(
-                [str(script), str(out_dir)],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=60,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-
-            manifest = out_dir / "manifest.csv"
-            samples = load_manifest(manifest, out_dir, limit=0)
-
-        self.assertEqual(len(samples), 1)
-        self.assertEqual(samples[0].sample_id, "osr_harvard_two_speaker_meeting")
-        assert samples[0].reference_segments is not None
-        self.assertEqual(
-            [segment.speaker_label for segment in samples[0].reference_segments],
-            ["Speaker 1", "Speaker 1", "Speaker 1", "Speaker 2", "Speaker 2", "Speaker 2"],
-        )
-        self.assertIn("Paint the sockets in the wall dull green.", samples[0].reference)
-        self.assertNotIn("The small pup gnawed a hole in the sock.", samples[0].reference)
-        self.assertTrue(
-            all(
-                segment.t_start is not None
-                and segment.t_end is not None
-                and segment.t_end > segment.t_start
-                for segment in samples[0].reference_segments
-            )
-        )
 
 
 def _shell_script_command(path: str) -> list[str]:

@@ -43,15 +43,7 @@ try {
     Write-Host "Expected:"
     Write-Host "  - The transcript reflects what was spoken."
     Write-Host "  - It does not repeat stale fixture text."
-    Write-Host "  - Plain Record and push-to-talk use the same non-meeting ASR behavior."
-    Write-Host ""
-    Write-Host "For Meeting validation on a tester with the Sortformer lane installed:"
-    Write-Host ""
-    Write-Host "  $Python -m dictate doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput"
-    Write-Host ""
-    Write-Host "Expected:"
-    Write-Host "  - The app allows Meeting only when a speaker-attribution lane is ready."
-    Write-Host "  - A Meeting capture produces speaker/timestamp segment metadata."
+    Write-Host "  - Plain Record and push-to-talk use the same Parakeet ASR behavior."
 } finally {
     Pop-Location
 }

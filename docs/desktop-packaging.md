@@ -39,25 +39,12 @@ implemented in `src/dictate/ui_server.py`). The webview talks to that server ove
 loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.json`.
 
 The desktop bundles stage the default offline resources beside the frozen
-engine: Parakeet v2 int8 ONNX for regular English dictation and pyannote
-Community-1 for Meeting speaker attribution. Customers should not need Hugging
-Face accounts or model downloads for those bundled paths.
-
-Hugging Face appears in the build pipeline only because pyannote Community-1 is
-a gated upstream model. The build needs access to the already-approved model
-once, before packaging, so it can copy the model snapshot into
-`ui-shell/src-tauri/engine/models/`. Parakeet v2 int8 is public and does not
-need a private token. Runtime customer installs must prefer the bundled model
-paths and must not ask customers for Hugging Face credentials for the shipped
-default dictation or Meeting paths.
-
-Operator credential source: use the existing secret-management lane, such as
-Bitwarden Secrets Manager materialized into GitHub Actions secrets or a
-protected runner environment. The app and customer runtime must not call
-Bitwarden or Hugging Face. If an internal model mirror/artifact becomes the
-source of truth, update `scripts/prepare-pyannote-community-model.py` to stage
-from that artifact before falling back to Hugging Face; do not reintroduce a
-customer-time download.
+engine: Parakeet v2 int8 ONNX for English dictation. Customers do not need
+Hugging Face accounts or model downloads for it, and the build needs no
+Hugging Face token: Parakeet v2 int8 is public. The pyannote Community-1 model
+the builds used to stage for Meeting, and the token it needed, went with Meeting
+(#140). `packaging/dictate-engine.spec` and `packaging/build-engine.sh` fail
+the build if torch or pyannote is frozen into the engine again.
 
 The bundled engine runs Parakeet on the CPU through the `onnxruntime` package.
 There are no GPU builds: the `gpu` and `amd` extras were removed when Dictate

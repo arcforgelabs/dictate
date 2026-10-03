@@ -21,7 +21,7 @@ spec.loader.exec_module(audit_module)
 
 
 class TranscriptionPlanAuditTests(unittest.TestCase):
-    def test_audit_reports_meeting_blocker_without_gpu_gates(self) -> None:
+    def test_audit_has_no_meeting_or_gpu_gates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _write_minimal_plan(root)
@@ -31,36 +31,16 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
         self.assertEqual(gates["canonical_plan"].status, "pass")
         self.assertEqual(gates["benchmark_fixture_tooling"].status, "pass")
-        self.assertEqual(gates["meeting_speaker_attribution"].status, "blocked")
-        self.assertIn("parakeet-pyannote", gates["meeting_speaker_attribution"].detail)
-        self.assertIn("parakeet-diarizen", gates["meeting_speaker_attribution"].detail)
-        self.assertIn("parakeet-sortformer", gates["meeting_speaker_attribution"].detail)
         self.assertEqual(gates["update_scope_decision"].status, "pass")
-        self.assertTrue(audit_module.has_blockers(gates.values()))
-        # CPU only: CUDA and AMD evidence no longer gates readiness.
+        self.assertFalse(audit_module.has_blockers(gates.values()))
+        # Meeting was removed (#140) and CPU is the only device: neither gates readiness.
+        self.assertNotIn("meeting_speaker_attribution", gates)
         self.assertFalse({name for name in gates if name.startswith(("cuda_", "amd_"))})
-
-    def test_audit_accepts_promoted_meeting_artifacts(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
-                device="cpu",
-                rtfx=10.0,
-            )
-            _write_meeting_success(root)
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        self.assertEqual(gates["meeting_speaker_attribution"].status, "pass")
 
     def test_readiness_report_marks_all_acceptance_items_ready_when_gates_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -72,81 +52,22 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_success(root)
 
             items = audit_module.readiness_report(audit_module.audit(root))
 
         self.assertTrue(items)
         self.assertEqual({item.status for item in items}, {"ready"})
-
-    def test_audit_accepts_one_promoted_meeting_artifact(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
-                device="cpu",
-                rtfx=10.0,
-            )
-            _write_meeting_failure(root)
-            _write_single_meeting_success(root, "parakeet-sortformer")
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        self.assertEqual(gates["meeting_speaker_attribution"].status, "pass")
-        self.assertIn("parakeet-sortformer DER", gates["meeting_speaker_attribution"].detail)
-        self.assertIn("remaining candidates", gates["meeting_speaker_attribution"].detail)
-
-    def test_audit_rejects_meeting_artifact_that_was_not_a_cpu_run(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            _write_meeting_failure(root)
-            _write_single_meeting_success(root, "parakeet-sortformer", device="cuda")
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        self.assertEqual(gates["meeting_speaker_attribution"].status, "fail")
-        self.assertIn("not a CPU run", gates["meeting_speaker_attribution"].detail)
-
-    def test_audit_names_old_meeting_artifacts_it_no_longer_reads(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-            # A workstation that passed before the gate moved to CPU runs: only
-            # the old-named artifact exists.
-            old = root / "benchmark-results" / "parakeet-sortformer-cuda-human-meeting.json"
-            old.parent.mkdir(parents=True)
-            old.write_text("{}", encoding="utf-8")
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        meeting = gates["meeting_speaker_attribution"]
-        self.assertEqual(meeting.status, "blocked")
-        self.assertIn("parakeet-sortformer-cpu-human-meeting.json", meeting.detail)
-        self.assertIn("not read", meeting.detail)
-        self.assertIn("parakeet-sortformer-cuda-human-meeting.json", meeting.detail)
-
-    def test_audit_without_any_meeting_artifacts_lists_only_missing_files(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            _write_minimal_plan(root)
-            _write_scripts(root)
-
-            gates = {gate.name: gate for gate in audit_module.audit(root)}
-
-        meeting = gates["meeting_speaker_attribution"]
-        self.assertEqual(meeting.status, "blocked")
-        self.assertIn("missing curated-human meeting benchmark artifacts", meeting.detail)
-        self.assertNotIn("not read", meeting.detail)
+        self.assertNotIn("Meeting", [item.name for item in items])
 
     def test_fixture_tooling_gate_requires_no_gpu_tooling(self) -> None:
         source = AUDIT_PATH.read_text(encoding="utf-8").lower()
         for gpu_marker in ("cuda", "amd", "directml", "dmlexecutionprovider", "gpu"):
             self.assertNotIn(gpu_marker, source)
+
+    def test_fixture_tooling_gate_requires_no_meeting_tooling(self) -> None:
+        source = AUDIT_PATH.read_text(encoding="utf-8").lower()
+        for marker in ("meeting", "pyannote", "diarizen", "sortformer", "diariz"):
+            self.assertNotIn(marker, source)
 
     def test_audit_rejects_lane_runner_without_preflight_markers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -158,7 +79,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
@@ -175,7 +95,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
@@ -193,7 +112,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
@@ -210,7 +128,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
@@ -227,7 +144,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
 
@@ -246,7 +162,7 @@ class RepositoryPlanReadinessTests(unittest.TestCase):
 
         self.assertEqual(checklist, [item.name for item in items])
         for name in checklist:
-            self.assertNotRegex(name, r"(?i)nvidia|amd|cuda|gpu")
+            self.assertNotRegex(name, r"(?i)nvidia|amd|cuda|gpu|meeting")
 
     def test_readiness_report_on_this_checkout(self) -> None:
         output = io.StringIO()
@@ -264,13 +180,11 @@ class RepositoryPlanReadinessTests(unittest.TestCase):
         }
         self.assertEqual(
             list(statuses),
-            ["CPU English", "Meeting", "Plain recording", "Windows VM", "Packaging", "Regression"],
+            ["CPU English", "Plain recording", "Windows VM", "Packaging", "Regression"],
         )
-        # Everything except Meeting is decided by files tracked in Git. Meeting
-        # needs a local benchmark artifact (benchmark-results/ is ignored).
-        for name in ("CPU English", "Plain recording", "Windows VM", "Packaging", "Regression"):
-            self.assertEqual(statuses[name], "READY", name)
-        self.assertIn(statuses["Meeting"], {"READY", "BLOCKED"})
+        # Every item is decided by files tracked in Git.
+        for name, status in statuses.items():
+            self.assertEqual(status, "READY", name)
 
 
 def _write_minimal_plan(
@@ -324,9 +238,7 @@ def _write_scripts(
     for name in [
         "generate-benchmark-fixtures.sh",
         "generate-curated-human-asr-fixture.sh",
-        "generate-curated-human-meeting-fixture.sh",
         "generate-long-benchmark-fixtures.sh",
-        "generate-meeting-benchmark-fixtures.sh",
         "import-transcription-evidence.py",
         "run-human-test-readiness.sh",
         "run-human-test-readiness.ps1",
@@ -334,9 +246,8 @@ def _write_scripts(
         (scripts / name).write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     runner_text = (
         "#!/usr/bin/env bash\n"
-        "# --skip-preflight doctor --stt-backend parakeet-pyannote "
-        "--stt-backend parakeet-diarizen --stt-backend parakeet-sortformer "
-        "cpu-human meeting-human --fixture-class --device cpu\n"
+        "# --skip-preflight doctor --stt-backend parakeet "
+        "cpu-human --fixture-class --device cpu\n"
         if preflighted_runner
         else "#!/usr/bin/env bash\n"
     )
@@ -362,9 +273,8 @@ def _write_scripts(
         collector_text += (
             "# benchmark-results/*.json transcription_plan_audit.py --json "
             "lane-runner-dry-run.txt human-lane-dry-run.txt lane-readiness.txt "
-            "promotion-status.txt cpu-parakeet-v2 meeting-sortformer machine.txt "
-            "parakeet-v2-cpu-human-gated.json "
-            "parakeet-pyannote-cpu-human-meeting.json\n"
+            "promotion-status.txt cpu-parakeet-v2 machine.txt "
+            "parakeet-v2-cpu-human-gated.json\n"
         )
     (scripts / "collect-transcription-evidence.sh").write_text(collector_text, encoding="utf-8")
     ps_collector_text = "param()\n"
@@ -372,12 +282,9 @@ def _write_scripts(
         ps_collector_text += (
             "# benchmark-results/*.json transcription_plan_audit.py --json "
             "lane-runner-dry-run.txt human-lane-dry-run.txt lane-readiness.txt "
-            "promotion-status.txt cpu-parakeet-v2 meeting-sortformer machine.txt Compress-Archive "
+            "promotion-status.txt cpu-parakeet-v2 machine.txt Compress-Archive "
             "parakeet-v2-cpu-flite-long-3x-gated.json "
-            "parakeet-diarizen-cpu-flite-meeting.json "
-            "parakeet-sortformer-cpu-flite-meeting.json "
-            "parakeet-v2-cpu-human-gated.json "
-            "parakeet-pyannote-cpu-human-meeting.json\n"
+            "parakeet-v2-cpu-human-gated.json\n"
         )
     (scripts / "collect-transcription-evidence.ps1").write_text(ps_collector_text, encoding="utf-8")
 
@@ -400,57 +307,9 @@ def _write_benchmark(
                     "samples": 1,
                     "completed_samples": 1,
                     "mean_rtfx": rtfx,
-                    "mean_der": None,
                     "segment_boundary_pair_count": boundary_pairs,
                 },
                 "gates": [{"name": "mean_rtf", "passed": True}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _write_meeting_failure(root: Path) -> None:
-    for backend in ("parakeet-pyannote", "parakeet-diarizen", "parakeet-sortformer"):
-        path = root / "benchmark-results" / f"{backend}-cpu-human-meeting.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "config": {"backend": backend, "device": "cpu", "diarize": True},
-                    "summary": {"mean_der": None},
-                    "gates": [{"name": "benchmark_runtime", "passed": False}],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-
-def _write_meeting_success(root: Path) -> None:
-    for backend in ("parakeet-pyannote", "parakeet-diarizen", "parakeet-sortformer"):
-        _write_single_meeting_success(root, backend)
-
-
-def _write_single_meeting_success(root: Path, backend: str, *, device: str = "cpu") -> None:
-    path = root / "benchmark-results" / f"{backend}-cpu-human-meeting.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "config": {
-                    "backend": backend,
-                    "device": device,
-                    "diarize": True,
-                    "require_speaker_attribution": True,
-                    "fixture_class": "curated-human",
-                },
-                "summary": {
-                    "samples": 1,
-                    "completed_samples": 1,
-                    "mean_der": 0.1,
-                    "segment_boundary_pair_count": 4,
-                },
-                "gates": [{"name": "mean_der", "passed": True}],
             }
         ),
         encoding="utf-8",

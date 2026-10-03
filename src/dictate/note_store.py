@@ -47,6 +47,9 @@ def _is_safe_note_id(note_id: str) -> bool:
 @dataclass(slots=True)
 class NoteRecord:
     note_id: str
+    # "note" for every note recorded now. A transcript saved by Meeting capture
+    # (removed in #140) says "meeting" and has speaker_labels set; it is still
+    # read, listed and exported like any other note.
     mode: str
     provider: str
     model: str
@@ -70,6 +73,8 @@ class NoteSegment:
     provider: str
     model: str
     text: str
+    # Only set on segments saved by Meeting capture before #140, kept so those
+    # transcripts still read as "Speaker 1: ...".
     speaker_id: str | None = None
     speaker_label: str | None = None
 
@@ -87,21 +92,19 @@ class NoteStore:
         provider: str,
         model: str,
         recording_id: int | None = None,
-        speaker_labels: bool = False,
-        mode: str = "note",
     ) -> str:
         note_id = f"note_{uuid.uuid4().hex}"
         started_at = self._next_timestamp().isoformat()
         record = NoteRecord(
             note_id=note_id,
-            mode=mode,
+            mode="note",
             provider=provider,
             model=model,
             started_at=started_at,
             ended_at=None,
             duration_s=None,
             status="recording",
-            speaker_labels=speaker_labels,
+            speaker_labels=False,
             recording_id=recording_id,
         )
         note_dir = self._note_dir(note_id)

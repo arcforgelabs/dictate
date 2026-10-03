@@ -39,30 +39,16 @@ class SavedSelectionMigrationTests(unittest.TestCase):
             with self.subTest(model=model):
                 self.assertEqual(stt_factory.saved_stt_selection(None, model), ("parakeet", model))
                 self.assertEqual(stt_factory.saved_stt_selection("", model), ("parakeet", model))
-                self.assertEqual(
-                    stt_factory.saved_meeting_selection(None, model), ("parakeet-pyannote", model)
-                )
 
     def test_removed_backend_drops_even_a_parakeet_model(self) -> None:
         self.assertEqual(
             stt_factory.saved_stt_selection("faster-whisper", "parakeet-tdt-0.6b-v3"), (None, None)
         )
 
-    def test_meeting_selection_falls_back_to_pyannote_default(self) -> None:
-        self.assertEqual(
-            stt_factory.saved_meeting_selection("whisperx", "large-v3"),
-            ("parakeet-pyannote", "parakeet-tdt-0.6b-v2"),
-        )
-        self.assertEqual(
-            stt_factory.saved_meeting_selection(None, None),
-            ("parakeet-pyannote", "parakeet-tdt-0.6b-v2"),
-        )
-
-    def test_meeting_selection_keeps_registered_backend(self) -> None:
-        self.assertEqual(
-            stt_factory.saved_meeting_selection("parakeet-diarizen", "parakeet-tdt-0.6b-v3"),
-            ("parakeet-diarizen", "parakeet-tdt-0.6b-v3"),
-        )
+    def test_meeting_selection_is_gone(self) -> None:
+        # Meeting capture was removed (#140).
+        self.assertFalse(hasattr(stt_factory, "saved_meeting_selection"))
+        self.assertNotIn("parakeet-pyannote", stt_factory.BACKEND_REGISTRY)
 
 
 if __name__ == "__main__":

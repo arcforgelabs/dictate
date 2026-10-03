@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Freeze the Dictate engine into a single self-contained directory bundle at
 # packaging/dist/dictate-engine/ (launcher: .../dictate-engine). This is the
-# Tauri sidecar embedded in the .deb / AppImage. The desktop bundles stage the
-# bundled local ASR / meeting model resources beside the engine separately.
+# Tauri sidecar embedded in the .deb / AppImage. The bundled Parakeet model is
+# staged beside the engine under ui-shell/src-tauri/engine/models.
 #
 # Uses an isolated build venv so the freeze is reproducible and doesn't depend
 # on the dev environment.
@@ -15,32 +15,16 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 BUILD_VENV="$HERE/.build-venv"
 
-if [ -z "${DICTATE_HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-${HF_TOKEN:-}}}" ]; then
-  echo "✗ staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN" >&2
-  exit 1
-fi
-
 echo "▶ creating isolated build venv"
 if command -v uv >/dev/null 2>&1; then
   uv venv "$BUILD_VENV" --python "$PYTHON" --quiet
   VPY="$BUILD_VENV/bin/python"
-  # Linux .deb must stay under GitHub's 2 GiB release-asset limit. Default
-  # PyTorch wheels pull CUDA/nvidia/triton (~4+ GiB). Pin the CPU index first so
-  # the meeting extra resolves against it. torchaudio must come from the same
-  # index: the PyPI build links libcudart, cannot import beside CPU torch, and
-  # then PyInstaller silently skips pyannote's model modules (Meeting breaks).
-  if [ "$(uname -s)" = "Linux" ]; then
-    uv pip install --python "$VPY" torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
-  fi
-  uv pip install --python "$VPY" -e "$ROOT[x11,wayland,meeting]" pyinstaller --quiet
+  uv pip install --python "$VPY" -e "$ROOT[x11,wayland]" pyinstaller --quiet
 else
   "$PYTHON" -m venv "$BUILD_VENV"
   VPY="$BUILD_VENV/bin/python"
   "$VPY" -m pip install --upgrade pip --quiet
-  if [ "$(uname -s)" = "Linux" ]; then
-    "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
-  fi
-  "$VPY" -m pip install -e "$ROOT[x11,wayland,meeting]" pyinstaller --quiet
+  "$VPY" -m pip install -e "$ROOT[x11,wayland]" pyinstaller --quiet
 fi
 
 echo "▶ freezing the engine (PyInstaller${DICTATE_ONEFILE:+, onefile})"
@@ -53,7 +37,6 @@ echo "▶ staging bundled model resources"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 "$VPY" "$ROOT/scripts/prepare-parakeet-v2-int8-model.py" --output "$STAGE_DIR/models/parakeet-tdt-0.6b-v2-onnx"
-"$VPY" "$ROOT/scripts/prepare-pyannote-community-model.py" --output "$STAGE_DIR/models/pyannote-speaker-diarization-community-1"
 echo "▶ staging third-party notices and model attributions"
 "$VPY" "$ROOT/scripts/stage-notices.py" --engine-dir "$STAGE_DIR"
 
@@ -87,22 +70,25 @@ if [ "$(uname -s)" = "Linux" ] && [ -z "${DICTATE_BUNDLE_GPU_LIBS:-}" ]; then
   ENGINE_DIR="$(cd "$(dirname "$BIN")" && pwd)"
   if find "$ENGINE_DIR" \( -path '*/nvidia/*' -o -path '*/triton/*' \) 2>/dev/null | grep -q .; then
     echo "✗ frozen engine still contains nvidia/triton trees;" >&2
-    echo "  Linux builds must use CPU torch. See packaging/host_audio_libs.py." >&2
+    echo "  Nothing in the engine needs CUDA. See packaging/host_audio_libs.py." >&2
     exit 1
   fi
   echo "✓ nvidia/triton trees not bundled"
 fi
 
-# The Whisper-family runtimes were removed. dictate-engine.spec already fails
-# on them; this checks the files that actually landed (onedir: _internal/).
+# The Whisper-family runtimes and the Meeting runtime (torch, pyannote; #140)
+# were removed. dictate-engine.spec already fails on them; this checks the
+# files that actually landed (onedir: _internal/) and the staged models.
 ENGINE_DIR="$(cd "$(dirname "$BIN")" && pwd)"
-REMOVED_RUNTIME="$(find "$ENGINE_DIR" \( -name 'av' -o -name 'av.libs' -o -name 'ctranslate2*' \
-  -o -name 'faster_whisper*' -o -name 'whisperx*' -o -name 'libx264*' -o -name 'libx265*' \) 2>/dev/null || true)"
+REMOVED_RUNTIME="$(find "$ENGINE_DIR" "$STAGE_DIR" \( -name 'av' -o -name 'av.libs' -o -name 'ctranslate2*' \
+  -o -name 'faster_whisper*' -o -name 'whisperx*' -o -name 'libx264*' -o -name 'libx265*' \
+  -o -name 'torch' -o -name 'torch.libs' -o -name 'torchaudio*' -o -name 'torchcodec*' \
+  -o -name 'libtorch*' -o -name 'pyannote*' \) 2>/dev/null || true)"
 if [ -n "$REMOVED_RUNTIME" ]; then
-  echo "✗ frozen engine contains a removed Whisper-family runtime:" >&2
+  echo "✗ frozen engine contains a removed Whisper-family or Meeting runtime:" >&2
   printf '%s\n' "$REMOVED_RUNTIME" | head -20 >&2
   exit 1
 fi
-echo "✓ no av, av.libs, ctranslate2, faster_whisper, whisperx, libx264 or libx265 under $ENGINE_DIR ($(find "$ENGINE_DIR" -type f | wc -l) files)"
+echo "✓ no av, ctranslate2, faster_whisper, whisperx, libx264, libx265, torch, torchaudio, torchcodec or pyannote under $ENGINE_DIR or $STAGE_DIR ($(find "$ENGINE_DIR" -type f | wc -l) engine files)"
 
 echo "✓ engine frozen: $BIN  ($(du -sh "$BIN" | cut -f1))"

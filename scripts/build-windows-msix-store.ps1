@@ -246,16 +246,18 @@ function Assert-MsixPackage {
                 "engine\dictate-distribution.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
-                "engine\models\pyannote-speaker-diarization-community-1\config.*",
                 "engine\THIRD_PARTY_NOTICES.md",
-                "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md",
-                "engine\models\pyannote-speaker-diarization-community-1\ATTRIBUTION.md"
+                "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md"
             )
         ) {
             $PayloadPath = Join-Path $InspectDir $Payload
             if (-not (Test-Path $PayloadPath)) {
                 throw "MSIX validation failed: missing payload '$Payload'"
             }
+        }
+        # Meeting capture was removed (#140): no pyannote model in any package.
+        if (Test-Path (Join-Path $InspectDir "engine\models\pyannote-*")) {
+            throw "MSIX validation failed: a pyannote model is in the package"
         }
     } finally {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $InspectDir
@@ -273,10 +275,8 @@ function Assert-MsixStagePayload {
             "engine\dictate-engine.exe",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
             "engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt",
-            "engine\models\pyannote-speaker-diarization-community-1\config.*",
             "engine\THIRD_PARTY_NOTICES.md",
-            "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md",
-            "engine\models\pyannote-speaker-diarization-community-1\ATTRIBUTION.md"
+            "engine\models\parakeet-tdt-0.6b-v2-onnx\ATTRIBUTION.md"
         )
     ) {
         $PayloadPath = Join-Path $StageDir $Payload

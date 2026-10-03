@@ -23,18 +23,7 @@ Dictate is a local desktop app. A trusted local user intentionally installing, c
 
 ## Accepted Risks (tracked)
 
-The WhisperX stack, whose `torch~=2.8` and `huggingface-hub<1` pins held back
-torch, transformers and NLTK, was removed along with the other Whisper backends.
-The locked torch is 2.14, which carries the fixes for GHSA-vgrw-7cvw-pwgx and
-GHSA-qfhq-4f3w-5fph, and NLTK is no longer a dependency. One advisory remains:
-
-- **transformers `Trainer` RCE** — GHSA-69w3-r845-3855 (medium, fix 5.x).
-  transformers is pulled in only by the experimental `[sortformer]` Meeting
-  extra, which pins it below 5.x because NeMo 2.6's ASR imports need the older
-  tokenizer API. `[sortformer]` is **not** in the shipped `.deb`/AppImage/MSI,
-  which are frozen from `[x11,wayland,meeting]` (`packaging/build-engine.sh`).
-  The advisory is reachable only through the `Trainer` (training) class;
-  Dictate only runs inference and never trains.
-
-**Action:** when NeMo supports transformers 5.x, lift the `[sortformer]` pins
-and re-lock, then remove this entry.
+None. The last tracked advisory, the transformers `Trainer` RCE
+(GHSA-69w3-r845-3855), came in only through the experimental `[sortformer]`
+Meeting extra, which was removed with Meeting capture (#140). torch,
+transformers and NLTK are no longer dependencies.

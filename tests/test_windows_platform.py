@@ -189,9 +189,7 @@ class WindowsPlatformTests(unittest.TestCase):
 
         self.assertEqual(assignments["DEFAULT_BACKEND"], "parakeet")
         self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet"], "parakeet-tdt-0.6b-v2")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-pyannote"], "parakeet-tdt-0.6b-v2")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-diarizen"], "parakeet-tdt-0.6b-v2")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-sortformer"], "parakeet-tdt-0.6b-v2")
+        self.assertEqual(set(assignments["DEFAULT_MODELS"]), {"parakeet"})
 
     def test_windows_tray_controls_open_full_dictate_app_before_legacy_panel(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_tray.py").read_text(
@@ -210,9 +208,11 @@ class WindowsPlatformTests(unittest.TestCase):
         )
 
         self.assertIn("[switch]$NoStartup", script)
-        self.assertIn("[switch]$Meeting", script)
         self.assertIn('$installExtras = @("windows")', script)
-        self.assertIn('$installExtras += "meeting"', script)
+        # -Meeting is retired (#140): accepted, ignored, never installs the extra.
+        self.assertIn("[switch]$Meeting", script)
+        self.assertIn("Ignoring -Meeting", script)
+        self.assertNotIn('$installExtras += "meeting"', script)
         self.assertIn('$installTarget = "${PSScriptRoot}[$($installExtras -join', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.cmd"', script)
         self.assertIn('Join-Path $ScriptsDir "dictate-tray.vbs"', script)
@@ -222,7 +222,10 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('Install-StartupShortcut -TargetPath $wscript -Arguments $trayArgs', script)
         self.assertIn('Join-Path $programsDir "Dictate Controls.lnk"', script)
 
-    def test_windows_desktop_bundle_stages_offline_meeting_runtime(self) -> None:
+    def test_desktop_bundles_stage_parakeet_and_no_meeting_runtime(self) -> None:
+        # Meeting capture was removed (#140): no build installs the meeting
+        # extra, stages a pyannote model or needs a Hugging Face token, and the
+        # engine spec fails the freeze if torch or pyannote comes back.
         root = Path(__file__).resolve().parents[1]
         script = (root / "scripts" / "build-windows-desktop.ps1").read_text(encoding="utf-8")
         linux_script = (root / "scripts" / "build-linux-desktop.sh").read_text(encoding="utf-8")
@@ -230,28 +233,28 @@ class WindowsPlatformTests(unittest.TestCase):
         spec = (root / "packaging" / "dictate-engine.spec").read_text(encoding="utf-8")
         shell = (root / "ui-shell" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
 
-        self.assertIn("$Root[windows,meeting]", script)
+        self.assertIn("$Root[windows]", script)
         self.assertIn("prepare-parakeet-v2-int8-model.py", script)
         self.assertIn("parakeet-tdt-0.6b-v2-onnx", script)
-        self.assertIn("prepare-pyannote-community-model.py", script)
-        self.assertIn("pyannote-speaker-diarization-community-1", script)
-        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", script)
-        self.assertLess(script.index("Hugging Face token via DICTATE_HF_TOKEN"), script.index("building the front-end"))
-        self.assertIn("[x11,wayland,meeting]", engine_script)
+        self.assertIn("[x11,wayland]", engine_script)
         self.assertIn("prepare-parakeet-v2-int8-model.py", engine_script)
-        self.assertIn("prepare-pyannote-community-model.py", engine_script)
-        self.assertIn("Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN", engine_script)
-        self.assertLess(engine_script.index("Hugging Face token via DICTATE_HF_TOKEN"), engine_script.index("creating isolated build venv"))
+        self.assertNotIn("[x11,wayland,meeting]", engine_script)
+        self.assertNotIn("prepare-pyannote", engine_script)
+        self.assertNotIn("HF_TOKEN", engine_script)
+        for text in (script, linux_script, shell):
+            self.assertNotIn("meeting", text.lower())
+            self.assertNotIn("pyannote", text.lower())
+            self.assertNotIn("HF_TOKEN", text)
         self.assertIn('grep -q appimage', linux_script)
         self.assertIn("unset DICTATE_ONEFILE", linux_script)
         self.assertIn("cp -a packaging/dist/dictate-engine/. ui-shell/src-tauri/engine/", linux_script)
-        self.assertIn('"torch"', spec)
-        self.assertIn('"pyannote.audio"', spec)
-        self.assertNotIn('"torch", "matplotlib"', spec)
+        self.assertNotIn('"pyannote.audio"', spec)
+        removed = spec[spec.index("_REMOVED_PACKAGES = {"):spec.index("_REMOVED_DIRS")]
+        for package in ("torch", "torchaudio", "torchcodec", "pyannote"):
+            self.assertIn(f'"{package}"', removed)
+        self.assertIn("-name 'libtorch*' -o -name 'pyannote*'", engine_script)
         self.assertIn("DICTATE_PARAKEET_MODEL_PATH", shell)
-        self.assertIn("DICTATE_PYANNOTE_MODEL_PATH", shell)
         self.assertIn("bundled_parakeet_model", shell)
-        self.assertIn("pyannote-speaker-diarization-community-1", shell)
 
     def test_windows_installer_prunes_stale_user_install_surfaces(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(
@@ -274,9 +277,9 @@ class WindowsPlatformTests(unittest.TestCase):
         script = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
 
         self.assertIn("--no-startup", script)
-        self.assertIn("--meeting", script)
-        self.assertIn('INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"', script)
-        self.assertIn('EXTRAS+=("meeting")', script)
+        # --meeting is retired (#140): accepted, ignored, never installs the extra.
+        self.assertIn("--meeting|--no-meeting)", script)
+        self.assertNotIn('EXTRAS+=("meeting")', script)
         self.assertIn('ICON_PATH="$ICON_DIR/dictate-simple.png"', script)
         self.assertIn('install -m 644 "$SCRIPT_DIR/assets/dictate.png" "$ICON_PATH"', script)
         self.assertIn('rm -f "$ICON_DIR/dictate-controls.png" "$ICON_DIR/dictate.png"', script)
@@ -809,29 +812,15 @@ class WindowsPlatformTests(unittest.TestCase):
             workflow,
         )
 
-    def test_bundle_workflows_pass_huggingface_token_to_staging_builds(self) -> None:
+    def test_bundle_workflows_need_no_huggingface_token(self) -> None:
+        # The token was only for staging the gated pyannote model, which went
+        # with Meeting (#140). Parakeet v2 int8 is public.
         root = Path(__file__).resolve().parents[1]
         release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        desktop_bundle = (root / ".github" / "workflows" / "desktop-bundle.yml").read_text(
-            encoding="utf-8"
-        )
-        msix_store_bundle = (root / ".github" / "workflows" / "windows-msix-store-bundle.yml").read_text(
-            encoding="utf-8"
-        )
-        msstore_publish = (root / ".github" / "workflows" / "msstore-publish-msix.yml").read_text(
-            encoding="utf-8"
-        )
-        unstable = (root / ".github" / "workflows" / "npm-unstable.yml").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertEqual(release.count("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}"), 2)
         self.assertIn("Build the desktop bundle (freezes engine + builds .deb)", release)
         self.assertIn("Build the Windows desktop bundle", release)
-        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", desktop_bundle)
-        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msix_store_bundle)
-        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", msstore_publish)
-        self.assertIn("DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}", unstable)
+        for workflow in sorted((root / ".github" / "workflows").glob("*.yml")):
+            self.assertNotIn("DICTATE_HF_TOKEN", workflow.read_text(encoding="utf-8"), workflow.name)
 
 
 if __name__ == "__main__":

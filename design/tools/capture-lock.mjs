@@ -12,7 +12,6 @@ const states = {
   "recording": async (p) => { await p.click(".recbtn"); await p.waitForTimeout(900); },
   "paused": async (p) => { await p.click(".recbtn"); await p.waitForTimeout(600); await p.click(".recbtn"); await p.waitForTimeout(500); },
   "dictations": async (p) => { await p.click("button[title='Dictations']"); await p.waitForTimeout(500); },
-  "meeting-note": async (p) => { await p.click("button[title='Dictations']"); await p.waitForTimeout(400); await p.click(".note-row:has-text('Speaker 1')"); await p.waitForTimeout(500); },
   "quick-note": async (p) => { await p.click("button[title='Dictations']"); await p.waitForTimeout(400); await p.click(".note-row >> nth=0"); await p.waitForTimeout(500); },
   "about": async (p) => { await p.click("button[title='About Dictate'], button[aria-label='About Dictate'], button:has-text('About')"); await p.waitForTimeout(400); },
   "palette": async (p) => { await p.keyboard.press("Control+K"); await p.waitForTimeout(400); },

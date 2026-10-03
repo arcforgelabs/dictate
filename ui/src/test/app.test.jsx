@@ -28,7 +28,7 @@ function finishCapture() {
   fireEvent.click(screen.getByText("Finish note"));
 }
 
-// Meeting capture and the All / Meetings / Quick filter are beta-channel chrome.
+// Renders the app as the given release channel would (stable or unstable).
 function renderApp(channel) {
   if (channel) window.__DICTATE_TEST_CHANNEL__ = channel;
   return render(<App />);
@@ -172,7 +172,10 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(exactText));
   });
 
-  it("trusts explicit note mode while retaining legacy segment meeting fallback", async () => {
+  it("lists a meeting transcript saved before Meeting was removed as an ordinary note", async () => {
+    // Meeting capture was removed (#140). Transcripts it saved still come back
+    // from /api/state with mode "meeting" and speaker labels; they stay in the
+    // one Notes list, with no Meetings / Quick filter.
     const sources = [];
     const writeText = vi.fn().mockResolvedValue();
     Object.assign(navigator, { clipboard: { writeText } });
@@ -194,9 +197,11 @@ describe("Quiet Console app (mock mode)", () => {
             segments: [{ seq: 0, text: "Explicit segmented conversation note" }],
           },
           {
-            id: "legacy_segmented_meeting",
-            text: "Legacy segmented meeting",
+            id: "legacy_meeting",
+            text: "Speaker 1: Legacy segmented meeting",
             createdAt: "2026-07-13T00:00:00+00:00",
+            mode: "meeting",
+            speakerLabels: true,
             segments: [{ seq: 0, speaker_label: "Speaker 1", text: "Legacy segmented meeting" }],
           },
         ],
@@ -205,6 +210,7 @@ describe("Quiet Console app (mock mode)", () => {
 
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Meeting" })).not.toBeInTheDocument();
     act(() => {
       sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: true }) });
       sources[0].onmessage({ data: JSON.stringify({ type: "recording", active: false }) });
@@ -215,13 +221,13 @@ describe("Quiet Console app (mock mode)", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Explicit segmented conversation note"));
 
     navTo("Notes");
-    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
-    expect(screen.getByText(/Legacy segmented meeting/)).toBeInTheDocument();
-    expect(screen.queryByText("Explicit segmented conversation note")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Quick" }));
+    expect(screen.queryByRole("button", { name: "Meetings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quick" })).not.toBeInTheDocument();
     expect(screen.getByText("Explicit segmented conversation note")).toBeInTheDocument();
-    expect(screen.queryByText(/Legacy segmented meeting/)).not.toBeInTheDocument();
+    const legacy = screen.getByText(/Legacy segmented meeting/);
+    expect(legacy).toBeInTheDocument();
+    fireEvent.click(legacy);
+    expect(await screen.findByText("Speaker 1")).toBeInTheDocument();
   });
 
   it("uses native Windows chrome without the inner mock titlebar", () => {
@@ -901,41 +907,13 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByText("Copy last dictation")).not.toBeInTheDocument();
   });
 
-  it("hides meeting capture and the dictation filter on the normal channel", () => {
-    render(<App />);
+  it("has no meeting capture or dictation filter on any channel", () => {
+    // Meeting capture was removed (#140), from the beta (unstable) build too.
+    renderApp("unstable");
     expect(screen.queryByRole("button", { name: "Meeting" })).not.toBeInTheDocument();
     navTo("Notes");
     expect(screen.queryByRole("group", { name: "Filter dictations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Meetings" })).not.toBeInTheDocument();
-  });
-
-  it("records a mock meeting with speaker-labelled output", async () => {
-    renderApp("unstable");
-    fireEvent.click(screen.getByText("Meeting"));
-    expect(screen.getByText("Meeting")).toBeInTheDocument();
-    expect(screen.getByLabelText("Finish meeting")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Finish meeting"));
-    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
-    expect(screen.getByText("Separating speakers and preparing the transcript.")).toBeInTheDocument();
-
-    await waitFor(() => expect(screen.getByTitle("Copy")).toBeInTheDocument(), { timeout: 2000 });
-    expect(screen.getByText("Speaker 1")).toBeInTheDocument();
-    expect(screen.getByText("Speaker 2")).toBeInTheDocument();
-    expect(screen.getByText("0:00-0:02")).toBeInTheDocument();
-    expect(screen.getByText(/launch blockers/i)).toBeInTheDocument();
-  });
-
-  it("keeps a completed local meeting accessible in Dictations", async () => {
-    renderApp("unstable");
-    fireEvent.click(screen.getByText("Meeting"));
-    fireEvent.click(screen.getByLabelText("Finish meeting"));
-    await waitFor(() => expect(screen.getByLabelText("Close note")).toBeInTheDocument(), { timeout: 2000 });
-    fireEvent.click(screen.getByLabelText("Close note"));
-    fireEvent.click(screen.getByLabelText("Dictations"));
-    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
-
-    expect(screen.getByText(/launch blockers/i)).toBeInTheDocument();
-    expect(screen.getByText(/test the Windows build/i)).toBeInTheDocument();
   });
 
   it("uses a compact listening indicator for push-to-talk without the old waveform", async () => {
@@ -995,22 +973,6 @@ describe("Quiet Console app (mock mode)", () => {
       content: expect.stringContaining("# Note -"),
     })));
     expect(screen.getByText("Saved as Markdown")).toBeInTheDocument();
-  });
-
-  it("exports segmented meeting notes with speaker labels and timestamps", async () => {
-    const invoke = vi.fn().mockResolvedValue(true);
-    renderApp("unstable");
-    fireEvent.click(screen.getByText("Meeting"));
-    fireEvent.click(screen.getByLabelText("Finish meeting"));
-
-    await waitFor(() => expect(screen.getByTitle("Export as Markdown")).toBeInTheDocument(), { timeout: 2000 });
-    window.__TAURI__ = { core: { invoke } };
-    fireEvent.click(screen.getByTitle("Export as Markdown"));
-
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
-      content: expect.stringContaining("**Speaker 1 [0:00-0:02]:** Let's capture the launch blockers."),
-    })));
-    expect(invoke.mock.calls[0][1].content).toContain("**Speaker 2 [0:02-0:05]:** I will test the Windows build and report back tomorrow.");
   });
 
   it("resolves Transcribing… back to home on note status=empty (live SSE)", async () => {
@@ -1340,26 +1302,6 @@ describe("Notes list (history view)", () => {
     expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
   });
 
-  it("category toggle filters meetings vs quick records", () => {
-    renderApp("unstable");
-    navTo("Notes");
-    // Default "All": both a meeting (diarized) and quick records are visible.
-    expect(screen.getByText(/status round/i)).toBeInTheDocument();   // meeting (has segments)
-    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();      // quick (no segments)
-    // "Meetings": only the meeting.
-    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
-    expect(screen.getByText(/status round/i)).toBeInTheDocument();
-    expect(screen.queryByText(/reviewers/i)).not.toBeInTheDocument();
-    // "Quick": only quick records.
-    fireEvent.click(screen.getByRole("button", { name: "Quick" }));
-    expect(screen.queryByText(/status round/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
-    // Back to "All": both again.
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getByText(/status round/i)).toBeInTheDocument();
-    expect(screen.getByText(/reviewers/i)).toBeInTheDocument();
-  });
-
   it("search filters notes by text", () => {
     render(<App />);
     navTo("Notes");
@@ -1448,7 +1390,7 @@ describe("Notes list (history view)", () => {
     expect(screen.getByLabelText("Back to capture")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("classifies a hydrated meeting by mode when it has no diarized segments", async () => {
+  it("lists a saved meeting without speaker segments as a note", async () => {
     const sources = [];
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
     window.EventSource = class {
@@ -1472,7 +1414,6 @@ describe("Notes list (history view)", () => {
     render(<App />);
     await waitFor(() => expect(sources).toHaveLength(1));
     navTo("Notes");
-    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
 
     const meeting = await screen.findByText("Durable local meeting without speaker labels");
     expect(meeting).toBeInTheDocument();
@@ -1481,7 +1422,7 @@ describe("Notes list (history view)", () => {
     expect(screen.getByText("Durable local meeting without speaker labels")).toBeInTheDocument();
   });
 
-  it("rehydrates persisted meeting segments from live state", async () => {
+  it("keeps a saved meeting transcript readable and exportable with its speakers", async () => {
     const sources = [];
     const invoke = vi.fn().mockResolvedValue(true);
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };

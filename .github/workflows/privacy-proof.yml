@@ -1,18 +1,18 @@
 name: Privacy proof
 
-# Meeting mode (beta) bundles pyannote.audio and torch, which the regular CI
-# jobs do not install, so the pyannote telemetry test is skipped there. This
-# job installs the meeting extra (CPU torch) and runs one real Meeting-mode
-# pass with outbound sockets refused and syscalls traced. It runs only when
-# the code it proves changes.
+# Proves a note stays on the device: one real Parakeet note pass (ONNX
+# Runtime, the Hugging Face Hub client for the model download) with outbound
+# sockets refused and syscalls traced, plus the telemetry tests with nothing
+# skipped. It also checks uv.lock against pyproject.toml. It runs only when the
+# code it proves changes. Until #140 it traced Meeting mode (pyannote) instead.
 
 on:
   pull_request:
     paths:
       - "src/dictate/__init__.py"
+      - "src/dictate/engine.py"
       - "src/dictate/runtime_logging.py"
       - "src/dictate/stt/parakeet_backend.py"
-      - "src/dictate/stt/parakeet_pyannote_backend.py"
       - "pyproject.toml"
       - "uv.lock"
       - "scripts/ci_privacy_trace.py"
@@ -28,17 +28,17 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  meeting-trace:
-    name: Meeting-mode privacy trace (pyannote, sockets blocked)
+  note-trace:
+    name: Note-mode privacy trace (Parakeet, sockets blocked)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
-      - name: Install ffmpeg (fixture voices, pyannote audio decoding) and strace
+      - name: Install ffmpeg (fixture voice) and strace
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg strace
@@ -48,33 +48,17 @@ jobs:
           python -m pip install --upgrade pip uv
           uv lock --check
 
-      - name: Install Dictate with the meeting extra (CPU torch, versions from uv.lock)
+      - name: Install Dictate
         run: |
-          # Read the versions from uv.lock so this proof runs what the lock pins.
-          eval "$(python - <<'EOF'
-          import tomllib
-          lock = tomllib.load(open("uv.lock", "rb"))
-          wanted = {"torch": "TORCH", "torchaudio": "TORCHAUDIO", "torchcodec": "TORCHCODEC",
-                    "pyannote-audio": "PYANNOTE", "onnx": "ONNX"}
-          found = {}
-          for package in lock["package"]:
-              if package["name"] in wanted:
-                  found.setdefault(package["name"], []).append(package["version"])
-          for name, var in wanted.items():
-              versions = found.get(name, [])
-              if len(versions) != 1:
-                  raise SystemExit(f"uv.lock: expected one {name} version, found {versions}")
-              print(f"{var}={versions[0]}")
-          EOF
-          )"
-          # torch, torchaudio and torchcodec are ABI-coupled, and torchcodec's
-          # Linux wheels on PyPI are CUDA builds that will not load next to CPU
-          # torch, so all three come from the CPU index.
-          python -m pip install "torch==$TORCH" "torchaudio==$TORCHAUDIO" "torchcodec==$TORCHCODEC" \
-            --index-url https://download.pytorch.org/whl/cpu
-          # onnx: lets the ONNX Runtime telemetry-store test run instead of skipping.
-          python -m pip install -e ".[meeting]" "pyannote.audio==$PYANNOTE" "onnx==$ONNX"
-          python -m pip list 2>/dev/null | grep -Ei '^(torch|torchaudio|torchcodec|pyannote\.audio|onnxruntime|onnx|opentelemetry-sdk) '
+          # onnx: lets the ONNX Runtime telemetry-store test run instead of
+          # skipping. Dictate does not depend on it; 1.22.0 is the version
+          # uv.lock pinned while the meeting extra pulled it in (before #140).
+          python -m pip install -e . "onnx==1.22.0"
+          python -m pip list 2>/dev/null | grep -Ei '^(onnxruntime|onnx|onnx-asr|huggingface-hub|torch|pyannote\.audio) '
+          if python -c "import torch" 2>/dev/null || python -c "import pyannote.audio" 2>/dev/null; then
+            echo "::error::torch or pyannote.audio is installed with Dictate (#140)"
+            exit 1
+          fi
 
       - name: Telemetry and log tests (none may skip)
         run: |
@@ -82,80 +66,48 @@ jobs:
           python -m unittest -v tests.test_third_party_telemetry tests.test_runtime_logging 2>&1 \
             | tee "$RUNNER_TEMP/unittest.txt"
           if grep -q "skipped" "$RUNNER_TEMP/unittest.txt"; then
-            echo "::error::a telemetry test was skipped; the meeting extra did not install"
+            echo "::error::a telemetry test was skipped"
             exit 1
           fi
 
-      - name: Check for the Hugging Face token
-        id: token
-        env:
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
+      - name: Stage the model and a spoken fixture (network allowed here only)
         run: |
-          if [ -n "$DICTATE_HF_TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::DICTATE_HF_TOKEN is not available to this run (fork or Dependabot PR); pyannote Community-1 is gated, so the Meeting-mode trace is skipped"
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Stage models and a two-voice fixture (network allowed here only)
-        if: steps.token.outputs.available == 'true'
-        env:
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
-        run: |
-          python scripts/prepare-pyannote-community-model.py --output "$RUNNER_TEMP/models/pyannote-community-1"
           python scripts/prepare-parakeet-v2-int8-model.py --output "$RUNNER_TEMP/models/parakeet-v2-int8"
-          bash scripts/generate-meeting-benchmark-fixtures.sh "$RUNNER_TEMP/fixture"
+          bash scripts/generate-benchmark-fixtures.sh "$RUNNER_TEMP/fixture"
 
-      - name: "Baseline: pyannote without Dictate (2026.9.27 behaviour), sockets refused"
-        if: steps.token.outputs.available == 'true'
+      - name: "Note through Dictate: sockets refused, strace -f, stderr on a TTY"
         env:
-          HOME: ${{ runner.temp }}/home-baseline
-        run: |
-          mkdir -p "$HOME" "$RUNNER_TEMP/trace"
-          python scripts/ci_privacy_trace.py baseline \
-            --pyannote-model "$RUNNER_TEMP/models/pyannote-community-1" \
-            --audio "$RUNNER_TEMP/fixture/flite_meeting.wav" \
-            --report "$RUNNER_TEMP/trace/baseline.json"
-
-      - name: "Meeting mode through Dictate: sockets refused, strace -f, stderr on a TTY"
-        if: steps.token.outputs.available == 'true'
-        env:
-          HOME: ${{ runner.temp }}/home-meeting
+          HOME: ${{ runner.temp }}/home-note
           XDG_DATA_HOME: ${{ runner.temp }}/dictate-data
-          DICTATE_PYANNOTE_MODEL_PATH: ${{ runner.temp }}/models/pyannote-community-1
           DICTATE_PARAKEET_MODEL_PATH: ${{ runner.temp }}/models/parakeet-v2-int8
           # A shell that opted in to every telemetry switch; Dictate must override them.
-          PYANNOTE_METRICS_ENABLED: "true"
           HF_HUB_DISABLE_TELEMETRY: "0"
           ORT_DISABLE_TELEMETRY: "0"
         run: |
-          mkdir -p "$HOME"
+          mkdir -p "$HOME" "$RUNNER_TEMP/trace"
           T="$RUNNER_TEMP/trace"
           # script(1) gives the engine a real terminal on stderr, so the TTY and
           # log sides of the stderr tee can both be checked.
           script -qefc "strace -f -qq -e trace=execve,connect,sendto,sendmsg,sendmmsg -e signal=none \
-            -o '$T/strace.txt' python scripts/ci_privacy_trace.py meeting \
-            --audio '$RUNNER_TEMP/fixture/flite_meeting.wav' --report '$T/meeting.json'" \
+            -o '$T/strace.txt' python scripts/ci_privacy_trace.py note \
+            --audio '$RUNNER_TEMP/fixture/flite_review.wav' --report '$T/note.json'" \
             "$T/terminal.txt"
           cp "$XDG_DATA_HOME/dictate/logs/latest.log" "$T/latest.log"
 
       - name: Check and print the redacted trace
-        if: steps.token.outputs.available == 'true'
         run: |
           python scripts/ci_privacy_trace.py summarize --trace-dir "$RUNNER_TEMP/trace"
           echo "----- latest.log (complete) -----"
           cat "$RUNNER_TEMP/trace/latest.log"
 
       - name: Upload the trace
-        if: always() && steps.token.outputs.available == 'true'
+        if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: meeting-privacy-trace
+          name: note-privacy-trace
           retention-days: 30
           path: |
-            ${{ runner.temp }}/trace/baseline.json
-            ${{ runner.temp }}/trace/meeting.json
+            ${{ runner.temp }}/trace/note.json
             ${{ runner.temp }}/trace/strace.txt
             ${{ runner.temp }}/trace/latest.log
             ${{ runner.temp }}/trace/terminal.txt

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,52 +37,77 @@ class NoteStoreTests(unittest.TestCase):
             note = store.load_note(note_id)
             assert note is not None
             self.assertEqual(note.status, "ready")
+            self.assertEqual(note.mode, "note")
+            self.assertFalse(note.speaker_labels)
 
-    def test_speaker_segments_round_trip_and_assemble_with_labels(self) -> None:
+    def test_meeting_transcript_saved_before_removal_stays_readable(self) -> None:
+        # Meeting capture was removed (#140). These are the files it left
+        # under notes/ in 2026.9.27, byte for byte in shape: an upgrade must
+        # list them, read them with their speaker labels, and never drop them.
         with tempfile.TemporaryDirectory() as tmp:
-            store = NoteStore(root=Path(tmp) / "notes")
-            note_id = store.create_note(
-                provider="parakeet-pyannote",
-                model="parakeet-tdt-0.6b-v2",
-                recording_id=8,
-                speaker_labels=True,
-                mode="meeting",
-            )
-            store.append_segment(
-                note_id,
-                NoteSegment(
-                    seq=0,
-                    t_start=0.0,
-                    t_end=1.0,
-                    provider="parakeet-pyannote",
-                    model="parakeet-tdt-0.6b-v2",
-                    text="hello",
-                    speaker_id="SPEAKER_A",
-                    speaker_label="Speaker 1",
+            root = Path(tmp) / "notes"
+            note_dir = root / "note_0123456789abcdef0123456789abcdef"
+            note_dir.mkdir(parents=True)
+            (note_dir / "note.json").write_text(
+                json.dumps(
+                    {
+                        "note_id": note_dir.name,
+                        "mode": "meeting",
+                        "provider": "parakeet-pyannote",
+                        "model": "parakeet-tdt-0.6b-v2+pyannote/speaker-diarization-community-1",
+                        "started_at": "2026-09-30T01:00:00+00:00",
+                        "ended_at": "2026-09-30T01:05:00+00:00",
+                        "duration_s": None,
+                        "status": "ready",
+                        "speaker_labels": True,
+                        "archived": False,
+                        "recording_id": 8,
+                        "error": None,
+                        "rev": 3,
+                        "updated_at": "2026-09-30T01:05:00+00:00",
+                    },
+                    indent=2,
                 ),
+                encoding="utf-8",
             )
-            store.append_segment(
-                note_id,
-                NoteSegment(
-                    seq=1,
-                    t_start=1.0,
-                    t_end=2.0,
-                    provider="parakeet-pyannote",
-                    model="parakeet-tdt-0.6b-v2",
-                    text="reply",
-                    speaker_id="SPEAKER_B",
-                    speaker_label="Speaker 2",
-                ),
+            segment = {
+                "provider": "parakeet-pyannote",
+                "model": "parakeet-tdt-0.6b-v2+pyannote/speaker-diarization-community-1",
+            }
+            (note_dir / "segments.jsonl").write_text(
+                json.dumps(
+                    {
+                        "seq": 0, "t_start": 0.0, "t_end": 1.0, **segment, "text": "hello",
+                        "speaker_id": "SPEAKER_00", "speaker_label": "Speaker 1",
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "seq": 1, "t_start": 1.0, "t_end": 2.0, **segment, "text": "reply",
+                        "speaker_id": "SPEAKER_01", "speaker_label": "Speaker 2",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
             )
+            store = NoteStore(root=root)
 
-            note = store.load_note(note_id)
-            assert note is not None
+            self.assertEqual(store.recover_interrupted(), [])
+            notes = store.list_notes()
+            self.assertEqual([note.note_id for note in notes], [note_dir.name])
+            note = notes[0]
             self.assertEqual(note.mode, "meeting")
             self.assertTrue(note.speaker_labels)
-            segments = store.load_segments(note_id)
-            self.assertEqual(segments[0].speaker_id, "SPEAKER_A")
+            self.assertEqual(note.status, "ready")
+            segments = store.load_segments(note.note_id)
+            self.assertEqual(segments[0].speaker_id, "SPEAKER_00")
             self.assertEqual(segments[1].speaker_label, "Speaker 2")
-            self.assertEqual(store.assembled_text(note_id), "Speaker 1: hello Speaker 2: reply")
+            self.assertEqual(segments[1].t_end, 2.0)
+            self.assertEqual(store.assembled_text(note.note_id), "Speaker 1: hello Speaker 2: reply")
+            self.assertTrue(store.archive_note(note.note_id))
+            self.assertTrue(store.unarchive_note(note.note_id))
+            self.assertTrue((note_dir / "segments.jsonl").is_file())
 
     def test_list_notes_returns_newest_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -44,13 +44,9 @@ class Config:
     push_to_talk_key: str | None = None
     stt_backend: str | None = None
     stt_model: str | None = None
-    meeting_stt_backend: str | None = None
-    meeting_stt_model: str | None = None
     stt_compute_type: str | None = None
     update_channel: str | None = None
     installed_package_version: str | None = None
-    # Which record categories sync: "meetings" (note+segment only, the default) or
-    # "everything" (also the rolling quick-copy history). See docs/record-categories-spec.md.
 
     @property
     def hotwords_str(self) -> str | None:
@@ -98,9 +94,55 @@ def migrate_cpu_only_settings(data: dict) -> tuple[bool, list[str]]:
     return changed, notices
 
 
+# Speaker-labelling backends removed with Meeting capture (#140).
+MEETING_BACKENDS = frozenset({"parakeet-pyannote", "parakeet-diarizen", "parakeet-sortformer"})
+_MEETING_SETTING_KEYS = ("meeting_stt_backend", "meeting_stt_model")
+
+
+def migrate_meeting_settings(data: dict) -> tuple[bool, list[str]]:
+    """Remove settings that only Meeting capture used.
+
+    Meeting capture was removed from the app (#140; the work is kept on the
+    ``archive/meeting-2026-10-03`` branch). ``meeting_stt_backend`` and
+    ``meeting_stt_model`` are dropped, with one notice. A dictation
+    ``stt_backend`` set to one of the removed Meeting backends becomes
+    ``parakeet`` and keeps its saved model: every Meeting backend ran a Parakeet
+    model. Saved notes and meeting transcripts live outside config.yaml and are
+    not touched. Changes ``data`` in place and returns whether it changed, plus
+    the notices.
+    """
+    changed = False
+    notices: list[str] = []
+    removed = [key for key in _MEETING_SETTING_KEYS if key in data]
+    if removed:
+        for key in removed:
+            data.pop(key)
+        changed = True
+        notices.append(
+            f"Removed saved Meeting settings ({', '.join(removed)}): Meeting capture is no "
+            "longer in Dictate (#140). Saved meeting transcripts stay in history."
+        )
+    backend = data.get("stt_backend")
+    if isinstance(backend, str) and backend.strip() in MEETING_BACKENDS:
+        data["stt_backend"] = "parakeet"
+        changed = True
+        notices.append(
+            f"Moved saved STT backend '{backend}' to parakeet: the Meeting backends were "
+            "removed (#140)."
+        )
+    return changed, notices
+
+
+def migrate_saved_settings(data: dict) -> tuple[bool, list[str]]:
+    """Apply every settings migration to ``data`` (see the ``migrate_*`` functions)."""
+    cpu_changed, cpu_notices = migrate_cpu_only_settings(data)
+    meeting_changed, meeting_notices = migrate_meeting_settings(data)
+    return cpu_changed or meeting_changed, cpu_notices + meeting_notices
+
+
 def _migrate_saved_config(data: dict, path: Path) -> None:
-    """Rewrite config.yaml once when it still holds GPU-era settings."""
-    changed, notices = migrate_cpu_only_settings(data)
+    """Rewrite config.yaml once when it still holds retired settings."""
+    changed, notices = migrate_saved_settings(data)
     if not changed:
         return
     for notice in notices:
@@ -115,8 +157,8 @@ def _migrate_saved_config(data: dict, path: Path) -> None:
 def load_config(path: Path = CONFIG_PATH) -> Config:
     """Load config from YAML file. Returns defaults if file doesn't exist.
 
-    A config written while GPU lanes existed is migrated to CPU and saved
-    back on the first load (see ``migrate_cpu_only_settings``).
+    A config written while GPU lanes or Meeting capture existed is migrated
+    and saved back on the first load (see ``migrate_saved_settings``).
     """
     if not path.is_file():
         return Config()
@@ -160,8 +202,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     stt_backend = data.get("stt_backend")
     stt_model = data.get("stt_model")
-    meeting_stt_backend = data.get("meeting_stt_backend")
-    meeting_stt_model = data.get("meeting_stt_model")
     stt_compute_type = data.get("stt_compute_type")
     update_channel = data.get("update_channel")
     installed_package_version = data.get("installed_package_version")
@@ -169,10 +209,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_backend = None
     if not isinstance(stt_model, str):
         stt_model = None
-    if not isinstance(meeting_stt_backend, str):
-        meeting_stt_backend = None
-    if not isinstance(meeting_stt_model, str):
-        meeting_stt_model = None
     if not isinstance(stt_compute_type, str):
         stt_compute_type = None
     if not isinstance(update_channel, str):
@@ -188,8 +224,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         push_to_talk_key=push_to_talk_key,
         stt_backend=stt_backend,
         stt_model=stt_model,
-        meeting_stt_backend=meeting_stt_backend,
-        meeting_stt_model=meeting_stt_model,
         stt_compute_type=stt_compute_type,
         update_channel=update_channel,
         installed_package_version=installed_package_version,
@@ -197,7 +231,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
 
 def _load_raw(path: Path = CONFIG_PATH) -> dict:
-    """Load raw YAML dict, preserving all keys except GPU-era settings.
+    """Load raw YAML dict, preserving all keys except retired settings.
 
     Setters save this dict back, so a retired setting is migrated by the first
     write as well as the first ``load_config``.
@@ -209,7 +243,7 @@ def _load_raw(path: Path = CONFIG_PATH) -> dict:
     except Exception:
         return {}
     if isinstance(data, dict):
-        _changed, notices = migrate_cpu_only_settings(data)
+        _changed, notices = migrate_saved_settings(data)
         for notice in notices:
             logger.warning(notice)
     return data
@@ -269,14 +303,6 @@ def set_stt_selection(backend: str, model: str, path: Path = CONFIG_PATH) -> Non
     data = _load_raw(path)
     data["stt_backend"] = backend
     data["stt_model"] = model
-    _save_raw(data, path)
-
-
-def set_meeting_stt_selection(backend: str, model: str, path: Path = CONFIG_PATH) -> None:
-    """Persist selected Meeting STT backend/model without changing dictation."""
-    data = _load_raw(path)
-    data["meeting_stt_backend"] = backend
-    data["meeting_stt_model"] = model
     _save_raw(data, path)
 
 

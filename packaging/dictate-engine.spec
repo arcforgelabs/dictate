@@ -1,9 +1,8 @@
 # PyInstaller spec for the frozen Dictate engine sidecar.
 #
-# Bundles the Python runtime + STT stack (onnx-asr / onnxruntime) plus the
-# local Meeting runtime. The desktop builds stage
-# Parakeet v2 int8 and pyannote Community-1 beside the engine so the default
-# English ASR and Meeting mode do not need customer Hugging Face credentials.
+# Bundles the Python runtime + STT stack (onnx-asr / onnxruntime). The desktop
+# builds stage Parakeet v2 int8 beside the engine so the default English ASR
+# works offline from the first run.
 #
 # Two layouts, selected by DICTATE_ONEFILE:
 #   - onedir (default): dist/dictate-engine/dictate-engine  — fast start; used
@@ -64,33 +63,6 @@ for pkg in ("onnx_asr", "onnxruntime"):
     except Exception:
         pass
 
-# Local Meeting backend runtime (pyannote Community-1 + torch). The model files
-# are staged as Tauri resources by scripts/build-windows-desktop.ps1.
-for pkg in ("torch", "torchaudio", "pyannote.audio", "pyannote.core", "pyannote.database", "pyannote.metrics"):
-    try:
-        d, b, h = collect_all(pkg)
-        datas += filter_pyinstaller_binaries(d)
-        binaries += filter_pyinstaller_binaries(b)
-        hiddenimports += h
-    except Exception:
-        pass
-
-# pyannote loads its model classes by name from the checkpoint
-# (pyannote.audio.models.*), so they are only frozen if collect_all above could
-# import pyannote.audio. When that import fails (for example a CUDA torchaudio
-# beside CPU torch), PyInstaller only warns and the bundle ships without them:
-# Meeting then dies at load with ModuleNotFoundError. Fail the build instead.
-import importlib.util  # noqa: E402
-
-if importlib.util.find_spec("pyannote.audio") is not None and not any(
-    name.startswith("pyannote.audio.models.") for name in hiddenimports
-):
-    raise SystemExit(
-        "pyannote.audio is installed but could not be imported at freeze time, so "
-        "its model modules would be missing from the bundle. On Linux install "
-        "torch and torchaudio from the CPU index (see packaging/build-engine.sh)."
-    )
-
 # Our own package + its lazily-imported backends/dialogs.
 hiddenimports += collect_submodules("dictate")
 hiddenimports += [
@@ -146,17 +118,22 @@ a = Analysis(
 a.binaries = filter_pyinstaller_binaries(a.binaries)
 a.datas = filter_pyinstaller_binaries(a.datas)
 
-# The Whisper-family runtimes were removed: faster-whisper, WhisperX,
-# CTranslate2 and PyAV, whose FFmpeg build carried GPL libx264/libx265. Fail the
+# Removed runtimes. The Whisper family went first: faster-whisper, WhisperX,
+# CTranslate2 and PyAV, whose FFmpeg build carried GPL libx264/libx265. Meeting
+# capture followed (#140): pyannote and the torch stack it ran on. Fail the
 # build if a transitive import brings any of them back, in either layout.
-_REMOVED_PACKAGES = {"av", "ctranslate2", "faster_whisper", "whisperx"}
-_REMOVED_DIRS = _REMOVED_PACKAGES | {"av.libs", "ctranslate2.libs"}
+_REMOVED_PACKAGES = {
+    "av", "ctranslate2", "faster_whisper", "whisperx",
+    "torch", "torchaudio", "torchcodec", "pyannote",
+}
+_REMOVED_DIRS = _REMOVED_PACKAGES | {"av.libs", "ctranslate2.libs", "torch.libs", "torchcodec.libs"}
+_REMOVED_LIBS = ("libx264", "libx265", "libtorch", "torch_cpu", "torch_python", "libc10", "c10.dll")
 
 
 def _removed_file(dest):
     parts = dest.replace("\\", "/").split("/")
     name = parts[-1].lower()
-    return parts[0] in _REMOVED_DIRS or name.startswith(("libx264", "libx265"))
+    return parts[0] in _REMOVED_DIRS or name.startswith(_REMOVED_LIBS)
 
 
 _found = sorted(
@@ -165,12 +142,13 @@ _found = sorted(
 )
 if _found:
     raise SystemExit(
-        "dictate-engine.spec: removed Whisper-family runtime in the frozen engine: "
+        "dictate-engine.spec: removed Whisper-family or Meeting runtime in the frozen engine: "
         + ", ".join(_found[:20])
     )
 print(
-    f"dictate-engine.spec: no av, av.libs, ctranslate2, faster_whisper, whisperx, libx264 "
-    f"or libx265 among {len(a.pure)} modules, {len(a.binaries)} binaries, {len(a.datas)} data files"
+    f"dictate-engine.spec: no av, ctranslate2, faster_whisper, whisperx, libx264, libx265, "
+    f"torch, torchaudio, torchcodec or pyannote among {len(a.pure)} modules, "
+    f"{len(a.binaries)} binaries, {len(a.datas)} data files"
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)

@@ -26,12 +26,12 @@ class ConfigSetModelTests(unittest.TestCase):
         from dictate.config import Config
         with patch(
             "dictate.__main__.load_config",
-            return_value=Config(stt_backend="parakeet-pyannote"),
+            return_value=Config(stt_backend="parakeet"),
         ):
             with patch("dictate.__main__.set_stt_selection") as mock_sel:
                 code, out, _ = _run_config(["set-model", "parakeet-tdt-0.6b-v3"])
         self.assertEqual(code, 0)
-        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v3")
+        mock_sel.assert_called_once_with("parakeet", "parakeet-tdt-0.6b-v3")
         self.assertIn("parakeet-tdt-0.6b-v3", out)
 
     def test_set_model_defaults_to_parakeet_backend(self) -> None:
@@ -45,26 +45,11 @@ class ConfigSetModelTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 mock_sel.assert_called_once_with("parakeet", "parakeet-tdt-0.6b-v3")
 
-    def test_set_meeting_model_defaults_to_parakeet_pyannote_backend(self) -> None:
-        with patch("dictate.__main__.set_meeting_stt_selection") as mock_sel:
-            code, out, _ = _run_config(["set-meeting-model", "parakeet-tdt-0.6b-v2"])
-        self.assertEqual(code, 0)
-        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v2")
-        self.assertIn("meeting_model=parakeet-tdt-0.6b-v2", out)
-
-    def test_set_meeting_model_accepts_backend_prefix(self) -> None:
-        with patch("dictate.__main__.set_meeting_stt_selection") as mock_sel:
-            code, out, _ = _run_config(
-                ["set-meeting-model", "parakeet-pyannote/parakeet-tdt-0.6b-v3"]
-            )
-        self.assertEqual(code, 0)
-        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v3")
-        self.assertIn("parakeet-pyannote", out)
-
-    def test_set_meeting_model_rejects_unknown_backend(self) -> None:
-        code, _, err = _run_config(["set-meeting-model", "unknown/model"])
-        self.assertEqual(code, 1)
-        self.assertIn("unknown meeting backend", err)
+    def test_set_meeting_model_is_gone(self) -> None:
+        # Meeting capture was removed (#140), and its subcommand with it.
+        with self.assertRaises(SystemExit) as raised:
+            _run_config(["set-meeting-model", "parakeet-tdt-0.6b-v2"])
+        self.assertEqual(raised.exception.code, 2)
 
 
 class ConfigShowTests(unittest.TestCase):
@@ -79,7 +64,7 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("stt_backend: parakeet", out)
         self.assertIn("model: parakeet-tdt-0.6b-v3", out)
-        self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
+        self.assertNotIn("meeting", out)
         self.assertIn("shortcut: ", out)
         self.assertIn("update_channel: stable", out)
 
@@ -99,8 +84,6 @@ class ConfigShowTests(unittest.TestCase):
         cfg = Config(
             stt_backend="faster-whisper",
             stt_model="turbo",
-            meeting_stt_backend="whisperx",
-            meeting_stt_model="large-v3",
         )
         with patch("dictate.__main__.load_config", return_value=cfg):
             code, out, _ = _run_config(["show"])
@@ -108,7 +91,6 @@ class ConfigShowTests(unittest.TestCase):
         self.assertIn("stt_backend: parakeet\n", out)
         self.assertIn("model: (default)", out)
         self.assertNotIn("turbo", out)
-        self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
 
     def test_show_redacts_hotword_values(self) -> None:
         from dictate.config import Config
