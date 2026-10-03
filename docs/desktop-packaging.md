@@ -100,6 +100,17 @@ scripts/build-windows-desktop.ps1
   and writes the handshake time, first authenticated `/api/state` time, file
   count and size to the job summary. The manual Windows bundle and Store MSIX
   workflows run it after the build.
+- `scripts/windows-first-run-smoke.ps1` measures what a new user waits through on
+  a fresh Windows VM with Defender on: the silent NSIS install, the first and a
+  warm engine launch (split into unpack/imports, Parakeet model load, handshake
+  and first `/api/state`), and end-of-audio-to-text for ~3 s, ~8 s and ~15 s
+  synthesized dictations, with Defender's CPU time for each step. Run it
+  elevated on a throwaway VM, for example a Crabbox Azure Windows lease
+  (`crabbox warmup --provider azure --target windows --class standard`), with
+  `-InstallerUrl` pointing at a release `*_x64-setup.exe` or a
+  `windows-desktop-bundle` artifact zip; `-DefenderExclusion` (separate VM, for
+  diagnosis only) excludes the install folder first. Stop and clean up the lease
+  afterwards.
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the
