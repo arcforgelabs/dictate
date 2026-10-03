@@ -1,28 +1,32 @@
 # Dictate
 
-Local-only desktop dictation. Read `VISION.md` before changing product
-behaviour.
+Read `VISION.md` before changing product behaviour, and before reviewing an
+issue or pull request. It owns product scope: what Dictate is, the order of
+work, and the "What we will not merge" list. `README.md` indexes the rest of
+the docs.
 
-## Direction
+## Reviewing
 
-Transcription runs on the user's machine. No accounts, no subscriptions, no API
-keys, no hosted models, no network call in the transcription path.
+Judge every issue and pull request against `VISION.md`, and say which line it
+fits or conflicts with. Three outcomes:
 
-Account, subscription, cloud sync and hosted-transcription code was removed on
-2026-09-19. Do not reintroduce a cloud path: no accounts, no API keys, no
-hosted models, no sync. What was removed and why is in
-`docs/local-only-audit.md`.
+- **Aligned, current:** dictation work, or anything the "Order of work" puts
+  first.
+- **Aligned, later:** meeting and long-recording work. Fine to keep open; it
+  must not block a dictation release or slow dictation down, and it ships only
+  in Dictate Beta, never in the stable app. Until that split lands (#131),
+  fixes to the Meeting code already in the tree count here too.
+- **Not aligned:** conflicts with "Local only" or the "What we will not merge"
+  list, or was started under a vision that has since changed. Recommend closing
+  it with the `r: not-in-vision` label, quoting the conflicting line.
 
-## Where things are recorded
+Product rejection stays a maintainer decision; reviewers recommend it.
 
-GitHub is the record. Product direction lives in `VISION.md`, work in GitHub
-issues, and code, configuration, tests and implementation contracts are
-repository truth.
+## Records
 
-Atlassian is legacy. Confluence no longer owns the vision and Jira no longer
-owns the work. Any remaining pointer to a Confluence space, a Jira project
-(`OPS`, `DEL`), or the Assets registry is stale — strip it when you touch the
-file rather than following it.
+GitHub issues and pull requests are the work record. Any remaining pointer to
+Confluence, Jira (`OPS`, `DEL`) or the Assets registry is stale; strip it when
+you touch the file.
 
 <!-- arc-forge-org-consistency:start -->
 ## Pull requests
