@@ -12,6 +12,8 @@
 #   - Node/npm
 #   - Rust toolchain
 #   - winapp CLI (`winget install microsoft.winappcli --source winget`)
+#   - MakePri from the Windows SDK (preinstalled on GitHub Windows runners);
+#     falls back to `winapp tool makepri`
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\build-windows-msix-store.ps1
@@ -59,6 +61,88 @@ function Find-MakeAppxCommand {
     }
 
     throw "Missing MSIX packaging tool. Install winapp CLI or the Windows SDK MakeAppx tool."
+}
+
+function Find-MakePriCommand {
+    $MakePri = Get-Command "makepri.exe" -ErrorAction SilentlyContinue
+    if ($MakePri) {
+        return @{ Kind = "makepri"; Path = $MakePri.Source }
+    }
+
+    $SdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+    if (Test-Path $SdkRoot) {
+        $SdkMakePri = Get-ChildItem $SdkRoot -Recurse -Filter "makepri.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\makepri\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($SdkMakePri) {
+            return @{ Kind = "makepri"; Path = $SdkMakePri.FullName }
+        }
+    }
+
+    $WinApp = Get-Command "winapp" -ErrorAction SilentlyContinue
+    if ($WinApp) {
+        return @{ Kind = "winapp"; Path = $WinApp.Source }
+    }
+
+    throw "Missing MakePri tool. Install winapp CLI or the Windows SDK MakePri tool."
+}
+
+function Invoke-MakePri {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Command,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    if ($Command.Kind -eq "winapp") {
+        & $Command.Path tool makepri @Arguments
+    } else {
+        & $Command.Path @Arguments
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "makepri $($Arguments[0]) failed with exit code $LASTEXITCODE."
+    }
+}
+
+function New-ResourcesPri {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Command,
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [Parameter(Mandatory = $true)][string]$AssetsDir,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    # The manifest names plain logo paths (Assets\Square44x44Logo.png); Windows
+    # resolves them to the scale-*/targetsize-*/altform-unplated files through
+    # resources.pri. Index a copy holding only the manifest and Assets so the
+    # engine payload's folders are never read as resource qualifiers.
+    $PriRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("dictate-msix-pri-" + [guid]::NewGuid().ToString("N"))
+    try {
+        $Project = Join-Path $PriRoot "project"
+        New-Item -ItemType Directory -Force -Path $Project | Out-Null
+        Copy-Item $ManifestPath (Join-Path $Project "AppxManifest.xml")
+        Copy-Item $AssetsDir (Join-Path $Project "Assets") -Recurse
+
+        $Config = Join-Path $PriRoot "priconfig.xml"
+        Invoke-MakePri -Command $Command -Arguments @("createconfig", "/cf", $Config, "/dq", "en-US", "/pv", "10.0.0", "/o")
+        # Drop the auto resource-package split so one resources.pri holds every variant.
+        [xml]$ConfigXml = Get-Content $Config -Raw
+        foreach ($Node in @($ConfigXml.SelectNodes("//packaging"))) {
+            [void]$Node.ParentNode.RemoveChild($Node)
+        }
+        $ConfigXml.Save($Config)
+
+        $Pri = Join-Path $PriRoot "resources.pri"
+        Invoke-MakePri -Command $Command -Arguments @(
+            "new", "/pr", $Project, "/cf", $Config, "/mn", (Join-Path $Project "AppxManifest.xml"), "/of", $Pri, "/o"
+        )
+        if (-not (Test-Path $Pri)) {
+            throw "makepri did not produce resources.pri"
+        }
+        Copy-Item $Pri $Destination -Force
+    } finally {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $PriRoot
+    }
 }
 
 function Convert-ToMsixVersion {
@@ -156,6 +240,8 @@ function Assert-MsixPackage {
         foreach (
             $Payload in @(
                 "dictate-ui-shell.exe",
+                "resources.pri",
+                "Assets\Square44x44Logo.targetsize-24_altform-unplated.png",
                 "engine\dictate-engine.exe",
                 "engine\dictate-distribution.json",
                 "engine\models\parakeet-tdt-0.6b-v2-onnx\config.json",
@@ -210,6 +296,7 @@ Require-Command $Python
 Require-Command "npm"
 Require-Command "cargo"
 $MakeAppxCommand = Find-MakeAppxCommand
+$MakePriCommand = Find-MakePriCommand
 
 $TauriConfigPath = Join-Path $Root "ui-shell\src-tauri\tauri.conf.json"
 $TauriConfig = Get-Content $TauriConfigPath -Raw | ConvertFrom-Json
@@ -255,6 +342,9 @@ Set-Content -Path $Manifest -Value $ManifestContent -Encoding UTF8
 
 # Manifest logos are rendered from assets/dictate.svg by scripts/render_brand_icons.py.
 Copy-Item (Join-Path $MsixRoot "assets\*.png") $Assets -Force
+
+Write-Host "indexing manifest logos into resources.pri"
+New-ResourcesPri -Command $MakePriCommand -ManifestPath $Manifest -AssetsDir $Assets -Destination (Join-Path $Dist "resources.pri")
 
 Write-Host "packing MSIX"
 if (Test-Path $Output) {

@@ -159,6 +159,8 @@ def resolve_default_local_backend(device: ComputeDevice = "auto") -> tuple[SttBa
 def saved_stt_selection(
     backend: str | None,
     model: str | None,
+    *,
+    default_backend: SttBackend = "parakeet",
 ) -> tuple[SttBackend | None, str | None]:
     """Validate a dictation backend/model pair read from config.yaml.
 
@@ -167,15 +169,24 @@ def saved_stt_selection(
     (an unset backend used to mean faster-whisper too). Anything that is not a
     registered backend is treated as unset, and its model is dropped with it so
     a Whisper model name is never handed to Parakeet.
+
+    The one exception is an unset backend with a Parakeet model, such as the
+    ``stt_model: parakeet-tdt-0.6b-v3`` line ``config/default-config.yaml``
+    offers for multilingual dictation. That model is kept, on
+    ``default_backend``.
     """
-    if backend not in BACKEND_REGISTRY:
-        return None, None
-    return backend, model  # type: ignore[return-value]
+    if backend in BACKEND_REGISTRY:
+        return backend, model  # type: ignore[return-value]
+    if not backend and model in PARAKEET_MODELS:
+        return default_backend, model
+    return None, None
 
 
 def saved_meeting_selection(backend: str | None, model: str | None) -> tuple[SttBackend, str]:
     """The Meeting backend/model from config.yaml, falling back to parakeet-pyannote."""
-    saved_backend, saved_model = saved_stt_selection(backend, model)
+    saved_backend, saved_model = saved_stt_selection(
+        backend, model, default_backend=DEFAULT_MEETING_BACKEND
+    )
     if saved_backend is None:
         saved_backend = DEFAULT_MEETING_BACKEND
     return saved_backend, resolve_model_name(saved_backend, saved_model)

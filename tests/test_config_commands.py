@@ -83,6 +83,16 @@ class ConfigShowTests(unittest.TestCase):
         self.assertIn("shortcut: ", out)
         self.assertIn("update_channel: stable", out)
 
+    def test_show_reports_saved_parakeet_model_without_backend(self) -> None:
+        from dictate.config import Config
+
+        cfg = Config(stt_model="parakeet-tdt-0.6b-v3")
+        with patch("dictate.__main__.load_config", return_value=cfg):
+            code, out, _ = _run_config(["show"])
+        self.assertEqual(code, 0)
+        self.assertIn("stt_backend: parakeet\n", out)
+        self.assertIn("model: parakeet-tdt-0.6b-v3\n", out)
+
     def test_show_reports_parakeet_for_legacy_whisper_config(self) -> None:
         from dictate.config import Config
 
