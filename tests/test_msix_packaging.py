@@ -87,6 +87,16 @@ class MsixPackagingTests(unittest.TestCase):
         self.assertIn(r"engine\models\parakeet-tdt-0.6b-v2-onnx\vocab.txt", script)
         self.assertIn(r"engine\models\pyannote-speaker-diarization-community-1\config.*", script)
 
+    def test_msix_requires_the_onedir_engine_within_path_limits(self) -> None:
+        script = (ROOT / "scripts" / "build-windows-msix-store.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(r'(Join-Path $StageDir "engine\_internal") -PathType Container', script)
+        self.assertEqual(script.count(r'"engine\_internal\python3*.dll"'), 2)
+        self.assertIn("$MaxMsixPayloadPathLength = 150", script)
+        self.assertIn("$Longest.Length -gt $MaxMsixPayloadPathLength", script)
+
     def test_store_marker_carries_the_release_version(self) -> None:
         # Store installs read their version from this marker (About panel and
         # update status), so it must follow tauri.conf.json, not a fixed string.
