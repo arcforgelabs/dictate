@@ -6,7 +6,8 @@ Date: 2026-07-05
 
 This is the authoritative planning document only for Dictate local
 transcription, recordings, meetings, model lanes, timestamping, speaker
-attribution, GPU support, and their release evidence. `VISION.md` is the
+attribution, and their release evidence. Dictate runs on the CPU only; GPU
+material below is history unless it says otherwise. `VISION.md` is the
 current cross-system authority; this plan is subordinate for account, cloud,
 commerce, and Deck decisions. Older research/cost notes are archived under
 `docs/archive/`.
@@ -100,7 +101,7 @@ Deployment blockers before calling this plan complete:
 5. Decide the public Windows promotion path: current VM evidence proves the
    no-bundle executable and MSIX packaging paths; MSI/NSIS direct-download
    bundling is still not promoted.
-7. Staged update preparation is deferred out of the human-test release. The
+6. Staged update preparation is deferred out of the human-test release. The
    human-test release uses the tested immediate source update path plus the
    documented MSIX/manual package path.
 
@@ -132,9 +133,10 @@ The `faster-whisper/large-v3` bridge for this workstation was removed on
 
 ## Implementation Status
 
-GPU history: the CUDA and AMD lanes, with their benchmark, evidence and audit
-tooling, were removed on 2026-10-01 (#112); their last evidence is in this
-file's git history before that date.
+GPU history: the CUDA and AMD lanes were dropped on 2026-10-01. Their
+benchmark, evidence and audit tooling was removed with #112; the GPU install
+paths and the engine's device selection go with #110 and #111. Their last
+evidence is in this file's git history before 2026-10-01.
 
 Parakeet v2 and v3 are wired through the ONNX/onnx-asr loader on the CPU.
 
@@ -238,7 +240,7 @@ Benchmark evidence foundation:
 4. `scripts/run-transcription-lane-benchmarks.sh` is the canonical local lane
    runner for writing the CPU, CPU multilingual, curated-human CPU, and Meeting
    JSON artifacts consumed by this plan and the plan audit. Every lane runs on
-   the CPU. Use
+   the CPU; its CUDA and AMD lanes were removed with #112. Use
    `--dry-run` first on target machines to verify the exact commands without
    loading models.
 5. The canonical lane runner preflights each selected lane with `dictate doctor
@@ -253,6 +255,17 @@ Benchmark evidence foundation:
    timestamped archive under
    `evidence-bundles/` for CPU, Windows, and Meeting test-machine
    handoff. The plan audit requires that output directory to be ignored by Git.
+
+## AMD GPU Path (dropped)
+
+AMD GPU lanes were dropped on 2026-10-01 with the rest of GPU support. There is
+no AMD acceptance gate, and the readiness audit no longer requires the AMD
+promotion artifacts (`benchmark-results/parakeet-v2-amd-human-gated.json` and
+`benchmark-results/parakeet-v3-amd-human-gated.json`). The AMD benchmark
+runners and the AMD audit gate were removed with #112. The `amd` extra and the
+DirectML and ROCm/MIGraphX provider checks are still in the tree, unsupported,
+until #110 and #111 remove them. Earlier revisions of this file hold the old
+AMD runtime plan and gates.
 
 ## Meeting Stack
 
@@ -373,8 +386,11 @@ Remaining app-level gates:
 | Lane | ASR | Speaker Attribution | Decision |
 | --- | --- | --- | --- |
 | Local quality candidate | Parakeet v2/v3 | DiariZen | Selectable/preflightable as `parakeet-diarizen`; preferred if CPU benchmarks show processing time is bearable. |
-| Local speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; passes the curated-human Meeting gates on the CPU. |
-| Local offline fallback | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; passes the curated-human Meeting gates on the CPU but runs far slower than real time; ship after packaging/licensing and speed gates pass. |
+| Local live/speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. Passes the curated-human Meeting gates on the CPU (2026-10-01, one OSR fixture). |
+| Local CPU baseline | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; passes the curated-human Meeting gates on the CPU but runs far slower than real time; ship after packaging/licensing and speed gates pass. |
+
+Every Meeting lane runs on the CPU. The GPU lanes in earlier revisions of this
+table (CUDA quality and speed, AMD) were dropped on 2026-10-01.
 
 WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
 useful, but do not build the product dependency around WhisperX.
@@ -411,6 +427,9 @@ report documented in `benchmarks/README.md`. Human-readable console output is
 not enough for promotion because it cannot be compared reliably across hardware
 lanes.
 
+There is no GPU tier: GPU lanes were dropped on 2026-10-01. Lanes are
+benchmarked and promoted on the CPU of everyday machines.
+
 ## Human-Test Acceptance Checklist
 
 The deployment is ready for human testing only when these checks are true:
@@ -433,15 +452,31 @@ The deployment is ready for human testing only when these checks are true:
    UI server state, tray helpers, Windows platform behavior, and meeting
    speaker-attribution rules pass locally.
 
+These six items are exactly the items `--readiness` reports. The NVIDIA English,
+NVIDIA multilingual, AMD English and AMD multilingual items were removed on
+2026-10-01 when GPU lanes were dropped.
+
 Run `python3 scripts/transcription_plan_audit.py` before handing a build to a
 tester. It summarizes which plan gates have local evidence and which are still
 blocked. Use `--strict` in automation; it exits `2` while required promotion
 evidence is missing.
 Run `python3 scripts/transcription_plan_audit.py --readiness` for the
 tester-facing checklist view. It maps the human-test acceptance items above to
-the audit gates and currently marks CPU English, Meeting, plain recording,
-Windows VM, packaging, and regression as `READY`. Use `--readiness --json` for
-a machine-readable handoff report.
+the audit gates and reports six items: CPU English, Meeting, Plain recording,
+Windows VM, Packaging and Regression. CPU English, Plain recording, Windows VM,
+Packaging and Regression are decided by files in the repository. Meeting is
+`READY` only when at least one curated-human CPU meeting benchmark artifact in
+`benchmark-results/` (not tracked in Git) passes its gates, so a fresh checkout
+reports Meeting as `BLOCKED`. The gate reads
+`benchmark-results/parakeet-{pyannote,diarizen,sortformer}-cpu-human-meeting.json`
+and fails any artifact whose `config.device` is not `cpu`. Artifacts from
+before #112 are named `*-cuda-human-meeting.json` and are no longer read; the
+audit names them when the CPU artifacts are missing. To produce the CPU
+artifacts, run `scripts/run-transcription-lane-benchmarks.sh` with
+`DICTATE_MEETING_HUMAN_MANIFEST` pointing at the curated meeting manifest and
+`--lane meeting-sortformer-human`, `--lane meeting-human` and
+`--lane meeting-diarizen-human`. No GPU item is reported. Use
+`--readiness --json` for a machine-readable handoff report.
 Use `scripts/run-human-test-readiness.sh` on Linux source installs, or
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
 scripts\run-human-test-readiness.ps1` on Windows source installs,
@@ -466,7 +501,8 @@ optional dependency path.
 `uv run python -m py_compile src/dictate/__main__.py src/dictate/benchmark.py
 src/dictate/doctor.py src/dictate/stt/factory.py src/dictate/ui_server.py`
 also succeeded on the same worktree.
-Latest readiness and plan-audit evidence (2026-10-01, #112): `python3
+Latest readiness and plan-audit evidence (2026-10-01, #112, on the operator
+workstation with its local CPU Meeting artifacts): `python3
 scripts/transcription_plan_audit.py --readiness` reports every human-test
 checklist item as `READY`, unchanged from before the GPU tooling was removed.
 `python3 scripts/transcription_plan_audit.py` reports `pass` for the canonical
@@ -478,7 +514,8 @@ reports record Python, platform, machine, and processor context only.
 `scripts/run-human-test-readiness.sh` and
 `scripts/run-human-test-readiness.ps1` provide the source-install handoff
 wrapper for that report plus the manual microphone and Meeting checks; both run
-the CPU doctor.
+the CPU doctor. Readiness and audit evidence from 2026-07-05, including the
+CUDA and AMD gates, is in earlier revisions of this file.
 
 Latest Parakeet-first local default evidence: `uv run pytest
 tests/test_default_local_model.py tests/test_main_stt_selection.py
@@ -798,9 +835,11 @@ curated-human run passes (see the CPU Meeting evidence above).
    - Keep recordings and push-to-talk on the same ASR path.
    - Keep Meeting as the only path that requires speaker attribution.
 
-2. **Parakeet runtime coverage**
+2. **Parakeet on the CPU**
    - Benchmark Parakeet v3 CPU feasibility.
-   - Measure and tune end-to-end CPU dictation latency.
+   - Measure and tune release-to-text latency on everyday CPU machines.
+   - The CUDA and AMD runtime tasks that were here were dropped on 2026-10-01;
+     removing their code is #110, #111 and #112.
 
 3. **Meeting speaker attribution**
    - Validate DiariZen runtime loading and benchmark `parakeet-diarizen`.
@@ -879,13 +918,21 @@ noisy-input fixtures, not only clean read speech.
 
 1. `onnx-asr` 0.12.0 (2026-07-15) adds convolution-based ONNX preprocessors for
    the GPU path.
-2. ONNX Runtime is now pinned to `1.30.x`. The old `<1.24` pin existed for
-   the external-data path check; Dictate stages Parakeet as flat real files,
-   and an external-data model loads on 1.30 (verified 2026-09-20 on CPU).
-3. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
+2. ONNX Runtime is now pinned to `1.30.x` for both the CPU and CUDA lanes.
+   `onnxruntime-gpu` 1.27+ ships CUDA 13 runtime wheels (`nvidia-cuda-runtime`,
+   `nvidia-cudnn-cu13`), which need NVIDIA driver 580 or newer; 1.26 was the
+   last CUDA 12 build. The old `<1.24` pin existed for the external-data path
+   check; Dictate stages Parakeet as flat real files, and an external-data
+   model loads on 1.30 (verified 2026-09-20 on CPU). The CUDA lane was dropped
+   on 2026-10-01 and is not re-validated.
+3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra is capped at
+   `<1.25`. Microsoft has retired that wheel. The Windows AMD lane would have
+   needed a replacement runtime; that question closed when GPU lanes were
+   dropped on 2026-10-01.
+4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
    Nemotron streaming, Moonshine, Qwen3-ASR, and Cohere Transcribe. It is the
    runtime to evaluate if a streaming lane is opened.
-4. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
+5. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
 
 ## Archived Notes
 

@@ -292,11 +292,27 @@ def _meeting_promotion_gate(root: Path) -> Gate:
     ]
     missing = [relative for relative, _backend in targets if not (root / relative).exists()]
     if missing:
-        return Gate(
-            "meeting_speaker_attribution",
-            "blocked",
-            "missing curated-human meeting benchmark artifacts: " + ", ".join(missing),
+        detail = "missing curated-human meeting benchmark artifacts: " + ", ".join(missing)
+        # Artifacts written before the gate moved to CPU runs keep their old
+        # names. Name them so a workstation that used to pass sees why it no
+        # longer does, instead of only a list of missing files.
+        expected = {Path(relative).name for relative, _backend in targets}
+        results = root / "benchmark-results"
+        unread = (
+            sorted(
+                path.name
+                for path in results.glob("parakeet-*-human-meeting.json")
+                if path.name not in expected
+            )
+            if results.is_dir()
+            else []
         )
+        if unread:
+            detail += (
+                "; not read (only *-cpu-human-meeting.json counts; rerun the "
+                "meeting-*-human lanes on the CPU): " + ", ".join(unread)
+            )
+        return Gate("meeting_speaker_attribution", "blocked", detail)
 
     details: list[str] = []
     blockers: list[str] = []

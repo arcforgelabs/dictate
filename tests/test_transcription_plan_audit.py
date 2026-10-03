@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -108,6 +111,38 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
         self.assertEqual(gates["meeting_speaker_attribution"].status, "fail")
         self.assertIn("not a CPU run", gates["meeting_speaker_attribution"].detail)
 
+    def test_audit_names_old_meeting_artifacts_it_no_longer_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_minimal_plan(root)
+            _write_scripts(root)
+            # A workstation that passed before the gate moved to CPU runs: only
+            # the old-named artifact exists.
+            old = root / "benchmark-results" / "parakeet-sortformer-cuda-human-meeting.json"
+            old.parent.mkdir(parents=True)
+            old.write_text("{}", encoding="utf-8")
+
+            gates = {gate.name: gate for gate in audit_module.audit(root)}
+
+        meeting = gates["meeting_speaker_attribution"]
+        self.assertEqual(meeting.status, "blocked")
+        self.assertIn("parakeet-sortformer-cpu-human-meeting.json", meeting.detail)
+        self.assertIn("not read", meeting.detail)
+        self.assertIn("parakeet-sortformer-cuda-human-meeting.json", meeting.detail)
+
+    def test_audit_without_any_meeting_artifacts_lists_only_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_minimal_plan(root)
+            _write_scripts(root)
+
+            gates = {gate.name: gate for gate in audit_module.audit(root)}
+
+        meeting = gates["meeting_speaker_attribution"]
+        self.assertEqual(meeting.status, "blocked")
+        self.assertIn("missing curated-human meeting benchmark artifacts", meeting.detail)
+        self.assertNotIn("not read", meeting.detail)
+
     def test_fixture_tooling_gate_requires_no_gpu_tooling(self) -> None:
         source = AUDIT_PATH.read_text(encoding="utf-8").lower()
         for gpu_marker in ("cuda", "amd", "directml", "dmlexecutionprovider", "gpu"):
@@ -198,6 +233,44 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
 
         self.assertEqual(gates["update_scope_decision"].status, "fail")
         self.assertIn("Staged update preparation", gates["update_scope_decision"].detail)
+
+
+class RepositoryPlanReadinessTests(unittest.TestCase):
+    """Run the audit against this checkout's real plan and scripts."""
+
+    def test_plan_checklist_names_exactly_the_reported_items(self) -> None:
+        plan = (ROOT / "docs" / "TRANSCRIPTION_PLAN.md").read_text(encoding="utf-8")
+        section = plan.split("## Human-Test Acceptance Checklist", 1)[1].split("\n## ", 1)[0]
+        checklist = re.findall(r"^\d+\.\s+\*\*(.+?):\*\*", section, re.MULTILINE)
+        items = audit_module.readiness_report(audit_module.audit(ROOT))
+
+        self.assertEqual(checklist, [item.name for item in items])
+        for name in checklist:
+            self.assertNotRegex(name, r"(?i)nvidia|amd|cuda|gpu")
+
+    def test_readiness_report_on_this_checkout(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = audit_module.main(["--readiness", "--root", str(ROOT)])
+        report = output.getvalue()
+        # Shown in the CI log as the readiness transcript for the tested commit.
+        print("\ntranscription_plan_audit.py --readiness on this checkout:\n" + report, file=sys.stderr)
+
+        self.assertEqual(exit_code, 0)
+        statuses = {
+            line[9:].split("  ", 1)[0].strip(): line[:9].strip()
+            for line in report.splitlines()
+            if line.strip()
+        }
+        self.assertEqual(
+            list(statuses),
+            ["CPU English", "Meeting", "Plain recording", "Windows VM", "Packaging", "Regression"],
+        )
+        # Everything except Meeting is decided by files tracked in Git. Meeting
+        # needs a local benchmark artifact (benchmark-results/ is ignored).
+        for name in ("CPU English", "Plain recording", "Windows VM", "Packaging", "Regression"):
+            self.assertEqual(statuses[name], "READY", name)
+        self.assertIn(statuses["Meeting"], {"READY", "BLOCKED"})
 
 
 def _write_minimal_plan(

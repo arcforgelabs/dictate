@@ -41,5 +41,5 @@ follow-ups below.
 
 ## Lock / gate
 The convergence target is [`locks/note-capture-core/LOCK.md`](locks/note-capture-core/LOCK.md);
-new port work is measured against it. Cloud is the source of truth; `.claude-design*` is a
-disposable gitignored cache; freezes go in `locks/`.
+new port work is measured against it. Tokens and brand rules live in the design system
+artifact named in [`README.md`](README.md); freezes go in `locks/`.
