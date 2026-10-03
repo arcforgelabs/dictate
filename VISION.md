@@ -7,6 +7,10 @@ whatever app you are already using. Its second job, later, is longer
 recordings and meetings: a local, speaker-labelled transcript you can keep and
 export. Both are the same idea, voice to text locally, and nothing else.
 
+Install and usage: [`README.md`](README.md). How to contribute:
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Reporting a security problem:
+[`SECURITY.md`](SECURITY.md).
+
 ## Local only
 
 Transcription runs on the user's machine. There is no account, no subscription,
@@ -42,8 +46,14 @@ setup beyond pressing record.
    work.
 2. **Meetings and long recordings.** Local, speaker-labelled transcripts. This
    is in the vision but comes after dictation, is low priority, and never
-   blocks a dictation release. Meeting features stay off the stable channel
-   until dictation is where it should be.
+   blocks a dictation release. Until dictation is where it should be, meeting
+   features ship only in Dictate Beta: a separate app, installed alongside the
+   stable one with its own data and updates. The stable app carries no beta
+   features and no beta code or libraries, switched off or otherwise. That
+   split is the target, not yet the app: until
+   [#131](https://github.com/arcforgelabs/dictate/issues/131) lands, Meeting
+   is still in the current build, and fixing it there is later work, not out of
+   bounds.
 
 Work that makes dictation slower, heavier or harder to install for the sake of
 meetings is the wrong trade.
@@ -62,11 +72,35 @@ meetings is the wrong trade.
   not managed.
 - Meeting features that need anything beyond the local machine: bots that join
   calls, calendar or conferencing integrations, cloud diarization.
+- Adding beta features, or the code and libraries behind them, to the stable
+  app, including behind a toggle. They belong in Dictate Beta.
 - Features justified by selling. Dictate is not a commercial product; a feature
   earns its place by making local voice-to-text better.
 
 This list is a guardrail, not a law. A change that conflicts with it needs this
 file changed first, by pull request.
+
+## Contribution rules
+
+- One pull request, one topic. Do not bundle unrelated fixes or features; a
+  few small related fixes can share one.
+- Keep a pull request reviewable. One over about 5,000 changed lines is
+  reviewed only in exceptional circumstances; split it.
+- Open pull requests against `master`. One built on another unmerged branch is
+  not reviewed until that branch lands, so wait for it, or say in the
+  description what it depends on.
+- Do not open a batch of small pull requests at once. Each one costs a review.
+- Show it working. The description says what was run, on which commit, what it
+  showed, and what was not run.
+
+## Settings compatibility
+
+Dictate reads the current settings only. It does not keep old, renamed or
+removed settings working through permanent aliases. When a change makes an
+existing setting invalid, such as a removed speech backend, the same change
+moves it to the current equivalent on upgrade and keeps what the user chose
+wherever it still exists. A user's notes and history are never dropped to
+make a setting fit.
 
 ## How this file is used
 
