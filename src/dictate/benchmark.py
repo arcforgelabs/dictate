@@ -6,8 +6,6 @@ import argparse
 import csv
 import json
 import platform
-import shutil
-import subprocess
 import sys
 import time
 import wave
@@ -834,77 +832,12 @@ def _sample_result_payload(result: SampleResult) -> dict[str, object]:
 
 
 def _environment_payload() -> dict[str, object]:
-    payload: dict[str, object] = {
+    return {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "machine": platform.machine(),
         "processor": platform.processor(),
-        "onnxruntime_providers": _onnxruntime_providers(),
     }
-    gpu_summary = _gpu_summary()
-    if gpu_summary:
-        payload["gpu_summary"] = gpu_summary
-    return payload
-
-
-def _onnxruntime_providers() -> list[str]:
-    try:
-        import onnxruntime as ort
-
-        return list(ort.get_available_providers())
-    except Exception:  # noqa: BLE001
-        return []
-
-
-def _gpu_summary() -> list[str]:
-    lines: list[str] = []
-    nvidia_smi = shutil.which("nvidia-smi")
-    if nvidia_smi:
-        lines.extend(
-            _command_lines(
-                [
-                    nvidia_smi,
-                    "--query-gpu=name,driver_version,memory.total",
-                    "--format=csv,noheader",
-                ]
-            )
-        )
-    lspci = shutil.which("lspci")
-    if lspci:
-        lines.extend(
-            line
-            for line in _command_lines([lspci])
-            if any(token in line.lower() for token in ("vga", "3d controller", "display"))
-        )
-    if platform.system().lower() == "windows":
-        lines.extend(
-            _command_lines(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-Command",
-                    "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
-                ]
-            )
-        )
-    return [line for line in lines if line.strip()]
-
-
-def _command_lines(command: list[str]) -> list[str]:
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-        )
-    except Exception:  # noqa: BLE001
-        return []
-    if completed.returncode != 0:
-        return []
-    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
 def _evaluate_gates(

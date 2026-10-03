@@ -27,6 +27,9 @@
   `float16` compute type becomes `int8`, with a one-line notice when a GPU was
   chosen; everything else in the config is kept. A `--device` flag is still
   accepted so existing scripts run, and is ignored.
+- GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
+  CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
+  GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A

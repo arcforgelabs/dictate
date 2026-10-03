@@ -31,9 +31,9 @@ clearly `minimum` or clearly `advanced`.
 
 | Tier | Detection Shape | Default Config Intent |
 | --- | --- | --- |
-| `minimum` | x64 desktop OS, 4 CPU cores, 8 GB RAM, no proven CUDA/GPU acceleration, enough disk for the packaged app and normal local model cache | CPU-safe local dictation, conservative compute, heavy/experimental features disabled |
-| `recommended` | x64 desktop OS, recent 6 CPU cores, 16 GB RAM, adequate disk, optional but not required GPU acceleration | Default local dictation config for most users |
-| `advanced` | Recommended baseline plus a proven NVIDIA CUDA path or a separately proven AMD GPU path, 32 GB RAM preferred, large model disk headroom | Parakeet GPU English/multilingual lanes plus local meeting speaker-attribution experiments |
+| `minimum` | x64 desktop OS, 4 CPU cores, 8 GB RAM, enough disk for the packaged app and normal local model cache | CPU-safe local dictation, conservative compute, heavy/experimental features disabled |
+| `recommended` | x64 desktop OS, recent 6 CPU cores, 16 GB RAM, adequate disk | Default local dictation config for most users |
+| `advanced` | Recommended baseline plus 8 or more recent CPU cores, 32 GB RAM preferred, large model disk headroom | Parakeet v3 multilingual on the CPU plus local meeting speaker-attribution experiments |
 
 Windows must be included in tier proof before a tier is considered production
 ready.
@@ -55,9 +55,9 @@ The canonical model lanes live in
 [../docs/TRANSCRIPTION_PLAN.md](../docs/TRANSCRIPTION_PLAN.md). This benchmark
 document defines dataset and measurement format only.
 
-Do not promote any CPU, NVIDIA GPU, AMD GPU, or meeting lane to default
-from marketing claims alone. Run the same manifest on representative hardware
-and record WER, DER where applicable, RTF/RTFx, RAM/VRAM, install size, and
+Dictate runs on the CPU only. Do not promote any CPU or meeting lane to
+default from marketing claims alone. Run the same manifest on representative
+hardware and record WER, DER where applicable, RTF/RTFx, RAM, install size, and
 package/runtime dependencies.
 
 The first curated dataset should include:
@@ -102,7 +102,7 @@ files are local artifacts and are ignored by git. Use them for speed, JSON
 shape, timestamp, and smoke gates. Do not use flite WER as the final product
 quality benchmark; curated human recordings are still required before promotion.
 
-For a same-fixture CPU/CUDA comparison with less startup-overhead distortion,
+For CPU speed measurements with less startup-overhead distortion,
 generate the longer repeated synthetic fixture:
 
 ```bash
@@ -110,8 +110,8 @@ scripts/generate-long-benchmark-fixtures.sh
 ```
 
 This writes a longer WAV plus `manifest.csv` and `manifest-3x.csv` under
-`benchmark-fixtures/flite-long/`. Use `manifest-3x.csv` for quick paired
-CPU/GPU speed comparisons. It is still synthetic speech, so it is promotion
+`benchmark-fixtures/flite-long/`. Use `manifest-3x.csv` for quick repeatable
+CPU speed runs. It is still synthetic speech, so it is promotion
 evidence for runtime plumbing and relative speed only; curated human recordings
 remain the product-quality gate.
 
@@ -137,11 +137,7 @@ scripts/generate-curated-human-asr-fixture.sh
 
 DICTATE_HUMAN_MANIFEST=/path/to/asr-human-manifest.csv \
 DICTATE_HUMAN_AUDIO_ROOT=/path/to/audio \
-scripts/run-transcription-lane-benchmarks.sh --lane cuda-human
-
-DICTATE_HUMAN_MANIFEST=/path/to/asr-human-manifest.csv \
-DICTATE_HUMAN_AUDIO_ROOT=/path/to/audio \
-scripts/run-transcription-lane-benchmarks.sh --lane amd-human
+scripts/run-transcription-lane-benchmarks.sh --lane cpu-human
 
 scripts/generate-curated-human-meeting-fixture.sh
 
@@ -150,40 +146,16 @@ DICTATE_MEETING_HUMAN_AUDIO_ROOT=/path/to/audio \
 scripts/run-transcription-lane-benchmarks.sh --lane meeting-human
 ```
 
-Use `cuda-human-v3`, `amd-human-v3`, `meeting-diarizen-human`, and
+Use `cpu-human-v3`, `meeting-diarizen-human`, and
 `meeting-sortformer-human` for the multilingual and alternate Meeting
 promotion artifacts. `scripts/generate-curated-human-asr-fixture.sh` prepares a
-small Open Speech Repository Harvard-sentence ASR fixture for CUDA smoke
+small Open Speech Repository Harvard-sentence ASR fixture for CPU smoke
 promotion. `scripts/generate-curated-human-meeting-fixture.sh` prepares a
 two-speaker Open Speech Repository Harvard-sentence fixture with timestamped
 speaker turns for Meeting runtime validation; it is not a natural meeting
-recording and does not substitute for AMD hardware evidence.
+recording.
 
-On a Radeon test machine, use the AMD promotion wrapper to generate both
-required AMD human artifacts with the canonical names and then run the plan
-audit:
-
-```bash
-scripts/run-amd-promotion-benchmarks.sh --collect-evidence
-```
-
-On Windows Radeon/DirectML machines, use the native PowerShell wrapper:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-amd-promotion-benchmarks.ps1 -CollectEvidence
-```
-
-Run `scripts/run-amd-promotion-benchmarks.sh --dry-run` first to inspect the
-commands, or `scripts\run-amd-promotion-benchmarks.ps1 -DryRun` on Windows. The
-wrapper prepares the curated ASR fixture when `DICTATE_HUMAN_MANIFEST` is unset,
-runs the English and multilingual AMD human lanes, then collects the normal
-evidence bundle when requested. The PowerShell wrapper installs `.[amd]` by
-default so Windows Radeon testers get `onnxruntime-directml`; pass
-`-NoInstallAmdExtra` only for a pre-prepared venv. It still requires a real
-AMD-capable ONNX Runtime provider; synthetic DirectML readiness or an
-NVIDIA-only workstation will not pass the AMD promotion audit.
-
-After a Radeon tester returns an evidence bundle, import its benchmark JSON
+After a tester returns an evidence bundle, import its benchmark JSON
 artifacts and rerun the plan audit:
 
 ```bash
@@ -200,13 +172,13 @@ For a source-install human-test handoff, run the readiness wrapper before the
 manual microphone checks:
 
 ```bash
-scripts/run-human-test-readiness.sh --device auto
+scripts/run-human-test-readiness.sh
 ```
 
 On Windows source installs:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-human-test-readiness.ps1 -Device auto
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-human-test-readiness.ps1
 ```
 
 These wrappers run the readiness report, perform a quick local Parakeet doctor
@@ -221,7 +193,7 @@ dictate benchmark \
   --audio-root /path/to/audio \
   --stt-backend parakeet \
   --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
+  --device cpu \
   --fixture-class curated-human \
   --require-timestamp-metrics \
   --validate-manifest-only
@@ -231,7 +203,7 @@ dictate benchmark \
   --audio-root /path/to/audio \
   --stt-backend parakeet-pyannote \
   --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
+  --device cpu \
   --fixture-class curated-human \
   --diarize \
   --require-speaker-attribution \
@@ -253,14 +225,14 @@ dictate benchmark \
   --audio-root benchmarks \
   --stt-backend parakeet \
   --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
+  --device cpu \
   --language en \
   --fixture-class curated-human \
-  --json-output benchmark-results/parakeet-v2-cuda.json \
-  --run-label workstation-cuda
+  --json-output benchmark-results/parakeet-v2-cpu.json \
+  --run-label workstation-cpu
 ```
 
-Local generated-fixture CUDA smoke with timestamp gates:
+Local generated-fixture CPU smoke with timestamp gates:
 
 ```bash
 dictate benchmark \
@@ -268,16 +240,16 @@ dictate benchmark \
   --audio-root benchmark-fixtures/flite-smoke \
   --stt-backend parakeet \
   --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
+  --device cpu \
   --language en \
   --require-timestamp-metrics \
-  --max-mean-rtf 0.70 \
+  --max-mean-rtf 1.00 \
   --max-mean-segment-boundary-mae-s 0.50 \
-  --json-output benchmark-results/parakeet-v2-cuda-flite-smoke-gated.json \
-  --run-label local-cuda-flite-smoke-gated
+  --json-output benchmark-results/parakeet-v2-cpu-flite-smoke-gated.json \
+  --run-label local-cpu-flite-smoke-gated
 ```
 
-Local generated-fixture CPU/CUDA comparison:
+Local generated-fixture CPU long run:
 
 ```bash
 dictate benchmark \
@@ -292,19 +264,6 @@ dictate benchmark \
   --max-mean-segment-boundary-mae-s 1.00 \
   --json-output benchmark-results/parakeet-v2-cpu-flite-long-3x-gated.json \
   --run-label local-cpu-flite-long-3x-gated
-
-dictate benchmark \
-  --manifest benchmark-fixtures/flite-long/manifest-3x.csv \
-  --audio-root benchmark-fixtures/flite-long \
-  --stt-backend parakeet \
-  --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
-  --language en \
-  --require-timestamp-metrics \
-  --max-mean-rtf 1.00 \
-  --max-mean-segment-boundary-mae-s 1.00 \
-  --json-output benchmark-results/parakeet-v2-cuda-flite-long-3x-gated.json \
-  --run-label local-cuda-flite-long-3x-gated
 ```
 
 To run the canonical local lane matrix with consistent artifact names, use:
@@ -312,10 +271,7 @@ To run the canonical local lane matrix with consistent artifact names, use:
 ```bash
 scripts/run-transcription-lane-benchmarks.sh --dry-run
 scripts/run-transcription-lane-benchmarks.sh --lane cpu
-scripts/run-transcription-lane-benchmarks.sh --lane cuda
-scripts/run-transcription-lane-benchmarks.sh --lane cuda-multilingual
-scripts/run-transcription-lane-benchmarks.sh --lane amd
-scripts/run-transcription-lane-benchmarks.sh --lane amd-multilingual
+scripts/run-transcription-lane-benchmarks.sh --lane cpu-multilingual
 scripts/run-transcription-lane-benchmarks.sh --lane meeting
 scripts/run-transcription-lane-benchmarks.sh --lane meeting-diarizen
 scripts/run-transcription-lane-benchmarks.sh --lane meeting-sortformer
@@ -325,12 +281,9 @@ The lane runner writes the JSON artifact names consumed by
 `docs/TRANSCRIPTION_PLAN.md` and `scripts/transcription_plan_audit.py`. Use
 `--dry-run` on a target machine first to confirm the command sequence without
 loading models. By default, each lane runs `dictate doctor --quick` first for
-the exact backend/model/device so CUDA, AMD provider, or gated Meeting model
+the exact backend/model on the CPU so missing runtime or gated Meeting model
 problems fail before long benchmark work starts. Use `--skip-preflight` only
-when deliberately collecting a failed benchmark JSON artifact. AMD lanes still
-require a machine with an AMD-capable ONNX Runtime provider; the Windows VM
-DirectML smoke proves packaging/readiness only, not representative Radeon
-performance.
+when deliberately collecting a failed benchmark JSON artifact.
 
 For source installs, `./install.sh --meeting` or
 `.\install-windows.ps1 -Meeting` installs the pyannote/torch dependencies for
@@ -352,8 +305,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\collect-transc
 
 The collector writes a timestamped archive under `evidence-bundles/` containing
 the plan, benchmark JSON reports, audit output, lane dry-run output,
-`lane-readiness.txt` doctor output for CPU/CUDA/AMD/Meeting lanes, and basic
-machine/provider context. It intentionally does not collect environment
+`lane-readiness.txt` doctor output for CPU and Meeting lanes, and basic
+machine/CPU context. It intentionally does not collect environment
 variables or tokens. `evidence-bundles/` is ignored by Git so local handoff
 archives do not accidentally enter commits.
 
@@ -366,7 +319,7 @@ dictate benchmark \
   --audio-root benchmark-fixtures/flite-meeting-smoke \
   --stt-backend parakeet-pyannote \
   --model parakeet-tdt-0.6b-v2 \
-  --device cuda \
+  --device cpu \
   --language en \
   --diarize \
   --require-speaker-attribution \
@@ -375,17 +328,14 @@ dictate benchmark \
   --max-mean-der 0.20 \
   --max-mean-segment-boundary-mae-s 0.50 \
   --max-mean-speaker-confusion-rate 0.15 \
-  --json-output benchmark-results/parakeet-pyannote-cuda-flite-meeting.json \
-  --run-label workstation-cuda-flite-meeting
+  --json-output benchmark-results/parakeet-pyannote-cpu-flite-meeting.json \
+  --run-label workstation-cpu-flite-meeting
 ```
 
 The JSON report is the promotion artifact. It records backend/model/device,
-capabilities, ONNX Runtime providers, detected GPU summary lines where
-available, WER, RTF, RTFx, peak RSS when available, optional DER and speaker
-metrics, timestamp boundary-pair counts, gates, and per-sample
-hypotheses/segments. AMD promotion artifacts must include AMD/Radeon
-provider/hardware provenance in this environment block; a generic DirectML run
-without AMD/Radeon hardware is not accepted as representative Radeon evidence.
+capabilities, Python/platform/CPU context, WER, RTF, RTFx, peak RSS when
+available, optional DER and speaker metrics, timestamp boundary-pair counts,
+gates, and per-sample hypotheses/segments.
 
 Promotion gates can fail the command with exit code `2`:
 

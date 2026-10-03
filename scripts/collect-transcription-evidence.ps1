@@ -76,23 +76,18 @@ try {
             "Run the canonical benchmark commands from benchmarks/README.md, then collect this bundle again.",
             "Expected artifact names:",
             "  benchmark-results/parakeet-v2-cpu-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-v2-cuda-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-v3-cuda-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-v2-amd-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-v3-amd-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-pyannote-cuda-flite-meeting.json",
-            "  benchmark-results/parakeet-diarizen-cuda-flite-meeting.json",
-            "  benchmark-results/parakeet-sortformer-cuda-flite-meeting.json"
+            "  benchmark-results/parakeet-v3-cpu-flite-long-3x-gated.json",
+            "  benchmark-results/parakeet-pyannote-cpu-flite-meeting.json",
+            "  benchmark-results/parakeet-diarizen-cpu-flite-meeting.json",
+            "  benchmark-results/parakeet-sortformer-cpu-flite-meeting.json"
         ) | Set-Content -Path $LaneDryRun -Encoding UTF8
     }
 
     $HumanLaneDryRun = Join-Path $BundleDir "human-lane-dry-run.txt"
     if ($Bash) {
         $HumanLanes = @(
-            "cuda-human",
-            "cuda-human-v3",
-            "amd-human",
-            "amd-human-v3",
+            "cpu-human",
+            "cpu-human-v3",
             "meeting-human",
             "meeting-diarizen-human",
             "meeting-sortformer-human"
@@ -108,13 +103,11 @@ try {
             "Bash was not available on this Windows machine.",
             "Use benchmarks/README.md for curated-human promotion commands.",
             "Expected human artifact names:",
-            "  benchmark-results/parakeet-v2-cuda-human-gated.json",
-            "  benchmark-results/parakeet-v3-cuda-human-gated.json",
-            "  benchmark-results/parakeet-v2-amd-human-gated.json",
-            "  benchmark-results/parakeet-v3-amd-human-gated.json",
-            "  benchmark-results/parakeet-pyannote-cuda-human-meeting.json",
-            "  benchmark-results/parakeet-diarizen-cuda-human-meeting.json",
-            "  benchmark-results/parakeet-sortformer-cuda-human-meeting.json"
+            "  benchmark-results/parakeet-v2-cpu-human-gated.json",
+            "  benchmark-results/parakeet-v3-cpu-human-gated.json",
+            "  benchmark-results/parakeet-pyannote-cpu-human-meeting.json",
+            "  benchmark-results/parakeet-diarizen-cpu-human-meeting.json",
+            "  benchmark-results/parakeet-sortformer-cpu-human-meeting.json"
         ) | Set-Content -Path $HumanLaneDryRun -Encoding UTF8
     }
 
@@ -125,13 +118,11 @@ try {
         ""
     ) | Set-Content -Path $PromotionStatus -Encoding UTF8
     $ExpectedPromotionArtifacts = @(
-        "benchmark-results/parakeet-v2-cuda-human-gated.json",
-        "benchmark-results/parakeet-v3-cuda-human-gated.json",
-        "benchmark-results/parakeet-v2-amd-human-gated.json",
-        "benchmark-results/parakeet-v3-amd-human-gated.json",
-        "benchmark-results/parakeet-pyannote-cuda-human-meeting.json",
-        "benchmark-results/parakeet-diarizen-cuda-human-meeting.json",
-        "benchmark-results/parakeet-sortformer-cuda-human-meeting.json"
+        "benchmark-results/parakeet-v2-cpu-human-gated.json",
+        "benchmark-results/parakeet-v3-cpu-human-gated.json",
+        "benchmark-results/parakeet-pyannote-cpu-human-meeting.json",
+        "benchmark-results/parakeet-diarizen-cpu-human-meeting.json",
+        "benchmark-results/parakeet-sortformer-cpu-human-meeting.json"
     )
     foreach ($Relative in $ExpectedPromotionArtifacts) {
         $Path = Join-Path $RepoRoot $Relative
@@ -162,13 +153,10 @@ try {
     }
 
     Invoke-LaneReadiness "cpu-parakeet-v2" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "cuda-parakeet-v2" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v2", "--device", "cuda", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "cuda-parakeet-v3" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3", "--device", "cuda", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "amd-parakeet-v2" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v2", "--device", "amd", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "amd-parakeet-v3" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3", "--device", "amd", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-pyannote" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-pyannote", "--model", "parakeet-tdt-0.6b-v2", "--device", "cuda", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-diarizen" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-diarizen", "--model", "parakeet-tdt-0.6b-v2", "--device", "cuda", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-sortformer" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-sortformer", "--model", "parakeet-tdt-0.6b-v2", "--device", "cuda", "--quick", "--type-backend", "pynput")
+    Invoke-LaneReadiness "cpu-parakeet-v3" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3", "--device", "cpu", "--quick", "--type-backend", "pynput")
+    Invoke-LaneReadiness "meeting-pyannote" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-pyannote", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
+    Invoke-LaneReadiness "meeting-diarizen" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-diarizen", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
+    Invoke-LaneReadiness "meeting-sortformer" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-sortformer", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
 
     $Machine = Join-Path $BundleDir "machine.txt"
     @(
@@ -179,9 +167,11 @@ try {
         "OS: $([System.Environment]::OSVersion.VersionString)",
         "Processor architecture: $env:PROCESSOR_ARCHITECTURE",
         "",
-        "ONNX Runtime providers:"
+        "CPU:"
     ) | Set-Content -Path $Machine -Encoding UTF8
-    & $Python -c "import onnxruntime as ort; print(','.join(ort.get_available_providers()))" *>> $Machine
+    Get-CimInstance Win32_Processor |
+        ForEach-Object { "  $($_.Name) ($($_.NumberOfCores) cores, $($_.NumberOfLogicalProcessors) threads)" } |
+        Add-Content -Path $Machine -Encoding UTF8
 
     & git status --short *> (Join-Path $BundleDir "git-status.txt")
 } finally {

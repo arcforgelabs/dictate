@@ -133,87 +133,31 @@ The `faster-whisper/large-v3` bridge for this workstation was removed on
 
 ## Implementation Status
 
-The GPU paragraphs below are history: GPU lanes were dropped on 2026-10-01.
+GPU history: the CUDA and AMD lanes were dropped on 2026-10-01. Their
+benchmark, evidence and audit tooling was removed with #112; the GPU install
+paths and the engine's device selection go with #110 and #111. Their last
+evidence is in this file's git history before 2026-10-01.
 
-As of 2026-07-05, Dictate accepts `amd` as an explicit compute-device lane in
-the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
-Runtime exposes an AMD-capable execution provider. Parakeet v2 and v3 are wired
-through the ONNX/onnx-asr loader, and explicit CUDA/AMD Parakeet requests pass
-provider lists into ONNX Runtime instead of silently running the CPU path.
+Parakeet v2 and v3 are wired through the ONNX/onnx-asr loader on the CPU.
 
-Fresh local backend selection is now Parakeet-first across CPU, CUDA, and AMD
-when the Parakeet runtime is importable. This is still not a performance-promoted
-GPU lane: representative NVIDIA/AMD hardware benchmarks, package/provider
-coverage, and failure-mode testing remain before claiming CUDA or AMD speed
-targets.
-
-NVIDIA CUDA evidence on Samuel's workstation (recorded on the CUDA 12 lane,
-`onnxruntime-gpu` 1.23.2; the pin moved to 1.30 / CUDA 13 on 2026-09-20 and
-this list must be re-run before the GPU lane is called re-validated):
-
-1. `onnxruntime-gpu==1.23.2` exposes `CUDAExecutionProvider` after
-   `onnxruntime.preload_dlls()` loads the CUDA/cuDNN libraries from the venv.
-2. `dictate doctor --stt-backend parakeet --device cpu --quick` is healthy.
-3. `dictate doctor --stt-backend parakeet --device cuda --quick` is healthy.
-4. `dictate doctor --stt-backend parakeet-pyannote --device cuda --quick`
-   imports the Meeting runtime and detects CUDA, but exits with code `2` until
-   pyannote Community-1 access is configured through accepted Hugging Face model
-   terms plus token or an offline local model path.
-5. `torch==2.8.0+cu128` reports CUDA available on `NVIDIA GeForce RTX 4090`,
-   and `pyannote.audio==4.0.5` imports successfully.
-6. `dictate prepare-model --stt-backend parakeet --model parakeet-tdt-0.6b-v2
-   --device cuda --compute-type int8` loads successfully.
-7. `dictate prepare-model --stt-backend parakeet --model parakeet-tdt-0.6b-v3
-   --device cuda --compute-type int8` loads successfully.
-8. `dictate prepare-model --stt-backend parakeet-pyannote --model
-   parakeet-tdt-0.6b-v2 --device cuda --compute-type int8` now validates both
-   the Parakeet ASR resource and the pyannote speaker-attribution resource. On
-   this workstation it loads Parakeet on CUDA, then exits with code `2` because
-   pyannote Community-1 model access is not configured.
-9. Parakeet v2 and v3 CUDA smoke transcriptions on one second of silence return
-   `no_speech` with an empty transcript, as expected.
-10. The Parakeet backend exposes a plain ASR `transcribe_segments(...)` path via
+1. The Parakeet backend exposes a plain ASR `transcribe_segments(...)` path via
    `onnx-asr` timestamp adapters when available. The engine and benchmark CLI
    consume this path for non-meeting recordings so Parakeet dictation can carry
    `TranscriptSegment` timing metadata, not just plain text.
-11. A repeatable local flite-smoke benchmark fixture generator exists at
-    `scripts/generate-benchmark-fixtures.sh`. These fixtures are for speed,
-    JSON-shape, timestamp, and gate smoke evidence only; curated human speech
-    recordings are still required for final WER promotion.
-12. A repeatable longer flite benchmark fixture generator exists at
-    `scripts/generate-long-benchmark-fixtures.sh`. It writes a longer WAV plus
-    `manifest.csv` and `manifest-3x.csv` so CPU/CUDA comparisons can run
-    against the same repeated synthetic audio with less startup-overhead
-    distortion than the short smoke fixture.
-13. A repeatable local flite meeting-smoke fixture generator exists at
-    `scripts/generate-meeting-benchmark-fixtures.sh`. It produces a synthetic
-    two-speaker WAV plus timestamped `segments_json` references for meeting
-    benchmark JSON-shape, DER, speaker-confusion, and boundary-metric smoke
-    validation.
-
-Windows CUDA packaging status:
-
-1. `install-windows.ps1` now detects NVIDIA hardware through `nvidia-smi`,
-   `Win32_VideoController`, or PCI vendor `VEN_10DE`.
-2. On detected NVIDIA hardware, or when called with `-ForceCuda`, the installer
-   replaces the CPU-only `onnxruntime` wheel with
-   `onnxruntime-gpu[cuda,cudnn]>=1.30,<1.31`. This follows ONNX Runtime's
-   documented CUDA/cuDNN site-package preload path and avoids requiring a manual
-   CUDA Toolkit install for the Parakeet ONNX CUDA lane. The 1.30 wheels bundle
-   the CUDA 13 runtime, so the machine needs NVIDIA driver 580 or newer.
-3. `-NoCuda` suppresses CUDA package installation for CI, constrained machines,
-   and user support cases.
-4. The hosted npm install/update wrappers pass `-ForceCuda` and `-NoCuda`
-   through to the source installer/updater.
-5. The `win11-dev` lab VM currently exposes only a `Red Hat QXL controller`.
-   It verifies the non-NVIDIA Windows install path and startup/user-profile
-   surface. With `-ForceCuda`, it also verifies that the GPU wheel installs,
-   `onnxruntime.preload_dlls()` can load the bundled CUDA/cuDNN runtime DLLs,
-   `CUDAExecutionProvider` appears, and `dictate doctor --device cuda` is
-   healthy. It cannot prove real NVIDIA inference. That is the job of the
-   `win11-gpu` VM, which has the NVIDIA GPU on passthrough plus WSL2 for the
-   Linux CUDA lane; it is being set up as of 2026-09-20 and
-   `scripts/windows-vm-smoke.sh` still needs a target for it.
+2. A repeatable local flite-smoke benchmark fixture generator exists at
+   `scripts/generate-benchmark-fixtures.sh`. These fixtures are for speed,
+   JSON-shape, timestamp, and gate smoke evidence only; curated human speech
+   recordings are still required for final WER promotion.
+3. A repeatable longer flite benchmark fixture generator exists at
+   `scripts/generate-long-benchmark-fixtures.sh`. It writes a longer WAV plus
+   `manifest.csv` and `manifest-3x.csv` so CPU speed runs can repeat the same
+   synthetic audio with less startup-overhead distortion than the short smoke
+   fixture.
+4. A repeatable local flite meeting-smoke fixture generator exists at
+   `scripts/generate-meeting-benchmark-fixtures.sh`. It produces a synthetic
+   two-speaker WAV plus timestamped `segments_json` references for meeting
+   benchmark JSON-shape, DER, speaker-confusion, and boundary-metric smoke
+   validation.
 
 Windows VM evidence on `win11-dev`:
 
@@ -229,7 +173,7 @@ Windows VM evidence on `win11-dev`:
    and
    `C:\Users\Public\dictate-vm-smoke\source\ui-shell\src-tauri\target\release\engine\dictate-engine.exe`.
 5. Current dirty-tree no-bundle build verification after the preflighted lane
-   runner, stricter plan audit, refreshed install smoke, validated AMD evidence
+   runner, stricter plan audit, refreshed install smoke, validated evidence
    import, and segment-aware UI refresh:
    `scripts/windows-vm-smoke.sh --vm win11-dev --mode build --timeout 1800
    --keep-guest-workdir` passed on 2026-07-05. The guest rebuilt the UI with
@@ -237,7 +181,7 @@ Windows VM evidence on `win11-dev`:
    with `DICTATE_BUNDLES=no-bundle`, and verified the same no-bundle shell
    executable and engine sidecar artifact paths listed above.
 6. Current dirty-tree MSIX verification after the preflighted lane runner,
-   stricter plan audit, refreshed install smoke, validated AMD evidence import,
+   stricter plan audit, refreshed install smoke, validated evidence import,
    segment-aware UI refresh, and refreshed no-bundle build:
    `scripts/windows-vm-smoke.sh --vm win11-dev --mode msix --timeout 2400
    --keep-guest-workdir` passed on 2026-07-05. The builder regenerated the UI
@@ -259,21 +203,9 @@ Windows VM evidence on `win11-dev`:
    uninstalling cleanly. The guest selection now includes Meeting lane config
    and daemon behavior through `tests.test_config_commands`,
    `tests.test_config_selection`, and `tests.test_daemon_history`.
-8. Windows AMD DirectML packaging smoke now passes: `scripts/windows-vm-smoke.sh
-   --vm win11-dev --mode amd --timeout 1800 --keep-guest-workdir` passed on
-   2026-07-05 after the preflighted lane runner, stricter plan audit, refreshed
-   install smoke, and current package checks. This caught and fixed a marker bug
-   where Windows reports `platform_machine == "AMD64"` rather than `x86_64`;
-   the `amd` and `gpu` optional dependency markers now include both. The latest
-   AMD smoke resets Dictate app data, seeds a fresh config, runs 196 focused
-   tests with 15 skips, installs `onnxruntime-directml==1.23.0`, verifies
-   `DmlExecutionProvider`, and `dictate doctor --stt-backend parakeet --device
-   amd --quick --type-backend pynput` reports the Parakeet AMD DirectML lane
-   healthy. This proves Windows DirectML package/readiness wiring, not real
-   Radeon performance.
-9. Current dirty-tree Windows lifecycle verification after the preflighted lane
-   runner, stricter plan audit, refreshed install smoke, current package checks,
-   and refreshed AMD DirectML smoke:
+8. Current dirty-tree Windows lifecycle verification after the preflighted lane
+   runner, stricter plan audit, refreshed install smoke, and current package
+   checks:
    `scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle --timeout 2400
    --keep-guest-workdir` passed on 2026-07-05. It performed the clean install
    path with 196 focused tests and 15 skips, ran update, then ran default
@@ -294,36 +226,6 @@ smoke verifies install, update, post-update doctor, and uninstall on `win11-dev`
 the staged `available -> preparing -> ready` UX and persistent skipped-version
 state are deferred until after human testing.
 
-Current AMD readiness behavior:
-
-1. `dictate doctor --stt-backend parakeet --device amd --quick` requires an
-   ONNX Runtime AMD-capable provider.
-2. Accepted provider signals are `MIGraphXExecutionProvider`,
-   `ROCMExecutionProvider`, or `DmlExecutionProvider`.
-3. Windows AMD installs have an explicit `amd` optional dependency group that
-   installs `onnxruntime-directml`, giving ONNX Runtime a DirectML provider path
-   for Radeon customers on Windows.
-4. Linux AMD remains ROCm/MIGraphX-provider based because the exact ONNX Runtime
-   build is machine/distribution dependent. The acceptance gate is still the
-   actual exposed provider, not the presence of a package name.
-5. (Removed 2026-09-30: the faster-whisper AMD rejection went with the
-   backend.)
-6. Startup preflight blocks an explicit AMD request if the runtime cannot
-   actually satisfy it, avoiding a silent CPU fallback.
-7. `parakeet-tdt-0.6b-v3` is available as the planned multilingual Parakeet
-   lane, but it still needs benchmark and packaging validation before promotion.
-8. On Samuel's RTX 4090 workstation, `dictate doctor --stt-backend parakeet
-   --device amd --quick` fails closed because no `MIGraphXExecutionProvider`,
-   `ROCMExecutionProvider`, or `DmlExecutionProvider` is present. This is
-   expected on this NVIDIA-only machine and does not validate the required AMD
-   customer path.
-9. `dictate doctor --stt-backend parakeet --device auto --quick` does not emit
-   AMD-missing diagnostics on an NVIDIA-only machine; AMD readiness is checked
-   strictly when `--device amd` is explicitly requested.
-10. `scripts/windows-vm-smoke.sh --vm win11-dev --mode amd` validates the
-    Windows DirectML packaging path by installing `.[amd]` in the Windows guest
-    and requiring `DmlExecutionProvider` before running AMD doctor.
-
 Benchmark evidence foundation:
 
 1. `dictate benchmark` accepts plain ASR and diarized meeting runs.
@@ -336,22 +238,22 @@ Benchmark evidence foundation:
    timestamped `segments_json` references before any local Meeting backend is
    promoted.
 4. `scripts/run-transcription-lane-benchmarks.sh` is the canonical local lane
-   runner for writing the CPU, CUDA, CUDA multilingual, AMD, AMD multilingual,
-   and Meeting JSON artifacts consumed by this plan and the plan audit (its
-   CUDA and AMD lanes are unsupported since 2026-10-01 and go with #112). Use
+   runner for writing the CPU, CPU multilingual, curated-human CPU, and Meeting
+   JSON artifacts consumed by this plan and the plan audit. Every lane runs on
+   the CPU; its CUDA and AMD lanes were removed with #112. Use
    `--dry-run` first on target machines to verify the exact commands without
    loading models.
 5. The canonical lane runner preflights each selected lane with `dictate doctor
-   --quick` for the exact backend/model/device before benchmark work starts.
-   This fails fast when CUDA, an AMD provider, or the gated Meeting speaker
+   --quick` for the exact backend/model before benchmark work starts.
+   This fails fast when the Parakeet runtime or the gated Meeting speaker
    model is unavailable. `--skip-preflight` is reserved for intentionally
    collecting failed benchmark JSON artifacts.
 6. `scripts/collect-transcription-evidence.sh` and
    `scripts/collect-transcription-evidence.ps1` package the plan, benchmark
    JSON artifacts, audit output, lane-runner dry-run output, per-lane doctor
-   readiness output, and basic non-secret machine/provider context into a
+   readiness output, and basic non-secret machine/CPU context into a
    timestamped archive under
-   `evidence-bundles/` for AMD, CUDA, Windows, and Meeting test-machine
+   `evidence-bundles/` for CPU, Windows, and Meeting test-machine
    handoff. The plan audit requires that output directory to be ignored by Git.
 
 ## AMD GPU Path (dropped)
@@ -359,10 +261,11 @@ Benchmark evidence foundation:
 AMD GPU lanes were dropped on 2026-10-01 with the rest of GPU support. There is
 no AMD acceptance gate, and the readiness audit no longer requires the AMD
 promotion artifacts (`benchmark-results/parakeet-v2-amd-human-gated.json` and
-`benchmark-results/parakeet-v3-amd-human-gated.json`). The `amd` extra, the
-DirectML and ROCm/MIGraphX provider checks and the AMD benchmark runners are
-still in the tree, unsupported, until #110, #111 and #112 remove them. Earlier
-revisions of this file hold the old AMD runtime plan and gates.
+`benchmark-results/parakeet-v3-amd-human-gated.json`). The AMD benchmark
+runners and the AMD audit gate were removed with #112. The `amd` extra and the
+DirectML and ROCm/MIGraphX provider checks are still in the tree, unsupported,
+until #110 and #111 remove them. Earlier revisions of this file hold the old
+AMD runtime plan and gates.
 
 ## Meeting Stack
 
@@ -427,13 +330,12 @@ Current foundation:
     closed with runtime-readiness errors until their optional speaker
     attribution runtimes are installed.
 
-This is not yet the finished Meeting product lane, but there is now one
-curated-human local Meeting lane that passes the current speaker/timestamp
-gates: `parakeet-sortformer` on CUDA. The local DiariZen lane still needs real
-runtime loading, `parakeet-pyannote` still needs gated model access plus real
-fixture benchmarks before it can become the CPU/offline fallback, and the
-desktop UI still needs timestamp quality validation against broader real
-fixtures.
+This is not yet the finished Meeting product lane, but two curated-human
+local Meeting lanes pass the current speaker/timestamp gates on the CPU:
+`parakeet-sortformer` and `parakeet-pyannote` (2026-10-01, one OSR fixture).
+pyannote is far slower than real time on the CPU. The local DiariZen lane still
+needs real runtime loading, and the desktop UI still needs timestamp quality
+validation against broader real fixtures.
 
 The target architecture:
 
@@ -484,8 +386,8 @@ Remaining app-level gates:
 | Lane | ASR | Speaker Attribution | Decision |
 | --- | --- | --- | --- |
 | Local quality candidate | Parakeet v2/v3 | DiariZen | Selectable/preflightable as `parakeet-diarizen`; preferred if CPU benchmarks show processing time is bearable. |
-| Local live/speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. Its passing benchmark so far ran on CUDA, so it needs a CPU benchmark before promotion. |
-| Local CPU baseline | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; ship after packaging/licensing and benchmark gates pass. |
+| Local live/speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. Passes the curated-human Meeting gates on the CPU (2026-10-01, one OSR fixture). |
+| Local CPU baseline | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; passes the curated-human Meeting gates on the CPU but runs far slower than real time; ship after packaging/licensing and speed gates pass. |
 
 Every Meeting lane runs on the CPU. The GPU lanes in earlier revisions of this
 table (CUDA quality and speed, AMD) were dropped on 2026-10-01.
@@ -563,14 +465,21 @@ tester-facing checklist view. It maps the human-test acceptance items above to
 the audit gates and reports six items: CPU English, Meeting, Plain recording,
 Windows VM, Packaging and Regression. CPU English, Plain recording, Windows VM,
 Packaging and Regression are decided by files in the repository. Meeting is
-`READY` only when at least one curated-human meeting benchmark artifact in
+`READY` only when at least one curated-human CPU meeting benchmark artifact in
 `benchmark-results/` (not tracked in Git) passes its gates, so a fresh checkout
-reports Meeting as `BLOCKED`. Those artifact names still say `cuda`; renaming
-them to CPU artifacts is part of #112. No GPU item is reported. Use
+reports Meeting as `BLOCKED`. The gate reads
+`benchmark-results/parakeet-{pyannote,diarizen,sortformer}-cpu-human-meeting.json`
+and fails any artifact whose `config.device` is not `cpu`. Artifacts from
+before #112 are named `*-cuda-human-meeting.json` and are no longer read; the
+audit names them when the CPU artifacts are missing. To produce the CPU
+artifacts, run `scripts/run-transcription-lane-benchmarks.sh` with
+`DICTATE_MEETING_HUMAN_MANIFEST` pointing at the curated meeting manifest and
+`--lane meeting-sortformer-human`, `--lane meeting-human` and
+`--lane meeting-diarizen-human`. No GPU item is reported. Use
 `--readiness --json` for a machine-readable handoff report.
-Use `scripts/run-human-test-readiness.sh --device auto` on Linux source
-installs, or `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-scripts\run-human-test-readiness.ps1 -Device auto` on Windows source installs,
+Use `scripts/run-human-test-readiness.sh` on Linux source installs, or
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+scripts\run-human-test-readiness.ps1` on Windows source installs,
 to print the readiness report, run a quick local Parakeet doctor, and show the
 manual real-microphone checks that must be completed on each human-test
 machine. These scripts intentionally print, rather than auto-pass, the
@@ -584,72 +493,29 @@ tests/test_ui_server.py tests/test_daemon_history.py tests/test_engine_capabilit
 Latest full Python regression evidence: `uv run pytest -q` passed with
 `687 passed, 5 subtests passed` on 2026-07-05 after the UI mock-mode guard,
 benchmark fixture tooling, preflighted lane runner, evidence collector,
-validated AMD evidence importer, human-test readiness report and wrappers,
-Windows MSIX, Windows AMD DirectML smoke, Meeting timestamp reconciliation, segment-aware UI refresh, and separate
+validated evidence importer, human-test readiness report and wrappers,
+Windows MSIX, Meeting timestamp reconciliation, segment-aware UI refresh, and separate
 Meeting backend-lane changes, including the DiariZen and Sortformer Meeting
 lane registry additions and the source installer `--meeting` / `-Meeting`
 optional dependency path.
 `uv run python -m py_compile src/dictate/__main__.py src/dictate/benchmark.py
 src/dictate/doctor.py src/dictate/stt/factory.py src/dictate/ui_server.py`
 also succeeded on the same worktree.
-Latest readiness-report evidence: `uv run pytest
-tests/test_transcription_plan_audit.py tests/test_benchmark_fixtures.py -q`
-passed with `30 passed` after adding the `--readiness` and `--readiness --json`
-audit outputs plus source-install human-test readiness wrappers. On that worktree,
-`python3 scripts/transcription_plan_audit.py --readiness` reported every
-human-test checklist item as `READY` except AMD English and AMD multilingual,
-which were `BLOCKED` on the missing Radeon benchmark artifacts. Both AMD items
-were removed from the report on 2026-10-01.
+Latest readiness and plan-audit evidence (2026-10-01, #112, on the operator
+workstation with its local CPU Meeting artifacts): `python3
+scripts/transcription_plan_audit.py --readiness` reports every human-test
+checklist item as `READY`, unchanged from before the GPU tooling was removed.
+`python3 scripts/transcription_plan_audit.py` reports `pass` for the canonical
+plan, benchmark fixture tooling, Meeting speaker attribution, Windows VM package
+evidence, and the staged-update deferral decision. The Meeting gate now reads
+only CPU curated-human artifacts (`benchmark-results/parakeet-*-cpu-human-meeting.json`)
+and fails any artifact whose `config.device` is not `cpu`. Benchmark JSON
+reports record Python, platform, machine, and processor context only.
 `scripts/run-human-test-readiness.sh` and
 `scripts/run-human-test-readiness.ps1` provide the source-install handoff
-wrapper for that report plus the manual microphone and Meeting checks.
-`scripts/run-human-test-readiness.sh --skip-doctor --device auto` prints the
-readiness report and manual real-audio checks successfully. `bash -n
-scripts/run-human-test-readiness.sh scripts/run-amd-promotion-benchmarks.sh
-scripts/collect-transcription-evidence.sh scripts/windows-vm-smoke.sh` passed,
-and `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax --timeout 900
---keep-guest-workdir` passed after parsing
-`scripts/run-human-test-readiness.ps1` in the Windows guest.
-
-Transcription-plan audit evidence from 2026-07-05, before GPU lanes were
-dropped (the audit no longer runs the CUDA and AMD gates described here):
-`python3 scripts/transcription_plan_audit.py` reported `pass` for the canonical plan,
-benchmark fixture tooling, synthetic CUDA-vs-CPU comparison, synthetic
-multilingual CUDA evidence, documented Windows VM package evidence covering
-install, lifecycle, no-bundle build, AMD DirectML, and MSIX, and the explicit
-staged-update deferral decision. It reports `pass` for CUDA human promotion
-using the Open Speech Repository Harvard-sentence fixture:
-`benchmark-results/parakeet-v2-cuda-human-gated.json` reports
-`mean_wer=0.0500` and `mean_rtfx=36.65`, and
-`benchmark-results/parakeet-v3-cuda-human-gated.json` reports
-`mean_wer=0.3500` and `mean_rtfx=32.26`; both artifacts are marked
-`fixture_class=curated-human` and pass WER, RTF, and timestamp gates. It
-reports `pass` for Meeting speaker attribution because
-`benchmark-results/parakeet-sortformer-cuda-human-meeting.json` is a
-curated-human CUDA run with speaker attribution required and all DER,
-speaker-confusion, and timestamp gates passing. It still records
-`parakeet-pyannote` and `parakeet-diarizen` as remaining candidate blockers,
-not as blockers to having one local Meeting lane ready for human testing. It
-reports `blocked` for AMD Radeon performance because the required v2 English
-and v3 multilingual curated-human AMD artifacts are missing. Synthetic DirectML
-package readiness is not counted as representative Radeon performance evidence.
-`python3
-scripts/transcription_plan_audit.py --strict` exited `2` at the time because
-the AMD Radeon performance artifacts were missing.
-Benchmark JSON reports now include ONNX Runtime provider names and detected GPU
-summary lines where available, and the AMD gate rejects curated-human artifacts
-that lack `MIGraphXExecutionProvider`/`ROCMExecutionProvider` or
-`DmlExecutionProvider` plus AMD/Radeon hardware provenance.
-`bash -n scripts/generate-curated-human-asr-fixture.sh
-scripts/run-transcription-lane-benchmarks.sh`, `uv run pytest
-tests/test_benchmark.py tests/test_transcription_plan_audit.py -q`
-passed with `32 passed`, and `uv run python -m py_compile src/dictate/benchmark.py
-scripts/transcription_plan_audit.py tests/test_benchmark.py
-tests/test_benchmark_fixtures.py tests/test_transcription_plan_audit.py`
-succeeded on 2026-07-05. `bash -n
-scripts/windows-vm-smoke.sh scripts/transcription_plan_audit.py` also passed
-after adding the audit test to
-the Windows VM smoke selection.
+wrapper for that report plus the manual microphone and Meeting checks; both run
+the CPU doctor. Readiness and audit evidence from 2026-07-05, including the
+CUDA and AMD gates, is in earlier revisions of this file.
 
 Latest Parakeet-first local default evidence: `uv run pytest
 tests/test_default_local_model.py tests/test_main_stt_selection.py
@@ -663,7 +529,7 @@ src/dictate/stt/factory.py src/dictate/__main__.py src/dictate/doctor.py
 src/dictate/ui_server.py` succeeded; and `uv run dictate doctor --quick
 --type-backend pynput` exited `0` with `STT backend: parakeet` and `STT model:
 parakeet-tdt-0.6b-v2` on 2026-07-05. Fresh local startup defaults now choose
-Parakeet v2 for CPU, CUDA, and AMD when the Parakeet runtime is importable;
+Parakeet v2 when the Parakeet runtime is importable;
 faster-whisper was the fallback when Parakeet was unavailable until it was
 removed on 2026-09-30; Parakeet is now a core dependency.
 
@@ -679,8 +545,8 @@ stricter transcription-plan audit tests. The guest seeded
 parakeet` with `STT model: parakeet-tdt-0.6b-v2`.
 `scripts/windows-vm-smoke.sh --vm win11-dev --mode lifecycle --timeout 2400
 --keep-guest-workdir` also passed again on 2026-07-05 after the preflighted
-lane runner, stricter plan audit, refreshed install smoke, current package
-checks, and refreshed AMD DirectML smoke: the install phase ran `196` focused
+lane runner, stricter plan audit, refreshed install smoke, and current package
+checks: the install phase ran `196` focused
 Windows tests with `15 skipped`, default doctor reported Parakeet v2, update
 completed, and post-update doctor again reported Parakeet v2 before uninstall.
 Staged update preparation is deferred out of the human-test release. The
@@ -699,7 +565,7 @@ tests`.
 
 Latest Windows package evidence: `scripts/windows-vm-smoke.sh --vm win11-dev
 --mode build --timeout 1800 --keep-guest-workdir` passed on 2026-07-05 after
-the validated AMD evidence import and segment-aware UI refresh. It rebuilt the
+the validated evidence import and segment-aware UI refresh. It rebuilt the
 UI with Vite, froze and smoke-tested `dictate-engine.exe`, built
 `dictate-ui-shell.exe` with `DICTATE_BUNDLES=no-bundle`, and verified both the
 shell executable and `engine\dictate-engine.exe` sidecar. `scripts/windows-vm-smoke.sh
@@ -784,80 +650,18 @@ tests/test_benchmark.py tests/test_stt_registry.py -q` passed with `66 passed`;
 and `uv run python -m py_compile src/dictate/stt/parakeet_backend.py
 src/dictate/engine.py src/dictate/benchmark.py` succeeded on 2026-07-05.
 
-Latest AMD packaging/readiness evidence: `uv lock` resolved the `amd` optional
-extra and added `onnxruntime-directml==1.23.0`; `uv run pytest
-tests/test_stt_registry.py tests/test_default_local_model.py
-tests/test_main_stt_selection.py -q` passed with `64 passed` and verifies that
-the DirectML extra exists for Windows `AMD64`, that explicit AMD readiness
-errors point users to Windows DirectML or Linux ROCm/MIGraphX provider setup,
-that `auto` mode does not incorrectly require an AMD provider on non-AMD
-machines, and that saved AMD runtime profiles remain valid. `bash -n
-scripts/windows-vm-smoke.sh install.sh scripts/generate-long-benchmark-fixtures.sh`
-passed. `uv run python -m unittest tests.test_update_status
-tests.test_windows_platform tests.test_ui_server tests.test_model_prepare
-tests.test_default_local_model tests.test_main_stt_selection
-tests.test_stt_registry tests.test_benchmark tests.test_main_benchmark_dispatch
-tests.test_benchmark_fixtures tests.test_transcription_plan_audit
-tests.test_config_commands tests.test_config_selection tests.test_daemon_history`
-passed with `314 tests`; `uv run pytest
-tests/test_stt_registry.py tests/test_default_local_model.py
-tests/test_main_stt_selection.py tests/test_windows_platform.py -q` passed with
-`103 passed`. `scripts/windows-vm-smoke.sh --vm win11-dev --mode amd --timeout
-1800 --keep-guest-workdir` passed again on 2026-07-05 after the preflighted
-lane runner, stricter plan audit, refreshed install smoke, and current package
-checks: the guest seeded clean Dictate app data, ran `196` focused Windows tests
-with `15 skipped`, installed `onnxruntime-directml==1.23.0`, reported
-`providers=DmlExecutionProvider,CPUExecutionProvider`, and `dictate doctor
---stt-backend parakeet --device amd --quick --type-backend pynput` exited `0`
-with `ONNX Runtime AMD-capable provider detected: DmlExecutionProvider`. This is
-Windows DirectML packaging/readiness evidence; representative Radeon hardware
-benchmarks are still required before AMD promotion.
-`scripts/run-amd-promotion-benchmarks.sh` and
-`scripts/run-amd-promotion-benchmarks.ps1` are now the canonical Radeon
-test-machine wrappers for the remaining AMD promotion gate. On a machine with a
-real AMD-capable ONNX Runtime provider they prepare the curated Open Speech
-Repository ASR fixture when needed, run the English and multilingual AMD human
-lanes, write `benchmark-results/parakeet-v2-amd-human-gated.json` and
-`benchmark-results/parakeet-v3-amd-human-gated.json`, run the plan audit, and
-can package the handoff bundle with `--collect-evidence` / `-CollectEvidence`.
-The PowerShell wrapper is native for Windows Radeon/DirectML testers and does
-not require Bash or FFmpeg for the curated ASR fixture. It installs `.[amd]` by
-default so a Windows Radeon tester gets `onnxruntime-directml`; `-NoInstallAmdExtra`
-is available only for pre-prepared virtual environments.
-`scripts/import-transcription-evidence.py` imports returned Linux `.tar.gz` or
+Latest evidence-import evidence: `scripts/import-transcription-evidence.py` imports returned Linux `.tar.gz` or
 Windows `.zip` evidence bundles by copying `benchmark-results/*.json` into the
-local repo and can rerun the audit with `--audit`, so the two AMD promotion
+local repo and can rerun the audit with `--audit`, so returned promotion
 artifacts can be validated without manual file copying. It now validates each
 candidate artifact as benchmark JSON with `config` and `summary` objects before
 copying, supports evidence directories plus `.zip`, `.tar.gz`, and `.tgz`
 bundles, and ignores unsafe archive member paths. `uv run pytest
 tests/test_benchmark_fixtures.py tests/test_transcription_plan_audit.py -q`
 passed with `27 passed` on 2026-07-05 after adding zip dry-run, tar import,
-no-overwrite, malformed-JSON rejection, promotion-runner, and audit coverage.
-`scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax --timeout 900
---keep-guest-workdir` passed on 2026-07-05 after adding the wrapper to the
-Windows syntax smoke, and the guest parsed
-`scripts/run-amd-promotion-benchmarks.ps1` successfully. On this workstation,
-ONNX Runtime exposes `TensorrtExecutionProvider`, `CUDAExecutionProvider`, and
-`CPUExecutionProvider` only; `lspci` shows an AMD/ATI Raphael integrated VGA
-device but no `MIGraphXExecutionProvider`, `ROCMExecutionProvider`, or
-`DmlExecutionProvider`, so this machine still cannot produce representative AMD
-promotion artifacts.
+no-overwrite, malformed-JSON rejection, and audit coverage.
 
-Latest local CUDA benchmark artifact evidence: `scripts/generate-benchmark-fixtures.sh`
-generated a two-sample flite smoke manifest under `benchmark-fixtures/flite-smoke/`;
-`uv run dictate benchmark --manifest benchmark-fixtures/flite-smoke/manifest.csv
---audio-root benchmark-fixtures/flite-smoke --stt-backend parakeet --model
-parakeet-tdt-0.6b-v2 --device cuda --language en --require-timestamp-metrics
---max-mean-rtf 0.70 --max-mean-segment-boundary-mae-s 0.50 --json-output
-benchmark-results/parakeet-v2-cuda-flite-smoke-gated.json --run-label
-local-rtx4090-flite-smoke-gated` passed on 2026-07-05. The artifact reports
-`mean_rtf=0.1433`, `mean_rtfx=10.78`, `mean_der=null`,
-`mean_segment_boundary_mae_s=0.30`, and `segment_boundary_pair_count=4`; the
-RTF, timestamp-MAE, and required timestamp metric gates passed. This is smoke
-evidence only, not final curated WER or Meeting DER evidence.
-
-Latest CPU-vs-CUDA Parakeet v2 comparison evidence:
+Latest CPU Parakeet v2 long-fixture evidence:
 `scripts/generate-long-benchmark-fixtures.sh` generated a longer synthetic
 flite fixture under `benchmark-fixtures/flite-long/` with a 47.81s WAV and a
 three-row repeat manifest. `uv run dictate benchmark --manifest
@@ -867,27 +671,10 @@ parakeet-tdt-0.6b-v2 --device cpu --language en --require-timestamp-metrics
 --max-mean-rtf 1.00 --max-mean-segment-boundary-mae-s 1.00 --json-output
 benchmark-results/parakeet-v2-cpu-flite-long-3x-gated.json --run-label
 local-cpu-flite-long-3x-gated` passed through the preflighted canonical lane
-runner with `mean_rtf=0.0345`, `mean_rtfx=28.98`, `mean_wer=0.0976`, and
-`mean_segment_boundary_mae_s=0.3830`. The same runner on CUDA, written to
-`benchmark-results/parakeet-v2-cuda-flite-long-3x-gated.json`, passed with
-`mean_rtf=0.0289`, `mean_rtfx=34.78`, `mean_wer=0.0976`, and the same
-timestamp MAE. Both artifacts were refreshed on 2026-07-05 through
-`scripts/run-transcription-lane-benchmarks.sh`, including lane preflight doctor
-checks. This gives current same-fixture speed evidence for the NVIDIA lane on
-the RTX 4090, but remains synthetic; curated human speech benchmarks are still
-required before final product promotion.
-
-Latest Parakeet v3 CUDA multilingual-lane evidence:
-`scripts/run-transcription-lane-benchmarks.sh --lane cuda-multilingual` passed
-on 2026-07-05 and wrote
-`benchmark-results/parakeet-v3-cuda-flite-long-3x-gated.json`. The artifact
-uses `model=parakeet-tdt-0.6b-v3`, `device=cuda`, and reports
-`mean_rtf=0.0283`, `mean_rtfx=35.90`, `mean_wer=0.1301`,
-`mean_segment_boundary_mae_s=0.2630`, and `segment_boundary_pair_count=6`.
-This run included the Parakeet v3 CUDA preflight doctor and proves the wired v3
-CUDA lane can produce timestamped benchmark output on the local NVIDIA
-workstation. It remains synthetic English fixture evidence, not final
-multilingual human-speech promotion evidence.
+runner on 2026-07-05 with `mean_rtf=0.0345`, `mean_rtfx=28.98`,
+`mean_wer=0.0976`, and `mean_segment_boundary_mae_s=0.3830`. It remains
+synthetic; curated human speech benchmarks are still required before final
+product promotion.
 
 Latest long fixture and lane-runner reproducibility evidence: `bash -n
 scripts/generate-long-benchmark-fixtures.sh scripts/generate-benchmark-fixtures.sh
@@ -895,11 +682,11 @@ scripts/generate-meeting-benchmark-fixtures.sh
 scripts/run-transcription-lane-benchmarks.sh
 scripts/collect-transcription-evidence.sh` passed, and `uv run pytest
 tests/test_benchmark_fixtures.py -q` passed with `8 passed` on 2026-07-05. The
-lane runner dry-run lists the canonical CPU, CUDA, multilingual CUDA, AMD,
-multilingual AMD, and Meeting smoke artifact names before loading models, and
-shows the preflight doctor commands that will fail fast for missing CUDA, AMD
-provider, or gated Meeting model access. It also exposes explicit
-`cuda-human`, `cuda-human-v3`, `amd-human`, `amd-human-v3`, `meeting-human`,
+lane runner dry-run lists the canonical CPU, multilingual CPU, and Meeting
+smoke artifact names before loading models, and shows the preflight doctor
+commands that will fail fast for a missing runtime or gated Meeting model
+access (lane set reduced to CPU on 2026-10-01, #112). It also exposes explicit
+`cpu-human`, `cpu-human-v3`, `meeting-human`,
 `meeting-diarizen-human`, and `meeting-sortformer-human` lanes that require
 curated manifests through `DICTATE_HUMAN_MANIFEST` or
 `DICTATE_MEETING_HUMAN_MANIFEST` and write artifacts marked
@@ -908,11 +695,11 @@ now validates curated-human manifests before model loading, rejecting generated
 `benchmark-fixtures/` paths, `flite` sample IDs or filenames, missing audio
 files, missing timestamp references, and missing timestamped speaker references
 for Meeting/DER lanes. The Bash and PowerShell evidence collectors now include
-`human-lane-dry-run.txt` with the exact curated-human CUDA, AMD, and Meeting
+`human-lane-dry-run.txt` with the exact curated-human CPU and Meeting
 promotion commands plus `promotion-status.txt` showing whether each required
 promotion artifact is present or missing. The collector dry-runs list the
 handoff bundle contents without exposing token or environment-variable values
-and include `lane-readiness.txt` with quick doctor output for CPU, CUDA, AMD,
+and include `lane-readiness.txt` with quick doctor output for CPU,
 pyannote, DiariZen, and Sortformer lanes. The default `evidence-bundles/`
 output path is ignored by Git.
 `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax --timeout 900
@@ -927,31 +714,30 @@ Repository Harvard-sentence speakers with timestamped `Speaker 1` and
 `Speaker 2` turns. `uv run python -m dictate benchmark --manifest
 benchmark-curated/open-speech-meeting/manifest.csv --audio-root
 benchmark-curated/open-speech-meeting --stt-backend parakeet-pyannote --model
-parakeet-tdt-0.6b-v2 --device cuda --fixture-class curated-human --diarize
+parakeet-tdt-0.6b-v2 --fixture-class curated-human --diarize
 --require-speaker-attribution --require-timestamp-metrics
 --require-der-metrics --validate-manifest-only` passed on 2026-07-05. This
 proves the curated-human Meeting manifest is valid and ready for the three
 Meeting runtime lanes; it does not prove speaker-attribution runtime quality
 until `parakeet-pyannote`, `parakeet-diarizen`, or `parakeet-sortformer` can
-load and write their `*-cuda-human-meeting.json` artifacts.
-The curated-human Meeting candidate benchmarks were also run so they could
-write comparable candidate artifacts:
-`benchmark-results/parakeet-pyannote-cuda-human-meeting.json` and
-`benchmark-results/parakeet-diarizen-cuda-human-meeting.json` are marked
-`fixture_class=curated-human` and still fail `benchmark_runtime` on the same
-curated-human Meeting sample. The pyannote lane needs accepted
-`pyannote/speaker-diarization-community-1` terms plus a Hugging Face token or
-offline model checkout; the DiariZen lane needs an importable DiariZen runtime.
-`benchmark-results/parakeet-sortformer-cuda-human-meeting.json` is now a real
-curated-human CUDA run: NeMo ASR imports, the NVIDIA Streaming Sortformer v2.1
-model loads from the Hugging Face cache, and diarization inference runs. After
-correcting the OSR meeting fixture to use the actual Harvard sentences in the
-audio and speech-only sentence timestamps, and after changing benchmark speaker
-metrics to score by timestamp overlap rather than segment index,
-`meeting-sortformer-human` passes the current Meeting gates with
-`mean_rtfx=3.00`, `mean_wer=0.2200`, `mean_der=0.1920`,
-`mean_speaker_confusion_rate=0.0867`, and
-`mean_segment_boundary_mae_s=0.2258`.
+load and write their `*-cpu-human-meeting.json` artifacts.
+CPU curated-human Meeting evidence (2026-10-01, #112; AMD Ryzen 9 7950X,
+16 cores): `scripts/run-transcription-lane-benchmarks.sh` lanes
+`meeting-sortformer-human`, `meeting-human` and `meeting-diarizen-human`, run on
+`benchmark-curated/open-speech-meeting`, wrote
+`benchmark-results/parakeet-{sortformer,pyannote,diarizen}-cpu-human-meeting.json`,
+all with `device=cpu` and `fixture_class=curated-human`:
+
+| Lane | WER | DER | Speaker confusion | Boundary MAE (s) | RTFx | Gates |
+| --- | --- | --- | --- | --- | --- | --- |
+| `parakeet-sortformer` | 0.22 | 0.192 | 0.087 | 0.226 | 1.84 | pass |
+| `parakeet-pyannote` | 0.04 | 0.104 | 0.000 | 0.123 | 0.16 | pass |
+| `parakeet-diarizen` | - | - | - | - | - | `benchmark_runtime` (runtime not importable) |
+
+Sortformer needs the `sortformer` optional dependency group (NeMo ASR).
+pyannote needs Community-1 model access and took 145 s for 23 s of audio, so it
+passes the quality gates but not a usable speed bar. This is one short fixture;
+broader meeting fixtures are still needed before a long-term default.
 
 Latest meeting fixture evidence: `scripts/generate-meeting-benchmark-fixtures.sh`
 generated `benchmark-fixtures/flite-meeting-smoke/manifest.csv` with one
@@ -962,48 +748,11 @@ tests/test_benchmark.py tests/test_main_benchmark_dispatch.py -q` passed on
 recordings are still required before promoting a Meeting speaker-attribution
 lane.
 
-Latest `parakeet-pyannote` meeting benchmark attempt: `uv run dictate benchmark
---manifest benchmark-fixtures/flite-meeting-smoke/manifest.csv --audio-root
-benchmark-fixtures/flite-meeting-smoke --stt-backend parakeet-pyannote --model
-parakeet-tdt-0.6b-v2 --device cuda --language en --diarize
---require-speaker-attribution --require-timestamp-metrics --require-der-metrics
---max-mean-der 0.20 --max-mean-segment-boundary-mae-s 0.50
---max-mean-speaker-confusion-rate 0.15 --json-output
-benchmark-results/parakeet-pyannote-cuda-flite-meeting.json --run-label
-local-rtx4090-flite-meeting-gated` exited with code `2` on 2026-07-05 and
-wrote the JSON artifact. The failed `benchmark_runtime` gate records that
-pyannote Community-1 still needs either accepted Hugging Face model terms plus
-`DICTATE_HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN`/`HF_TOKEN`, or an offline
-`DICTATE_PYANNOTE_MODEL_PATH` checkout. This proves the benchmark wiring reaches
-the real meeting backend, but the local meeting lane is not promotion-ready.
-
-Latest DiariZen/Sortformer meeting benchmark attempts:
-`scripts/run-transcription-lane-benchmarks.sh --lane meeting-diarizen
---skip-preflight` and `scripts/run-transcription-lane-benchmarks.sh --lane
-meeting-sortformer --skip-preflight` both exited with code `2` on 2026-07-05
-and wrote `benchmark-results/parakeet-diarizen-cuda-flite-meeting.json` and
-`benchmark-results/parakeet-sortformer-cuda-flite-meeting.json`. The failed
-`benchmark_runtime` gates record that the DiariZen runtime is not importable.
-Sortformer has since moved past the missing-runtime blocker through the
-`sortformer` optional dependency group in `pyproject.toml`, which installs NeMo
-ASR with compatible `transformers`/`tokenizers` pins. `uv run python -m dictate
-doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device
-cuda --quick --type-backend pynput` now exits `0` on the RTX 4090 workstation.
-The curated-human Sortformer benchmark runs and writes DER/timestamp metrics
-and now passes the current quality gates on the OSR meeting fixture, so it is
-the first local Meeting lane promoted for human testing. It still needs broader
-meeting fixtures before becoming the long-term default.
-
 Latest `parakeet-pyannote` preparation evidence: `uv run pytest
 tests/test_model_prepare.py tests/test_parakeet_pyannote_backend.py
 tests/test_main_prepare_dispatch.py -q` passed with `20 passed`, and `uv run
 python -m py_compile src/dictate/model_prepare.py
-src/dictate/stt/parakeet_pyannote_backend.py` succeeded on 2026-07-05. `uv run
-dictate prepare-model --stt-backend parakeet-pyannote --model
-parakeet-tdt-0.6b-v2 --device cuda --compute-type int8` now reaches the real
-meeting preparation path: Parakeet CUDA loads, then preparation exits with code
-`2` because pyannote Community-1 model access still needs accepted Hugging Face
-terms plus a token or an offline model path.
+src/dictate/stt/parakeet_pyannote_backend.py` succeeded on 2026-07-05.
 
 Latest Meeting timestamp reconciliation evidence: `uv run pytest
 tests/test_parakeet_pyannote_backend.py tests/test_engine_capabilities.py
@@ -1063,7 +812,7 @@ accept `--meeting` / `--no-meeting` and `DICTATE_INSTALL_MEETING=1`; Windows
 source installs accept `-Meeting`. Both install paths add the existing
 `meeting` optional dependency group for the `parakeet-pyannote` lane.
 Sortformer runtime setup is captured as the explicit `sortformer` optional
-dependency group for CUDA tester machines; DiariZen remains external runtime
+dependency group; DiariZen remains external runtime
 setup until a stable package/install path is selected.
 
 Latest Meeting backend readiness evidence: no `DICTATE_HF_TOKEN`,
@@ -1074,8 +823,10 @@ pytest tests/test_stt_registry.py tests/test_ui_server.py
 tests/test_model_prepare.py -q` passed with `76 passed`; `uv run python -m
 py_compile src/dictate/stt/factory.py src/dictate/ui_server.py
 src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
---stt-backend parakeet-pyannote --device cuda --quick` exited with code `2` on
-2026-07-05, reporting the missing gated pyannote model access as `[FAIL]`.
+--stt-backend parakeet-pyannote --quick` exited with code `2` on 2026-07-05,
+reporting the missing gated pyannote model access as `[FAIL]`. Superseded on
+2026-10-01: pyannote access is configured on this workstation and the CPU
+curated-human run passes (see the CPU Meeting evidence above).
 
 ## Implementation Phases
 
@@ -1099,7 +850,7 @@ src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
      surfaces and benchmark timestamp quality.
 
 4. **Remove Whisper product dependency** — done 2026-09-30, ahead of the
-   Parakeet AMD and multilingual benchmark gates, by owner decision. The desktop
+   Parakeet multilingual benchmark gate, by owner decision. The desktop
    UI already forced Parakeet, and faster-whisper pulled a GPL FFmpeg build
    (through PyAV) into the bundle. Benchmark comparison rows stay as historical
    evidence only.
@@ -1205,7 +956,3 @@ Archived notes are reference material only. They do not override this plan.
 - pyannote Community-1 model card: https://huggingface.co/pyannote/speaker-diarization-community-1
 - Diarization benchmark paper: https://arxiv.org/html/2509.26177v1
 - NVIDIA Streaming Sortformer blog: https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/
-- ONNX Runtime MIGraphX Execution Provider: https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html
-- ONNX Runtime ROCm Execution Provider note: https://onnxruntime.ai/docs/execution-providers/ROCm-ExecutionProvider.html
-- AMD ROCm ONNX Runtime install notes: https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-onnx.html
-- AMD GPUOpen DirectML/ONNX Runtime guide: https://gpuopen.com/learn/onnx-directlml-execution-provider-guide-part1/

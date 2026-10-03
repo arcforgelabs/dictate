@@ -31,18 +31,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
             _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
@@ -68,52 +56,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-human-gated.json",
-                device="cuda",
-                rtfx=14.0,
-                model="parakeet-tdt-0.6b-v2",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-human-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-amd-human-gated.json",
-                device="amd",
-                rtfx=12.0,
-                model="parakeet-tdt-0.6b-v2",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-                amd_hardware=True,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-amd-human-gated.json",
-                device="amd",
-                rtfx=13.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-                amd_hardware=True,
-            )
             _write_meeting_success(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
@@ -129,52 +71,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
                 device="cpu",
                 rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-human-gated.json",
-                device="cuda",
-                rtfx=14.0,
-                model="parakeet-tdt-0.6b-v2",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-human-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-amd-human-gated.json",
-                device="amd",
-                rtfx=12.0,
-                model="parakeet-tdt-0.6b-v2",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-                amd_hardware=True,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-amd-human-gated.json",
-                device="amd",
-                rtfx=13.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-                fixture_class="curated-human",
-                amd_hardware=True,
             )
             _write_meeting_success(root)
 
@@ -193,18 +89,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
             _write_meeting_failure(root)
             _write_single_meeting_success(root, "parakeet-sortformer")
 
@@ -213,6 +97,56 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
         self.assertEqual(gates["meeting_speaker_attribution"].status, "pass")
         self.assertIn("parakeet-sortformer DER", gates["meeting_speaker_attribution"].detail)
         self.assertIn("remaining candidates", gates["meeting_speaker_attribution"].detail)
+
+    def test_audit_rejects_meeting_artifact_that_was_not_a_cpu_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_minimal_plan(root)
+            _write_scripts(root)
+            _write_meeting_failure(root)
+            _write_single_meeting_success(root, "parakeet-sortformer", device="cuda")
+
+            gates = {gate.name: gate for gate in audit_module.audit(root)}
+
+        self.assertEqual(gates["meeting_speaker_attribution"].status, "fail")
+        self.assertIn("not a CPU run", gates["meeting_speaker_attribution"].detail)
+
+    def test_audit_names_old_meeting_artifacts_it_no_longer_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_minimal_plan(root)
+            _write_scripts(root)
+            # A workstation that passed before the gate moved to CPU runs: only
+            # the old-named artifact exists.
+            old = root / "benchmark-results" / "parakeet-sortformer-cuda-human-meeting.json"
+            old.parent.mkdir(parents=True)
+            old.write_text("{}", encoding="utf-8")
+
+            gates = {gate.name: gate for gate in audit_module.audit(root)}
+
+        meeting = gates["meeting_speaker_attribution"]
+        self.assertEqual(meeting.status, "blocked")
+        self.assertIn("parakeet-sortformer-cpu-human-meeting.json", meeting.detail)
+        self.assertIn("not read", meeting.detail)
+        self.assertIn("parakeet-sortformer-cuda-human-meeting.json", meeting.detail)
+
+    def test_audit_without_any_meeting_artifacts_lists_only_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_minimal_plan(root)
+            _write_scripts(root)
+
+            gates = {gate.name: gate for gate in audit_module.audit(root)}
+
+        meeting = gates["meeting_speaker_attribution"]
+        self.assertEqual(meeting.status, "blocked")
+        self.assertIn("missing curated-human meeting benchmark artifacts", meeting.detail)
+        self.assertNotIn("not read", meeting.detail)
+
+    def test_fixture_tooling_gate_requires_no_gpu_tooling(self) -> None:
+        source = AUDIT_PATH.read_text(encoding="utf-8").lower()
+        for gpu_marker in ("cuda", "amd", "directml", "dmlexecutionprovider", "gpu"):
+            self.assertNotIn(gpu_marker, source)
 
     def test_audit_rejects_lane_runner_without_preflight_markers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -223,18 +157,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
                 device="cpu",
                 rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
             )
             _write_meeting_failure(root)
 
@@ -252,18 +174,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
                 device="cpu",
                 rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
             )
             _write_meeting_failure(root)
 
@@ -283,18 +193,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
             _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
@@ -312,18 +210,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 device="cpu",
                 rtfx=10.0,
             )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
-            )
             _write_meeting_failure(root)
 
             gates = {gate.name: gate for gate in audit_module.audit(root)}
@@ -340,18 +226,6 @@ class TranscriptionPlanAuditTests(unittest.TestCase):
                 root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json",
                 device="cpu",
                 rtfx=10.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=14.0,
-            )
-            _write_benchmark(
-                root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json",
-                device="cuda",
-                rtfx=15.0,
-                model="parakeet-tdt-0.6b-v3",
-                boundary_pairs=4,
             )
             _write_meeting_failure(root)
 
@@ -428,7 +302,6 @@ def _write_minimal_plan(
                 "mode lifecycle --timeout 2400",
                 *build_markers,
                 *update_markers,
-                "mode amd --timeout 1800",
                 "mode msix --timeout 2400",
                 "evidence collector dry-run",
                 "314",
@@ -455,8 +328,6 @@ def _write_scripts(
         "generate-long-benchmark-fixtures.sh",
         "generate-meeting-benchmark-fixtures.sh",
         "import-transcription-evidence.py",
-        "run-amd-promotion-benchmarks.sh",
-        "run-amd-promotion-benchmarks.ps1",
         "run-human-test-readiness.sh",
         "run-human-test-readiness.ps1",
     ]:
@@ -465,32 +336,14 @@ def _write_scripts(
         "#!/usr/bin/env bash\n"
         "# --skip-preflight doctor --stt-backend parakeet-pyannote "
         "--stt-backend parakeet-diarizen --stt-backend parakeet-sortformer "
-        "cuda-human amd-human meeting-human --fixture-class --device amd\n"
+        "cpu-human meeting-human --fixture-class --device cpu\n"
         if preflighted_runner
         else "#!/usr/bin/env bash\n"
     )
     (scripts / "run-transcription-lane-benchmarks.sh").write_text(runner_text, encoding="utf-8")
-    amd_runner_text = (
-        "#!/usr/bin/env bash\n"
-        "# generate-curated-human-asr-fixture.sh amd-human amd-human-v3 "
-        "transcription_plan_audit.py collect-transcription-evidence.sh\n"
-    )
-    (scripts / "run-amd-promotion-benchmarks.sh").write_text(
-        amd_runner_text,
-        encoding="utf-8",
-    )
-    amd_runner_ps1_text = (
-        "# parakeet-v2-amd-human-gated.json parakeet-v3-amd-human-gated.json "
-        "DmlExecutionProvider transcription_plan_audit.py collect-transcription-evidence.ps1\n"
-    )
-    (scripts / "run-amd-promotion-benchmarks.ps1").write_text(
-        amd_runner_ps1_text,
-        encoding="utf-8",
-    )
     readiness_runner_text = (
         "#!/usr/bin/env bash\n"
-        "# transcription_plan_audit.py --readiness dictate doctor dictate --once "
-        "run-amd-promotion-benchmarks.sh\n"
+        "# transcription_plan_audit.py --readiness dictate doctor dictate --once\n"
     )
     (scripts / "run-human-test-readiness.sh").write_text(
         readiness_runner_text,
@@ -498,7 +351,7 @@ def _write_scripts(
     )
     readiness_runner_ps1_text = (
         "# transcription_plan_audit.py --readiness -m dictate doctor "
-        "-m dictate --once run-amd-promotion-benchmarks.ps1\n"
+        "-m dictate --once\n"
     )
     (scripts / "run-human-test-readiness.ps1").write_text(
         readiness_runner_ps1_text,
@@ -509,9 +362,9 @@ def _write_scripts(
         collector_text += (
             "# benchmark-results/*.json transcription_plan_audit.py --json "
             "lane-runner-dry-run.txt human-lane-dry-run.txt lane-readiness.txt "
-            "promotion-status.txt cuda-parakeet-v2 meeting-sortformer machine.txt "
-            "parakeet-v2-cuda-human-gated.json parakeet-v2-amd-human-gated.json "
-            "parakeet-pyannote-cuda-human-meeting.json\n"
+            "promotion-status.txt cpu-parakeet-v2 meeting-sortformer machine.txt "
+            "parakeet-v2-cpu-human-gated.json "
+            "parakeet-pyannote-cpu-human-meeting.json\n"
         )
     (scripts / "collect-transcription-evidence.sh").write_text(collector_text, encoding="utf-8")
     ps_collector_text = "param()\n"
@@ -519,12 +372,12 @@ def _write_scripts(
         ps_collector_text += (
             "# benchmark-results/*.json transcription_plan_audit.py --json "
             "lane-runner-dry-run.txt human-lane-dry-run.txt lane-readiness.txt "
-            "promotion-status.txt cuda-parakeet-v2 meeting-sortformer machine.txt Compress-Archive "
-            "parakeet-v2-amd-flite-long-3x-gated.json "
-            "parakeet-diarizen-cuda-flite-meeting.json "
-            "parakeet-sortformer-cuda-flite-meeting.json "
-            "parakeet-v2-cuda-human-gated.json parakeet-v2-amd-human-gated.json "
-            "parakeet-pyannote-cuda-human-meeting.json\n"
+            "promotion-status.txt cpu-parakeet-v2 meeting-sortformer machine.txt Compress-Archive "
+            "parakeet-v2-cpu-flite-long-3x-gated.json "
+            "parakeet-diarizen-cpu-flite-meeting.json "
+            "parakeet-sortformer-cpu-flite-meeting.json "
+            "parakeet-v2-cpu-human-gated.json "
+            "parakeet-pyannote-cpu-human-meeting.json\n"
         )
     (scripts / "collect-transcription-evidence.ps1").write_text(ps_collector_text, encoding="utf-8")
 
@@ -537,7 +390,6 @@ def _write_benchmark(
     model: str = "parakeet-tdt-0.6b-v2",
     boundary_pairs: int = 0,
     fixture_class: str = "synthetic",
-    amd_hardware: bool = False,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -552,33 +404,20 @@ def _write_benchmark(
                     "segment_boundary_pair_count": boundary_pairs,
                 },
                 "gates": [{"name": "mean_rtf", "passed": True}],
-                "environment": _benchmark_environment(amd_hardware=amd_hardware),
             }
         ),
         encoding="utf-8",
     )
 
 
-def _benchmark_environment(*, amd_hardware: bool = False) -> dict[str, object]:
-    if amd_hardware:
-        return {
-            "onnxruntime_providers": ["DmlExecutionProvider", "CPUExecutionProvider"],
-            "gpu_summary": ["AMD Radeon RX 7800 XT"],
-        }
-    return {
-        "onnxruntime_providers": ["CPUExecutionProvider"],
-        "gpu_summary": ["NVIDIA GeForce RTX 4090"],
-    }
-
-
 def _write_meeting_failure(root: Path) -> None:
     for backend in ("parakeet-pyannote", "parakeet-diarizen", "parakeet-sortformer"):
-        path = root / "benchmark-results" / f"{backend}-cuda-human-meeting.json"
+        path = root / "benchmark-results" / f"{backend}-cpu-human-meeting.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
-                    "config": {"backend": backend, "device": "cuda", "diarize": True},
+                    "config": {"backend": backend, "device": "cpu", "diarize": True},
                     "summary": {"mean_der": None},
                     "gates": [{"name": "benchmark_runtime", "passed": False}],
                 }
@@ -592,15 +431,15 @@ def _write_meeting_success(root: Path) -> None:
         _write_single_meeting_success(root, backend)
 
 
-def _write_single_meeting_success(root: Path, backend: str) -> None:
-    path = root / "benchmark-results" / f"{backend}-cuda-human-meeting.json"
+def _write_single_meeting_success(root: Path, backend: str, *, device: str = "cpu") -> None:
+    path = root / "benchmark-results" / f"{backend}-cpu-human-meeting.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "config": {
                     "backend": backend,
-                    "device": "cuda",
+                    "device": device,
                     "diarize": True,
                     "require_speaker_attribution": True,
                     "fixture_class": "curated-human",
