@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "dictate"
-version = "2026.10.1"
+version = "2026.10.2"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
