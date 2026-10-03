@@ -244,6 +244,50 @@ class ClipboardKeeperTests(unittest.TestCase):
         self.assertEqual(session.restored_at, 0.0)
         self.assertTrue(session.closed)
 
+    def test_a_failure_after_the_clipboard_was_replaced_restores_it(self) -> None:
+        for stage in ("write", "after_write", "before_paste"):
+            with self.subTest(stage=stage):
+                board = FakeBoard({TEXT: b"old"})
+                clock = FakeClock()
+
+                class FailingSession(FakeSession):
+                    def write_text(self, text: str) -> None:
+                        super().write_text(text)
+                        if stage == "write":
+                            raise OutputError("clipboard command failed: half written")
+
+                    def before_paste(self) -> None:
+                        if stage == "before_paste":
+                            raise OSError("pump failed")
+
+                def after_write(session) -> None:
+                    if stage == "after_write":
+                        raise OutputError("xclip failed")
+
+                session = FailingSession(board, clock)
+                keeper = make_keeper(session, clock)
+                with self.assertRaises((OutputError, OSError)):
+                    keeper.paste("dictated words", lambda: None, after_write=after_write)
+
+                self.assertEqual(board.formats, {TEXT: b"old"})
+                self.assertTrue(keeper.last_outcome.restored)
+                self.assertTrue(session.closed)
+
+    def test_a_write_that_never_touched_the_clipboard_restores_nothing(self) -> None:
+        board = FakeBoard({TEXT: b"old"})
+
+        class BusySession(FakeSession):
+            def write_text(self, text: str) -> None:
+                raise OutputError("clipboard command failed: busy")
+
+        session = BusySession(board, self.clock)
+        keeper = make_keeper(session, self.clock)
+        with self.assertRaises(OutputError):
+            keeper.paste("dictated words", lambda: None)
+
+        self.assertIsNone(session.restored_at)
+        self.assertEqual(board.formats, {TEXT: b"old"})
+
     def test_dictation_still_pastes_when_the_clipboard_cannot_be_saved(self) -> None:
         board = FakeBoard({TEXT: b"old"})
         session = FakeSession(board, self.clock)

@@ -383,5 +383,113 @@ class RealXclipTests(unittest.TestCase):
         self.assertEqual(self.read("primary", "UTF8_STRING"), b"primary before")
 
 
+def _have_wayland_clipboard() -> bool:
+    return (
+        not sys.platform.startswith("win")
+        and bool(os.environ.get("WAYLAND_DISPLAY"))
+        and shutil.which("wl-copy") is not None
+        and shutil.which("wl-paste") is not None
+    )
+
+
+@unittest.skipUnless(
+    _have_wayland_clipboard(),
+    "needs a Wayland compositor and wl-clipboard (CI runs these under headless sway)",
+)
+class RealWaylandTests(unittest.TestCase):
+    """Real wl-copy and wl-paste against a real compositor."""
+
+    TEXT = "text/plain;charset=utf-8"
+
+    def tearDown(self) -> None:
+        subprocess.run(["wl-copy", "--clear"], check=False)
+        subprocess.run(["pkill", "-x", "wl-copy"], check=False)
+
+    @staticmethod
+    def copy(data: bytes, mime: str) -> None:
+        subprocess.run(["wl-copy", "--type", mime], input=data, check=True, timeout=5)
+
+    @staticmethod
+    def read(mime: str) -> bytes | None:
+        done = subprocess.run(
+            ["wl-paste", "--no-newline", "--type", mime], capture_output=True, timeout=5, check=False
+        )
+        return done.stdout if done.returncode == 0 else None
+
+    @staticmethod
+    def types() -> list[str] | None:
+        done = subprocess.run(["wl-paste", "--list-types"], capture_output=True, timeout=5, check=False)
+        if done.returncode != 0:
+            return None
+        return done.stdout.decode().split()
+
+    def paste_with_reader(self, keeper: ClipboardKeeper, text: str) -> list[bytes | None]:
+        received: list[bytes | None] = []
+        readers: list[threading.Thread] = []
+
+        def paste() -> None:
+            reader = threading.Thread(target=lambda: received.append(self.read(self.TEXT)))
+            readers.append(reader)
+            reader.start()
+
+        keeper.paste(text, paste)
+        for reader in readers:
+            reader.join(5)
+        return received
+
+    @staticmethod
+    def keeper() -> ClipboardKeeper:
+        return ClipboardKeeper(
+            lambda plain: WaylandClipboardSession(plain_text=plain),
+            background=False,
+            no_signal_delay=0.5,
+        )
+
+    def test_image_comes_back_after_the_target_reads_the_text(self) -> None:
+        image = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 4
+        self.copy(image, "image/png")
+
+        keeper = self.keeper()
+        received = self.paste_with_reader(keeper, "dictated on wayland")
+
+        self.assertEqual(received, [b"dictated on wayland"])
+        self.assertTrue(keeper.last_outcome.restored, keeper.last_outcome)
+        self.assertEqual(self.read("image/png"), image)
+
+    def test_text_comes_back(self) -> None:
+        self.copy("copied before ünïcode".encode(), self.TEXT)
+
+        keeper = self.keeper()
+        received = self.paste_with_reader(keeper, "dictated on wayland")
+
+        self.assertEqual(received, [b"dictated on wayland"])
+        self.assertEqual(self.read(self.TEXT), "copied before ünïcode".encode())
+
+    def test_empty_clipboard_is_empty_again(self) -> None:
+        subprocess.run(["wl-copy", "--clear"], check=True, timeout=5)
+        self.assertIsNone(self.types())
+
+        keeper = self.keeper()
+        received = self.paste_with_reader(keeper, "dictated on wayland")
+
+        self.assertEqual(received, [b"dictated on wayland"])
+        self.assertTrue(keeper.last_outcome.restored)
+        self.assertIsNone(self.types())
+
+    def test_copy_during_the_wait_is_kept(self) -> None:
+        self.copy(b"before", self.TEXT)
+
+        def paste() -> None:
+            threading.Thread(
+                target=lambda: (time.sleep(0.1), self.copy(b"user copy", self.TEXT))
+            ).start()
+
+        keeper = self.keeper()
+        keeper.paste("dictated on wayland", paste)
+
+        self.assertTrue(keeper.last_outcome.kept_newer_copy, keeper.last_outcome)
+        self.assertEqual(self.read(self.TEXT), b"user copy")
+
+
 if __name__ == "__main__":
     unittest.main()

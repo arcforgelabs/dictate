@@ -112,12 +112,67 @@ def paste_into_edit(text: str) -> dict[str, object]:
     }
 
 
+def _find_notepad(user32: object, timeout: float) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        hwnd = user32.FindWindowW("Notepad", None)
+        if hwnd:
+            return int(hwnd)
+        time.sleep(0.2)
+    return 0
+
+
+def _bring_to_front(user32: object, kernel32: object, hwnd: int) -> bool:
+    """Make Notepad the foreground window, as a user's click would."""
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    if user32.GetForegroundWindow() == hwnd:
+        return True
+    # Windows lets a thread attached to the foreground thread's input queue
+    # move the foreground; this is how a launcher hands focus to a new window.
+    foreground = user32.GetForegroundWindow()
+    foreground_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    own_thread = kernel32.GetCurrentThreadId()
+    attached = bool(foreground_thread) and bool(
+        user32.AttachThreadInput(own_thread, foreground_thread, True)
+    )
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(own_thread, foreground_thread, False)
+    time.sleep(0.5)
+    return user32.GetForegroundWindow() == hwnd
+
+
 def paste_into_notepad(text: str) -> dict[str, object]:
+    """Send the real Ctrl+V through Dictate's typing backend into Notepad.
+
+    Notepad is left open; the PowerShell script reads its text back through
+    UI Automation and, with -CloseNotepad, closes it.
+    """
     from dictate.outputs import resolve_typing_backend
 
-    # Notepad is left open so the maintainer can see the pasted line.
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32")
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+    kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
     subprocess.Popen(["notepad.exe"])
-    time.sleep(2.0)
+    hwnd = _find_notepad(user32, 20.0)
+    if not hwnd:
+        return {"target": "notepad", "error": "Notepad window not found"}
+    time.sleep(1.0)
+    foreground = _bring_to_front(user32, kernel32, hwnd)
+
     output = resolve_typing_backend("auto")
     output.send(text)
     keeper = getattr(output, "keeper", None)
@@ -125,8 +180,10 @@ def paste_into_notepad(text: str) -> dict[str, object]:
         keeper.wait_idle(10)
     return {
         "target": "notepad",
+        "typing_backend": output.name,
+        "notepad_was_foreground": foreground,
+        # Checked by the PowerShell script through UI Automation.
         "pasted_matches": None,
-        "note": "check Notepad shows the dictated line, then close it without saving",
         "outcome": _outcome(keeper),
     }
 

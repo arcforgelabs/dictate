@@ -138,6 +138,56 @@ jobs:
           PYTHONPATH: src
         run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python python -EnableHistoryForTest -RequireHistory
 
+      - name: Real Ctrl+V into Notepad through Dictate's typing backend
+        # Needs the runner's desktop to let a new window take the foreground;
+        # the step's log says whether it did. Not a gate on its own.
+        continue-on-error: true
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m pip install --quiet pynput
+          powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python python -Target notepad -CloseNotepad -RequireHistory
+
+  wayland-clipboard:
+    # A real compositor: headless sway speaks the wlr data-control protocol,
+    # which wl-copy and wl-paste use without a focused window.
+    name: Wayland clipboard (headless sway + wl-clipboard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install sway and wl-clipboard
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sway wl-clipboard
+
+      - name: Save and restore the clipboard against a real compositor
+        env:
+          PYTHONPATH: src
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+            sway -c /dev/null > "$RUNNER_TEMP/sway.log" 2>&1 &
+          socket=""
+          for i in $(seq 1 50); do
+            socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' -print -quit)"
+            [ -n "$socket" ] && break
+            sleep 0.2
+          done
+          if [ -z "$socket" ]; then
+            cat "$RUNNER_TEMP/sway.log"
+            echo "sway did not start"
+            exit 1
+          fi
+          export WAYLAND_DISPLAY="$(basename "$socket")"
+          echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+          python -m unittest -v tests.test_clipboard_linux.RealWaylandTests
+
   npm:
     name: npm package check
     runs-on: ubuntu-latest

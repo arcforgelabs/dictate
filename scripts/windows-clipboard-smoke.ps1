@@ -22,6 +22,10 @@ It changes a user setting, so it is meant for throwaway CI machines only.
 -RequireHistory fails the run unless history is readable, records an ordinary
 copy, and does not hold the dictated text.
 
+-Target notepad reads Notepad's text back through UI Automation and fails unless it
+is exactly the dictated text. -CloseNotepad then closes every Notepad window
+without saving (CI only).
+
 Two OLE bookkeeping formats ("DataObject", "Ole Private Data") point at the
 source app's live data object; Dictate does not carry them over, so they are
 left out of the comparison. The restored clipboard also carries
@@ -33,7 +37,8 @@ param(
     [ValidateSet("edit", "notepad")]
     [string]$Target = "edit",
     [switch]$EnableHistoryForTest,
-    [switch]$RequireHistory
+    [switch]$RequireHistory,
+    [switch]$CloseNotepad
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,6 +139,31 @@ function Set-MixedClipboard {
     [System.Windows.Forms.Clipboard]::SetDataObject($data, $true, 20, 100)
 }
 
+function Get-NotepadText {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $automation = [System.Windows.Automation.AutomationElement]
+    $byClass = New-Object System.Windows.Automation.PropertyCondition($automation::ClassNameProperty, "Notepad")
+    $window = $automation::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $byClass)
+    if ($null -eq $window) { return $null }
+    $document = New-Object System.Windows.Automation.PropertyCondition($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+    $edit = New-Object System.Windows.Automation.PropertyCondition($automation::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+    $either = New-Object System.Windows.Automation.OrCondition($document, $edit)
+    $content = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $either)
+    if ($null -eq $content) { return $null }
+    try {
+        $pattern = $content.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        return $pattern.DocumentRange.GetText(-1)
+    } catch {
+        try {
+            $pattern = $content.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            return $pattern.Current.Value
+        } catch {
+            return $null
+        }
+    }
+}
+
 function Get-ClipboardHistoryTexts {
     try {
         Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -216,6 +246,23 @@ $json = & $Python scripts\windows_clipboard_smoke.py --target $Target --text $di
 $pasteExit = $LASTEXITCODE
 Write-Host "    $json"
 if ($pasteExit -ne 0) { $failures += "paste helper exited $pasteExit" }
+
+if ($Target -eq "notepad") {
+    Write-Step "Reading Notepad's text through UI Automation"
+    $notepadText = Get-NotepadText
+    if ($null -eq $notepadText) {
+        $failures += "could not read Notepad's text back"
+    } elseif ($notepadText.Trim() -ne $dictated) {
+        $failures += "Notepad holds '$($notepadText.Trim())', not the dictated text"
+    } else {
+        Write-Host "    Notepad holds exactly the dictated text"
+    }
+    if ($CloseNotepad) {
+        Get-Process -Name "Notepad" -ErrorAction SilentlyContinue | Stop-Process -Force
+    } else {
+        Write-Host "    Notepad is left open: close it without saving"
+    }
+}
 
 Start-Sleep -Milliseconds 500
 $after = [DictateClipDump]::Dump()

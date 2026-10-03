@@ -209,18 +209,18 @@ class ClipboardKeeper:
                     type(exc).__name__,
                 )
 
-            session.write_text(text)
-            if after_write is not None:
-                after_write(session)
-            # Reads before this point (clipboard managers reacting to the write)
-            # are not the paste target.
-            session.before_paste()
             try:
+                session.write_text(text)
+                if after_write is not None:
+                    after_write(session)
+                # Reads before this point (clipboard managers reacting to the
+                # write) are not the paste target.
+                session.before_paste()
                 send_paste()
             except BaseException:
-                # Nothing will read the text; put the old clipboard straight back.
-                if outcome.saved and not session.changed_since_write():
-                    self._restore(session, snapshot, outcome)
+                # Nothing will read the text. If the write got far enough to
+                # replace the clipboard, put the old contents straight back.
+                self._restore_after_failure(session, snapshot, outcome)
                 raise
             job.pasted.set()
 
@@ -233,6 +233,22 @@ class ClipboardKeeper:
             self._restore(session, snapshot, outcome)
         finally:
             session.close()
+
+    @classmethod
+    def _restore_after_failure(
+        cls, session: ClipboardSession, snapshot: Any, outcome: PasteOutcome
+    ) -> None:
+        if not outcome.saved:
+            return
+        try:
+            # A write that failed before touching the clipboard reads as
+            # "changed" here (Windows: not the owner; Wayland/X11: our text is
+            # not there), so nothing is overwritten.
+            if not session.changed_since_write():
+                cls._restore(session, snapshot, outcome)
+        except Exception as exc:  # noqa: BLE001
+            # Report the original failure, not this one.
+            logger.warning("Clipboard restore after a failed paste failed: %s", type(exc).__name__)
 
     @staticmethod
     def _restore(session: ClipboardSession, snapshot: Any, outcome: PasteOutcome) -> None:
