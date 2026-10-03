@@ -1697,6 +1697,9 @@ export default function App() {
       }, 900);
       return () => { clearTimeout(t1); };
     }
+    // Check once the hydrate effect has marked the window live, so a bridge
+    // injected at launch and one that arrives later each get exactly one check.
+    if (!live) return;
     let cancelled = false;
     ipc.checkUpdates().then((st) => {
       if (cancelled || !st) return;
