@@ -69,9 +69,14 @@ jobs:
           set -euo pipefail
           ENGINE_DIR="$PWD/ui-shell/src-tauri/engine"
           echo "engine resources: $(du -sh "$ENGINE_DIR" | cut -f1), $(find "$ENGINE_DIR" -type f | wc -l) files"
-          # pyannote counts as a directory (package, dist-info, model folder):
-          # onnx-asr ships its own onnx_asr/models/pyannote.py, which is not it.
-          found="$(find "$ENGINE_DIR" \( -iname '*torch*' -o \( -type d -iname '*pyannote*' \) \) | head -20)"
+          # Match the packages, their dist-info and native libraries, and model
+          # folders. File names alone over-match: onnx-asr ships its own
+          # onnx_asr/models/pyannote.py, and ONNX Runtime and huggingface_hub
+          # carry torch export helpers (_torch.py, *_torch.py) that import nothing.
+          found="$(find "$ENGINE_DIR" \( \( -type d \( -name 'torch' -o -name 'torch.libs' -o -name 'torch-*' \
+            -o -name 'torchaudio*' -o -name 'torchcodec*' -o -iname '*pyannote*' \) \) \
+            -o -name 'libtorch*' -o -name 'libc10*' \) | head -20)"
+          REMOVED_RE='/(torch|torch\.libs|torch-[^/]*|torchaudio[^/]*|torchcodec[^/]*|[^/]*pyannote[^/]*)/|/lib(torch|c10)[^/]*$'
           if [ -n "$found" ]; then
             echo "::error::torch or pyannote files in the staged engine"
             printf '%s\n' "$found"
@@ -81,11 +86,11 @@ jobs:
           shopt -s nullglob
           for deb in ui-shell/src-tauri/target/release/bundle/deb/*.deb; do
             listing="$(dpkg-deb -c "$deb")"
-            count="$(printf '%s\n' "$listing" | grep -ciE 'torch|/[^/]*pyannote[^/]*/' || true)"
+            count="$(printf '%s\n' "$listing" | grep -ciE "$REMOVED_RE" || true)"
             echo "$(basename "$deb"): $(stat -c%s "$deb") bytes, $(printf '%s\n' "$listing" | wc -l) entries, ${count} torch/pyannote entries"
             if [ "$count" != "0" ]; then
               echo "::error::$(basename "$deb") contains torch or pyannote"
-              printf '%s\n' "$listing" | grep -iE 'torch|/[^/]*pyannote[^/]*/' | head -20
+              printf '%s\n' "$listing" | grep -iE "$REMOVED_RE" | head -20
               exit 1
             fi
           done
