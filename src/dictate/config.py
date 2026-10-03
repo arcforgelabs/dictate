@@ -46,8 +46,6 @@ class Config:
     stt_model: str | None = None
     meeting_stt_backend: str | None = None
     meeting_stt_model: str | None = None
-    # Retired: Dictate runs on CPU only. Read so startup can say it is ignored.
-    stt_device: str | None = None
     stt_compute_type: str | None = None
     update_channel: str | None = None
     installed_package_version: str | None = None
@@ -66,8 +64,60 @@ class Config:
         return self.hotwords_str
 
 
+# Compute types that only meant something on a GPU, and the CPU type that
+# replaces them. Parakeet already loaded int8 when float16 was saved.
+_GPU_ONLY_COMPUTE_TYPES = {"float16": "int8"}
+
+
+def migrate_cpu_only_settings(data: dict) -> tuple[bool, list[str]]:
+    """Move settings saved while GPU lanes existed to their CPU equivalent.
+
+    Dictate runs on CPU only (#111). ``stt_device`` is removed, whatever it
+    said: CPU is the only device, so there is nothing left to choose. A
+    GPU-only ``stt_compute_type`` (float16) becomes int8. Everything else in
+    ``data`` is left as it is. Changes ``data`` in place and returns whether
+    it changed, plus a notice for each choice that moved (a saved ``cpu`` or
+    ``auto`` device moves silently).
+    """
+    changed = False
+    notices: list[str] = []
+    if "stt_device" in data:
+        device = data.pop("stt_device")
+        changed = True
+        if isinstance(device, str) and device.strip().lower() not in {"", "cpu", "auto"}:
+            notices.append(f"Moved saved STT device '{device}' to CPU: Dictate runs on CPU only.")
+    compute_type = data.get("stt_compute_type")
+    if isinstance(compute_type, str) and compute_type in _GPU_ONLY_COMPUTE_TYPES:
+        replacement = _GPU_ONLY_COMPUTE_TYPES[compute_type]
+        data["stt_compute_type"] = replacement
+        changed = True
+        notices.append(
+            f"Moved saved STT compute type '{compute_type}' to {replacement}: "
+            "Dictate runs on CPU only."
+        )
+    return changed, notices
+
+
+def _migrate_saved_config(data: dict, path: Path) -> None:
+    """Rewrite config.yaml once when it still holds GPU-era settings."""
+    changed, notices = migrate_cpu_only_settings(data)
+    if not changed:
+        return
+    for notice in notices:
+        logger.warning(notice)
+    try:
+        _save_raw(data, path)
+    except OSError as exc:
+        # The settings above are still used as migrated for this run.
+        logger.warning(f"Could not save migrated settings to {path}: {exc}")
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
-    """Load config from YAML file. Returns defaults if file doesn't exist."""
+    """Load config from YAML file. Returns defaults if file doesn't exist.
+
+    A config written while GPU lanes existed is migrated to CPU and saved
+    back on the first load (see ``migrate_cpu_only_settings``).
+    """
     if not path.is_file():
         return Config()
 
@@ -76,6 +126,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     except Exception:
         logger.warning(f"Failed to parse {path}, using defaults")
         return Config()
+
+    if isinstance(data, dict):
+        _migrate_saved_config(data, path)
 
     hotwords = data.get("hotwords", [])
     if isinstance(hotwords, str):
@@ -109,7 +162,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     stt_model = data.get("stt_model")
     meeting_stt_backend = data.get("meeting_stt_backend")
     meeting_stt_model = data.get("meeting_stt_model")
-    stt_device = data.get("stt_device")
     stt_compute_type = data.get("stt_compute_type")
     update_channel = data.get("update_channel")
     installed_package_version = data.get("installed_package_version")
@@ -121,8 +173,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         meeting_stt_backend = None
     if not isinstance(meeting_stt_model, str):
         meeting_stt_model = None
-    if not isinstance(stt_device, str):
-        stt_device = None
     if not isinstance(stt_compute_type, str):
         stt_compute_type = None
     if not isinstance(update_channel, str):
@@ -140,7 +190,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_model=stt_model,
         meeting_stt_backend=meeting_stt_backend,
         meeting_stt_model=meeting_stt_model,
-        stt_device=stt_device,
         stt_compute_type=stt_compute_type,
         update_channel=update_channel,
         installed_package_version=installed_package_version,
@@ -148,13 +197,22 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
 
 def _load_raw(path: Path = CONFIG_PATH) -> dict:
-    """Load raw YAML dict, preserving all keys."""
+    """Load raw YAML dict, preserving all keys except GPU-era settings.
+
+    Setters save this dict back, so a retired setting is migrated by the first
+    write as well as the first ``load_config``.
+    """
     if not path.is_file():
         return {}
     try:
-        return _read_config_yaml(path)
+        data = _read_config_yaml(path)
     except Exception:
         return {}
+    if isinstance(data, dict):
+        _changed, notices = migrate_cpu_only_settings(data)
+        for notice in notices:
+            logger.warning(notice)
+    return data
 
 
 def _save_raw(data: dict, path: Path = CONFIG_PATH) -> None:

@@ -4,14 +4,16 @@ import contextlib
 import io
 import signal
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
 
 from dictate import __main__ as main_module
-from dictate.config import Config
+from dictate.config import Config, load_config
 from dictate.stt import SttCapabilities
 
 
@@ -171,47 +173,43 @@ class MainSttSelectionTests(unittest.TestCase):
             )
         return compute_type, stderr.getvalue()
 
-    def test_saved_gpu_device_loads_as_cpu_with_one_line_notice(self) -> None:
-        for device in ("cuda", "amd"):
-            with self.subTest(device=device):
-                compute_type, stderr = self._compute_type(
-                    [], Config(stt_device=device, stt_compute_type="int8")
-                )
-
-                self.assertEqual(compute_type, "int8")
-                self.assertEqual(
-                    stderr.strip().splitlines()[0],
-                    f"Ignoring saved STT device '{device}': Dictate runs on CPU only.",
-                )
-
-    def test_saved_cpu_or_auto_device_is_silent(self) -> None:
-        for device in ("cpu", "auto"):
-            with self.subTest(device=device):
-                _compute_type, stderr = self._compute_type([], Config(stt_device=device))
-
-                self.assertNotIn("device", stderr)
-
-    def test_saved_gpu_only_compute_type_loads_as_int8(self) -> None:
-        compute_type, stderr = self._compute_type(
-            [], Config(stt_device="cuda", stt_compute_type="float16")
-        )
+    def test_saved_unknown_compute_type_loads_as_int8(self) -> None:
+        # A GPU-era float16 is migrated on disk by load_config (see
+        # test_config_selection); anything else unknown still loads as int8.
+        compute_type, stderr = self._compute_type([], Config(stt_compute_type="bogus"))
 
         self.assertEqual(compute_type, "int8")
-        self.assertIn("Ignoring saved STT compute type 'float16' in config; using int8.", stderr)
+        self.assertIn("Ignoring saved STT compute type 'bogus' in config; using int8.", stderr)
 
     def test_saved_cpu_compute_type_is_used(self) -> None:
         compute_type, _stderr = self._compute_type([], Config(stt_compute_type="float32"))
 
         self.assertEqual(compute_type, "float32")
 
-    def test_cli_device_flag_still_parses_and_is_ignored(self) -> None:
-        compute_type, stderr = self._compute_type(
-            ["--device", "cpu", "--compute-type", "float32"],
-            Config(stt_device="cuda", stt_compute_type="int8"),
-        )
+    def test_gpu_era_config_starts_on_cpu_int8_after_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "stt_device: cuda\nstt_compute_type: float16\n", encoding="utf-8"
+            )
+            with self.assertLogs("dictate.config", level="WARNING"):
+                config = load_config(path=config_path)
 
-        self.assertEqual(compute_type, "float32")
-        self.assertEqual(stderr, "")
+            compute_type, stderr = self._compute_type([], config)
+
+            self.assertEqual(compute_type, "int8")
+            self.assertEqual(stderr.strip(), "Using saved STT compute type: int8")
+
+    def test_cli_device_flag_still_parses_and_is_ignored(self) -> None:
+        for device in ("cpu", "auto"):
+            with self.subTest(device=device):
+                compute_type, stderr = self._compute_type(
+                    ["--device", device, "--compute-type", "float32"],
+                    Config(stt_compute_type="int8"),
+                )
+
+                self.assertEqual(compute_type, "float32")
+                self.assertEqual(stderr, "")
 
     def test_cli_gpu_device_flag_is_ignored_with_notice(self) -> None:
         compute_type, stderr = self._compute_type(["--device", "cuda"], Config())

@@ -652,9 +652,11 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
 
             backend.patch_config({"device": {"device": "cuda", "compute": "float16"}})
 
-            cfg = config_mod.load_config(backend.config_path)
-            self.assertIsNone(cfg.stt_device)
-            self.assertIsNone(cfg.stt_compute_type)
+            config_path = Path(backend.config_path)
+            saved = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+            self.assertNotIn("stt_device", saved)
+            self.assertNotIn("stt_compute_type", saved)
+            self.assertIsNone(config_mod.load_config(backend.config_path).stt_compute_type)
 
     def test_meeting_start_blocks_when_pyannote_model_access_missing(self) -> None:
         with tempfile.TemporaryDirectory() as d:

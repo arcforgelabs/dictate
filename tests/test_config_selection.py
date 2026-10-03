@@ -4,6 +4,9 @@ import locale
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import yaml
 
 from dictate.config import (
     add_hotwords,
@@ -38,21 +41,111 @@ class ConfigSelectionTests(unittest.TestCase):
             self.assertEqual(config.stt_backend, "gemini")
             self.assertEqual(config.stt_model, "gemini-3-flash-preview")
 
-    def test_gpu_era_runtime_keys_still_load(self) -> None:
+    def test_gpu_era_settings_migrate_to_cpu_on_first_load(self) -> None:
         # Dictate runs on CPU only. A config written while GPU lanes existed
-        # still loads; startup ignores the retired device with a notice.
+        # moves to CPU on the first load and is saved back, keeping every
+        # other choice; it neither fails nor keeps the GPU setting around.
+        for device in ("cuda", "amd"):
+            with self.subTest(device=device), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = Path(temp_dir) / "config.yaml"
+                config_path.write_text(
+                    "hotwords: [AcmeWidget]\n"
+                    "lexicon_replacements: {acme: Acme}\n"
+                    "stt_backend: parakeet\n"
+                    "stt_model: parakeet-tdt-0.6b-v3\n"
+                    f"stt_device: {device}\n"
+                    "stt_compute_type: float16\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertLogs("dictate.config", level="WARNING") as logs:
+                    config = load_config(path=config_path)
+
+                self.assertEqual(config.stt_compute_type, "int8")
+                self.assertFalse(hasattr(config, "stt_device"))
+                self.assertEqual(config.hotwords, ["AcmeWidget"])
+                self.assertEqual(config.lexicon_replacements, {"acme": "Acme"})
+                self.assertEqual(config.stt_backend, "parakeet")
+                self.assertEqual(config.stt_model, "parakeet-tdt-0.6b-v3")
+                self.assertEqual(
+                    [record.getMessage() for record in logs.records],
+                    [
+                        f"Moved saved STT device '{device}' to CPU: Dictate runs on CPU only.",
+                        "Moved saved STT compute type 'float16' to int8: "
+                        "Dictate runs on CPU only.",
+                    ],
+                )
+
+                saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                self.assertNotIn("stt_device", saved)
+                self.assertEqual(saved["stt_compute_type"], "int8")
+                self.assertEqual(saved["hotwords"], ["AcmeWidget"])
+                self.assertEqual(saved["lexicon_replacements"], {"acme": "Acme"})
+                self.assertEqual(saved["stt_backend"], "parakeet")
+                self.assertEqual(saved["stt_model"], "parakeet-tdt-0.6b-v3")
+
+                # The migration happens once: the next load is silent.
+                with self.assertNoLogs("dictate.config", level="WARNING"):
+                    self.assertEqual(load_config(path=config_path).stt_compute_type, "int8")
+
+    def test_saved_cpu_or_auto_device_is_dropped_silently(self) -> None:
+        for device in ("cpu", "auto"):
+            with self.subTest(device=device), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = Path(temp_dir) / "config.yaml"
+                config_path.write_text(
+                    f"stt_device: {device}\nstt_compute_type: float32\n", encoding="utf-8"
+                )
+
+                with self.assertNoLogs("dictate.config", level="WARNING"):
+                    config = load_config(path=config_path)
+
+                self.assertEqual(config.stt_compute_type, "float32")
+                saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved, {"stt_compute_type": "float32"})
+
+    def test_current_config_is_not_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            original = "# my notes\nhotwords: [AcmeWidget]\nstt_compute_type: int8\n"
+            config_path.write_text(original, encoding="utf-8")
+
+            load_config(path=config_path)
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+
+    def test_gpu_era_settings_still_load_when_config_cannot_be_saved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
             config_path.write_text(
-                "hotwords: [AcmeWidget]\nstt_device: cuda\nstt_compute_type: float16\n",
-                encoding="utf-8",
+                "stt_device: cuda\nstt_compute_type: float16\n", encoding="utf-8"
             )
 
-            config = load_config(path=config_path)
+            with (
+                patch("dictate.config._save_raw", side_effect=PermissionError("read-only")),
+                self.assertLogs("dictate.config", level="WARNING") as logs,
+            ):
+                config = load_config(path=config_path)
 
-            self.assertEqual(config.hotwords, ["AcmeWidget"])
-            self.assertEqual(config.stt_device, "cuda")
-            self.assertEqual(config.stt_compute_type, "float16")
+            self.assertEqual(config.stt_compute_type, "int8")
+            self.assertTrue(
+                any(
+                    "Could not save migrated settings" in record.getMessage()
+                    for record in logs.records
+                )
+            )
+
+    def test_first_setter_write_also_drops_gpu_era_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "stt_device: cuda\nstt_compute_type: float16\n", encoding="utf-8"
+            )
+
+            with self.assertLogs("dictate.config", level="WARNING"):
+                add_hotwords(["AcmeWidget"], path=config_path)
+
+            saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, {"hotwords": ["AcmeWidget"], "stt_compute_type": "int8"})
 
     def test_set_meeting_stt_preferences_preserve_primary_selection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

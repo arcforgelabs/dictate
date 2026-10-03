@@ -67,7 +67,6 @@ from dictate.stt import (
     SttBackend,
     add_retired_device_argument,
     create_speech_to_text,
-    is_cpu_device_name,
     note_retired_device,
     resolve_default_local_backend,
     resolve_model_name,
@@ -447,17 +446,12 @@ def _resolve_startup_compute_type(
 ) -> ComputeType:
     """The CPU compute type, from the CLI or config.yaml.
 
-    Dictate runs on CPU only. A ``--device`` flag or a saved ``stt_device`` from
-    a GPU-era config is ignored with a one-line notice (``cpu`` and ``auto`` are
-    silent), and a saved GPU-only compute type loads as int8.
+    Dictate runs on CPU only. A ``--device`` flag is ignored with a one-line
+    notice (``cpu`` and ``auto`` are silent). A GPU-era ``stt_device`` or
+    float16 compute type was already migrated by ``load_config``; any other
+    compute type this build does not know loads as int8.
     """
-    if args.device is not None:
-        note_retired_device(args.device)
-    elif config.stt_device and not is_cpu_device_name(config.stt_device):
-        print(
-            f"Ignoring saved STT device '{config.stt_device}': Dictate runs on CPU only.",
-            file=sys.stderr,
-        )
+    note_retired_device(args.device)
 
     if _flag_in_args(cli_args, "--compute-type"):
         return args.compute_type

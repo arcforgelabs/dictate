@@ -154,9 +154,9 @@ def saved_stt_selection(
 def saved_compute_type(value: str | None) -> ComputeType:
     """The compute type from config.yaml, falling back to int8.
 
-    Configs written while GPU lanes existed can say ``float16``, which only
-    meant something on a GPU (Parakeet already loaded int8 for it). Anything
-    that is not a CPU compute type loads as int8.
+    ``load_config`` already moved a GPU-era ``float16`` to int8 on disk. This
+    guards against anything else that is not a CPU compute type, such as a
+    hand-edited typo, which also loads as int8.
     """
     if value in COMPUTE_TYPES:
         return value  # type: ignore[return-value]
