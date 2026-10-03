@@ -15,6 +15,7 @@
   `ORT_DISABLE_TELEMETRY=1`, so it does neither.
 - Logs no longer contain what you dictated. Finished dictations and notes are
   logged as their length; the words appear only in an interactive terminal.
+- Logs written by 2026.9.27 and earlier are scrubbed of dictated text on startup.
 
 ### Removed
 
