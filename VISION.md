@@ -84,9 +84,8 @@ file changed first, by pull request.
 
 - One pull request, one topic. Do not bundle unrelated fixes or features; a
   few small related fixes can share one.
-- Keep a pull request reviewable. Past about 2,000 changed lines, not counting
-  lockfiles, licence texts and generated files, split it, unless the change
-  only makes sense whole; then say why in the description.
+- Keep a pull request reviewable. One over about 5,000 changed lines is
+  reviewed only in exceptional circumstances; split it.
 - Open pull requests against `master`. One built on another unmerged branch is
   not reviewed until that branch lands, so wait for it, or say in the
   description what it depends on.
