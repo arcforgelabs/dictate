@@ -7,6 +7,10 @@ whatever app you are already using. Its second job, later, is longer
 recordings and meetings: a local, speaker-labelled transcript you can keep and
 export. Both are the same idea, voice to text locally, and nothing else.
 
+Install and usage: [`README.md`](README.md). How to contribute:
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Reporting a security problem:
+[`SECURITY.md`](SECURITY.md).
+
 ## Local only
 
 Transcription runs on the user's machine. There is no account, no subscription,
@@ -75,6 +79,29 @@ meetings is the wrong trade.
 
 This list is a guardrail, not a law. A change that conflicts with it needs this
 file changed first, by pull request.
+
+## Contribution rules
+
+- One pull request, one topic. Do not bundle unrelated fixes or features; a
+  few small related fixes can share one.
+- Keep a pull request reviewable. Past about 2,000 changed lines, not counting
+  lockfiles, licence texts and generated files, split it, unless the change
+  only makes sense whole; then say why in the description.
+- Open pull requests against `master`. One built on another unmerged branch is
+  not reviewed until that branch lands, so wait for it, or say in the
+  description what it depends on.
+- Do not open a batch of small pull requests at once. Each one costs a review.
+- Show it working. The description says what was run, on which commit, what it
+  showed, and what was not run.
+
+## Settings compatibility
+
+Dictate reads the current settings only. It does not keep old, renamed or
+removed settings working through permanent aliases. When a change makes an
+existing setting invalid, such as a removed speech backend, the same change
+moves it to the current equivalent on upgrade and keeps what the user chose
+wherever it still exists. A user's notes and history are never dropped to
+make a setting fit.
 
 ## How this file is used
 
