@@ -13,9 +13,7 @@ subscription, no provider API key, and no hosted transcription. Microphone audio
 never leaves the device, and Arc Forge does not receive dictation text, audio,
 or transcripts at all.
 
-Microphone audio is used only while you dictate and is not kept. A Meeting
-recording (beta) is written to a temporary file while it is processed, then
-deleted. Dictation history, notes, custom words, spelling substitutions and app
+Microphone audio is used only while you dictate and is not kept. Dictation history, notes, custom words, spelling substitutions and app
 preferences are stored in the operating-system user data directory:
 
 - Linux: `~/.config/dictate/` and `~/.local/share/dictate/`
@@ -38,12 +36,9 @@ them carry dictation content:
   requests carry the usual information any web request does, such as an IP
   address, and no dictation content.
 - **Model downloads, only outside the installed app.** The desktop app ships
-  with the models it uses (Parakeet for dictation, pyannote Community-1 for
-  Meeting), so it downloads nothing to transcribe. Source installs, and models
-  chosen from the command line that are not bundled, download model files from
-  Hugging Face once. Source installs using Meeting may read a Hugging Face token
-  from the environment or the Hugging Face token file to fetch the gated
-  pyannote model.
+  with the model it uses (Parakeet), so it downloads nothing to transcribe.
+  Source installs, and models chosen from the command line that are not
+  bundled, download model files from Hugging Face once, without a token.
 - **Microsoft Store.** Installs from the Store are updated by the Store and
   subject to Microsoft's own install and update telemetry. Arc Forge does not
   receive dictation content through it.
@@ -51,13 +46,14 @@ them carry dictation content:
 Dictate has no analytics, no crash reporting, and no usage telemetry, and turns
 off the telemetry its bundled libraries would otherwise send, before any of them
 load: ONNX Runtime's Microsoft telemetry (the engine that runs Parakeet; it keeps
-a device ID and uploads usage events to Microsoft by default), pyannote.audio's
-usage metrics (on by default upstream) and Hugging Face Hub telemetry.
+a device ID and uploads usage events to Microsoft by default) and Hugging Face
+Hub telemetry.
 
 Dictate 2026.9.27 and earlier did not turn these off. Those versions sent ONNX
 Runtime usage events (session creation, graph optimisation and run timings,
-with a device ID) to Microsoft whenever they transcribed, and Meeting mode
-reported pipeline use to pyannote. Neither included audio or transcript text.
+with a device ID) to Microsoft whenever they transcribed, and Meeting mode (since
+removed, #140) reported pipeline use to pyannote. Neither included audio or
+transcript text.
 
 ## Diagnostics
 
@@ -70,7 +66,7 @@ Hugging Face token before attaching them to a bug report.
 ## Third-party software
 
 Dictate bundles open-source libraries and models under their own licences,
-including the Parakeet and pyannote models (CC-BY-4.0). Notices ship with the
+including the Parakeet model (CC-BY-4.0). Notices ship with the
 app as `THIRD_PARTY_NOTICES.md` and are published at
 `https://arcforge.au/legal/notices`.
 

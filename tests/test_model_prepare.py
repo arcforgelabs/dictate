@@ -9,7 +9,6 @@ from unittest.mock import patch
 from dictate.model_prepare import _create_loaded_stt, _prepare_backend_resources, run_prepare_model
 from dictate.model_state import is_model_prepared
 from dictate.stt.parakeet_backend import _INT8_FILES, prepare_parakeet_v2_int8_model
-from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText
 
 
 class FakeFailingStt:
@@ -42,19 +41,6 @@ class FakePreparedStt:
 
     def prepare_model_resources(self) -> None:
         self.prepared = True
-
-    def release(self) -> None:
-        return
-
-
-class FakeParakeetAsr:
-    def __init__(self) -> None:
-        self.model_loaded = False
-
-    @property
-    def model(self):
-        self.model_loaded = True
-        return "asr-loaded"
 
     def release(self) -> None:
         return
@@ -122,24 +108,6 @@ class ModelPrepareTests(unittest.TestCase):
         args, _kwargs = download.call_args
         self.assertEqual(Path(args[0]), output.resolve())
         self.assertEqual(args[2], _INT8_FILES)
-
-    def test_parakeet_pyannote_prepare_loads_asr_and_pyannote_pipeline(self) -> None:
-        stt = ParakeetPyannoteSpeechToText()
-        fake_asr = FakeParakeetAsr()
-        pipeline_calls = 0
-
-        def fake_pipeline():
-            nonlocal pipeline_calls
-            pipeline_calls += 1
-            return object()
-
-        stt._asr = fake_asr  # type: ignore[assignment]
-        stt._pyannote_pipeline = fake_pipeline  # type: ignore[method-assign]
-
-        stt.prepare_model_resources()
-
-        self.assertTrue(fake_asr.model_loaded)
-        self.assertEqual(pipeline_calls, 1)
 
 
 if __name__ == "__main__":

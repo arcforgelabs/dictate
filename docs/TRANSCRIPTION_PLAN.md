@@ -5,9 +5,10 @@ Date: 2026-07-05
 **Status:** Active scoped authority for local transcription and release evidence.
 
 This is the authoritative planning document only for Dictate local
-transcription, recordings, meetings, model lanes, timestamping, speaker
-attribution, and their release evidence. Dictate runs on the CPU only; GPU
-material below is history unless it says otherwise. `VISION.md` is the
+transcription, recordings, model lanes, timestamping, and their release
+evidence. Meetings and speaker labelling are shelved (P3, #140) and not part of
+this plan. Dictate runs on the CPU only; GPU material below is history unless
+it says otherwise. `VISION.md` is the
 current cross-system authority; this plan is subordinate for account, cloud,
 commerce, and Deck decisions. Older research/cost notes are archived under
 `docs/archive/`.
@@ -17,7 +18,8 @@ commerce, and Deck decisions. Older research/cost notes are archived under
 Ship a clean local-first transcription stack where:
 
 1. Push-to-talk dictation and plain recordings use the same verbatim ASR path.
-2. Meeting mode always produces a speaker-attributed transcript.
+2. Meeting capture is not in the app. It was removed on 2026-10-03 (#140) and
+   is kept on the `archive/meeting-2026-10-03` branch and tag.
 3. Parakeet on the CPU is the local ASR foundation. Dictate does not support
    GPUs: NVIDIA CUDA and AMD lanes were dropped on 2026-10-01 to focus on CPU
    latency on the machines people already have. Removing the remaining GPU
@@ -35,8 +37,8 @@ Set this document as the active scoped deployment goal for local transcription
 and release evidence:
 
 > Implement `docs/TRANSCRIPTION_PLAN.md` end to end so Dictate is ready for
-> human testing on everyday CPU machines, including meeting speaker
-> attribution and a Windows build verified in the local VM lab.
+> human testing on everyday CPU machines, with a Windows build verified in
+> the local VM lab.
 
 This document is the source of truth only for the scoped transcription/model
 deployment. Older goal, model-research, and cost-planning notes are archived or
@@ -78,30 +80,22 @@ Current verified state:
 5. The Windows human-test artifacts currently proven in the local VM are the
    no-bundle executable plus `dictate-engine.exe` sidecar and a Store-style
    `.msix` package. MSI/NSIS direct-download installers are still not promoted.
-6. The engine has a strict speaker-attribution contract for meetings:
-   `require_speaker_attribution=True` fails closed when the selected backend
-   cannot produce speaker-attributed output. Daemon, loopback API, and desktop
-   UI meeting start/stop paths are wired.
+6. Meeting capture, its speaker-attribution backends (pyannote, DiariZen,
+   Sortformer), and the torch/pyannote runtime and model in the builds were
+   removed on 2026-10-03 (#140). Meeting transcripts saved before then stay in
+   history as notes.
 
 Deployment blockers before calling this plan complete:
 
 1. Measure end-to-end dictation latency on CPU on the two daily machines
    (X Forge and the Framework laptop) and tune where the numbers point.
-2. Benchmark and promote at least one local speaker-attribution lane for
-   Meeting mode, on CPU.
-3. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
-   initial Parakeet+pyannote Community-1 backend against the same meeting
-   fixtures.
-4. Ship integrated timestamp/segment/speaker metadata instead of string-only
-   transcripts all the way through the meeting UI/export workflow. The backend,
-   engine, daemon, note-store, live expanded-note UI, and Markdown export
-   foundation now exists, and persisted notes rehydrate with speaker/timestamp
-   segments after restart. Notes search and list-level Markdown export are
-   segment-aware. Timestamp quality validation remains.
-5. Decide the public Windows promotion path: current VM evidence proves the
+2. Validate note timestamp quality. The engine, daemon, note store, expanded-note
+   UI, search and Markdown export carry timestamped segments; their accuracy on
+   real recordings is not yet measured.
+3. Decide the public Windows promotion path: current VM evidence proves the
    no-bundle executable and MSIX packaging paths; MSI/NSIS direct-download
    bundling is still not promoted.
-6. Staged update preparation is deferred out of the human-test release. The
+4. Staged update preparation is deferred out of the human-test release. The
    human-test release uses the tested immediate source update path plus the
    documented MSIX/manual package path.
 
@@ -111,9 +105,8 @@ Deployment blockers before calling this plan complete:
 | --- | --- |
 | Push-to-talk dictation | Verbatim ASR, no speaker attribution. |
 | Plain recording | Same ASR behavior as push-to-talk, no speaker attribution. |
-| Meeting | ASR plus speaker attribution. No exceptions. |
 
-The UI should expose product language such as `Meeting` and `Record`. It should
+The UI should expose product language such as `Record`. It should
 not expose primary controls named `diarization`, `ASR backend`, `CUDA`, `MIGraphX`,
 or similar engine terms.
 
@@ -142,7 +135,7 @@ Parakeet v2 and v3 are wired through the ONNX/onnx-asr loader on the CPU.
 
 1. The Parakeet backend exposes a plain ASR `transcribe_segments(...)` path via
    `onnx-asr` timestamp adapters when available. The engine and benchmark CLI
-   consume this path for non-meeting recordings so Parakeet dictation can carry
+   consume this path for recordings so Parakeet dictation can carry
    `TranscriptSegment` timing metadata, not just plain text.
 2. A repeatable local flite-smoke benchmark fixture generator exists at
    `scripts/generate-benchmark-fixtures.sh`. These fixtures are for speed,
@@ -153,11 +146,6 @@ Parakeet v2 and v3 are wired through the ONNX/onnx-asr loader on the CPU.
    `manifest.csv` and `manifest-3x.csv` so CPU speed runs can repeat the same
    synthetic audio with less startup-overhead distortion than the short smoke
    fixture.
-4. A repeatable local flite meeting-smoke fixture generator exists at
-   `scripts/generate-meeting-benchmark-fixtures.sh`. It produces a synthetic
-   two-speaker WAV plus timestamped `segments_json` references for meeting
-   benchmark JSON-shape, DER, speaker-confusion, and boundary-metric smoke
-   validation.
 
 Windows VM evidence on `win11-dev`:
 
@@ -200,9 +188,7 @@ Windows VM evidence on `win11-dev`:
    runs 314 focused tests with 16 skips in the guest, verifies `dictate
    2026.7.4`, runs `dictate doctor --quick --type-backend pynput`, and reports
    `STT backend: parakeet` with `STT model: parakeet-tdt-0.6b-v2` before
-   uninstalling cleanly. The guest selection now includes Meeting lane config
-   and daemon behavior through `tests.test_config_commands`,
-   `tests.test_config_selection`, and `tests.test_daemon_history`.
+   uninstalling cleanly.
 8. Current dirty-tree Windows lifecycle verification after the preflighted lane
    runner, stricter plan audit, refreshed install smoke, and current package
    checks:
@@ -228,33 +214,29 @@ state are deferred until after human testing.
 
 Benchmark evidence foundation:
 
-1. `dictate benchmark` accepts plain ASR and diarized meeting runs.
+1. `dictate benchmark` runs plain ASR. Its speaker options (`--diarize`, DER
+   and speaker-confusion gates) went with Meeting on 2026-10-03 (#140).
 2. JSON output records backend/model/device, WER, RTF, RTFx, peak RSS when the
-   platform exposes it, per-sample hypotheses, optional speaker segments,
-   diarization error rate, speaker-confusion rate, segment-boundary mean
-   absolute error, boundary-pair counts, and promotion gate results.
-3. Meeting lane benchmarks must use `--diarize --require-speaker-attribution`
-   plus `--require-timestamp-metrics --require-der-metrics` and fixtures with
-   timestamped `segments_json` references before any local Meeting backend is
-   promoted.
-4. `scripts/run-transcription-lane-benchmarks.sh` is the canonical local lane
-   runner for writing the CPU, CPU multilingual, curated-human CPU, and Meeting
-   JSON artifacts consumed by this plan and the plan audit. Every lane runs on
-   the CPU; its CUDA and AMD lanes were removed with #112. Use
-   `--dry-run` first on target machines to verify the exact commands without
-   loading models.
-5. The canonical lane runner preflights each selected lane with `dictate doctor
+   platform exposes it, per-sample hypotheses, optional timed segments,
+   segment-boundary mean absolute error, boundary-pair counts, and promotion
+   gate results.
+3. `scripts/run-transcription-lane-benchmarks.sh` is the canonical local lane
+   runner for writing the CPU, CPU multilingual, and curated-human CPU JSON
+   artifacts consumed by this plan and the plan audit. Every lane runs on the
+   CPU; its CUDA and AMD lanes were removed with #112 and its Meeting lanes
+   with #140. Use `--dry-run` first on target machines to verify the exact
+   commands without loading models.
+4. The canonical lane runner preflights each selected lane with `dictate doctor
    --quick` for the exact backend/model before benchmark work starts.
-   This fails fast when the Parakeet runtime or the gated Meeting speaker
-   model is unavailable. `--skip-preflight` is reserved for intentionally
-   collecting failed benchmark JSON artifacts.
-6. `scripts/collect-transcription-evidence.sh` and
+   This fails fast when the Parakeet runtime is unavailable. `--skip-preflight`
+   is reserved for intentionally collecting failed benchmark JSON artifacts.
+5. `scripts/collect-transcription-evidence.sh` and
    `scripts/collect-transcription-evidence.ps1` package the plan, benchmark
    JSON artifacts, audit output, lane-runner dry-run output, per-lane doctor
    readiness output, and basic non-secret machine/CPU context into a
-   timestamped archive under
-   `evidence-bundles/` for CPU, Windows, and Meeting test-machine
-   handoff. The plan audit requires that output directory to be ignored by Git.
+   timestamped archive under `evidence-bundles/` for CPU and Windows
+   test-machine handoff. The plan audit requires that output directory to be
+   ignored by Git.
 
 ## AMD GPU Path (dropped)
 
@@ -267,133 +249,52 @@ runners and the AMD audit gate were removed with #112, and the `amd` extra with
 unsupported, until #111 removes them. Earlier revisions of this file hold the old
 AMD runtime plan and gates.
 
-## Meeting Stack
+## Meetings (shelved)
 
-Meeting mode is ASR plus speaker attribution over the same audio timeline.
-
-Current foundation:
-
-1. `SttCapabilities.supports_speaker_attribution` marks backends that can return
-   speaker-attributed output.
-2. The Parakeet speaker backends declare speaker-attribution
-   support because they expose `transcribe_diarized(...)`.
-3. `DictationEngine.transcribe(..., require_speaker_attribution=True)` fails
-   closed instead of falling back to plain ASR.
-4. `Daemon.start_meeting_recording()` and `stop_meeting_recording()` route
-   meeting audio through the strict contract.
-5. `POST /api/meetings/start` and `POST /api/meetings/stop` expose the backend
-   surface for the desktop UI.
-6. The capture home exposes a user-facing `Meeting` action on the beta update
-   channel only. The normal channel is dictation, with no Meeting button and no
-   All / Meetings / Quick filter. Mock/dev mode returns speaker-labelled output
-   so the flow is testable without a live engine.
-7. `parakeet-pyannote` is a selectable local Meeting backend foundation. It
-   uses Parakeet v2/v3 for ASR and pyannote Community-1 for speaker turns,
-   supports `DICTATE_PYANNOTE_MODEL_PATH` for offline model checkouts, and uses
-   `DICTATE_HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, or `HF_TOKEN` for the gated
-   Hugging Face model when no local path is configured. Source installers expose
-   `--meeting` / `-Meeting` to install the pyannote/torch optional dependencies
-   for this lane.
-8. `TranscriptSegment` carries text, optional `t_start`/`t_end`, and optional
-   `speaker_id`/`speaker_label` through the STT and engine result contract.
-   Non-streamed `Record` and `Meeting` sessions now create durable note records,
-   and Meeting captures can persist speaker-labelled timed segments in
-   `NoteStore` while preserving the existing plain text transcript surface.
-9. The live expanded-note UI renders speaker/timestamp segment rows when the
-   backend provides them, and Markdown export preserves speaker labels and
-   segment timing. Plain recordings continue to render/export as normal text.
-10. The UI server rehydrates durable `NoteStore` records into the Notes list,
-    including speaker/timestamp segment arrays, so a restarted UI can reopen a
-    saved Meeting note with segment rows instead of only plain rolling history.
-11. Notes list search, copy, and Markdown export use normalized segment text,
-    speaker labels, speaker ids, and segment timestamps when a note carries
-    structured segments. Plain notes continue to use the text-only path.
-12. The loopback `Meeting` start endpoint now performs a speaker-attribution
-    readiness check before capture starts. If the selected backend has no
-    speaker-attribution capability, or if the `parakeet-pyannote` model access
-    warning indicates the gated Community-1 model is unavailable, the API
-    returns a product-level blocked state instead of recording audio that will
-    later transcribe without speakers or fail generically.
-13. Meeting mode now has a dedicated backend lane separate from normal
-    dictation/plain recording. A fresh config can keep Parakeet v2 as the
-    primary ASR backend while `Meeting` lazily installs and uses the default
-    `parakeet-pyannote` speaker-attribution backend after readiness checks pass.
-    Optional `meeting_stt_backend` and `meeting_stt_model` config keys can
-    override that Meeting lane without changing push-to-talk or plain
-    recording behavior.
-14. Advanced testers can inspect the selected Meeting lane with `dictate config
-    show` and set it without changing dictation via `dictate config
-    set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2` or the v3 model.
-15. DiariZen and NVIDIA Sortformer are now explicit selectable Meeting backend
-    lanes as `parakeet-diarizen` and `parakeet-sortformer`. They share the same
-    Parakeet ASR plus `TranscriptSegment` reconciliation contract and fail
-    closed with runtime-readiness errors until their optional speaker
-    attribution runtimes are installed.
-
-This is not yet the finished Meeting product lane, but two curated-human
-local Meeting lanes pass the current speaker/timestamp gates on the CPU:
-`parakeet-sortformer` and `parakeet-pyannote` (2026-10-01, one OSR fixture).
-pyannote is far slower than real time on the CPU. The local DiariZen lane still
-needs real runtime loading, and the desktop UI still needs timestamp quality
-validation against broader real fixtures.
-
-The target architecture:
-
-1. Parakeet produces transcript text and timestamps.
-2. A speaker-attribution model assigns speaker turns.
-3. Dictate reconciles ASR segments, word/segment timestamps, and speaker turns
-   into one transcript stream.
+Meeting capture, local speaker labelling (pyannote Community-1, DiariZen and
+NVIDIA Sortformer lanes), the `meeting` and `sortformer` extras, the bundled
+pyannote model and its Hugging Face token were removed from the app and every
+build on 2026-10-03. The work is P3 and kept on the `archive/meeting-2026-10-03`
+branch and tag; #140 records its state then (two speakers labelled in the frozen
+Linux engine, never run on Windows, about 20 s added to the first engine state
+request) and the bar for bringing it back. A saved `meeting_stt_backend` or
+`meeting_stt_model` is removed from `config.yaml` on upgrade with one notice.
+Meeting transcripts saved before then stay in history, readable, searchable and
+exportable with their speaker labels.
 
 ## UI And App Wiring
 
 The desktop UI must stay product-level while the engine lanes mature. The app
-surface should continue to expose `Record`, push-to-talk dictation, notes, and
-`Meeting`; model/provider names remain advanced configuration and diagnostics.
+surface should continue to expose `Record`, push-to-talk dictation and notes;
+model/provider names remain advanced configuration and diagnostics.
 
 Current UI/backend wiring that belongs to this deployment:
 
-1. Capture home, push-to-talk, and plain recording use the same non-meeting ASR
+1. Capture home, push-to-talk, and plain recording use the same Parakeet ASR
    path.
-2. `Meeting` routes through strict meeting endpoints and fails closed when no
-   speaker-attribution backend is available.
-3. Durable notes can carry structured transcript segments with optional
-   timestamps and speaker labels.
-4. Expanded notes, list search, copy, and Markdown export understand structured
+2. Durable notes can carry structured transcript segments with optional
+   timestamps. Speaker labels appear only on meeting transcripts saved before
+   Meeting was removed.
+3. Expanded notes, list search, copy, and Markdown export understand structured
    segments while preserving the plain text path.
-5. The UI server exposes live state, history/notes, config, doctor, and update
+4. The UI server exposes live state, history/notes, config, doctor, and update
    routes over the loopback API used by the Tauri shell.
-6. Mock/demo dictations are restricted to dev/test/browser preview mode or an
+5. Mock/demo dictations are restricted to dev/test/browser preview mode or an
    explicit `VITE_DICTATE_ENABLE_MOCK=1` opt-in. A packaged shell with no live
    engine bridge must fail visibly instead of returning canned fixture text.
 
 Remaining app-level gates:
 
-1. Validate segment and speaker rendering against real meeting fixtures, not
-   only mock/dev output.
-2. WhisperX was removed on 2026-09-30; the Parakeet speaker-attribution
-   lanes are the only Meeting backends.
-3. A `.deb` update downloads and verifies while the app stays open. Install
+1. Validate segment rendering against real recordings, not only mock/dev
+   output.
+2. A `.deb` update downloads and verifies while the app stays open. Install
    and restart are a second click. The Windows lifecycle smoke still covers
    its own installer path.
-4. Persistent skipped update versions are deferred with the staged update UX.
+3. Persistent skipped update versions are deferred with the staged update UX.
    The current UI-only `localStorage` skip remains a non-authoritative preview
    behavior until staged updates are promoted.
-5. Dictate is local-only (`VISION.md`); there is no hosted provider lane to
+4. Dictate is local-only (`VISION.md`); there is no hosted provider lane to
    promote and no provider-key or switchable-backend UI.
-
-## Speaker Attribution Lanes
-
-| Lane | ASR | Speaker Attribution | Decision |
-| --- | --- | --- | --- |
-| Local quality candidate | Parakeet v2/v3 | DiariZen | Selectable/preflightable as `parakeet-diarizen`; preferred if CPU benchmarks show processing time is bearable. |
-| Local live/speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. Passes the curated-human Meeting gates on the CPU (2026-10-01, one OSR fixture). |
-| Local CPU baseline | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; passes the curated-human Meeting gates on the CPU but runs far slower than real time; ship after packaging/licensing and speed gates pass. |
-
-Every Meeting lane runs on the CPU. The GPU lanes in earlier revisions of this
-table (CUDA quality and speed, AMD) were dropped on 2026-10-01.
-
-WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
-useful, but do not build the product dependency around WhisperX.
 
 ## Timestamping
 
@@ -402,25 +303,22 @@ word and segment timestamp support. The implementation should also study
 WhisperX-style alignment/reconciliation patterns, but timestamping must be
 owned by Dictate rather than depending on WhisperX as the product stack.
 
-Benchmark timestamp quality separately from WER and DER:
+Benchmark timestamp quality separately from WER:
 
 1. Segment start/end error.
 2. Word-level timing error where available.
-3. Speaker-turn boundary error.
-4. Stability on long recordings.
+3. Stability on long recordings.
 
 ## Benchmark Requirements
 
 Before promoting a lane to default, benchmark:
 
 1. WER for transcript quality.
-2. DER for speaker attribution where Meeting mode is involved.
-3. Speaker-confusion rate separately from DER.
-4. RTFx and live latency.
-5. RAM use.
-6. First-run download size and install/package weight.
-7. Runtime failure rate and fallback behavior.
-8. Windows and Linux coverage where that lane is intended to ship.
+2. RTFx and live latency.
+3. RAM use.
+4. First-run download size and install/package weight.
+5. Runtime failure rate and fallback behavior.
+6. Windows and Linux coverage where that lane is intended to ship.
 
 The required artifact format is the `dictate benchmark --json-output ...`
 report documented in `benchmarks/README.md`. Human-readable console output is
@@ -436,25 +334,22 @@ The deployment is ready for human testing only when these checks are true:
 
 1. **CPU English:** fresh install selects Parakeet v2, records real microphone
    speech, stores the note transcript, and does not repeat stale fixture text.
-2. **Meeting:** pressing `Meeting` produces speaker-attributed transcript output
-   and durable speaker/timestamp segment metadata. If no speaker-attribution
-   lane is available, the app must block the meeting path with a clear state
-   rather than producing an undiarized transcript.
-3. **Plain recording:** pressing `Record` uses the same ASR behavior as
+2. **Plain recording:** pressing `Record` uses the same ASR behavior as
    push-to-talk and does not expose speaker-attribution engine terms.
-4. **Windows VM:** install, lifecycle, no-bundle build, and MSIX package smokes
+3. **Windows VM:** install, lifecycle, no-bundle build, and MSIX package smokes
    pass on `win11-dev`; the tested artifact paths are documented for human
    testers.
-5. **Packaging:** the public Windows path is either a tested Store/MSIX route or
+4. **Packaging:** the public Windows path is either a tested Store/MSIX route or
    an explicitly approved temporary artifact; no stale MSI/NSIS assumption is
    presented as ready.
-6. **Regression:** focused Python tests for STT selection, model preparation,
-   UI server state, tray helpers, Windows platform behavior, and meeting
-   speaker-attribution rules pass locally.
+5. **Regression:** focused Python tests for STT selection, model preparation,
+   UI server state, tray helpers, Windows platform behavior, and settings
+   migration pass locally.
 
-These six items are exactly the items `--readiness` reports. The NVIDIA English,
+These five items are exactly the items `--readiness` reports. The NVIDIA English,
 NVIDIA multilingual, AMD English and AMD multilingual items were removed on
-2026-10-01 when GPU lanes were dropped.
+2026-10-01 when GPU lanes were dropped, and the Meeting item on 2026-10-03 when
+Meeting was removed (#140).
 
 Run `python3 scripts/transcription_plan_audit.py` before handing a build to a
 tester. It summarizes which plan gates have local evidence and which are still
@@ -462,21 +357,10 @@ blocked. Use `--strict` in automation; it exits `2` while required promotion
 evidence is missing.
 Run `python3 scripts/transcription_plan_audit.py --readiness` for the
 tester-facing checklist view. It maps the human-test acceptance items above to
-the audit gates and reports six items: CPU English, Meeting, Plain recording,
-Windows VM, Packaging and Regression. CPU English, Plain recording, Windows VM,
-Packaging and Regression are decided by files in the repository. Meeting is
-`READY` only when at least one curated-human CPU meeting benchmark artifact in
-`benchmark-results/` (not tracked in Git) passes its gates, so a fresh checkout
-reports Meeting as `BLOCKED`. The gate reads
-`benchmark-results/parakeet-{pyannote,diarizen,sortformer}-cpu-human-meeting.json`
-and fails any artifact whose `config.device` is not `cpu`. Artifacts from
-before #112 are named `*-cuda-human-meeting.json` and are no longer read; the
-audit names them when the CPU artifacts are missing. To produce the CPU
-artifacts, run `scripts/run-transcription-lane-benchmarks.sh` with
-`DICTATE_MEETING_HUMAN_MANIFEST` pointing at the curated meeting manifest and
-`--lane meeting-sortformer-human`, `--lane meeting-human` and
-`--lane meeting-diarizen-human`. No GPU item is reported. Use
-`--readiness --json` for a machine-readable handoff report.
+the audit gates and reports five items: CPU English, Plain recording, Windows
+VM, Packaging and Regression. All five are decided by files in the repository.
+No GPU or Meeting item is reported. Use `--readiness --json` for a
+machine-readable handoff report.
 Use `scripts/run-human-test-readiness.sh` on Linux source installs, or
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
 scripts\run-human-test-readiness.ps1` on Windows source installs,
@@ -485,37 +369,28 @@ manual real-microphone checks that must be completed on each human-test
 machine. These scripts intentionally print, rather than auto-pass, the
 microphone checks because the acceptance condition is spoken human audio.
 
-Latest focused backend regression evidence: `uv run pytest
-tests/test_parakeet_pyannote_backend.py tests/test_stt_registry.py
-tests/test_ui_server.py tests/test_daemon_history.py tests/test_engine_capabilities.py
--q` passed with `160 passed` on 2026-07-05.
-
 Latest full Python regression evidence: `uv run pytest -q` passed with
 `687 passed, 5 subtests passed` on 2026-07-05 after the UI mock-mode guard,
 benchmark fixture tooling, preflighted lane runner, evidence collector,
 validated evidence importer, human-test readiness report and wrappers,
-Windows MSIX, Meeting timestamp reconciliation, segment-aware UI refresh, and separate
-Meeting backend-lane changes, including the DiariZen and Sortformer Meeting
-lane registry additions and the source installer `--meeting` / `-Meeting`
-optional dependency path.
+Windows MSIX, and segment-aware UI refresh (and the Meeting lanes, since
+removed by #140).
 `uv run python -m py_compile src/dictate/__main__.py src/dictate/benchmark.py
 src/dictate/doctor.py src/dictate/stt/factory.py src/dictate/ui_server.py`
 also succeeded on the same worktree.
-Latest readiness and plan-audit evidence (2026-10-01, #112, on the operator
-workstation with its local CPU Meeting artifacts): `python3
-scripts/transcription_plan_audit.py --readiness` reports every human-test
-checklist item as `READY`, unchanged from before the GPU tooling was removed.
-`python3 scripts/transcription_plan_audit.py` reports `pass` for the canonical
-plan, benchmark fixture tooling, Meeting speaker attribution, Windows VM package
-evidence, and the staged-update deferral decision. The Meeting gate now reads
-only CPU curated-human artifacts (`benchmark-results/parakeet-*-cpu-human-meeting.json`)
-and fails any artifact whose `config.device` is not `cpu`. Benchmark JSON
-reports record Python, platform, machine, and processor context only.
+Latest readiness and plan-audit evidence: `tests/test_transcription_plan_audit.py`
+runs `python3 scripts/transcription_plan_audit.py --readiness` on the checkout
+in CI and requires all five items `READY`; the audit has a `pass` gate for the
+canonical plan, benchmark fixture tooling, Windows VM package evidence, and the
+staged-update deferral decision. The Meeting gate was removed with Meeting on
+2026-10-03 (#140); before that, on 2026-10-01 (#112), it passed on the operator
+workstation from local CPU curated-human artifacts. Benchmark JSON reports
+record Python, platform, machine, and processor context only.
 `scripts/run-human-test-readiness.sh` and
 `scripts/run-human-test-readiness.ps1` provide the source-install handoff
-wrapper for that report plus the manual microphone and Meeting checks; both run
-the CPU doctor. Readiness and audit evidence from 2026-07-05, including the
-CUDA and AMD gates, is in earlier revisions of this file.
+wrapper for that report plus the manual microphone checks; both run the CPU
+doctor. Readiness and audit evidence from 2026-07-05, including the CUDA, AMD
+and Meeting gates, is in earlier revisions of this file.
 
 Latest Parakeet-first local default evidence: `uv run pytest
 tests/test_default_local_model.py tests/test_main_stt_selection.py
@@ -616,20 +491,12 @@ renders normalized speaker segment content instead of only a generic note
 title, Markdown export preserves speaker labels and formatted timestamps, and
 the expanded note renders the same real-fixture-style segment rows.
 
-Latest Meeting start readiness evidence: `uv run pytest tests/test_ui_server.py
--q` passed with `51 passed`; `uv run python -m py_compile
-src/dictate/ui_server.py` succeeded; and `npm test -- --run src/test/ipc.test.js
-src/test/app.test.jsx && npm run build` passed with `45 UI tests` plus a
-successful production build from `ui/` on 2026-07-05. The local API now blocks
-Meeting before capture when the configured backend is not speaker-ready or when
-pyannote Community-1 access is missing.
-
 Latest non-meeting recording rule evidence: `uv run pytest
 tests/test_daemon_history.py tests/test_provider_supervisor.py -q` passed with
 `129 passed`, and `uv run python -m py_compile src/dictate/daemon.py`
 succeeded on 2026-07-05. Note/plain recordings now use the same non-speaker ASR
-path as push-to-talk, including the long-recording remote retry path. Meeting
-remains the only recording mode that requests required speaker attribution.
+path as push-to-talk, including the long-recording remote retry path. Meeting,
+the one mode that asked for speaker attribution, was removed with #140.
 
 Latest timestamp/DER benchmark-gate evidence: `uv run pytest
 tests/test_benchmark.py tests/test_main_benchmark_dispatch.py -q` passed with
@@ -639,7 +506,7 @@ benchmark CLI now supports failing promotion gates for WER, RTF, DER, speaker
 confusion, segment-boundary MAE, required timestamp metrics, and required DER
 metrics. Runtime failures during benchmark transcription now write the requested
 JSON artifact with a failed `benchmark_runtime` gate instead of producing only a
-traceback.
+traceback. The DER and speaker-confusion gates were removed with Meeting (#140).
 
 Latest Parakeet timestamp-segment evidence: `uv run pytest
 tests/test_parakeet_backend.py tests/test_engine_capabilities.py
@@ -705,135 +572,14 @@ output path is ignored by Git.
 `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax --timeout 900
 --keep-guest-workdir` also passed again on 2026-07-05 after the collector
 promotion-status changes and parsed `scripts/collect-transcription-evidence.ps1`
-in the Windows guest.
-
-Latest curated-human Meeting fixture evidence:
-`scripts/generate-curated-human-meeting-fixture.sh` creates
-`benchmark-curated/open-speech-meeting/manifest.csv` from two Open Speech
-Repository Harvard-sentence speakers with timestamped `Speaker 1` and
-`Speaker 2` turns. `uv run python -m dictate benchmark --manifest
-benchmark-curated/open-speech-meeting/manifest.csv --audio-root
-benchmark-curated/open-speech-meeting --stt-backend parakeet-pyannote --model
-parakeet-tdt-0.6b-v2 --fixture-class curated-human --diarize
---require-speaker-attribution --require-timestamp-metrics
---require-der-metrics --validate-manifest-only` passed on 2026-07-05. This
-proves the curated-human Meeting manifest is valid and ready for the three
-Meeting runtime lanes; it does not prove speaker-attribution runtime quality
-until `parakeet-pyannote`, `parakeet-diarizen`, or `parakeet-sortformer` can
-load and write their `*-cpu-human-meeting.json` artifacts.
-CPU curated-human Meeting evidence (2026-10-01, #112; AMD Ryzen 9 7950X,
-16 cores): `scripts/run-transcription-lane-benchmarks.sh` lanes
-`meeting-sortformer-human`, `meeting-human` and `meeting-diarizen-human`, run on
-`benchmark-curated/open-speech-meeting`, wrote
-`benchmark-results/parakeet-{sortformer,pyannote,diarizen}-cpu-human-meeting.json`,
-all with `device=cpu` and `fixture_class=curated-human`:
-
-| Lane | WER | DER | Speaker confusion | Boundary MAE (s) | RTFx | Gates |
-| --- | --- | --- | --- | --- | --- | --- |
-| `parakeet-sortformer` | 0.22 | 0.192 | 0.087 | 0.226 | 1.84 | pass |
-| `parakeet-pyannote` | 0.04 | 0.104 | 0.000 | 0.123 | 0.16 | pass |
-| `parakeet-diarizen` | - | - | - | - | - | `benchmark_runtime` (runtime not importable) |
-
-Sortformer needs the `sortformer` optional dependency group (NeMo ASR).
-pyannote needs Community-1 model access and took 145 s for 23 s of audio, so it
-passes the quality gates but not a usable speed bar. This is one short fixture;
-broader meeting fixtures are still needed before a long-term default.
-
-Latest meeting fixture evidence: `scripts/generate-meeting-benchmark-fixtures.sh`
-generated `benchmark-fixtures/flite-meeting-smoke/manifest.csv` with one
-two-speaker synthetic meeting WAV, three timestamped speaker turns, and
-`segments_json` references; `uv run pytest tests/test_benchmark_fixtures.py
-tests/test_benchmark.py tests/test_main_benchmark_dispatch.py -q` passed on
-2026-07-05. These fixtures are smoke evidence only; curated human meeting
-recordings are still required before promoting a Meeting speaker-attribution
-lane.
-
-Latest `parakeet-pyannote` preparation evidence: `uv run pytest
-tests/test_model_prepare.py tests/test_parakeet_pyannote_backend.py
-tests/test_main_prepare_dispatch.py -q` passed with `20 passed`, and `uv run
-python -m py_compile src/dictate/model_prepare.py
-src/dictate/stt/parakeet_pyannote_backend.py` succeeded on 2026-07-05.
-
-Latest Meeting timestamp reconciliation evidence: `uv run pytest
-tests/test_parakeet_pyannote_backend.py tests/test_engine_capabilities.py
-tests/test_benchmark.py tests/test_main_benchmark_dispatch.py
-tests/test_transcription_plan_audit.py -q` passed with `48 passed`, and `uv
-run python -m py_compile src/dictate/stt/parakeet_pyannote_backend.py
-tests/test_parakeet_pyannote_backend.py` succeeded on 2026-07-05. The
-`parakeet-pyannote` backend now uses Parakeet ASR subsegment timestamps inside
-pyannote speaker turns when available, offsets them into the original meeting
-timeline, clamps speaker turns to the actual audio duration, and falls back to
-one speaker-labelled segment per turn when only plain ASR text is available.
-
-Latest separate Meeting backend-lane evidence: `uv run pytest
-tests/test_daemon_history.py tests/test_ui_server.py tests/test_config_selection.py
-tests/test_default_local_model.py tests/test_main_stt_selection.py -q` passed
-with `181 passed`, and `uv run python -m py_compile src/dictate/config.py
-src/dictate/daemon.py src/dictate/ui_server.py tests/test_daemon_history.py
-tests/test_ui_server.py` succeeded on 2026-07-05. This verifies that normal
-note/plain recording continues to use the primary ASR backend, while Meeting
-can use a dedicated speaker-attribution backend and the UI start endpoint
-selects the default `parakeet-pyannote` Meeting lane even when the primary
-dictation backend is plain Parakeet.
-
-Latest Meeting-lane configuration evidence: `uv run pytest
-tests/test_config_commands.py tests/test_config_selection.py tests/test_ui_server.py
-tests/test_daemon_history.py tests/test_main_stt_selection.py -q` passed with
-`192 passed`, and `uv run python -m py_compile src/dictate/config.py
-src/dictate/__main__.py tests/test_config_commands.py tests/test_config_selection.py`
-succeeded on 2026-07-05. This verifies `meeting_stt_backend` /
-`meeting_stt_model` config parsing, `dictate config show` reporting the Meeting
-lane, and `dictate config set-meeting-model ...` changing the Meeting lane
-without changing the primary dictation backend.
-
-Latest DiariZen/Sortformer lane scaffolding evidence: `uv run pytest
-tests/test_stt_registry.py tests/test_ui_server.py tests/test_windows_platform.py
-tests/test_model_prepare.py tests/test_benchmark_fixtures.py
-tests/test_transcription_plan_audit.py -q` passed with `131 passed`, and `uv
-run python -m py_compile src/dictate/stt/base.py src/dictate/stt/factory.py
-src/dictate/stt/__init__.py src/dictate/stt/parakeet_speaker_backend.py
-src/dictate/doctor.py src/dictate/ui_server.py src/dictate/windows_control.py`
-succeeded on 2026-07-05. `scripts/windows-vm-smoke.sh --vm win11-dev --mode
-syntax --timeout 900 --keep-guest-workdir` also passed and parsed the updated
-PowerShell evidence collector in the Windows guest. `parakeet-diarizen` and
-`parakeet-sortformer` are now registered speaker-attribution Meeting lanes,
-exposed to doctor/model selection, Windows control defaults, UI model state,
-model preparation, and the canonical lane-runner dry-run. The DiariZen lane
-intentionally fails readiness until its runtime is installed. The Sortformer
-lane now passes runtime readiness when the `sortformer` optional dependency
-group is installed and has a passing curated-human benchmark artifact. Meeting
-still fails closed instead of silently returning undiarized output when the
-selected lane is unavailable.
-
-Latest Meeting installer-extra evidence: `bash -n install.sh install-windows.ps1`
-passed, and `uv run pytest tests/test_windows_platform.py
-tests/test_stt_registry.py -q` passed on 2026-07-05. Linux source installs now
-accept `--meeting` / `--no-meeting` and `DICTATE_INSTALL_MEETING=1`; Windows
-source installs accept `-Meeting`. Both install paths add the existing
-`meeting` optional dependency group for the `parakeet-pyannote` lane.
-Sortformer runtime setup is captured as the explicit `sortformer` optional
-dependency group; DiariZen remains external runtime
-setup until a stable package/install path is selected.
-
-Latest Meeting backend readiness evidence: no `DICTATE_HF_TOKEN`,
-`HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN`, `DICTATE_PYANNOTE_MODEL_PATH`, or
-`DICTATE_PYANNOTE_MODEL` is configured on this workstation, and no local
-Community-1 checkout was found under the shallow home-directory search. `uv run
-pytest tests/test_stt_registry.py tests/test_ui_server.py
-tests/test_model_prepare.py -q` passed with `76 passed`; `uv run python -m
-py_compile src/dictate/stt/factory.py src/dictate/ui_server.py
-src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
---stt-backend parakeet-pyannote --quick` exited with code `2` on 2026-07-05,
-reporting the missing gated pyannote model access as `[FAIL]`. Superseded on
-2026-10-01: pyannote access is configured on this workstation and the CPU
-curated-human run passes (see the CPU Meeting evidence above).
+in the Windows guest. The Meeting lanes, the meeting fixture generators and their
+collector entries were removed with #140.
 
 ## Implementation Phases
 
 1. **Consolidate defaults**
    - Keep fresh CPU English installs on Parakeet v2.
    - Keep recordings and push-to-talk on the same ASR path.
-   - Keep Meeting as the only path that requires speaker attribution.
 
 2. **Parakeet on the CPU**
    - Benchmark Parakeet v3 CPU feasibility.
@@ -842,13 +588,8 @@ curated-human run passes (see the CPU Meeting evidence above).
      their tooling and install paths went with #112 and #110, and the
      engine's device selection goes with #111.
 
-3. **Meeting speaker attribution**
-   - Validate DiariZen runtime loading and benchmark `parakeet-diarizen`.
-   - Broaden NVIDIA Streaming Sortformer v2.1 benchmarks beyond the initial
-     passing curated-human OSR fixture.
-   - Benchmark and package the initial `parakeet-pyannote` Community-1 wrapper.
-   - Finish Dictate timestamp/speaker-turn reconciliation in the UI/export
-     surfaces and benchmark timestamp quality.
+3. **Meeting speaker attribution** — removed from the app on 2026-10-03 and
+   shelved as P3 (#140); see "Meetings (shelved)" above.
 
 4. **Remove Whisper product dependency** — done 2026-09-30, ahead of the
    Parakeet multilingual benchmark gate, by owner decision. The desktop
@@ -867,7 +608,7 @@ figure and only useful as a relative ordering.
 | --- | --- | --- | --- | --- | --- |
 | Qwen/Qwen3-ASR-1.7B | 4.31 | 820 | 1.7B | Apache-2.0 | 52 languages, LLM decoder. GPU-class accuracy option only. |
 | nvidia/canary-qwen-2.5b | 4.43 | 867 | 2.5B | CC-BY-4.0 | GPU-class. |
-| ibm-granite/granite-speech-4.1-2b | 4.62 | 546 | 2B | Apache-2.0 | `-plus` variant does speaker-attributed ASR with word timestamps; Meeting prototype candidate. |
+| ibm-granite/granite-speech-4.1-2b | 4.62 | 546 | 2B | Apache-2.0 | `-plus` variant does speaker-attributed ASR with word timestamps; relevant only if Meetings return (#140). |
 | CohereLabs/cohere-transcribe-03-2026 | 4.67 | 907 | 2B | Apache-2.0 | Open weights now; community ONNX exists. GPU-class. |
 | **nvidia/parakeet-tdt-0.6b-v2 (shipped default)** | **4.70** | **6025** | 0.6B | CC-BY-4.0 | Best accuracy-per-speed of any open model. Keep. |
 | nvidia/parakeet-tdt-0.6b-v3 (shipped multilingual) | 4.86 | 6076 | 0.6B | CC-BY-4.0 | Keep. |
@@ -933,7 +674,6 @@ noisy-input fixtures, not only clean read speech.
 4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
    Nemotron streaming, Moonshine, Qwen3-ASR, and Cohere Transcribe. It is the
    runtime to evaluate if a streaming lane is opened.
-5. `pyannote.audio` 4.0.7 is the current Community-1 runtime.
 
 ## Archived Notes
 
@@ -941,10 +681,10 @@ Archived notes are reference material only. They do not override this plan.
 
 | Archived Note | Reason |
 | --- | --- |
-| `docs/archive/dictate-pro-subscription-architecture-2026-07-05.md` | Historical paid subscription and hosted-meeting architecture; the current model and meeting deployment plan lives here. |
+| `docs/archive/dictate-pro-subscription-architecture-2026-07-05.md` | Historical paid subscription and hosted-meeting architecture; the current model plan lives here; Meetings are shelved (#140). |
 | `docs/archive/goals-2026-07-05.md` | Superseded as the planning landing page; retained for historical product/release notes. |
 | `docs/archive/frontend-wiring-2026-07-05.md` | Superseded by the UI and app wiring section in this plan. |
-| `docs/archive/meeting-transcription-research-2026-07-05.md` | Superseded by this consolidated plan. |
+| `docs/archive/meeting-transcription-research-2026-07-05.md` | Superseded; Meetings are shelved (#140). |
 | `docs/archive/recent-dictation-history-spec-2026-07-05.md` | Historical implementation spec; local notes/history is now implementation context, not the active deployment goal. |
 | `docs/archive/xai-diarization-cost-model-2026-07-05.md` | Cost-focused provider note; no longer the canonical model direction. |
 
@@ -954,6 +694,3 @@ Archived notes are reference material only. They do not override this plan.
 - Parakeet v2 model card: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
 - Parakeet v3 model card: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 - Canary/Parakeet v3 technical report: https://arxiv.org/abs/2509.14128
-- pyannote Community-1 model card: https://huggingface.co/pyannote/speaker-diarization-community-1
-- Diarization benchmark paper: https://arxiv.org/html/2509.26177v1
-- NVIDIA Streaming Sortformer blog: https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/

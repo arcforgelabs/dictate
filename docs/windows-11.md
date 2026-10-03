@@ -3,7 +3,7 @@
 Windows 11 is a supported desktop target for Dictate. The normal path is the
 installed `Dictate` app entry, which starts the desktop capture app and tray
 process. The primary workflow is simple dictation and local dictation recovery;
-advanced configuration (model, meeting model, shortcut, hotwords, update
+advanced configuration (model, shortcut, hotwords, update
 channel) lives in the `dictate config` CLI.
 
 ## Supported Surface

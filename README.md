@@ -191,18 +191,12 @@ commands keep working. The engine has no device choice: a saved GPU device in
 `config.yaml` moves to CPU on upgrade, and `--device` is still accepted so the
 installers and old scripts run, and is ignored.
 
-- The Meeting button and the dictation-list filter are beta-channel chrome.
-  The normal channel is dictation only. Meeting uses a dedicated
-  speaker-attribution lane. Inspect it with
-  `dictate config show`; set it with
-  `dictate config set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2`.
-  Source installs can add pyannote support with `./install.sh --meeting` or
-  `.\install-windows.ps1 -Meeting`, then verify with
-  `dictate doctor --stt-backend parakeet-pyannote --quick`.
-  Experimental preflight targets also exist for
-  `parakeet-diarizen/parakeet-tdt-0.6b-v2` and
-  `parakeet-sortformer/parakeet-tdt-0.6b-v2`; these still require their
-  runtime-specific DiariZen or NeMo setup before selection.
+Meetings (speaker-labelled transcripts) are not part of Dictate for now: they
+were removed from every build on 2026-10-03 and are shelved as P3 (#140). On
+upgrade a saved Meeting model is removed from `config.yaml` with a one-line
+notice, and meeting transcripts you already saved stay in your notes with their
+speaker labels. The installers' old `--meeting` / `-Meeting` flags are accepted
+and ignored.
 
 ## Commands
 

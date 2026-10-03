@@ -48,12 +48,8 @@ from dictate.platform_paths import user_config_dir, user_data_dir
 from dictate.stt.factory import (
     BACKEND_REGISTRY,
     DEFAULT_MODELS,
-    check_backend_readiness,
-    create_speech_to_text,
     resolve_default_local_backend,
     resolve_model_name,
-    saved_compute_type,
-    saved_meeting_selection,
     saved_stt_selection,
 )
 from dictate.version import RELEASE_VERSION, release_channel
@@ -80,35 +76,9 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "local": True,
         "desc": "Runs on this machine — fast, accurate English, nothing leaves your device.",
     },
-    "parakeet-pyannote": {
-        "provider": "Local",
-        "brand": None,
-        "local": True,
-        "experimental": True,
-        "desc": "Local Meeting backend with Parakeet and speaker labels.",
-    },
-    "parakeet-diarizen": {
-        "provider": "Local",
-        "brand": None,
-        "local": True,
-        "experimental": True,
-        "desc": "Local Meeting backend with Parakeet and DiariZen speaker labels.",
-    },
-    "parakeet-sortformer": {
-        "provider": "Local",
-        "brand": None,
-        "local": True,
-        "experimental": True,
-        "desc": "Local Meeting backend with Parakeet and NVIDIA Sortformer speakers.",
-    },
 }
 
-PROVIDER_ORDER = (
-    "parakeet",
-    "parakeet-pyannote",
-    "parakeet-diarizen",
-    "parakeet-sortformer",
-)
+PROVIDER_ORDER = ("parakeet",)
 
 _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
@@ -126,14 +96,6 @@ class ApiError(Exception):
 
 def _dedupe_text(text: str) -> str:
     return " ".join(text.split()).casefold()
-
-
-def _meeting_blocking_warning(warnings: list[str]) -> str | None:
-    for warning in warnings:
-        normalized = warning.casefold()
-        if "pyannote/speaker-diarization-community-1 is gated" in normalized:
-            return warning
-    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -285,17 +247,9 @@ class UiBackend:
         cfg = self._load_ui_config()
         prefs = self.prefs_store.load()
         backend, model = self._dictation_selection(cfg)
-        meeting_backend, meeting_model = self._meeting_selection(cfg)
-        meeting_readiness = self._meeting_readiness(cfg)
         return {
             "version": RELEASE_VERSION,
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
-            "meetingModel": {
-                "id": f"{meeting_backend}/{meeting_model}",
-                "backend": meeting_backend,
-                "model": meeting_model,
-            },
-            "meetingReadiness": meeting_readiness,
             "models": self._models(),
             "shortcut": self._shortcut(cfg, prefs),
             "hotwords": list(cfg.hotwords),
@@ -334,7 +288,6 @@ class UiBackend:
                     "provider": meta.get("provider", backend),
                     "brand": meta.get("brand"),
                     "local": bool(meta.get("local")),
-                    "experimental": bool(meta.get("experimental")),
                     "desc": meta.get("desc", ""),
                     "default": model == default_model,
                 }
@@ -557,30 +510,14 @@ class UiBackend:
         started = bool(daemon.start_note_recording())
         return self._notes_payload()
 
-    def start_meeting_recording(self) -> dict[str, Any]:
-        daemon = self._require_daemon()
-        self._ensure_meeting_backend_ready()
-        daemon.start_meeting_recording()
-        return self._notes_payload()
-
     def stop_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         daemon.stop_note_recording()
         return self._notes_payload()
 
-    def stop_meeting_recording(self) -> dict[str, Any]:
-        daemon = self._require_daemon()
-        daemon.stop_meeting_recording()
-        return self._notes_payload()
-
     def discard_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         daemon.cancel_note_recording()
-        return self._notes_payload()
-
-    def discard_meeting_recording(self) -> dict[str, Any]:
-        daemon = self._require_daemon()
-        daemon.cancel_meeting_recording()
         return self._notes_payload()
 
     def pause_note_recording(self) -> dict[str, Any]:
@@ -597,58 +534,6 @@ class UiBackend:
         daemon = self._require_daemon()
         daemon.toggle_note_recording()
         return self._notes_payload()
-
-    def _ensure_meeting_backend_ready(self) -> None:
-        cfg = config_mod.load_config(self.config_path)
-        backend, model = self._meeting_selection(cfg)
-        readiness_payload = self._meeting_readiness(cfg)
-        if not readiness_payload["ready"]:
-            raise ApiError(409, f"Meeting model is not ready: {readiness_payload['reason']}")
-        self._install_meeting_backend_if_needed(cfg, backend=backend, model=model)
-
-    def _meeting_readiness(self, cfg: config_mod.Config) -> dict[str, Any]:
-        backend, model = self._meeting_selection(cfg)
-        readiness = check_backend_readiness(
-            backend=backend,
-            model=model,
-        )
-        capabilities = BACKEND_REGISTRY[backend].capabilities
-        if not capabilities.supports_speaker_attribution:
-            reason = "Meeting needs a speaker-ready local model. Select the Meeting model and prepare it first."
-        elif readiness.errors:
-            reason = readiness.errors[0]
-        else:
-            reason = _meeting_blocking_warning(readiness.warnings)
-        return {
-            "ready": reason is None,
-            "reason": reason,
-            "errors": list(readiness.errors),
-            "warnings": list(readiness.warnings),
-        }
-
-    def _meeting_selection(self, cfg: config_mod.Config) -> tuple[str, str]:
-        return saved_meeting_selection(cfg.meeting_stt_backend, cfg.meeting_stt_model)
-
-    def _install_meeting_backend_if_needed(
-        self,
-        cfg: config_mod.Config,
-        *,
-        backend: str,
-        model: str,
-    ) -> None:
-        daemon = self._require_daemon()
-        set_meeting = getattr(daemon, "set_meeting_speech_to_text", None)
-        if not callable(set_meeting):
-            return
-        current_meeting = getattr(daemon, "current_meeting_backend_model", None)
-        if callable(current_meeting) and current_meeting() == (backend, model):
-            return
-        stt = create_speech_to_text(
-            backend=backend,
-            model=model,
-            compute_type=saved_compute_type(cfg.stt_compute_type),
-        )
-        set_meeting(stt, hotwords=cfg.hotwords_for_backend(backend))
 
     def run_doctor(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
@@ -733,7 +618,7 @@ class UiBackend:
         }
         if self.daemon is not None:
             mode = getattr(self.daemon, "long_recording_mode", None)
-            if mode in {"note", "meeting"}:
+            if mode == "note":
                 payload["mode"] = mode
         if paused and self.daemon is not None:
             reason = getattr(self.daemon, "note_pause_reason", None)
@@ -751,6 +636,7 @@ class UiBackend:
             "provider": segment.provider,
             "model": segment.model,
         }
+        # Speaker fields exist only on meeting transcripts saved before #140.
         if segment.speaker_id:
             payload["speakerId"] = segment.speaker_id
         if segment.speaker_label:
@@ -954,14 +840,8 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return _Response(200, backend.start_note_recording())
         if path == "/api/notes/stop" and method == "POST":
             return _Response(200, backend.stop_note_recording())
-        if path == "/api/meetings/start" and method == "POST":
-            return _Response(200, backend.start_meeting_recording())
-        if path == "/api/meetings/stop" and method == "POST":
-            return _Response(200, backend.stop_meeting_recording())
         if path == "/api/notes/discard" and method == "POST":
             return _Response(200, backend.discard_note_recording())
-        if path == "/api/meetings/discard" and method == "POST":
-            return _Response(200, backend.discard_meeting_recording())
         if path == "/api/notes/pause" and method == "POST":
             return _Response(200, backend.pause_note_recording())
         if path == "/api/notes/resume" and method == "POST":
