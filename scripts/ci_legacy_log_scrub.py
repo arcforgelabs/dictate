@@ -92,8 +92,9 @@ def _show(title: str, files: list[Path]) -> None:
     print(f"===== {title} =====")
     for path in files:
         print(f"--- {path}")
-        for line in _read(path).splitlines(keepends=True):
-            print(f"    {line!r}")
+        # Split on \n only, so the \r a recording indicator left stays visible in its line.
+        for line in _read(path).split("\n")[:-1]:
+            print(f"    {line + chr(10)!r}")
 
 
 def _snapshot(files: list[Path]) -> dict[Path, tuple[int, int]]:
