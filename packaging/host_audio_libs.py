@@ -4,7 +4,9 @@ Dictate captures audio through ``sounddevice`` → PortAudio. On Linux the .deb
 already depends on distro ``libportaudio2`` (Pulse/PipeWire-aware). PyInstaller
 still tends to collect a private ``libportaudio`` / ``libasound`` from the build
 machine — often an ALSA-only build that defaults to raw ``hw:*`` devices and
-rejects 16 kHz under modern PipeWire (seen on Ubuntu 26).
+rejects 16 kHz under modern PipeWire (seen on Ubuntu 26). The build host's
+PortAudio also drags in ``libjack`` and its Berkeley DB (``libdb-5.3``, Sleepycat
+licence); once PortAudio is dropped nothing in the bundle loads them.
 
 Default PyTorch wheels also pull CUDA/nvidia/triton trees that push the Linux
 ``.deb`` past GitHub's 2 GiB release-asset limit. Those stay out of the freeze
@@ -28,6 +30,7 @@ _LINUX_HOST_AUDIO_PREFIXES = (
     "libpulse",
     "libpulse-simple",
     "libpulsecommon",
+    "libjack",
 )
 
 # CUDA / ROCm / Triton trees must not ship in the default Linux .deb — they alone
@@ -47,7 +50,7 @@ _LINUX_HEAVY_RUNTIME_PREFIXES = (
 )
 
 _LINUX_HOST_AUDIO_RE = re.compile(
-    r"^(?:lib)?(?:portaudio|asound|pulse(?:-simple|common)?)",
+    r"^(?:lib)?(?:portaudio|asound|pulse(?:-simple|common)?|jack)|^libdb-\d",
     re.IGNORECASE,
 )
 

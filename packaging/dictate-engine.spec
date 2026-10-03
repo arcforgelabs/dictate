@@ -75,6 +75,22 @@ for pkg in ("torch", "torchaudio", "pyannote.audio", "pyannote.core", "pyannote.
     except Exception:
         pass
 
+# pyannote loads its model classes by name from the checkpoint
+# (pyannote.audio.models.*), so they are only frozen if collect_all above could
+# import pyannote.audio. When that import fails (for example a CUDA torchaudio
+# beside CPU torch), PyInstaller only warns and the bundle ships without them:
+# Meeting then dies at load with ModuleNotFoundError. Fail the build instead.
+import importlib.util  # noqa: E402
+
+if importlib.util.find_spec("pyannote.audio") is not None and not any(
+    name.startswith("pyannote.audio.models.") for name in hiddenimports
+):
+    raise SystemExit(
+        "pyannote.audio is installed but could not be imported at freeze time, so "
+        "its model modules would be missing from the bundle. On Linux install "
+        "torch and torchaudio from the CPU index (see packaging/build-engine.sh)."
+    )
+
 # Our own package + its lazily-imported backends/dialogs.
 hiddenimports += collect_submodules("dictate")
 hiddenimports += [
