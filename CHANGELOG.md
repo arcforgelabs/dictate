@@ -68,6 +68,13 @@
   plugged in. The engine now reads the default correctly and, failing that,
   tries any device that can capture.
 
+- The window connects to its engine even when the engine is slow to start.
+  It used to wait 8 seconds and then stay on "Dictate engine is not
+  connected" for good, even after the engine came up; the Windows Store
+  build's engine took about 11 seconds on a cold start. It now keeps checking
+  and connects as soon as the engine is ready, without freezing while it
+  waits.
+
 ## 2026-09-27
 
 ### Fixed

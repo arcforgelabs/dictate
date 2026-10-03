@@ -423,12 +423,19 @@ fn json_str(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+// Async so the up-to-8s handshake wait in ensure_engine runs off the main
+// thread; a sync command would freeze the window while the UI keeps retrying
+// for an engine that is still starting.
 #[tauri::command]
-fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
+async fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
     let platform = detect_platform();
-    ensure_engine(&app).map(|h| BridgePayload {
-        base_url: h.url,
-        token: h.token,
+    let handshake = tauri::async_runtime::spawn_blocking(move || ensure_engine(&app))
+        .await
+        .ok()
+        .flatten()?;
+    Some(BridgePayload {
+        base_url: handshake.url,
+        token: handshake.token,
         platform,
     })
 }

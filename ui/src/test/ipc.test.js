@@ -47,6 +47,43 @@ describe("ipc bridge", () => {
     expect(() => unsub()).not.toThrow();
   });
 
+  it("keeps asking the shell for a bridge until a slow engine comes up", async () => {
+    vi.useFakeTimers();
+    window.__DICTATE__ = { platform: "win11" };
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ baseUrl: "http://127.0.0.1:3", token: "late", platform: "win11" });
+    window.__TAURI__ = { core: { invoke } };
+    const onLive = vi.fn();
+
+    ipc.waitForBridge(onLive, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onLive).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(onLive).toHaveBeenCalledTimes(1);
+    expect(ipc.isLive()).toBe(true);
+    expect(window.__DICTATE__).toMatchObject({ baseUrl: "http://127.0.0.1:3", token: "late", platform: "win11" });
+  });
+
+  it("stops waiting for a bridge once cancelled", async () => {
+    vi.useFakeTimers();
+    window.__DICTATE__ = { platform: "win11" };
+    const invoke = vi.fn().mockResolvedValue(null);
+    window.__TAURI__ = { core: { invoke } };
+    const onLive = vi.fn();
+
+    const cancel = ipc.waitForBridge(onLive, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    cancel();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(onLive).not.toHaveBeenCalled();
+  });
+
   it("refreshes the bridge and retries when the server port is stale", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "old", platform: "gnome" };
     window.__TAURI__ = {

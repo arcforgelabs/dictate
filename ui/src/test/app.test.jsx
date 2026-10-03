@@ -950,6 +950,48 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByText(/project note/i)).not.toBeInTheDocument();
   });
 
+  it("connects to a slow-starting engine once its bridge appears", async () => {
+    vi.useFakeTimers();
+    window.__DICTATE__ = { platform: "win11" };
+    let refreshes = 0;
+    const invoke = vi.fn(async (cmd) => {
+      if (cmd !== "refresh_bridge") return null;
+      refreshes += 1;
+      return refreshes < 3 ? null : { baseUrl: "http://127.0.0.1:1", token: "late", platform: "win11" };
+    });
+    window.__TAURI__ = { core: { invoke } };
+    const sources = [];
+    window.EventSource = class {
+      constructor(url) { this.url = url; sources.push(this); }
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith("/api/update-status")
+        ? { checked: true, updateAvailable: false }
+        : { history: [] }),
+    }));
+    const apiCalls = (path) => fetchSpy.mock.calls.filter(([url]) => String(url).endsWith(path)).length;
+
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    expect(screen.getByText("Dictate engine is not connected")).toBeInTheDocument();
+    expect(sources).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+    expect(refreshes).toBe(3);
+    expect(sources).toHaveLength(1);
+    expect(sources[0].url).toBe("http://127.0.0.1:1/api/events?token=late");
+    expect(apiCalls("/api/state")).toBe(1);
+    expect(apiCalls("/api/update-status")).toBe(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(refreshes).toBe(3);
+  });
+
   it("close from expanded note (after capture) returns to capture home", async () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Start recording"));
