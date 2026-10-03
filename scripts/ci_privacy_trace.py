@@ -175,7 +175,7 @@ def cmd_meeting(args: argparse.Namespace) -> int:
     result: dict[str, Any] = {}
 
     def main() -> int:
-        backend = ParakeetPyannoteSpeechToText(device="cpu")
+        backend = ParakeetPyannoteSpeechToText()
         segments = backend.transcribe_diarized_segments(audio)
         note = _format_segments(segments).strip()
         result["segments"] = len(segments)
