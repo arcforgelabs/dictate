@@ -14,7 +14,7 @@ Usage: scripts/windows-vm-smoke.sh [options]
 
 Options:
   --vm <name>          libvirt/QEMU VM name. Default: $VM_NAME
-  --mode <mode>        syntax, install, lifecycle, build, msix, or amd. Default: syntax
+  --mode <mode>        syntax, install, lifecycle, build, or msix. Default: syntax
   --timeout <seconds>  Guest command timeout. Default: 900
   --keep-guest-workdir Leave %TEMP%\\dictate-vm-smoke in the guest for inspection
   -h, --help           Show this help
@@ -25,7 +25,6 @@ Modes:
   lifecycle  install + update-windows.ps1 and uninstall-windows.ps1 smoke checks.
   build      syntax + build the Windows desktop executable and verify artifacts.
   msix       syntax + build the Store MSIX package and verify the .msix artifact.
-  amd        install + install the Windows AMD DirectML extra and run AMD doctor.
 
 Requires libvirt virsh access and QEMU Guest Agent running in the Windows VM.
 The source zip is copied into the guest through QEMU Guest Agent file APIs, so
@@ -82,8 +81,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$MODE" in
-  syntax|install|lifecycle|build|msix|amd) ;;
-  *) die "--mode must be syntax, install, lifecycle, build, msix, or amd" ;;
+  syntax|install|lifecycle|build|msix) ;;
+  *) die "--mode must be syntax, install, lifecycle, build, or msix" ;;
 esac
 
 need_cmd virsh
@@ -320,7 +319,6 @@ Write-Output "==> PowerShell syntax parse"
     'uninstall-windows.ps1',
     'scripts/collect-transcription-evidence.ps1',
     'scripts/run-human-test-readiness.ps1',
-    'scripts/run-amd-promotion-benchmarks.ps1',
     'scripts/windows-user-smoke.ps1'
 )
 foreach (\$script in \$scripts) {
@@ -328,7 +326,7 @@ foreach (\$script in \$scripts) {
     Write-Output "parsed \$script"
 }
 
-if (\$mode -in @('install', 'lifecycle', 'amd')) {
+if (\$mode -in @('install', 'lifecycle')) {
     Invoke-Checked 'Install Dictate Windows smoke' {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\install-windows.ps1 -NoPrepareTurbo -NoVerify -NoShortcut -NoStartup
     }
@@ -343,20 +341,6 @@ if (\$mode -in @('install', 'lifecycle', 'amd')) {
     }
     Invoke-Checked 'Doctor quick for fresh Parakeet default' {
         & .\\.venv\\Scripts\\dictate.exe doctor --quick --type-backend pynput
-    }
-    if (\$mode -eq 'amd') {
-        Invoke-Checked 'Install Windows AMD DirectML extra' {
-            & .\\.venv\\Scripts\\python.exe -m pip install -e ".[amd]"
-        }
-        Invoke-Checked 'Inspect ONNX Runtime DirectML provider' {
-            & .\\.venv\\Scripts\\python.exe -c "import onnxruntime as ort; providers=ort.get_available_providers(); print('providers=' + ','.join(providers)); raise SystemExit(0 if 'DmlExecutionProvider' in providers else 2)"
-        }
-        Invoke-Checked 'Doctor quick for Parakeet AMD DirectML lane' {
-            & .\\.venv\\Scripts\\dictate.exe doctor --stt-backend parakeet --device amd --quick --type-backend pynput
-        }
-        Invoke-Checked 'Uninstall Dictate Windows AMD smoke cleanup' {
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\uninstall-windows.ps1 -Quiet
-        }
     }
     if (\$mode -eq 'install') {
         Invoke-Checked 'Uninstall Dictate Windows smoke cleanup' {
