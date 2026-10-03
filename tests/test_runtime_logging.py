@@ -245,16 +245,23 @@ class RuntimeLoggingTests(unittest.TestCase):
         with patch("sys.stderr", None):
             runtime_logging.echo_dictated_text("Typed", "anything")
 
+    def test_scrub_writes_the_same_form_as_the_live_redaction(self) -> None:
+        # A scrubbed 2026.9.27 line must match what echo_dictated_text logs today.
+        for label, words in (("Typed", "my secret words"), ("Saved note", "meeting notes")):
+            live = StringIO()
+            with patch("sys.stderr", live):
+                runtime_logging.echo_dictated_text(label, words)
+            old_line = f"\r  {label}: {words}\n"
+            self.assertEqual(runtime_logging.redact_dictated_text(old_line), live.getvalue())
+            # A line already in that form is left as it is.
+            self.assertEqual(runtime_logging.redact_dictated_text(live.getvalue()), live.getvalue())
 
     def test_closing_mirrored_stderr_does_not_raise(self) -> None:
         # A library closing sys.stderr at exit used to raise AttributeError.
         with tempfile.TemporaryDirectory() as temp_dir:
             log_dir = Path(temp_dir) / "logs"
-            with patch.object(runtime_logging, "LOG_DIR", log_dir), patch.object(
-                runtime_logging, "LATEST_LOG_PATH", log_dir / "latest.log"
-            ), patch.object(runtime_logging, "LAST_FAILURE_LOG_PATH", log_dir / "last_failure.log"), patch(
-                "sys.stderr", new_callable=StringIO
-            ):
+            with _isolated_log_dirs(temp_dir), patch("sys.stderr", new_callable=StringIO):
+
                 def close_stderr() -> int:
                     import sys
 
@@ -268,6 +275,7 @@ class RuntimeLoggingTests(unittest.TestCase):
             latest = (log_dir / "latest.log").read_text(encoding="utf-8")
             self.assertIn("before close", latest)
             self.assertIn("dictate: exit code 0", latest)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,11 @@ _DICTATED_LINE = re.compile(
 _REDACTED_TEXT = re.compile(r"\[\d+ characters, not logged\]")
 
 
+def _redacted(text: str) -> str:
+    """What a log holds in place of dictated text: its length, never the words."""
+    return f"[{len(text)} characters, not logged]"
+
+
 class _TeeStderr:
     """Mirror stderr output to both terminal and log file."""
 
@@ -82,7 +87,7 @@ def echo_dictated_text(label: str, text: str) -> None:
     if stream is None:
         return
     full = f"\r  {label}: {text}\n"
-    redacted = f"\r  {label}: [{len(text)} characters, not logged]\n"
+    redacted = f"\r  {label}: {_redacted(text)}\n"
     if isinstance(stream, _TeeStderr):
         if stream.primary is not None:
             stream.primary.write(full if _is_tty(stream.primary) else redacted)
@@ -192,7 +197,7 @@ def redact_dictated_text(content: str) -> str:
         text = match.group("text")
         if not text or _REDACTED_TEXT.fullmatch(text):
             return match.group(0)
-        return f"{match.group('label')}: [{len(text)} characters, not logged]{match.group('eol')}"
+        return f"{match.group('label')}: {_redacted(text)}{match.group('eol')}"
 
     return _DICTATED_LINE.sub(_replace, content)
 

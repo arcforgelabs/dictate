@@ -73,6 +73,15 @@ jobs:
         run: |
           .venv\Scripts\python.exe -m unittest discover -s tests -p "test_ui_server.py"
 
+      - name: Scrub a 2026.9.27-format log on startup (before/after) on Linux
+        if: runner.os == 'Linux'
+        run: python scripts/ci_legacy_log_scrub.py --root "$RUNNER_TEMP/legacy-log-scrub"
+
+      - name: Scrub a 2026.9.27-format log on startup (before/after) on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe scripts\ci_legacy_log_scrub.py --root "$env:RUNNER_TEMP\legacy-log-scrub"
+
       - name: Show version on Linux
         if: runner.os == 'Linux'
         run: dictate --version
