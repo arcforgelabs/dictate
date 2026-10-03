@@ -18,7 +18,6 @@ from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 from dictate.config import (
     load_config,
     set_push_to_talk_combo,
-    set_stt_runtime_profile,
     set_stt_selection,
 )
 from dictate.daemon import Daemon
@@ -33,7 +32,11 @@ from dictate.model_state import (
     mark_model_failed,
     mark_model_prepared,
 )
-from dictate.stt import BACKEND_REGISTRY, create_speech_to_text, resolve_model_name
+from dictate.stt import (
+    BACKEND_REGISTRY,
+    create_speech_to_text,
+    saved_compute_type,
+)
 
 ICON_ACTIVE = "microphone-sensitivity-high-symbolic"
 ICON_PAUSED = "microphone-disabled-symbolic"
@@ -41,32 +44,14 @@ SWITCH_LOCK_SECONDS = 15
 SWITCH_ABORT_SECONDS = 300
 PREPARE_ABORT_SECONDS = 900
 SWITCH_STATUS_CLEAR_SECONDS = 6
-# The backend behind the tray's "Local" menu and its CPU/GPU runtime profiles.
+# The backend behind the tray's "Local" menu. Dictate runs on CPU only.
 LOCAL_BACKEND = "parakeet"
-LOCAL_RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
-    ("cpu", "int8", "CPU"),
-    ("cuda", "int8", "GPU"),
-    ("amd", "int8", "AMD GPU"),
-)
-
-
-def _device_for_backend(backend: str, current_device: str) -> str:
-    if backend == LOCAL_BACKEND:
-        return current_device if current_device in {"cpu", "cuda", "amd", "auto"} else "auto"
-    return "auto"
 
 
 def _compute_type_for_backend(backend: str, current_compute_type: str) -> str:
     if backend == LOCAL_BACKEND:
-        if current_compute_type in {"int8", "float16", "float32"}:
-            return current_compute_type
+        return saved_compute_type(current_compute_type)
     return "int8"
-
-
-def _local_runtime_name(device: str) -> str:
-    if device == "cuda":
-        return "GPU"
-    return "CPU"
 
 
 class TrayIcon:
@@ -86,19 +71,16 @@ class TrayIcon:
         self._prepare_started_monotonic = 0.0
         self._prepare_target_backend = ""
         self._prepare_target_model = ""
-        self._prepare_target_device = ""
         self._prepare_target_compute_type = ""
         self._prepare_process: subprocess.Popen[str] | None = None
-        self._pending_switch_after_prepare: tuple[str, str, str, str] | None = None
+        self._pending_switch_after_prepare: tuple[str, str, str] | None = None
         self._syncing_model_menu = False
-        self._syncing_profile_menu = False
         self._model_items: dict[tuple[str, str], Gtk.RadioMenuItem] = {}
-        self._profile_items: dict[tuple[str, str], Gtk.RadioMenuItem] = {}
         self._daemon_status_counter = 0
 
         self.daemon.status_callback = self._on_daemon_status
         self._active_backend, self._active_model = self.daemon.current_backend_model()
-        self._stt_device, self._stt_compute_type = self.daemon.runtime_stt_options()
+        self._stt_compute_type = self.daemon.runtime_compute_type()
 
         self.indicator = AyatanaAppIndicator3.Indicator.new(
             "dictate",
@@ -167,7 +149,6 @@ class TrayIcon:
         submenu = Gtk.Menu()
         radio_group: Gtk.RadioMenuItem | None = None
         self._model_items.clear()
-        self._profile_items.clear()
 
         def append_model_item(parent: Gtk.Menu, backend: str, model: str) -> None:
             nonlocal radio_group
@@ -180,12 +161,10 @@ class TrayIcon:
             self._model_items[(backend, model)] = item
             parent.append(item)
 
-        local_item = Gtk.MenuItem(label=f"Local ({_local_runtime_name(self._stt_device)})")
+        local_item = Gtk.MenuItem(label="Local (CPU)")
         local_menu = Gtk.Menu()
         for model in self._models_for_backend(LOCAL_BACKEND):
             append_model_item(local_menu, LOCAL_BACKEND, model)
-        local_menu.append(Gtk.SeparatorMenuItem())
-        self._append_local_runtime_items(local_menu)
         # Parakeet has no native hotword decoding; saved hotwords apply through
         # the post/hybrid lexicon modes.
         local_menu.append(Gtk.SeparatorMenuItem())
@@ -196,7 +175,6 @@ class TrayIcon:
         submenu.append(local_item)
 
         self._set_active_model_menu_item(self._active_backend, self._active_model)
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         return submenu
 
     def _models_for_backend(self, backend: str) -> tuple[str, ...]:
@@ -205,18 +183,6 @@ class TrayIcon:
         if self._active_backend == backend and self._active_model not in models:
             models.insert(0, self._active_model)
         return tuple(models)
-
-    def _append_local_runtime_items(self, submenu: Gtk.Menu) -> None:
-        radio_group: Gtk.RadioMenuItem | None = None
-        for device, compute_type, label in LOCAL_RUNTIME_PROFILES:
-            if radio_group is None:
-                item = Gtk.RadioMenuItem.new_with_label(None, label)
-                radio_group = item
-            else:
-                item = Gtk.RadioMenuItem.new_with_label_from_widget(radio_group, label)
-            item.connect("toggled", self._on_profile_selected, device, compute_type)
-            self._profile_items[(device, compute_type)] = item
-            submenu.append(item)
 
     def _on_toggle(self, item):
         if item.get_active():
@@ -302,14 +268,12 @@ class TrayIcon:
         if self._requires_preparation(
             backend=backend,
             model=model,
-            device=self._stt_device,
             compute_type=self._stt_compute_type,
         ):
             self._set_active_model_menu_item(self._active_backend, self._active_model)
             self._start_prepare_for_switch(
                 backend=backend,
                 model=model,
-                device=self._stt_device,
                 compute_type=self._stt_compute_type,
             )
             return
@@ -317,55 +281,7 @@ class TrayIcon:
         self._start_switch(
             backend=backend,
             model=model,
-            device=_device_for_backend(backend, self._stt_device),
             compute_type=_compute_type_for_backend(backend, self._stt_compute_type),
-        )
-
-    def _on_profile_selected(self, item, device: str, compute_type: str) -> None:
-        if self._syncing_profile_menu:
-            return
-        if not item.get_active():
-            return
-        if self._prepare_in_progress:
-            self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
-            self._set_switch_status("Model preparation already in progress. Please wait.")
-            return
-        if self._switch_in_progress:
-            return
-        target_backend = LOCAL_BACKEND
-        # A runtime profile change keeps the active Local model; coming from any
-        # other backend, switch to the Local default.
-        target_model = (
-            self._active_model
-            if self._active_backend == target_backend
-            else resolve_model_name(target_backend, None)
-        )
-        if (
-            self._active_backend == target_backend
-            and (device, compute_type) == (self._stt_device, self._stt_compute_type)
-        ):
-            return
-
-        if self._requires_preparation(
-            backend=target_backend,
-            model=target_model,
-            device=device,
-            compute_type=compute_type,
-        ):
-            self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
-            self._start_prepare_for_switch(
-                backend=target_backend,
-                model=target_model,
-                device=device,
-                compute_type=compute_type,
-            )
-            return
-
-        self._start_switch(
-            backend=target_backend,
-            model=target_model,
-            device=device,
-            compute_type=compute_type,
         )
 
     def _requires_preparation(
@@ -373,10 +289,9 @@ class TrayIcon:
         *,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> bool:
-        del backend, model, device, compute_type
+        del backend, model, compute_type
         return False
 
     def _start_prepare_for_switch(
@@ -384,7 +299,6 @@ class TrayIcon:
         *,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> None:
         self._prepare_counter += 1
@@ -394,9 +308,8 @@ class TrayIcon:
         self._prepare_started_monotonic = time.monotonic()
         self._prepare_target_backend = backend
         self._prepare_target_model = model
-        self._prepare_target_device = device
         self._prepare_target_compute_type = compute_type
-        self._pending_switch_after_prepare = (backend, model, device, compute_type)
+        self._pending_switch_after_prepare = (backend, model, compute_type)
         self._set_switch_status(
             self._build_prepare_status_message(
                 backend=backend,
@@ -416,8 +329,6 @@ class TrayIcon:
             backend,
             "--model",
             model,
-            "--device",
-            device,
             "--compute-type",
             compute_type,
         ]
@@ -433,7 +344,6 @@ class TrayIcon:
             mark_model_failed(
                 backend=backend,
                 model=model,
-                device=device,
                 compute_type=compute_type,
                 error_message=str(exc),
             )
@@ -443,7 +353,7 @@ class TrayIcon:
                 flags=0,
                 message_type=Gtk.MessageType.ERROR,
                 buttons=Gtk.ButtonsType.CLOSE,
-                text=f"Failed to prepare {backend} / {model} ({device}, {compute_type})",
+                text=f"Failed to prepare {backend} / {model} ({compute_type})",
             )
             dialog.format_secondary_text(str(exc))
             dialog.run()
@@ -476,18 +386,16 @@ class TrayIcon:
 
         backend = self._prepare_target_backend
         model = self._prepare_target_model
-        device = self._prepare_target_device
         compute_type = self._prepare_target_compute_type
 
         if return_code == 0:
             mark_model_prepared(
                 backend=backend,
                 model=model,
-                device=device,
                 compute_type=compute_type,
             )
             print(
-                f"Model prepared: {backend}/{model} ({device}/{compute_type})",
+                f"Model prepared: {backend}/{model} ({compute_type})",
                 file=sys.stderr,
             )
             pending = self._pending_switch_after_prepare
@@ -496,8 +404,7 @@ class TrayIcon:
                 self._start_switch(
                     backend=pending[0],
                     model=pending[1],
-                    device=pending[2],
-                    compute_type=pending[3],
+                    compute_type=pending[2],
                 )
             else:
                 self._set_switch_status("Model preparation complete.")
@@ -512,7 +419,6 @@ class TrayIcon:
             get_model_error(
                 backend=backend,
                 model=model,
-                device=device,
                 compute_type=compute_type,
             )
             or f"prepare command exited with code {return_code}"
@@ -520,13 +426,11 @@ class TrayIcon:
         mark_model_failed(
             backend=backend,
             model=model,
-            device=device,
             compute_type=compute_type,
             error_message=error_message,
         )
         self._pending_switch_after_prepare = None
         self._set_active_model_menu_item(self._active_backend, self._active_model)
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status("Model preparation failed. Keeping previous model.")
         GLib.timeout_add_seconds(
             SWITCH_STATUS_CLEAR_SECONDS,
@@ -538,7 +442,7 @@ class TrayIcon:
             flags=0,
             message_type=Gtk.MessageType.ERROR,
             buttons=Gtk.ButtonsType.CLOSE,
-            text=f"Failed to prepare {backend} / {model} ({device}, {compute_type})",
+            text=f"Failed to prepare {backend} / {model} ({compute_type})",
         )
         dialog.format_secondary_text(error_message)
         dialog.run()
@@ -562,7 +466,6 @@ class TrayIcon:
                 get_model_error(
                     backend=self._prepare_target_backend,
                     model=self._prepare_target_model,
-                    device=self._prepare_target_device,
                     compute_type=self._prepare_target_compute_type,
                 )
                 or f"prepare command timed out after {PREPARE_ABORT_SECONDS}s"
@@ -572,12 +475,10 @@ class TrayIcon:
 
         backend = self._prepare_target_backend
         model = self._prepare_target_model
-        device = self._prepare_target_device
         compute_type = self._prepare_target_compute_type
         mark_model_failed(
             backend=backend,
             model=model,
-            device=device,
             compute_type=compute_type,
             error_message=error_message,
         )
@@ -585,7 +486,6 @@ class TrayIcon:
         self._prepare_in_progress = False
         self._pending_switch_after_prepare = None
         self._set_active_model_menu_item(self._active_backend, self._active_model)
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status(
             "Model preparation timed out. Keeping previous backend."
         )
@@ -601,7 +501,6 @@ class TrayIcon:
         *,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> None:
         self._switch_counter += 1
@@ -614,12 +513,11 @@ class TrayIcon:
         self._switch_target_model = model
         # Keep checkmarks on the currently active selection until the new backend/model is ready.
         self._set_active_model_menu_item(self._active_backend, self._active_model)
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status(self._build_switch_status_message(backend, model))
         self._set_switch_menu_sensitive(False)
         threading.Thread(
             target=self._switch_worker,
-            args=(switch_id, backend, model, device, compute_type),
+            args=(switch_id, backend, model, compute_type),
             daemon=True,
         ).start()
         GLib.timeout_add_seconds(1, self._tick_switch_status, switch_id)
@@ -629,7 +527,6 @@ class TrayIcon:
             switch_id,
             backend,
             model,
-            device,
             compute_type,
         )
         GLib.timeout_add_seconds(
@@ -638,7 +535,6 @@ class TrayIcon:
             switch_id,
             backend,
             model,
-            device,
             compute_type,
         )
 
@@ -647,70 +543,32 @@ class TrayIcon:
         switch_id: int,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> None:
         print(
-            f"Switching STT to {backend} / {model} on {device} ({compute_type})...",
+            f"Switching STT to {backend} / {model} ({compute_type})...",
             file=sys.stderr,
         )
-        loaded_device = device
-        loaded_compute_type = compute_type
         try:
             stt = create_speech_to_text(
                 backend=backend,  # type: ignore[arg-type]
                 model=model,
-                device=device,  # type: ignore[arg-type]
                 compute_type=compute_type,  # type: ignore[arg-type]
             )
             _ = stt.model
         except Exception as exc:  # noqa: BLE001
-            if self._should_retry_switch_on_cpu(exc, backend=backend, requested_device=device):
-                print(
-                    (
-                        f"Switch failed on {device} for {backend}/{model}: {exc}. "
-                        "Retrying activation on CPU."
-                    ),
-                    file=sys.stderr,
-                )
-                try:
-                    loaded_device = "cpu"
-                    loaded_compute_type = "int8"
-                    stt = create_speech_to_text(
-                        backend=backend,  # type: ignore[arg-type]
-                        model=model,
-                        device=loaded_device,  # type: ignore[arg-type]
-                        compute_type=loaded_compute_type,  # type: ignore[arg-type]
-                    )
-                    _ = stt.model
-                except Exception as retry_exc:  # noqa: BLE001
-                    GLib.idle_add(
-                        self._finalize_switch,
-                        switch_id,
-                        False,
-                        backend,
-                        model,
-                        device,
-                        compute_type,
-                        str(retry_exc),
-                        True,
-                        None,
-                    )
-                    return
-            else:
-                GLib.idle_add(
-                    self._finalize_switch,
-                    switch_id,
-                    False,
-                    backend,
-                    model,
-                    device,
-                    compute_type,
-                    str(exc),
-                    True,
-                    None,
-                )
-                return
+            GLib.idle_add(
+                self._finalize_switch,
+                switch_id,
+                False,
+                backend,
+                model,
+                compute_type,
+                str(exc),
+                True,
+                None,
+            )
+            return
 
         GLib.idle_add(
             self._finalize_switch,
@@ -718,8 +576,7 @@ class TrayIcon:
             True,
             backend,
             model,
-            loaded_device,
-            loaded_compute_type,
+            compute_type,
             "",
             True,
             stt,
@@ -731,7 +588,6 @@ class TrayIcon:
         ok: bool,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
         error_message: str,
         notify_failure: bool,
@@ -739,7 +595,7 @@ class TrayIcon:
     ) -> bool:
         if switch_id != self._latest_switch_id:
             if loaded_stt is not None:
-                self._release_cuda_memory_best_effort()
+                self._release_memory_best_effort()
             return GLib.SOURCE_REMOVE
         try:
             if ok:
@@ -749,23 +605,19 @@ class TrayIcon:
                         hotwords=load_config().hotwords_for_backend(backend),
                     )
                 set_stt_selection(backend=backend, model=model)
-                set_stt_runtime_profile(device=device, compute_type=compute_type)
                 self._active_backend = backend
                 self._active_model = model
-                self._stt_device = device
                 self._stt_compute_type = compute_type
                 mark_model_prepared(
                     backend=backend,
                     model=model,
-                    device=device,
                     compute_type=compute_type,
                 )
                 print(
-                    f"STT switched to {backend} / {model} on {device} ({compute_type})",
+                    f"STT switched to {backend} / {model} ({compute_type})",
                     file=sys.stderr,
                 )
                 self._set_active_model_menu_item(backend, model)
-                self._set_active_profile_menu_item(device, compute_type)
                 self._sync_capability_menu_items()
                 self._update_model_status_label()
                 self._set_switch_status(f"Switched to {backend} / {model}.")
@@ -778,19 +630,17 @@ class TrayIcon:
                 print(
                     (
                         f"STT switch failed ({backend}/{model} "
-                        f"{device}/{compute_type}): {error_message}"
+                        f"{compute_type}): {error_message}"
                     ),
                     file=sys.stderr,
                 )
                 mark_model_failed(
                     backend=backend,
                     model=model,
-                    device=device,
                     compute_type=compute_type,
                     error_message=error_message,
                 )
                 self._set_active_model_menu_item(self._active_backend, self._active_model)
-                self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
                 self._set_switch_status("Switch failed. Keeping previous model.")
                 GLib.timeout_add_seconds(
                     SWITCH_STATUS_CLEAR_SECONDS,
@@ -803,12 +653,12 @@ class TrayIcon:
                         flags=0,
                         message_type=Gtk.MessageType.ERROR,
                         buttons=Gtk.ButtonsType.CLOSE,
-                        text=f"Failed to switch to {backend} / {model} ({device}, {compute_type})",
+                        text=f"Failed to switch to {backend} / {model} ({compute_type})",
                     )
                     dialog.format_secondary_text(error_message)
                     dialog.run()
                     dialog.destroy()
-                self._release_cuda_memory_best_effort()
+                self._release_memory_best_effort()
         finally:
             # Always release the UI lock even if GTK menu updates/dialog handling fail.
             self._switch_in_progress = False
@@ -821,7 +671,6 @@ class TrayIcon:
         switch_id: int,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> bool:
         if switch_id != self._latest_switch_id:
@@ -832,7 +681,7 @@ class TrayIcon:
         print(
             (
                 f"STT switch still running after {SWITCH_LOCK_SECONDS}s "
-                f"({backend}/{model} {device}/{compute_type}); unlocking menu."
+                f"({backend}/{model} {compute_type}); unlocking menu."
             ),
             file=sys.stderr,
         )
@@ -850,7 +699,6 @@ class TrayIcon:
         switch_id: int,
         backend: str,
         model: str,
-        device: str,
         compute_type: str,
     ) -> bool:
         if switch_id != self._latest_switch_id:
@@ -861,14 +709,13 @@ class TrayIcon:
         print(
             (
                 f"STT switch timed out after {SWITCH_ABORT_SECONDS}s "
-                f"({backend}/{model} {device}/{compute_type}); abandoning attempt."
+                f"({backend}/{model} {compute_type}); abandoning attempt."
             ),
             file=sys.stderr,
         )
         mark_model_failed(
             backend=backend,
             model=model,
-            device=device,
             compute_type=compute_type,
             error_message=f"switch timed out after {SWITCH_ABORT_SECONDS}s",
         )
@@ -880,11 +727,10 @@ class TrayIcon:
         self._switch_background_mode = False
         self._set_switch_menu_sensitive(True)
         self._set_active_model_menu_item(self._active_backend, self._active_model)
-        self._set_active_profile_menu_item(self._stt_device, self._stt_compute_type)
         self._set_switch_status(
             "Switch timed out. Keeping previous backend."
         )
-        self._release_cuda_memory_best_effort()
+        self._release_memory_best_effort()
         GLib.timeout_add_seconds(
             SWITCH_STATUS_CLEAR_SECONDS,
             self._clear_status_for_switch_id,
@@ -927,8 +773,6 @@ class TrayIcon:
     def _set_switch_menu_sensitive(self, sensitive: bool) -> None:
         for item in self._model_items.values():
             item.set_sensitive(sensitive)
-        for item in self._profile_items.values():
-            item.set_sensitive(sensitive)
 
     def _sync_capability_menu_items(self) -> None:
         self._update_model_status_label()
@@ -936,7 +780,7 @@ class TrayIcon:
     def _update_model_status_label(self) -> None:
         if not hasattr(self, "model_status_label"):
             return
-        label = f"Model: Local / {self._active_model} ({_local_runtime_name(self._stt_device)})"
+        label = f"Model: Local / {self._active_model} (CPU)"
         self.model_status_label.set_text(label)
 
     def _set_switch_status(self, message: str | None) -> None:
@@ -1001,35 +845,8 @@ class TrayIcon:
         return f"Preparing {backend} / {model_label} ({elapsed})..."
 
     @staticmethod
-    def _should_retry_switch_on_cpu(exc: Exception, *, backend: str, requested_device: str) -> bool:
-        if backend != LOCAL_BACKEND:
-            return False
-        if requested_device not in {"auto", "cuda"}:
-            return False
-        message = str(exc).lower()
-        return any(
-            token in message
-            for token in (
-                "cuda-capable device(s) is/are busy or unavailable",
-                "cuda is not available",
-                "cuda failed",
-                "cuda unavailable",
-                "cuda out of memory",
-                "out of memory",
-            )
-        )
-
-    @staticmethod
-    def _release_cuda_memory_best_effort() -> None:
+    def _release_memory_best_effort() -> None:
         gc.collect()
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
-        except Exception:  # noqa: BLE001
-            return
 
     def _set_active_model_menu_item(self, backend: str, model: str) -> None:
         item = self._model_items.get((backend, model))
@@ -1040,16 +857,6 @@ class TrayIcon:
             item.set_active(True)
         finally:
             self._syncing_model_menu = False
-
-    def _set_active_profile_menu_item(self, device: str, compute_type: str) -> None:
-        item = self._profile_items.get((device, compute_type))
-        if item is None:
-            return
-        self._syncing_profile_menu = True
-        try:
-            item.set_active(True)
-        finally:
-            self._syncing_profile_menu = False
 
     def _on_quit(self, _item):
         if self._quitting:

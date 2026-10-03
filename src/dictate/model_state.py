@@ -31,8 +31,10 @@ class ModelState:
     errors: dict[str, str] = field(default_factory=dict)
 
 
-def model_key(backend: str, model: str, device: str, compute_type: str) -> str:
-    return f"{backend}|{model}|{device}|{compute_type}"
+def model_key(backend: str, model: str, compute_type: str) -> str:
+    # The third field was the compute device when GPU lanes existed. Dictate runs
+    # on CPU only; keeping "cpu" there keeps existing prepared-model records valid.
+    return f"{backend}|{model}|cpu|{compute_type}"
 
 
 def load_model_state(path: Path = STATE_PATH) -> ModelState:
@@ -83,24 +85,22 @@ def save_model_state(state: ModelState, path: Path = STATE_PATH) -> None:
 def is_model_prepared(
     backend: str,
     model: str,
-    device: str,
     compute_type: str,
     *,
     path: Path = STATE_PATH,
 ) -> bool:
-    key = model_key(backend, model, device, compute_type)
+    key = model_key(backend, model, compute_type)
     return key in load_model_state(path=path).prepared
 
 
 def mark_model_prepared(
     backend: str,
     model: str,
-    device: str,
     compute_type: str,
     *,
     path: Path = STATE_PATH,
 ) -> None:
-    key = model_key(backend, model, device, compute_type)
+    key = model_key(backend, model, compute_type)
     state = load_model_state(path=path)
     state.prepared.add(key)
     state.errors.pop(key, None)
@@ -110,13 +110,12 @@ def mark_model_prepared(
 def mark_model_failed(
     backend: str,
     model: str,
-    device: str,
     compute_type: str,
     error_message: str,
     *,
     path: Path = STATE_PATH,
 ) -> None:
-    key = model_key(backend, model, device, compute_type)
+    key = model_key(backend, model, compute_type)
     state = load_model_state(path=path)
     state.prepared.discard(key)
     state.errors[key] = error_message[:1200] if error_message else "unknown model preparation error"
@@ -126,10 +125,9 @@ def mark_model_failed(
 def get_model_error(
     backend: str,
     model: str,
-    device: str,
     compute_type: str,
     *,
     path: Path = STATE_PATH,
 ) -> str | None:
-    key = model_key(backend, model, device, compute_type)
+    key = model_key(backend, model, compute_type)
     return load_model_state(path=path).errors.get(key)

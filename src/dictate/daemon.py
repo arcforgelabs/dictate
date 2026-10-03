@@ -457,13 +457,10 @@ class Daemon:
             stt = self.meeting_engine.stt
             return (stt.backend_name, getattr(stt, "model_name", "") or "")
 
-    def runtime_stt_options(self) -> tuple[str, str]:
-        """Return current STT device/compute options for new model instantiation."""
+    def runtime_compute_type(self) -> str:
+        """Return the current STT compute type for new model instantiation."""
         with self._engine_lock:
-            stt = self.engine.stt
-            device = getattr(stt, "device", "auto")
-            compute_type = getattr(stt, "compute_type", "int8")
-            return (device, compute_type)
+            return getattr(self.engine.stt, "compute_type", "int8")
 
     def shutdown(self) -> None:
         """Clean shutdown."""

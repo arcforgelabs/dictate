@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
+import sys
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TextIO
 
 import numpy as np
 
-ComputeDevice = Literal["cpu", "cuda", "amd", "auto"]
-COMPUTE_DEVICES: tuple[ComputeDevice, ...] = ("cpu", "cuda", "amd", "auto")
-ComputeType = Literal["int8", "float16", "float32"]
-COMPUTE_TYPES: tuple[ComputeType, ...] = ("int8", "float16", "float32")
-ONNX_AMD_PROVIDERS: tuple[str, ...] = (
-    "MIGraphXExecutionProvider",
-    "ROCMExecutionProvider",
-    "DmlExecutionProvider",
-)
+# Dictate runs on CPU only. int8 is the default; float32 loads the full-precision
+# Parakeet ONNX files. There is no device choice.
+ComputeType = Literal["int8", "float32"]
+COMPUTE_TYPES: tuple[ComputeType, ...] = ("int8", "float32")
 SttBackend = Literal[
     "parakeet",
     "parakeet-pyannote",
@@ -66,5 +63,31 @@ class SpeechToText:
         raise NotImplementedError
 
     def release(self) -> None:
-        """Release backend resources (for example GPU memory caches)."""
+        """Release backend resources (for example the loaded model)."""
         return
+
+
+def add_retired_device_argument(parser: argparse.ArgumentParser) -> None:
+    """Accept the retired ``--device`` flag so existing scripts keep working.
+
+    Dictate runs on CPU only. ``--device cpu`` and ``--device auto`` (what the
+    installers used to pass) are silent no-ops; any other value is ignored with
+    a one-line notice (see ``note_retired_device``). The flag is hidden from
+    ``--help``.
+    """
+    parser.add_argument("--device", default=None, help=argparse.SUPPRESS)
+
+
+def is_cpu_device_name(value: str) -> bool:
+    """True for retired device names that need no notice: cpu, and auto (now always CPU)."""
+    return value.strip().lower() in {"cpu", "auto"}
+
+
+def note_retired_device(value: str | None, *, stream: TextIO | None = None) -> None:
+    """Print a one-line notice when a retired non-CPU device was requested."""
+    if value is None or is_cpu_device_name(value):
+        return
+    print(
+        f"Ignoring --device {value}: Dictate runs on CPU only.",
+        file=stream if stream is not None else sys.stderr,
+    )

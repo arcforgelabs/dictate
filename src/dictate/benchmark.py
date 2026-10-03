@@ -21,11 +21,12 @@ except Exception:  # noqa: BLE001
     resource = None  # type: ignore[assignment]
 
 from dictate.stt import (
-    COMPUTE_DEVICES,
     STT_BACKENDS,
     SttCapabilities,
     TranscriptSegment,
+    add_retired_device_argument,
     create_speech_to_text,
+    note_retired_device,
     resolve_model_name,
 )
 
@@ -78,12 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Model name override (default backend model if omitted)",
     )
-    parser.add_argument(
-        "--device",
-        choices=COMPUTE_DEVICES,
-        default="auto",
-        help="Compute device",
-    )
+    add_retired_device_argument(parser)
     parser.add_argument(
         "--language",
         default="en",
@@ -181,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
 def run_benchmark(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    note_retired_device(args.device)
     return _run_from_args(args)
 
 
@@ -231,10 +228,9 @@ def _run_from_args(args: argparse.Namespace) -> int:
     stt = create_speech_to_text(
         backend=args.stt_backend,
         model=model_name,
-        device=args.device,
     )
 
-    print(f"Loading backend={args.stt_backend} model={model_name} device={args.device}")
+    print(f"Loading backend={args.stt_backend} model={model_name} device=cpu")
     _ = stt.model
 
     samples = load_manifest(manifest_path, audio_root, limit=args.limit)
@@ -799,7 +795,7 @@ def write_json_report(
         "config": {
             "backend": args.stt_backend,
             "model": model_name,
-            "device": args.device,
+            "device": "cpu",
             "language": args.language,
             "diarize": bool(args.diarize),
             "require_speaker_attribution": bool(args.require_speaker_attribution),

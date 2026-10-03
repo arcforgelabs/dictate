@@ -16,7 +16,6 @@ from dictate.config import (
     CONFIG_PATH,
     load_config,
     set_push_to_talk_combo,
-    set_stt_runtime_profile,
     set_stt_selection,
 )
 from dictate.history import HISTORY_PATH, HistoryEntry, HistoryStore
@@ -48,7 +47,6 @@ DEFAULT_MODELS = {
     "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
     "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
 }
-LOCAL_RUNTIME_CHOICES = ("CPU", "GPU")
 HISTORY_PAGE_SIZE = 5
 
 
@@ -71,9 +69,6 @@ class ControlPanel:
         self.status_var = tk.StringVar(value="")
         self.backend_var = tk.StringVar(value=DEFAULT_BACKEND)
         self.model_var = tk.StringVar(value=DEFAULT_MODELS[DEFAULT_BACKEND])
-        self.device_var = tk.StringVar(value="cpu")
-        self.compute_var = tk.StringVar(value="int8")
-        self.local_runtime_var = tk.StringVar(value="CPU")
         self.combo_var = tk.StringVar(value="ctrl_r")
         self.launch_on_startup_var = tk.BooleanVar(value=True)
         self.history_page_var = tk.StringVar(value="")
@@ -130,23 +125,12 @@ class ControlPanel:
         advanced_frame = ttk.Frame(config_frame)
         advanced_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         advanced_frame.columnconfigure(0, weight=1)
-        advanced_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(advanced_frame, text="Local").grid(row=0, column=0, sticky="w")
-        runtime_box = ttk.Combobox(
-            advanced_frame,
-            textvariable=self.local_runtime_var,
-            values=LOCAL_RUNTIME_CHOICES,
-            state="readonly",
-        )
-        runtime_box.grid(row=1, column=0, sticky="ew", padx=(0, 8))
-        runtime_box.bind("<<ComboboxSelected>>", lambda _event: self._on_runtime_changed())
 
         ttk.Checkbutton(
             advanced_frame,
             text="Launch on start up",
             variable=self.launch_on_startup_var,
-        ).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        ).grid(row=0, column=0, sticky="w")
 
         button_frame = ttk.Frame(config_frame)
         button_frame.grid(row=4, column=0, columnspan=3, sticky="e", pady=(10, 0))
@@ -243,7 +227,6 @@ class ControlPanel:
         model_choices = MODEL_CHOICES[backend]
         default_model = DEFAULT_MODELS.get(backend, model_choices[0])
         self.model_var.set(config.stt_model if config.stt_model in model_choices else default_model)
-        self._set_local_runtime_from_config(config.stt_device, config.stt_compute_type)
         combo = config.push_to_talk_combo or config.push_to_talk_key or "ctrl_r"
         self.combo_var.set(combo)
         self.launch_on_startup_var.set(startup_enabled())
@@ -254,15 +237,6 @@ class ControlPanel:
         self._sync_model_choices()
         self._sync_status_line()
 
-    def _on_runtime_changed(self) -> None:
-        if self.local_runtime_var.get() == "GPU":
-            self.device_var.set("cuda")
-            self.compute_var.set("int8")
-        else:
-            self.device_var.set("cpu")
-            self.compute_var.set("int8")
-        self._sync_status_line()
-
     def _sync_model_choices(self) -> None:
         backend = self.backend_var.get()
         choices = MODEL_CHOICES.get(backend, MODEL_CHOICES[DEFAULT_BACKEND])
@@ -271,25 +245,11 @@ class ControlPanel:
         if self.model_var.get() not in choices:
             self.model_var.set(DEFAULT_MODELS.get(backend, choices[0]))
 
-    def _set_local_runtime_from_config(
-        self,
-        device: str | None,
-        compute_type: str | None,
-    ) -> None:
-        if device == "cuda":
-            self.local_runtime_var.set("GPU")
-            self.device_var.set("cuda")
-            self.compute_var.set(compute_type if compute_type in {"int8", "float16"} else "int8")
-            return
-        self.local_runtime_var.set("CPU")
-        self.device_var.set("cpu")
-        self.compute_var.set("int8")
-
     def _sync_status_line(self) -> None:
         backend = self.backend_var.get()
         model = self.model_var.get()
         if backend in {"parakeet", "parakeet-pyannote"}:
-            selected = f"Selected: Local / {model} ({self.local_runtime_var.get()})"
+            selected = f"Selected: Local / {model}"
         else:
             selected = f"Selected: {backend} / {model}"
         self.status_var.set(
@@ -411,8 +371,6 @@ class ControlPanel:
     def save(self) -> bool:
         backend = self.backend_var.get()
         model = self.model_var.get()
-        device = self.device_var.get()
-        compute_type = self.compute_var.get()
         combo = self.combo_var.get().strip()
         try:
             normalized_combo = normalize_push_to_talk_combo(combo)
@@ -426,7 +384,6 @@ class ControlPanel:
             messagebox.showerror("Startup Setting Not Saved", str(exc))
             return False
         set_stt_selection(backend, model)
-        set_stt_runtime_profile(device, compute_type)
         set_push_to_talk_combo(normalized_combo)
         self.combo_var.set(normalized_combo)
         self._sync_status_line()

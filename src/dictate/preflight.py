@@ -17,7 +17,7 @@ from dictate.outputs import (
     resolve_typing_backend,
 )
 from dictate.hotkey import format_hotkey_combo, normalize_push_to_talk_combo
-from dictate.stt import ComputeDevice, SttBackend, check_backend_readiness
+from dictate.stt import SttBackend, check_backend_readiness
 
 
 @dataclass(slots=True)
@@ -39,7 +39,6 @@ def run_preflight(
     push_to_talk_combo: str = "ctrl_r",
     stt_backend: SttBackend = "parakeet",
     stt_model: str | None = None,
-    stt_device: ComputeDevice = "auto",
 ) -> PreflightReport:
     report = PreflightReport()
 
@@ -48,7 +47,6 @@ def run_preflight(
         report,
         stt_backend=stt_backend,
         stt_model=stt_model,
-        stt_device=stt_device,
     )
     _check_typing(
         report,
@@ -150,12 +148,10 @@ def _check_stt_backend(
     *,
     stt_backend: SttBackend,
     stt_model: str | None,
-    stt_device: ComputeDevice,
 ) -> None:
     backend_report = check_backend_readiness(
         backend=stt_backend,
         model=stt_model,
-        device=stt_device,
     )
     report.errors.extend(backend_report.errors)
     report.warnings.extend(backend_report.warnings)

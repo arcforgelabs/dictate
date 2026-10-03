@@ -659,8 +659,6 @@ export default function App() {
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
-  const [device2, setDevice2State] = useState("auto");
-  const [compute, setComputeState] = useState("int8");
   const [hotwords, setHotwords] = useState([]);
   const [history, setHistory] = useState(() => (ipc.isMockMode() ? DEMO_HISTORY() : []));
   // Default to system color scheme when no explicit pref is saved (Stage 3 parity with prototype).
@@ -1137,8 +1135,6 @@ export default function App() {
       setAmbientState(!!st.prefs.ambient);
     }
     if (typeof st.startup === "boolean") setStartupState(st.startup);
-    if (st.device?.device) setDevice2State(st.device.device);
-    if (st.device?.compute) setComputeState(st.device.compute);
     if (st.version) setVersion(st.version);
     if (st.updateChannel) setUpdateChannel(st.updateChannel);
     if (typeof st.installedPackageVersion === "string") setInstalledPackageVersion(st.installedPackageVersion);
@@ -1200,7 +1196,6 @@ export default function App() {
   const setOverlay = (v) => { setOverlayState(v); persist({ prefs: { overlay: v } }); };
   const setSound = (v) => { setSoundState(v); persist({ prefs: { sound: v } }); };
   const setAmbient = (v) => { setAmbientState(v); persist({ prefs: { ambient: v } }); };
-  const setDevice2 = (v) => { setDevice2State(v); persist({ device: { device: v } }); };
 
   const addHotword = (w) => {
     setHotwords((hw) => (hw.includes(w) ? hw : [...hw, w]));
@@ -1830,7 +1825,7 @@ export default function App() {
 
   const store = {
     view, setView, model, setModel, shortcut, setShortcut, activation, setActivation,
-    device, device2, setDevice2, compute, hotwords, addHotword, removeHotword,
+    device, hotwords, addHotword, removeHotword,
     history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
     recording, noteRecording, sessionStarted, notePaused, notePauseReason, captureMode, noteText,

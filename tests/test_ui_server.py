@@ -639,9 +639,24 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
             check_backend_readiness.assert_called_once_with(
                 backend="parakeet-pyannote",
                 model="parakeet-tdt-0.6b-v2",
-                device="auto",
             )
             self.assertEqual(daemon.calls, ["set-meeting", "start-meeting"])
+
+    def test_ui_exposes_no_device_control(self) -> None:
+        # Dictate runs on CPU only: no device in state, and a stale client's
+        # device patch is ignored rather than written back to config.
+        with tempfile.TemporaryDirectory() as d:
+            backend = _backend(d)
+
+            self.assertNotIn("device", backend.get_state())
+
+            backend.patch_config({"device": {"device": "cuda", "compute": "float16"}})
+
+            config_path = Path(backend.config_path)
+            saved = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+            self.assertNotIn("stt_device", saved)
+            self.assertNotIn("stt_compute_type", saved)
+            self.assertIsNone(config_mod.load_config(backend.config_path).stt_compute_type)
 
     def test_meeting_start_blocks_when_pyannote_model_access_missing(self) -> None:
         with tempfile.TemporaryDirectory() as d:
