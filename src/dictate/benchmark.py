@@ -28,7 +28,6 @@ from dictate.stt import (
     SttCapabilities,
     TranscriptSegment,
     create_speech_to_text,
-    resolve_default_local_model,
     resolve_model_name,
 )
 
@@ -73,8 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stt-backend",
         choices=STT_BACKENDS,
-        default="faster-whisper",
-        help="STT backend to evaluate",
+        default="parakeet",
+        help="STT backend to evaluate (default: parakeet)",
     )
     parser.add_argument(
         "--model",
@@ -230,10 +229,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         print(f"Manifest validation passed: {len(samples)} sample(s)")
         return 0
 
-    if args.stt_backend == "faster-whisper" and not args.model:
-        model_name = resolve_default_local_model(args.device)
-    else:
-        model_name = resolve_model_name(args.stt_backend, args.model)
+    model_name = resolve_model_name(args.stt_backend, args.model)
     stt = create_speech_to_text(
         backend=args.stt_backend,
         model=model_name,

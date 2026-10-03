@@ -9,14 +9,10 @@ export const useStore = () => useContext(StoreCtx);
 export const MODELS = [
   { id: "parakeet/parakeet-tdt-0.6b-v2", name: "English", provider: "Local", brand: null, local: true, backend: "parakeet",
     desc: "Runs on this machine — fast, accurate English, nothing leaves your device." },
-  { id: "faster-whisper/turbo", name: "faster-whisper · turbo", provider: "Local", brand: null, local: true, backend: "faster-whisper",
-    desc: "Runs on this machine — no key, nothing leaves your device." },
-  { id: "whisperx/large-v3", name: "whisperx · large-v3", provider: "Local", brand: null, local: true, backend: "whisperx",
-    desc: "Experimental local meeting diarization with WhisperX and pyannote." },
 ];
 export const modelById = (id) => {
   if (!id) return MODELS[0];
-  // Exact id match, else a backend-only id (e.g. "faster-whisper") maps to that
+  // Exact id match, else a backend-only id (e.g. "parakeet") maps to that
   // backend's first catalog entry, else fall back to the first model.
   const backend = String(id).split("/")[0];
   return (
@@ -32,7 +28,7 @@ export const DEMO_PHRASES = [
   "Let's move the planning session to Thursday and keep Friday clear for focused work.",
   "Draft a short note thanking the reviewers and ask them for feedback.",
   "Add a section to the doctor command that checks the microphone permissions.",
-  "The turbo model feels noticeably faster on this machine than the larger one.",
+  "The new model feels noticeably faster on this machine than the larger one.",
 ];
 
 export function nowLabel() {

@@ -71,7 +71,7 @@ class _StreamingAgc:
     def __init__(
         self,
         *,
-        target_rms: float = 0.12,  # ~ -18 dBFS RMS, a comfortable level for Whisper
+        target_rms: float = 0.12,  # ~ -18 dBFS RMS, a comfortable level for ASR
         max_gain: float = 40.0,
         min_gain: float = 0.02,
         limit: float = 0.98,

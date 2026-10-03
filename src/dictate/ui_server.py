@@ -51,8 +51,9 @@ from dictate.stt.factory import (
     check_backend_readiness,
     create_speech_to_text,
     resolve_default_local_backend,
-    resolve_default_local_model,
     resolve_model_name,
+    saved_meeting_selection,
+    saved_stt_selection,
 )
 from dictate.version import RELEASE_VERSION, release_channel
 
@@ -72,12 +73,6 @@ DEFAULT_PREFS: dict[str, Any] = {
     "outputFormat": "plain",     # "plain" | "markdown"
 }
 PROVIDER_META: dict[str, dict[str, Any]] = {
-    "faster-whisper": {
-        "provider": "Local",
-        "brand": None,
-        "local": True,
-        "desc": "Runs on this machine — no key, nothing leaves your device.",
-    },
     "parakeet": {
         "provider": "Local",
         "brand": None,
@@ -105,13 +100,6 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
         "experimental": True,
         "desc": "Local Meeting backend with Parakeet and NVIDIA Sortformer speakers.",
     },
-    "whisperx": {
-        "provider": "Local",
-        "brand": None,
-        "local": True,
-        "experimental": True,
-        "desc": "Experimental local meeting diarization with WhisperX and pyannote.",
-    },
 }
 
 PROVIDER_ORDER = (
@@ -119,16 +107,11 @@ PROVIDER_ORDER = (
     "parakeet-pyannote",
     "parakeet-diarizen",
     "parakeet-sortformer",
-    "faster-whisper",
-    "whisperx",
 )
 
 _VALID_THEMES = ("light", "dark", "system")
 _VALID_ACTIVATIONS = ("hold", "toggle")
 _VALID_OUTPUT_FORMATS = ("plain", "markdown")
-_PRIVATE_DICTATION_BACKEND = "parakeet"
-_PRIVATE_DICTATION_MODEL = "parakeet-tdt-0.6b-v2"
-_LEGACY_REGULAR_BACKENDS = {"faster-whisper", "whisperx"}
 
 
 class ApiError(Exception):
@@ -150,34 +133,6 @@ def _meeting_blocking_warning(warnings: list[str]) -> str | None:
         if "pyannote/speaker-diarization-community-1 is gated" in normalized:
             return warning
     return None
-
-
-# --------------------------------------------------------------------------- #
-# Provider health — thread-safe runtime outcome tracker
-# --------------------------------------------------------------------------- #
-class _ProviderHealthState:
-    """Thread-safe tracker for the last online-provider transcription outcome.
-
-    Updated by ``UiBackend.connect_engine_health`` when the engine reports a
-    result. The UI reads it via ``get_state()``; changes are also pushed via SSE.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._healthy: bool = True
-        self._reason: str | None = None
-
-    def report(self, healthy: bool, reason: str | None = None) -> bool:
-        """Update state. Returns ``True`` if the state changed."""
-        with self._lock:
-            changed = self._healthy != healthy or self._reason != reason
-            self._healthy = healthy
-            self._reason = reason
-            return changed
-
-    def get(self) -> tuple[bool, str | None]:
-        with self._lock:
-            return self._healthy, self._reason
 
 
 # --------------------------------------------------------------------------- #
@@ -279,7 +234,6 @@ class UiBackend:
     prefs_store: UiPrefsStore | None = None
     broker: EventBroker | None = None
     daemon: Any | None = None
-    provider_health: _ProviderHealthState = field(default_factory=_ProviderHealthState)
     # Injectable hooks (default to the real implementations).
     check_update_status: Callable[[], update_status_mod.UpdateStatus] = (
         update_status_mod.check_update_status
@@ -300,50 +254,36 @@ class UiBackend:
             self.prefs_store = UiPrefsStore()
 
     # ----- read ----------------------------------------------------------- #
-    def _effective_model(self, cfg: config_mod.Config, backend: str) -> str:
-        """The model the daemon will actually run for ``backend``.
+    def _dictation_selection(self, cfg: config_mod.Config) -> tuple[str, str]:
+        """The dictation backend/model the daemon will actually run for ``cfg``.
 
-        For faster-whisper with no saved model, this is the hardware-aware local
-        default (so the UI/doctor/model-list agree with the daemon on a weak box);
-        a saved model always wins.
+        No saved backend, or one this build does not ship (the removed Whisper
+        backends), means the local default; a saved model always wins otherwise.
         """
-        if backend == "faster-whisper" and not cfg.stt_model:
-            return resolve_default_local_model(cfg.stt_device or "auto")
-        return resolve_model_name(backend, cfg.stt_model)
+        backend, model = saved_stt_selection(cfg.stt_backend, cfg.stt_model)
+        if backend is None:
+            return resolve_default_local_backend(cfg.stt_device or "auto")
+        return backend, resolve_model_name(backend, model)
 
     def _load_ui_config(self) -> config_mod.Config:
-        """Load config and migrate stale regular dictation backends for the UI.
+        """Load config and migrate a stale regular dictation backend for the UI.
 
-        The UI ships Parakeet as the private regular dictation default. Legacy
-        faster-whisper / whisperx values are treated as stale regular dictation
-        state and rewritten so the runtime follows the shipped default instead
-        of continuing to hydrate the old multilingual local path.
+        A saved backend this build no longer ships (faster-whisper, whisperx, or
+        the removed hosted providers) is stale dictation state. The daemon
+        already ignores it and runs the local default; rewrite the saved
+        selection so the About row reports that same engine.
         """
         cfg = config_mod.load_config(self.config_path)
-        # Legacy local backends, and backends this build no longer ships
-        # (hosted xAI / OpenAI / Gemini), are stale dictation state. The daemon
-        # already ignores them and runs Parakeet; rewrite the saved selection
-        # so the About row reports that same engine instead of a Whisper name.
-        removed = bool(cfg.stt_backend) and cfg.stt_backend not in BACKEND_REGISTRY
-        if cfg.stt_backend in _LEGACY_REGULAR_BACKENDS or removed:
-            config_mod.set_stt_selection(
-                _PRIVATE_DICTATION_BACKEND,
-                _PRIVATE_DICTATION_MODEL,
-                path=self.config_path,
-            )
+        if cfg.stt_backend and saved_stt_selection(cfg.stt_backend, cfg.stt_model)[0] is None:
+            backend, model = resolve_default_local_backend(cfg.stt_device or "auto")
+            config_mod.set_stt_selection(backend, model, path=self.config_path)
             cfg = config_mod.load_config(self.config_path)
         return cfg
 
     def get_state(self) -> dict[str, Any]:
         cfg = self._load_ui_config()
         prefs = self.prefs_store.load()
-        # No saved backend, or one this build does not ship, uses the same
-        # local default the daemon runs (Parakeet on this machine).
-        backend = cfg.stt_backend or resolve_default_local_backend(cfg.stt_device or "auto")[0]
-        if backend not in BACKEND_REGISTRY:
-            backend, model = resolve_default_local_backend(cfg.stt_device or "auto")
-        else:
-            model = self._effective_model(cfg, backend)
+        backend, model = self._dictation_selection(cfg)
         meeting_backend, meeting_model = self._meeting_selection(cfg)
         meeting_readiness = self._meeting_readiness(cfg)
         return {
@@ -355,7 +295,7 @@ class UiBackend:
                 "model": meeting_model,
             },
             "meetingReadiness": meeting_readiness,
-            "models": self._models(cfg),
+            "models": self._models(),
             "shortcut": self._shortcut(cfg, prefs),
             "hotwords": list(cfg.hotwords),
             "history": self.get_history(),
@@ -382,20 +322,13 @@ class UiBackend:
         display = format_hotkey_combo(combo).split(" + ")
         return {"combo": combo, "display": display, "activation": prefs["activation"]}
 
-    def _models(self, cfg: config_mod.Config) -> list[dict[str, Any]]:
-        # Effective local default matches what the daemon runs on THIS machine, so
-        # the model list's "default" flag agrees with get_state on a weak box.
-        # A saved stt_model only counts as the faster-whisper default when the saved
-        # backend IS faster-whisper; otherwise (e.g. a hosted cloud selection) resolve
-        # the hardware-aware local tier instead of borrowing the hosted model name.
-        fw_saved = cfg.stt_model if (cfg.stt_backend or "faster-whisper") == "faster-whisper" else None
-        fw_default = fw_saved or resolve_default_local_model(cfg.stt_device or "auto")
+    def _models(self) -> list[dict[str, Any]]:
         models: list[dict[str, Any]] = []
         for backend in PROVIDER_ORDER:
             if backend not in BACKEND_REGISTRY:
                 continue
             meta = PROVIDER_META.get(backend, {})
-            default_model = fw_default if backend == "faster-whisper" else DEFAULT_MODELS[backend]
+            default_model = DEFAULT_MODELS[backend]
             for model in BACKEND_REGISTRY[backend].model_examples:
                 entry: dict[str, Any] = {
                     "id": f"{backend}/{model}",
@@ -527,19 +460,7 @@ class UiBackend:
             backend, _, name = model.partition("/")
         if backend not in BACKEND_REGISTRY:
             raise ApiError(400, f"unknown backend: {backend!r}")
-        if backend == "faster-whisper":
-            # The GUI has no local model-tier picker (the privacy pill is a plain
-            # local on/off), so any faster-whisper selection means "use the right
-            # local model for THIS machine". Resolve it hardware-aware rather than
-            # trust the client's hardcoded id, which would otherwise pin turbo in
-            # config forever on a weak CPU (saved model always wins → resolver never
-            # runs → the OOM/swap case the resolver exists to prevent).
-            # This is authoritative because _set_model only fires on an explicit
-            # PATCH /api/config user action, never on page load (load is get_state).
-            cfg = config_mod.load_config(self.config_path)
-            resolved = resolve_default_local_model(cfg.stt_device or "auto")
-        else:
-            resolved = resolve_model_name(backend, name)
+        resolved = resolve_model_name(backend, name)
         config_mod.set_stt_selection(backend, resolved, path=self.config_path)
 
     def _set_device(self, device: Any) -> None:
@@ -721,11 +642,7 @@ class UiBackend:
         }
 
     def _meeting_selection(self, cfg: config_mod.Config) -> tuple[str, str]:
-        backend = cfg.meeting_stt_backend or "parakeet-pyannote"
-        if backend not in BACKEND_REGISTRY:
-            backend = "parakeet-pyannote"
-        model = resolve_model_name(backend, cfg.meeting_stt_model)
-        return backend, model
+        return saved_meeting_selection(cfg.meeting_stt_backend, cfg.meeting_stt_model)
 
     def _install_meeting_backend_if_needed(
         self,
@@ -751,12 +668,8 @@ class UiBackend:
 
     def run_doctor(self) -> dict[str, Any]:
         cfg = config_mod.load_config(self.config_path)
-        backend = cfg.stt_backend or "faster-whisper"
-        if backend not in BACKEND_REGISTRY:
-            backend = "faster-whisper"
-        # Report the model the daemon will actually run (hardware-aware for a fresh
-        # weak-box config), respecting a saved model first.
-        model = self._effective_model(cfg, backend)
+        # Report the model the daemon will actually run, respecting a saved model.
+        backend, model = self._dictation_selection(cfg)
         combo = cfg.push_to_talk_combo or DEFAULT_PUSH_TO_TALK_COMBO
         checks = [
             {"label": "Microphone access", "sub": "Default device", "ok": True},
@@ -897,7 +810,7 @@ class UiBackend:
         Logic:
         Transcription is local-only, so the provider is always healthy.
         """
-        backend = cfg.stt_backend or "faster-whisper"
+        backend = self._dictation_selection(cfg)[0]
         return {
             "healthy": True,
             "status": "ok",
@@ -909,29 +822,6 @@ class UiBackend:
             "since": None,
         }
 
-
-    def connect_engine_health(self, engine: Any) -> None:
-        """Wire this backend's health tracker as the engine's ``health_sink``.
-
-        Installs a callback that updates ``provider_health`` and pushes a
-        ``provider-health`` SSE event on every state change.
-        """
-        ph = self.provider_health
-        broker = self.broker
-
-        def _sink(healthy: bool, reason: str | None) -> None:
-            changed = ph.report(healthy, reason)
-            if changed and broker is not None:
-                broker.publish(
-                    "provider-health",
-                    healthy=bool(healthy),
-                    status=reason or "ok",
-                )
-
-        try:
-            engine.health_sink = _sink
-        except Exception:  # noqa: BLE001
-            logger.warning("Could not wire health sink to engine")
 
     def _require_daemon(self) -> Any:
         if self.daemon is None:

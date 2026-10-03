@@ -161,11 +161,16 @@ Use this wording as the basis for Partner Center privacy/certification answers:
 - Speech is transcribed on the device by the bundled Parakeet model. Audio and
   text are never sent anywhere; there is no hosted transcription path.
 - There is no account, no sign-in, no API key, no analytics and no crash
-  reporting.
+  reporting. Telemetry in bundled third-party libraries (ONNX Runtime's
+  Microsoft telemetry, pyannote.audio usage metrics, Hugging Face Hub) is
+  switched off.
 - Dictate stores its settings, logs and a recent dictation history on the
-  device only. Users can export or delete it, and remove it by uninstalling.
-- The only network access is the update check (Microsoft Store installs update
-  through the Store).
+  device only. Logs do not contain dictated text. Users can export or delete
+  their data, and remove it by uninstalling.
+- Network access: the Store build ships its models and is updated by the Store,
+  so it makes no update-check or model-download requests of its own. Builds
+  outside the Store check GitHub (and, on the beta channel, the npm registry)
+  for updates, and source installs download models from Hugging Face.
 
 ## Age Rating Notes
 

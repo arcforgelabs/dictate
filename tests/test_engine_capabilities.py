@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
 from dictate.engine import DictationEngine
 from dictate.stt import SpeechToText, SttCapabilities, TranscriptSegment
+from dictate.stt.parakeet_backend import ParakeetSpeechToText
 
 
 class _DummyNoHotwordsSpeechToText(SpeechToText):
@@ -141,10 +141,10 @@ class _DummyPlainSegmentSpeechToText(SpeechToText):
         ]
 
 
-class _FailingApiSpeechToText(SpeechToText):
-    backend_name = "xai"
-    capabilities = SttCapabilities(supports_hotwords=True, supports_prompt_bias=False)
-    model_name = "grok-speech-to-text"
+class _FailingLocalSpeechToText(SpeechToText):
+    backend_name = "parakeet"
+    capabilities = SttCapabilities()
+    model_name = "parakeet-tdt-0.6b-v2"
 
     @property
     def model(self):
@@ -152,39 +152,7 @@ class _FailingApiSpeechToText(SpeechToText):
 
     def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
         del audio, language, hotwords, prompt_context
-        raise RuntimeError("remote 503")
-
-
-class _FallbackSpeechToText(SpeechToText):
-    backend_name = "faster-whisper"
-    capabilities = SttCapabilities(supports_hotwords=True, supports_prompt_bias=False)
-    model_name = "base"
-
-    def __init__(self, *, response_text: str = "fallback text", fail: bool = False) -> None:
-        self.response_text = response_text
-        self.fail = fail
-        self.received_hotwords: str | None = None
-
-    @property
-    def model(self):
-        return None
-
-    def transcribe(
-        self,
-        audio,
-        language=None,
-        hotwords=None,
-        prompt_context=None,
-        *,
-        initial_prompt=None,
-        long_form=False,
-        decode_profile="quality",
-    ) -> str:
-        del audio, language, prompt_context, initial_prompt, long_form, decode_profile
-        self.received_hotwords = hotwords
-        if self.fail:
-            raise RuntimeError("local model unavailable")
-        return self.response_text
+        raise RuntimeError("model load failed")
 
 
 class DictationEngineCapabilityTests(unittest.TestCase):
@@ -291,6 +259,27 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertEqual(result.text, "Testing canary one two three")
         self.assertIsNone(stt.received_hotwords)
 
+    def test_post_mode_corrects_hotwords_on_parakeet_capabilities(self) -> None:
+        # Parakeet has no native hotword decoding; hybrid still post-corrects.
+        class _ParakeetShaped(_DummyNoHotwordsSpeechToText):
+            backend_name = "parakeet"
+            capabilities = ParakeetSpeechToText.capabilities
+
+            def transcribe(self, audio, language=None, hotwords=None, prompt_context=None) -> str:
+                super().transcribe(audio, language, hotwords, prompt_context)
+                return "Testing canery one two three"
+
+        for mode in ("post", "hybrid"):
+            with self.subTest(mode=mode):
+                stt = _ParakeetShaped()
+                engine = DictationEngine(stt=stt, hotwords="canary", lexicon_mode=mode)
+
+                result = engine.transcribe(np.ones(8000, dtype=np.float32), language="en")
+
+                self.assertEqual(result.text, "Testing canary one two three")
+                self.assertIsNone(stt.received_hotwords)
+                self.assertIsNone(stt.received_prompt_context)
+
     def test_post_mode_applies_explicit_replacement_map(self) -> None:
         stt = _DummyHotwordsSpeechToText(response_text="Testing kinneri one two three")
         engine = DictationEngine(
@@ -306,58 +295,22 @@ class DictationEngineCapabilityTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.text, "Testing canary one two three")
 
-    def test_api_backend_failure_uses_cpu_whisper_fallback_for_same_audio(self) -> None:
-        fallback = _FallbackSpeechToText(response_text="recovered turn")
-        engine = DictationEngine(
-            stt=_FailingApiSpeechToText(),
-            hotwords="AcmeWidget",
-        )
+    def test_backend_failure_is_an_error_with_no_fallback_model(self) -> None:
+        # There is no hidden second model: a failed turn reports the error
+        # instead of loading (or downloading) anything else.
+        engine = DictationEngine(stt=_FailingLocalSpeechToText())
         audio = np.ones(8000, dtype=np.float32)
 
-        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
-            result = engine.transcribe(audio, language="en")
-
-        self.assertEqual(result.status, "ok")
-        self.assertEqual(result.text, "recovered turn")
-        self.assertEqual(fallback.received_hotwords, "AcmeWidget")
-        self.assertIsNotNone(result.notice)
-        self.assertIn("xAI transcription failed", result.notice or "")
-        self.assertIn("faster-whisper/base on CPU", result.notice or "")
-
-    def test_api_backend_failure_reports_cpu_fallback_failure(self) -> None:
-        fallback = _FallbackSpeechToText(fail=True)
-        engine = DictationEngine(stt=_FailingApiSpeechToText())
-        audio = np.ones(8000, dtype=np.float32)
-
-        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
-            result = engine.transcribe(audio, language="en")
+        result = engine.transcribe(audio, language="en")
 
         self.assertEqual(result.status, "error")
-        self.assertIn("xAI transcription failed: remote 503", result.error or "")
-        self.assertIn("CPU fallback failed: local model unavailable", result.error or "")
-
-
-class _FakeWhisperSegment:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class _KwargCapturingWhisperModel:
-    """Fake faster-whisper WhisperModel that records transcribe kwargs."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def transcribe(self, audio, **kwargs):  # noqa: ANN001
-        del audio
-        self.calls.append(kwargs)
-        return [_FakeWhisperSegment("fallback words")], None
+        self.assertEqual(result.error, "model load failed")
 
 
 class _PromptOnlyStreamingStt(SpeechToText):
     """Streaming backend that accepts initial_prompt/long_form but NOT decode_profile."""
 
-    backend_name = "faster-whisper"
+    backend_name = "fake-prompt-streaming"
     capabilities = SttCapabilities(supports_hotwords=True, supports_streaming_chunks=True)
     model_name = "base"
 
@@ -386,41 +339,6 @@ class _PromptOnlyStreamingStt(SpeechToText):
 
 
 class DecodeProfileThreadingTests(unittest.TestCase):
-    def test_note_mode_one_shot_fallback_decodes_with_note_beam_size(self) -> None:
-        # Item 2: a note-mode one-shot recording that fails hosted and falls back
-        # to CPU must decode with the "note" profile (beam_size=1).
-        from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
-
-        fallback = FasterWhisperSpeechToText(model_name="base", device="cpu", compute_type="int8")
-        fake_model = _KwargCapturingWhisperModel()
-        fallback._model = fake_model  # type: ignore[attr-defined]
-
-        engine = DictationEngine(stt=_FailingApiSpeechToText())
-        audio = np.ones(8000, dtype=np.float32)
-
-        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
-            result = engine.transcribe(audio, language="en", diarize=True, decode_profile="note")
-
-        self.assertEqual(result.status, "ok")
-        self.assertEqual(len(fake_model.calls), 1)
-        self.assertEqual(fake_model.calls[0]["beam_size"], 1)
-        self.assertEqual(fake_model.calls[0]["vad_parameters"]["speech_pad_ms"], 50)
-
-    def test_dictation_one_shot_uses_quality_beam_size(self) -> None:
-        from dictate.stt.faster_whisper_backend import FasterWhisperSpeechToText
-
-        fallback = FasterWhisperSpeechToText(model_name="base", device="cpu", compute_type="int8")
-        fake_model = _KwargCapturingWhisperModel()
-        fallback._model = fake_model  # type: ignore[attr-defined]
-
-        engine = DictationEngine(stt=_FailingApiSpeechToText())
-        audio = np.ones(8000, dtype=np.float32)
-
-        with patch("dictate.engine._create_cpu_whisper_fallback", return_value=fallback):
-            engine.transcribe(audio, language="en")  # default decode_profile="quality"
-
-        self.assertEqual(fake_model.calls[0]["beam_size"], 5)
-
     def test_stream_chunk_degrades_decode_profile_but_keeps_initial_prompt(self) -> None:
         # Item 4: a backend that accepts initial_prompt/long_form but not
         # decode_profile still receives initial_prompt (only decode_profile dropped).

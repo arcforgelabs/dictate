@@ -45,7 +45,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/state")"
 
 echo "▶ GET /api/state with the bearer token…"
 state="$(curl -fsS -H "Authorization: Bearer $TOKEN" "$URL/api/state")"
-echo "$state" | grep -q '"backend": *"faster-whisper"' || fail "state missing default backend"
+echo "$state" | grep -q '"backend": *"parakeet"' || fail "state missing default backend"
 
 echo "▶ PATCH /api/config sets a preference…"
 patched="$(curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \

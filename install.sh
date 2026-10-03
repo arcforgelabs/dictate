@@ -265,7 +265,7 @@ Exec=$HOME/.local/bin/dictate
 Icon=$ICON_PATH
 Type=Application
 Categories=AudioVideo;Audio;
-Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
+Keywords=voice;speech;transcription;dictation;asr;parakeet;
 Terminal=false
 # The Tauri shell window reports app_id "dictate-ui-shell" (GTK prgname). Without
 # this, GNOME can't match the running window to this launcher and shows a second,
@@ -286,7 +286,7 @@ Exec=$HOME/.local/bin/dictate
 Icon=$ICON_PATH
 Type=Application
 Categories=AudioVideo;Audio;
-Keywords=voice;speech;transcription;dictation;asr;whisper;canary;
+Keywords=voice;speech;transcription;dictation;asr;parakeet;
 Terminal=false
 StartupWMClass=dictate-ui-shell
 X-GNOME-Autostart-enabled=true

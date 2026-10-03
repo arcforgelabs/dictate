@@ -47,8 +47,6 @@ DEFAULT_MODELS = {
     "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
     "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
     "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
-    "faster-whisper": "small",
-    "whisperx": "large-v3",
 }
 LOCAL_RUNTIME_CHOICES = ("CPU", "GPU")
 HISTORY_PAGE_SIZE = 5
@@ -290,7 +288,7 @@ class ControlPanel:
     def _sync_status_line(self) -> None:
         backend = self.backend_var.get()
         model = self.model_var.get()
-        if backend in {"faster-whisper", "parakeet", "parakeet-pyannote"}:
+        if backend in {"parakeet", "parakeet-pyannote"}:
             selected = f"Selected: Local / {model} ({self.local_runtime_var.get()})"
         else:
             selected = f"Selected: {backend} / {model}"

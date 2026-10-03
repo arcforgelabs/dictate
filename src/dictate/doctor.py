@@ -24,9 +24,7 @@ from dictate.stt import (
     PARAKEET_PYANNOTE_MODELS,
     PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
-    WHISPERX_MODELS,
     create_speech_to_text,
-    resolve_default_local_model,
     resolve_model_name,
 )
 from dictate.startup import (
@@ -50,11 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Model name override for diagnosis. "
             f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
-            "faster-whisper examples: turbo, small. "
             f"parakeet-pyannote examples: {', '.join(PARAKEET_PYANNOTE_MODELS)}. "
             f"parakeet-diarizen examples: {', '.join(PARAKEET_DIARIZEN_MODELS)}. "
-            f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}. "
-            f"whisperx examples: {', '.join(WHISPERX_MODELS)}."
+            f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}."
         ),
     )
     parser.add_argument(
@@ -101,12 +97,7 @@ def run_doctor(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.stt_backend == "faster-whisper" and not args.model:
-        # No explicit --model: check the hardware-aware local default (turbo on
-        # capable hardware, small on a weak CPU), consistent with what the daemon runs.
-        model_name = resolve_default_local_model(args.device)
-    else:
-        model_name = resolve_model_name(args.stt_backend, args.model)
+    model_name = resolve_model_name(args.stt_backend, args.model)
     report = run_preflight(
         require_typing=True,
         require_clipboard=True,
@@ -274,12 +265,10 @@ def _seed_config_if_missing() -> None:
     if default_config.is_file():
         shutil.copyfile(default_config, CONFIG_PATH)
         return
-    # Leave stt_model UNSET so the hardware-aware resolver picks the local model
-    # dynamically at startup (turbo vs small for THIS machine) rather than pinning
-    # a doctor-time decision into config.
+    # Leave stt_backend/stt_model UNSET so startup picks the local default rather
+    # than pinning a doctor-time decision into config.
     CONFIG_PATH.write_text(
         "push_to_talk_combo: ctrl_r\n"
-        "stt_backend: faster-whisper\n"
         "stt_device: auto\n"
         "stt_compute_type: int8\n",
         encoding="utf-8",
@@ -369,17 +358,15 @@ def _fix_items(report) -> list[str]:  # noqa: ANN001
         if "Log directory is not writable" in warning or "fallback log directory" in warning:
             items.append("Run `dictate doctor --fix` to recreate writable log/config directories.")
         if "CUDA" in warning:
-            items.append("Use Local / CPU in controls, or install a CUDA-enabled CTranslate2 stack.")
+            items.append("Use Local / CPU in controls, or install Dictate with the 'gpu' extra.")
     for error in report.errors:
-        if "faster-whisper package is not importable" in error:
+        if "onnx-asr is not importable" in error:
             if sys.platform.startswith("win"):
                 items.append(
                     "Install or repair the Microsoft Visual C++ runtime, then rerun `dictate doctor`."
                 )
             else:
                 items.append("Run `./install.sh` or reinstall Dictate with local STT dependencies.")
-        if "API key" in error:
-            items.append("Open Dictate Settings and save a valid provider API key before selecting it.")
         if "No microphone" in error or "audio devices" in error or "microphone input" in error:
             items.append(
                 "Set a default microphone in desktop audio settings, and on Linux ensure "

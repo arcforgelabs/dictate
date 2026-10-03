@@ -76,8 +76,8 @@ class ModelPrepareTests(unittest.TestCase):
         with patch("dictate.model_prepare.create_speech_to_text", return_value=stt):
             with self.assertRaisesRegex(RuntimeError, "load failed"):
                 _create_loaded_stt(
-                    backend="faster-whisper",
-                    model="turbo",
+                    backend="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
                     device="auto",
                     compute_type="int8",
                 )

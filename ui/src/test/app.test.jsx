@@ -896,7 +896,7 @@ describe("Quiet Console app (mock mode)", () => {
     fireEvent.keyUp(window, { code: "ControlRight", bubbles: true });
     expect(screen.getByText("Dictate engine is not connected")).toBeInTheDocument();
     expect(screen.queryByText(/planning session/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/turbo model/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/model feels noticeably faster/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/thanking the reviewers/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Copy last dictation")).not.toBeInTheDocument();
   });

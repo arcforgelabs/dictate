@@ -13,7 +13,6 @@ import numpy as np
 from dictate import __main__ as main_module
 from dictate.config import Config
 from dictate.stt import SttCapabilities
-from dictate.stt import factory as stt_factory
 
 
 class FakeOnceStt:
@@ -47,192 +46,119 @@ class FakeHotwordStt:
 
 
 class MainSttSelectionTests(unittest.TestCase):
-    def test_saved_selection_used_when_cli_does_not_override(self) -> None:
+    def _startup_stt(self, cli_args: list[str], config: Config) -> tuple[str, str, str]:
         parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with contextlib.redirect_stderr(io.StringIO()):
+        args = parser.parse_args(cli_args)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
             backend, model = main_module._resolve_startup_stt(
                 args=args,
-                cli_args=[],
-                config=Config(stt_backend="whisperx", stt_model="large-v3"),
+                cli_args=cli_args,
+                config=config,
             )
+        return backend, model, stderr.getvalue()
 
-        self.assertEqual(backend, "whisperx")
-        self.assertEqual(model, "large-v3")
+    def test_saved_selection_used_when_cli_does_not_override(self) -> None:
+        backend, model, _ = self._startup_stt(
+            [],
+            Config(stt_backend="parakeet-pyannote", stt_model="parakeet-tdt-0.6b-v3"),
+        )
+
+        self.assertEqual((backend, model), ("parakeet-pyannote", "parakeet-tdt-0.6b-v3"))
 
     def test_cli_flags_override_saved_selection(self) -> None:
+        backend, model, _ = self._startup_stt(
+            ["--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3"],
+            Config(stt_backend="parakeet-pyannote", stt_model="parakeet-tdt-0.6b-v2"),
+        )
+
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
+
+    def test_model_flag_alone_uses_parakeet(self) -> None:
+        backend, model, _ = self._startup_stt(["--model", "parakeet-tdt-0.6b-v3"], Config())
+
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
+
+    def test_cli_rejects_removed_whisper_backends(self) -> None:
         parser = main_module.build_parser()
-        args = parser.parse_args(["--stt-backend", "faster-whisper", "--model", "small"])
+        for backend in ("faster-whisper", "whisperx"):
+            with self.subTest(backend=backend), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args(["--stt-backend", backend])
 
-        with contextlib.redirect_stderr(io.StringIO()):
-            backend, model = main_module._resolve_startup_stt(
-                args=args,
-                cli_args=["--stt-backend", "faster-whisper", "--model", "small"],
-                config=Config(stt_backend="whisperx", stt_model="large-v3"),
-            )
+    def test_invalid_saved_backend_falls_back_to_parakeet(self) -> None:
+        backend, model, stderr = self._startup_stt(
+            [],
+            Config(stt_backend="not-a-backend", stt_model="x"),
+        )
 
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "small")
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v2"))
+        self.assertIn("Ignoring unsupported saved STT backend 'not-a-backend'", stderr)
 
-    def test_invalid_saved_backend_falls_back_to_cli_defaults(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+    def test_saved_whisper_backends_migrate_to_parakeet_default(self) -> None:
+        for saved in (
+            Config(stt_backend="faster-whisper", stt_model="turbo"),
+            Config(stt_backend="faster-whisper"),
+            Config(stt_backend="whisperx", stt_model="large-v3"),
+            # An unset backend used to mean faster-whisper; its model is a Whisper name.
+            Config(stt_model="small"),
+        ):
+            with self.subTest(backend=saved.stt_backend, model=saved.stt_model):
+                backend, model, _ = self._startup_stt([], saved)
+                self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v2"))
 
-        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
-             patch.object(stt_factory, "parakeet_available", return_value=False), \
-             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
-             patch("os.cpu_count", return_value=4):
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(stt_backend="not-a-backend", stt_model="x"),
-                )
+    def test_saved_parakeet_model_without_backend_is_kept(self) -> None:
+        backend, model, stderr = self._startup_stt([], Config(stt_model="parakeet-tdt-0.6b-v3"))
 
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "small")
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
+        self.assertIn(
+            "Using saved STT selection: backend='parakeet' model='parakeet-tdt-0.6b-v3'", stderr
+        )
 
-    def test_default_startup_stt_prefers_parakeet_when_cuda_is_available(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+    def test_default_startup_stt_is_parakeet(self) -> None:
+        backend, model, stderr = self._startup_stt([], Config())
 
-        with patch.object(stt_factory, "parakeet_available", return_value=True), \
-             patch.object(stt_factory, "_cuda_available_for_faster_whisper") as cuda_probe:
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(),
-                )
-
-        self.assertEqual(backend, "parakeet")
-        self.assertEqual(model, "parakeet-tdt-0.6b-v2")
-        cuda_probe.assert_not_called()
-
-    def test_default_startup_stt_falls_back_to_turbo_when_cuda_available_without_parakeet(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with patch.object(stt_factory, "parakeet_available", return_value=False), \
-             patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(),
-                )
-
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "turbo")
-
-    def test_default_startup_stt_prefers_small_local_model_without_cuda(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        # No CUDA + a weak CPU box (little RAM) must resolve to the smaller model.
-        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
-             patch.object(stt_factory, "parakeet_available", return_value=False), \
-             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
-             patch("os.cpu_count", return_value=4):
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(),
-                )
-
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "small")
-
-    def test_saved_backend_without_model_uses_auto_recommended_model(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=True):
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(stt_backend="faster-whisper"),
-                )
-
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "turbo")
-
-    def test_saved_backend_without_model_uses_small_local_model_without_cuda(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with patch.object(stt_factory, "_cuda_available_for_faster_whisper", return_value=False), \
-             patch.object(stt_factory, "parakeet_available", return_value=False), \
-             patch.object(stt_factory, "_total_system_ram_bytes", return_value=4 * 1024**3), \
-             patch("os.cpu_count", return_value=4):
-            with contextlib.redirect_stderr(io.StringIO()):
-                backend, model = main_module._resolve_startup_stt(
-                    args=args,
-                    cli_args=[],
-                    config=Config(stt_backend="faster-whisper"),
-                )
-
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "small")
-
-    def test_saved_non_example_model_name_is_preserved(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with contextlib.redirect_stderr(io.StringIO()):
-            backend, model = main_module._resolve_startup_stt(
-                args=args,
-                cli_args=[],
-                config=Config(stt_backend="faster-whisper", stt_model="base"),
-            )
-
-        self.assertEqual(backend, "faster-whisper")
-        self.assertEqual(model, "base")
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v2"))
+        self.assertIn("Using automatic STT selection", stderr)
 
     def test_saved_custom_model_name_outside_examples_is_preserved(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+        backend, model, _ = self._startup_stt(
+            [],
+            Config(stt_backend="parakeet", stt_model="parakeet-tdt-9.9b-future"),
+        )
 
-        with contextlib.redirect_stderr(io.StringIO()):
-            backend, model = main_module._resolve_startup_stt(
-                args=args,
-                cli_args=[],
-                config=Config(stt_backend="parakeet", stt_model="parakeet-tdt-9.9b-future"),
-            )
-
-        self.assertEqual(backend, "parakeet")
-        self.assertEqual(model, "parakeet-tdt-9.9b-future")
-
-    def test_whisperx_backend_without_model_uses_registry_default(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
-
-        with contextlib.redirect_stderr(io.StringIO()):
-            backend, model = main_module._resolve_startup_stt(
-                args=args,
-                cli_args=[],
-                config=Config(stt_backend="whisperx"),
-            )
-
-        self.assertEqual(backend, "whisperx")
-        self.assertEqual(model, "large-v3")
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-9.9b-future"))
 
     def test_parakeet_backend_without_model_uses_registry_default(self) -> None:
-        parser = main_module.build_parser()
-        args = parser.parse_args([])
+        backend, model, _ = self._startup_stt([], Config(stt_backend="parakeet"))
 
-        with contextlib.redirect_stderr(io.StringIO()):
-            backend, model = main_module._resolve_startup_stt(
-                args=args,
-                cli_args=[],
-                config=Config(stt_backend="parakeet"),
-            )
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v2"))
 
-        self.assertEqual(backend, "parakeet")
-        self.assertEqual(model, "parakeet-tdt-0.6b-v2")
+    def test_daemon_startup_loads_parakeet_for_legacy_whisper_config(self) -> None:
+        lock = Mock()
+        lock.acquire.return_value = True
+        stt = FakeOnceStt()
+
+        with (
+            patch("dictate.__main__.ProcessLock", return_value=lock),
+            patch.object(
+                main_module,
+                "load_config",
+                return_value=Config(stt_backend="faster-whisper", stt_model="turbo"),
+            ),
+            patch.object(main_module, "_ensure_desktop_integration"),
+            patch.object(main_module, "_run_preflight_or_exit") as preflight,
+            patch.object(main_module, "_load_stt_or_exit", return_value=stt) as load_stt,
+            patch.object(main_module, "_resolve_language", return_value=None),
+            patch.object(main_module, "_resolve_hotwords", return_value=None),
+            patch.object(main_module, "_run_headless"),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(main_module.main(["--no-tray"]), 0)
+
+        self.assertEqual(load_stt.call_args.kwargs["stt_backend"], "parakeet")
+        self.assertEqual(load_stt.call_args.kwargs["model_name"], "parakeet-tdt-0.6b-v2")
+        self.assertEqual(preflight.call_args.kwargs["stt_backend"], "parakeet")
 
     def test_saved_runtime_profile_used_when_cli_does_not_override(self) -> None:
         parser = main_module.build_parser()
