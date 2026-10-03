@@ -103,7 +103,13 @@ def paste_into_edit(text: str) -> dict[str, object]:
         pasted = edit.text()
     finally:
         edit.close()
-    return {"target": "edit", "pasted_matches": pasted == text, "outcome": _outcome(keeper)}
+    return {
+        "target": "edit",
+        "pasted_matches": pasted == text,
+        # Synthetic text, so showing what landed is safe and helps a failure.
+        "pasted": pasted,
+        "outcome": _outcome(keeper),
+    }
 
 
 def paste_into_notepad(text: str) -> dict[str, object]:

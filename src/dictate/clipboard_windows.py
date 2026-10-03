@@ -71,6 +71,8 @@ PM_REMOVE = 0x0001
 ERROR_CLASS_ALREADY_EXISTS = 1410
 
 _OPEN_TIMEOUT_SECONDS = 1.0
+_PRE_PASTE_SETTLE_SECONDS = 0.02
+_PRE_PASTE_MAX_SECONDS = 0.1
 _CLASS_NAME = "DictateClipboardKeeper"
 
 
@@ -513,7 +515,16 @@ class WindowsClipboardSession:
     # -- keeper interface -------------------------------------------------
 
     def before_paste(self) -> None:
-        pass
+        # Apps that watch the clipboard react to the write by opening it, and
+        # may ask this window to render the text. Serve them before the
+        # keystroke, so the paste target does not find the clipboard held open
+        # (an app whose OpenClipboard fails pastes nothing).
+        self.wait(_PRE_PASTE_SETTLE_SECONDS)
+        deadline = time.monotonic() + _PRE_PASTE_MAX_SECONDS
+        while self._win.GetOpenClipboardWindow() and time.monotonic() < deadline:
+            self.wait(0.005)
+        # Reads so far were watchers, not the paste.
+        self._read_by_target = False
 
     def target_has_read(self) -> bool:
         return self._read_by_target
