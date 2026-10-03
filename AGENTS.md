@@ -8,17 +8,14 @@ the docs.
 ## Reviewing
 
 Judge every issue and pull request against `VISION.md`, and say which line it
-fits or conflicts with. Three outcomes:
+fits or conflicts with. Two outcomes:
 
-- **Aligned, current:** dictation work, or anything the "Order of work" puts
-  first.
-- **Aligned, later:** meeting and long-recording work. Fine to keep open; it
-  must not block a dictation release or slow dictation down, and it ships only
-  in Dictate Beta, never in the stable app. Until that split lands (#131),
-  fixes to the Meeting code already in the tree count here too.
+- **Aligned:** dictation and note work that the "Order of work" covers,
+  including removing Meeting code, which is off the roadmap.
 - **Not aligned:** conflicts with "Local only" or the "What we will not merge"
-  list, or was started under a vision that has since changed. Recommend closing
-  it with the `r: not-in-vision` label, quoting the conflicting line.
+  list (which includes any Meeting or speaker-labelling work), or was started
+  under a vision that has since changed. Recommend closing it with the
+  `r: not-in-vision` label, quoting the conflicting line.
 
 Product rejection stays a maintainer decision; reviewers recommend it.
 
