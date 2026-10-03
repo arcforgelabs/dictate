@@ -36,13 +36,6 @@
       "screenshot": "design/locks/note-capture-core/captures/dictations-win-light.png"
     },
     {
-      "name": "meeting-note-win-light",
-      "theme": "light",
-      "state": "meeting-note",
-      "title": "Dictate — Settings",
-      "screenshot": "design/locks/note-capture-core/captures/meeting-note-win-light.png"
-    },
-    {
       "name": "quick-note-win-light",
       "theme": "light",
       "state": "quick-note",
@@ -90,13 +83,6 @@
       "state": "dictations",
       "title": "Dictate — Settings",
       "screenshot": "design/locks/note-capture-core/captures/dictations-win-dark.png"
-    },
-    {
-      "name": "meeting-note-win-dark",
-      "theme": "dark",
-      "state": "meeting-note",
-      "title": "Dictate — Settings",
-      "screenshot": "design/locks/note-capture-core/captures/meeting-note-win-dark.png"
     },
     {
       "name": "quick-note-win-dark",

@@ -18,10 +18,7 @@ from dictate.runtime_logging import (
     resolve_log_paths,
 )
 from dictate.stt import (
-    PARAKEET_DIARIZEN_MODELS,
     PARAKEET_MODELS,
-    PARAKEET_PYANNOTE_MODELS,
-    PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
     add_retired_device_argument,
     create_speech_to_text,
@@ -48,10 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Model name override for diagnosis. "
-            f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
-            f"parakeet-pyannote examples: {', '.join(PARAKEET_PYANNOTE_MODELS)}. "
-            f"parakeet-diarizen examples: {', '.join(PARAKEET_DIARIZEN_MODELS)}. "
-            f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}."
+            f"parakeet examples: {', '.join(PARAKEET_MODELS)}."
         ),
     )
     add_retired_device_argument(parser)

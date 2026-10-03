@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -14,36 +13,12 @@ from dictate.stt.base import (
     SttCapabilities,
 )
 from dictate.stt.parakeet_backend import ParakeetSpeechToText, parakeet_available
-from dictate.stt.parakeet_pyannote_backend import (
-    PYANNOTE_COMMUNITY_MODEL,
-    ParakeetPyannoteSpeechToText,
-    pyannote_available,
-    pyannote_model_source,
-    pyannote_token,
-)
-from dictate.stt.parakeet_speaker_backend import (
-    DIARIZEN_MODEL,
-    SORTFORMER_MODEL,
-    ParakeetDiariZenSpeechToText,
-    ParakeetSortformerSpeechToText,
-    diarizen_available,
-    diarizen_model_source,
-    sortformer_available,
-    sortformer_model_source,
-)
 
 
 DEFAULT_MODELS: dict[SttBackend, str] = {
     "parakeet": "parakeet-tdt-0.6b-v2",
-    "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
-    "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
-    "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
 }
 PARAKEET_MODELS: tuple[str, ...] = ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3")
-PARAKEET_PYANNOTE_MODELS: tuple[str, ...] = PARAKEET_MODELS
-PARAKEET_DIARIZEN_MODELS: tuple[str, ...] = PARAKEET_MODELS
-PARAKEET_SORTFORMER_MODELS: tuple[str, ...] = PARAKEET_MODELS
-DEFAULT_MEETING_BACKEND: SttBackend = "parakeet-pyannote"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,39 +39,6 @@ BACKEND_REGISTRY: dict[SttBackend, BackendSpec] = {
         description="NVIDIA Parakeet-TDT English ASR via ONNX (fast, accurate on CPU).",
         capabilities=ParakeetSpeechToText.capabilities,
         builder=lambda model, compute_type: ParakeetSpeechToText(
-            model_name=model,
-            compute_type=compute_type,
-        ),
-    ),
-    "parakeet-pyannote": BackendSpec(
-        backend="parakeet-pyannote",
-        default_model=DEFAULT_MODELS["parakeet-pyannote"],
-        model_examples=PARAKEET_PYANNOTE_MODELS,
-        description="Local Meeting backend: Parakeet ASR with pyannote Community-1 speakers.",
-        capabilities=ParakeetPyannoteSpeechToText.capabilities,
-        builder=lambda model, compute_type: ParakeetPyannoteSpeechToText(
-            model_name=model,
-            compute_type=compute_type,
-        ),
-    ),
-    "parakeet-diarizen": BackendSpec(
-        backend="parakeet-diarizen",
-        default_model=DEFAULT_MODELS["parakeet-diarizen"],
-        model_examples=PARAKEET_DIARIZEN_MODELS,
-        description="Local Meeting backend: Parakeet ASR with DiariZen speaker attribution.",
-        capabilities=ParakeetDiariZenSpeechToText.capabilities,
-        builder=lambda model, compute_type: ParakeetDiariZenSpeechToText(
-            model_name=model,
-            compute_type=compute_type,
-        ),
-    ),
-    "parakeet-sortformer": BackendSpec(
-        backend="parakeet-sortformer",
-        default_model=DEFAULT_MODELS["parakeet-sortformer"],
-        model_examples=PARAKEET_SORTFORMER_MODELS,
-        description="Local Meeting backend: Parakeet ASR with NVIDIA Sortformer speaker attribution.",
-        capabilities=ParakeetSortformerSpeechToText.capabilities,
-        builder=lambda model, compute_type: ParakeetSortformerSpeechToText(
             model_name=model,
             compute_type=compute_type,
         ),
@@ -163,16 +105,6 @@ def saved_compute_type(value: str | None) -> ComputeType:
     return "int8"
 
 
-def saved_meeting_selection(backend: str | None, model: str | None) -> tuple[SttBackend, str]:
-    """The Meeting backend/model from config.yaml, falling back to parakeet-pyannote."""
-    saved_backend, saved_model = saved_stt_selection(
-        backend, model, default_backend=DEFAULT_MEETING_BACKEND
-    )
-    if saved_backend is None:
-        saved_backend = DEFAULT_MEETING_BACKEND
-    return saved_backend, resolve_model_name(saved_backend, saved_model)
-
-
 def create_speech_to_text(
     *,
     backend: SttBackend = "parakeet",
@@ -208,107 +140,4 @@ def check_backend_readiness(
                 'Install with: uv pip install "onnx-asr[cpu,hub]"'
             )
 
-    if backend == "parakeet-pyannote":
-        _check_parakeet_pyannote(report, model_name=model_name)
-
-    if backend == "parakeet-diarizen":
-        _check_parakeet_diarizen(report, model_name=model_name)
-
-    if backend == "parakeet-sortformer":
-        _check_parakeet_sortformer(report, model_name=model_name)
-
     return report
-
-
-def _check_parakeet_pyannote(
-    report: BackendReadiness,
-    *,
-    model_name: str,
-) -> None:
-    if model_name not in PARAKEET_PYANNOTE_MODELS:
-        report.errors.append(
-            f"Parakeet+pyannote model '{model_name}' is not one of the wired ASR models: "
-            f"{', '.join(PARAKEET_PYANNOTE_MODELS)}."
-        )
-    if parakeet_available():
-        report.notes.append("Parakeet (onnx-asr) importable.")
-    else:
-        report.errors.append(
-            'Parakeet backend selected but onnx-asr is not importable. '
-            'Install with: uv pip install "onnx-asr[cpu,hub]"'
-        )
-    if pyannote_available():
-        report.notes.append("pyannote.audio importable.")
-    else:
-        report.errors.append(
-            'pyannote.audio is not importable. Install with: uv pip install -e ".[meeting]"'
-        )
-    model_source = pyannote_model_source()
-    if os.path.exists(os.path.expanduser(model_source)):
-        report.notes.append(f"pyannote model path: {model_source}")
-    elif not pyannote_token():
-        report.errors.append(
-            f"{PYANNOTE_COMMUNITY_MODEL} is gated. Accept the Hugging Face model terms, "
-            "then set DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN. For offline "
-            "use, set DICTATE_PYANNOTE_MODEL_PATH to a local model checkout."
-        )
-
-
-def _check_parakeet_diarizen(
-    report: BackendReadiness,
-    *,
-    model_name: str,
-) -> None:
-    _check_parakeet_speaker_foundation(report, model_name=model_name, models=PARAKEET_DIARIZEN_MODELS)
-    if diarizen_available():
-        report.notes.append("DiariZen runtime importable.")
-    else:
-        report.errors.append(
-            "DiariZen Meeting backend selected but the diarizen runtime is not importable. "
-            "Install DiariZen or set DICTATE_DIARIZEN_MODEL_PATH to a supported local checkout."
-        )
-    source = diarizen_model_source()
-    if os.path.exists(os.path.expanduser(source)):
-        report.notes.append(f"DiariZen model path: {source}")
-    else:
-        report.notes.append(f"DiariZen model: {source or DIARIZEN_MODEL}")
-
-
-def _check_parakeet_sortformer(
-    report: BackendReadiness,
-    *,
-    model_name: str,
-) -> None:
-    _check_parakeet_speaker_foundation(report, model_name=model_name, models=PARAKEET_SORTFORMER_MODELS)
-    if sortformer_available():
-        report.notes.append("NVIDIA NeMo ASR runtime importable.")
-    else:
-        report.errors.append(
-            "NVIDIA Sortformer Meeting backend selected but NeMo ASR is not importable. "
-            'Install the NeMo ASR runtime before selecting parakeet-sortformer.'
-        )
-    source = sortformer_model_source()
-    if os.path.exists(os.path.expanduser(source)):
-        report.notes.append(f"Sortformer model path: {source}")
-    else:
-        report.notes.append(f"Sortformer model: {source or SORTFORMER_MODEL}")
-
-
-def _check_parakeet_speaker_foundation(
-    report: BackendReadiness,
-    *,
-    model_name: str,
-    models: tuple[str, ...],
-) -> None:
-    if model_name not in models:
-        report.errors.append(
-            f"Parakeet speaker-attribution ASR model '{model_name}' is not one of the wired models: "
-            f"{', '.join(models)}."
-        )
-    if parakeet_available():
-        report.notes.append("Parakeet (onnx-asr) importable.")
-    else:
-        report.errors.append(
-            'Parakeet backend selected but onnx-asr is not importable. '
-            'Install with: uv pip install "onnx-asr[cpu,hub]"'
-        )

@@ -4,10 +4,8 @@
 
 ### Privacy
 
-- Meeting mode no longer sends usage metrics to pyannote. pyannote.audio,
-  the speaker-labelling library, reports pipeline use to otel.pyannote.ai by
-  default; Dictate now turns that off, along with Hugging Face Hub telemetry,
-  before either library loads. Dictate makes no analytics requests.
+- Hugging Face Hub telemetry is turned off before the library loads. Dictate
+  makes no analytics requests.
 - Transcription no longer reports to Microsoft. ONNX Runtime, which runs the
   Parakeet model, has Microsoft's telemetry client built in: it kept a device
   ID and an event queue under `~/.cache/Microsoft/DeveloperTools` and uploaded
@@ -19,6 +17,21 @@
 
 ### Removed
 
+- Meeting capture and local speaker labelling, from every build, beta and
+  stable (#140). Meetings are P3: not ready, and not a focus until dictation
+  is. The work is kept on the `archive/meeting-2026-10-03` branch and tag.
+  Gone with it: the Meeting button and the All / Meetings / Quick filter, the
+  pyannote, DiariZen and Sortformer backends, `dictate config
+  set-meeting-model`, the `/api/meetings/*` routes, the `meeting` and
+  `sortformer` extras (torch, torchaudio, torchcodec, pyannote.audio, NeMo),
+  the bundled pyannote model and the Hugging Face token the builds needed, and
+  the Meeting benchmark lanes and readiness item. The build fails if torch or
+  pyannote are frozen into the engine again. On upgrade a saved
+  `meeting_stt_backend` / `meeting_stt_model` is removed from `config.yaml`
+  with one notice, and a dictation backend set to a Meeting backend becomes
+  `parakeet` with its model kept. Meeting transcripts you saved stay in your
+  notes, readable and exportable with their speaker labels. `install.sh
+  --meeting` and `install-windows.ps1 -Meeting` are ignored with a notice.
 - GPU support. Dictate runs on the CPU only; NVIDIA CUDA and AMD lanes are
   no longer supported.
 - The GPU install paths: the `gpu` and `amd` extras, `install.sh --gpu`, and
@@ -32,7 +45,7 @@
   accepted so existing scripts and installers run, and is ignored.
 - GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
   CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
-  GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.
+  GPU fields in benchmark reports.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A

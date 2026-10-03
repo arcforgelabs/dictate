@@ -214,7 +214,6 @@ jobs:
         shell: pwsh
         env:
           DICTATE_BUNDLES: "msi,nsis"
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: |
           $base = node -p "require('./package.json').version"
           $env:DICTATE_PACKAGE_VERSION = "$base-${{ inputs.npm_tag }}.${{ github.run_number }}.${{ github.run_attempt }}"
@@ -278,7 +277,6 @@ jobs:
       - name: Build Linux desktop .deb
         env:
           DICTATE_BUNDLES: "deb"
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: |
           set -euo pipefail
           BASE="$(node -p "require('./package.json').version")"
@@ -305,7 +303,7 @@ jobs:
             # GitHub release assets must be < 2 GiB.
             if [ "$size" -ge 2147483648 ]; then
               echo "✗ $artifact is ${size} bytes (>= 2 GiB); refuse upload." >&2
-              echo "  Linux packaging must use CPU torch and exclude nvidia/triton." >&2
+              echo "  Linux packaging must exclude nvidia/triton and other GPU runtimes." >&2
               exit 1
             fi
           done

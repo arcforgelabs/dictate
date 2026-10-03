@@ -151,17 +151,8 @@ export const ipc = {
   async stopNoteRecording() {
     return call("POST", "/api/notes/stop");
   },
-  async startMeetingRecording() {
-    return call("POST", "/api/meetings/start");
-  },
-  async stopMeetingRecording() {
-    return call("POST", "/api/meetings/stop");
-  },
   async discardNoteRecording() {
     return call("POST", "/api/notes/discard");
-  },
-  async discardMeetingRecording() {
-    return call("POST", "/api/meetings/discard");
   },
   async pauseNoteRecording() {
     return call("POST", "/api/notes/pause");

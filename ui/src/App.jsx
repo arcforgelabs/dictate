@@ -23,17 +23,6 @@ const DEMO_HISTORY = () => {
     { id: "h3", createdAt: now - 6 * 60 * 1000, text: "Reminder to send the meeting summary to the team this afternoon." },
     { id: "h2", createdAt: now - 38 * 60 * 1000, text: "Let's move the planning session to Thursday and keep Friday clear for focused work." },
     { id: "h1", createdAt: now - 2 * 60 * 60 * 1000, text: "Draft a short note thanking the reviewers and ask them for feedback." },
-    // A meeting (diarized segments) alongside the quick records — demonstrates the
-    // Meetings/Quick category filter (see docs/record-categories-spec.md).
-    {
-      id: "m1",
-      createdAt: now - 3 * 60 * 60 * 1000,
-      text: "Weekly sync",
-      segments: [
-        { seq: 0, speakerLabel: "Speaker 1", tStart: 0, tEnd: 8, text: "Let's kick off with a quick status round before the roadmap." },
-        { seq: 1, speakerLabel: "Speaker 2", tStart: 8, tEnd: 16, text: "Auth is done and deployed to prod; sync is the next piece." },
-      ],
-    },
   ];
 };
 
@@ -343,7 +332,7 @@ function AboutDialog() {
   );
 }
 
-function DiscardConfirmDialog({ meeting, onCancel, onConfirm }) {
+function DiscardConfirmDialog({ onCancel, onConfirm }) {
   const confirmRef = useRef(null);
   useEffect(() => {
     const t = setTimeout(() => confirmRef.current?.focus(), 40);
@@ -357,7 +346,6 @@ function DiscardConfirmDialog({ meeting, onCancel, onConfirm }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const label = meeting ? "meeting" : "note";
   return (
     <div className="confirm-scrim" onMouseDown={onCancel}>
       <div
@@ -368,7 +356,7 @@ function DiscardConfirmDialog({ meeting, onCancel, onConfirm }) {
         aria-describedby="discard-desc"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div id="discard-title" className="confirm-title">Discard {label}?</div>
+        <div id="discard-title" className="confirm-title">Discard note?</div>
         <div id="discard-desc" className="confirm-desc">
           This recording will be deleted and won&apos;t be saved to your notes.
         </div>
@@ -406,15 +394,12 @@ function GsKeyboard() {
 /* ── Capture home: header + Breath Cradle + feedback ─────────────────── */
 function CaptureHome() {
   const s = useStore();
-  const meeting = s.captureMode === "meeting";
   const [discardOpen, setDiscardOpen] = useState(false);
   // Getting-started teaching is per-session, not per-history: it shows on every
   // fresh launch (even with saved notes) and hides once capture begins this run.
   const gettingStarted = !s.noteRecording && !s.sessionStarted;
-  // Copy-last: the most recent quick record (a dictation, not a diarized meeting).
-  const isMeeting = (n) => n?.mode === "meeting"
-    || (n?.mode == null && Array.isArray(n?.segments) && n.segments.length > 0);
-  const recentQuick = (s.history || []).find((n) => !isMeeting(n));
+  // Copy-last: the most recent record.
+  const recentQuick = (s.history || [])[0];
   const recentQuickText = recentQuick ? (recentQuick.text || notePlainText(recentQuick)) : "";
   const recentQuickPreview = recentQuickText;
   const copyLast = () => {
@@ -434,12 +419,6 @@ function CaptureHome() {
           the GUI is do-it-for-them; advanced config lives in `dictate config`. */}
       <HomeBar
         right={<><UpdatePill /><AboutButton /></>}
-        meeting={s.updateChannel === "unstable" && !s.noteRecording ? (
-          <button type="button" className="meeting-action" onClick={s.startMeetingRecording}>
-            <Icon name="users" size={14} />
-            <span>Meeting</span>
-          </button>
-        ) : null}
       />
       <div className="note-home-inner">
         {/* Cradle + feedback */}
@@ -453,15 +432,15 @@ function CaptureHome() {
                   paused={s.notePaused}
                   reduced={s.reduced}
                   onStart={s.startNoteRecording}
-                  onPause={meeting ? s.finishNoteRecording : s.pauseNoteRecording}
+                  onPause={s.pauseNoteRecording}
                   onResume={s.resumeNoteRecording}
-                  activeLabel={meeting ? "Finish meeting" : "Pause recording"}
+                  activeLabel="Pause recording"
                 />
               </div>
               <div className={"note-feedback" + (gettingStarted ? " note-feedback--intro" : "")}>
             {s.noteRecording && !s.notePaused ? (
               <>
-                <div className="note-status live">{meeting ? "Meeting" : "Recording"}</div>
+                <div className="note-status live">Recording</div>
                 <div className="note-timer t-mono">{fmtSecs(s.noteElapsed)}</div>
                 {s.transcript?.text ? (
                   <div className="note-preview" aria-live="polite">
@@ -480,7 +459,7 @@ function CaptureHome() {
                 <div className="note-finish-row">
                   <button type="button" className="note-finish-btn" onClick={s.finishNoteRecording}>
                     <Icon name="square" size={14} />
-                    <span>{meeting ? "Finish meeting" : "Finish note"}</span>
+                    <span>Finish note</span>
                   </button>
                   <button
                     type="button"
@@ -530,7 +509,6 @@ function CaptureHome() {
       </div>
       {discardOpen && (
         <DiscardConfirmDialog
-          meeting={meeting}
           onCancel={() => setDiscardOpen(false)}
           onConfirm={() => {
             setDiscardOpen(false);
@@ -544,14 +522,12 @@ function CaptureHome() {
 
 /* ── Transcribing… (indeterminate, shown between stop and note event) ── */
 function NoteProcessing() {
-  const s = useStore();
-  const meeting = s.captureMode === "meeting";
   return (
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
         <div className="note-status-sub">
-          {meeting ? "Separating speakers and preparing the transcript." : "Turning your words into a note."}
+          Turning your words into a note.
         </div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
       </div>
@@ -654,8 +630,6 @@ export default function App() {
   // "home" = Breath Cradle capture surface; any VIEWS key = that settings view.
   const [view, setView] = useState("home");
   const [model, setModelState] = useState(PRIVATE_MODEL);
-  const [meetingModel, setMeetingModelState] = useState("parakeet-pyannote/parakeet-tdt-0.6b-v2");
-  const [meetingReadiness, setMeetingReadiness] = useState({ ready: true, reason: null });
   const [shortcut, setShortcutState] = useState(["Ctrl (R)"]);
   const [activation, setActivationState] = useState("hold");
   const [device] = useState("Default device");
@@ -679,7 +653,6 @@ export default function App() {
   const [sessionStarted, setSessionStarted] = useState(false);
   const [notePaused, setNotePaused] = useState(false);
   const [notePauseReason, setNotePauseReason] = useState(null);
-  const [captureMode, setCaptureMode] = useState("note");
   const [noteText, setNoteText] = useState("");
   const [noteElapsed, setNoteElapsed] = useState(0); // seconds since noteRecording started
   const [audioLevel, setAudioLevel] = useState(null);
@@ -758,7 +731,6 @@ export default function App() {
   // noteViewRef: stale-closure-safe read of noteView inside the SSE handler.
   const noteViewRef = useRef(null); noteViewRef.current = noteView;
   const discardPendingRef = useRef(false);
-  const captureModeRef = useRef("note"); captureModeRef.current = captureMode;
   // watchdogRef: 60 s safety-net timer; cleared on every normal resolution path.
   const watchdogRef = useRef(null);
   const ARCHIVE_LEAVE_MS = 220;
@@ -984,13 +956,11 @@ export default function App() {
         }
         else if (ev.type === "note-recording") {
           if (ev.paused) {
-            if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
             setNoteRecording(true);
             setNotePaused(true);
             setNotePauseReason(ev.pauseReason || null);
             setAudioLevel(null);
           } else if (ev.active) {
-            if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
             setNoteRecording(true);
             setSessionStarted(true);
             setNotePaused(false);
@@ -1005,7 +975,6 @@ export default function App() {
             setNotePaused(false);
             setNotePauseReason(null);
             setAudioLevel(null);
-            if (ev.mode === "meeting" || ev.mode === "note") setCaptureMode(ev.mode);
             if (ev.discarded || discardPendingRef.current) {
               discardPendingRef.current = false;
               clearWatchdog();
@@ -1033,14 +1002,14 @@ export default function App() {
               id: ev.id || "n" + Date.now(),
               text: ev.text,
               createdAt: ev.createdAt || new Date().toISOString(),
-              mode: ev.mode || captureModeRef.current,
+              mode: ev.mode || "note",
               segments: normalizeSegments(ev.segments),
             };
             setCurrentNote(note);
             setHistory((entries) => [note, ...entries.filter((entry) => entry.id !== note.id)].slice(0, 50));
             setExpandedFrom("capture");
             setNoteView("expanded");
-            toast(note.mode === "meeting" ? "Meeting saved to Dictations" : "Conversation note saved");
+            toast("Conversation note saved");
           } else if (status === "empty") {
             setNoteView(null);
             toast("No speech detected", { bad: true });
@@ -1128,8 +1097,6 @@ export default function App() {
 
   const hydrate = useCallback((st) => {
     if (st.model && st.model.id) setModelState(st.model.id);
-    if (st.meetingModel && st.meetingModel.id) setMeetingModelState(st.meetingModel.id);
-    if (st.meetingReadiness) setMeetingReadiness(st.meetingReadiness);
     if (st.shortcut) {
       if (Array.isArray(st.shortcut.display)) setShortcutState(st.shortcut.display);
       if (st.shortcut.activation) setActivationState(st.shortcut.activation);
@@ -1138,7 +1105,6 @@ export default function App() {
     setHistory(mapHistory(st));
     if (st.notes && typeof st.notes.recording === "boolean") setNoteRecording(st.notes.recording);
     if (st.notes && typeof st.notes.paused === "boolean") setNotePaused(st.notes.paused);
-    if (st.notes && (st.notes.mode === "meeting" || st.notes.mode === "note")) setCaptureMode(st.notes.mode);
     if (st.notes && typeof st.notes.pauseReason === "string") setNotePauseReason(st.notes.pauseReason);
     else if (st.notes && !st.notes.paused) setNotePauseReason(null);
     if (st.prefs) {
@@ -1326,7 +1292,6 @@ export default function App() {
     if (!r) return;
     if (typeof r.recording === "boolean") setNoteRecording(r.recording);
     if (typeof r.paused === "boolean") setNotePaused(r.paused);
-    if (r.mode === "meeting" || r.mode === "note") setCaptureMode(r.mode);
     if (typeof r.pauseReason === "string") setNotePauseReason(r.pauseReason);
     else if (r.paused === false) setNotePauseReason(null);
   };
@@ -1341,7 +1306,6 @@ export default function App() {
       clearWatchdog();
       setNotePaused(false);
       setNotePauseReason(null);
-      setCaptureMode("note");
       setNoteRecording(true);
       setSessionStarted(true);
       setNoteView(null);
@@ -1352,37 +1316,6 @@ export default function App() {
     ipc.startNoteRecording()
       .then(applyNoteState)
       .catch((e) => toast(e.message || "Could not start note recording", { bad: true }));
-  };
-
-  const startMeetingRecording = () => {
-    if (noteRecording) return;
-    if (meetingReadiness && meetingReadiness.ready === false) {
-      toast(`Meeting model is not ready: ${meetingReadiness.reason || "prepare the local Meeting model first"}`, {
-        bad: true,
-        ms: 12_000,
-      });
-      return;
-    }
-    if (!ipc.isLive()) {
-      if (!ipc.isMockMode()) {
-        toast("Dictate engine is not connected", { bad: true });
-        return;
-      }
-      clearWatchdog();
-      setNotePaused(false);
-      setNotePauseReason(null);
-      setCaptureMode("meeting");
-      setNoteRecording(true);
-      setSessionStarted(true);
-      setNoteView(null);
-      setCurrentNote(null);
-      toast("Meeting started");
-      return;
-    }
-    setCaptureMode("meeting");
-    ipc.startMeetingRecording()
-      .then(applyNoteState)
-      .catch((e) => toast(e.message || "Could not start meeting", { bad: true }));
   };
 
   const pauseNoteRecording = () => {
@@ -1428,35 +1361,26 @@ export default function App() {
       setNoteRecording(false);
       setNoteView("processing");
       armWatchdog();
-      const demo = captureMode === "meeting"
-        ? "Speaker 1: Let's capture the launch blockers.\nSpeaker 2: I will test the Windows build and report back tomorrow."
-        : "Let's capture this as a project note. Add the follow-up action for tomorrow.";
-      const demoSegments = captureMode === "meeting"
-        ? [
-            { seq: 0, tStart: 0, tEnd: 2.4, text: "Let's capture the launch blockers.", speakerLabel: "Speaker 1" },
-            { seq: 1, tStart: 2.4, tEnd: 5.8, text: "I will test the Windows build and report back tomorrow.", speakerLabel: "Speaker 2" },
-          ]
-        : [];
+      const demo = "Let's capture this as a project note. Add the follow-up action for tomorrow.";
       setTimeout(() => {
         clearWatchdog();
         const note = {
           id: "n" + Date.now(),
           text: demo,
           createdAt: new Date().toISOString(),
-          mode: captureMode,
-          segments: demoSegments,
+          mode: "note",
+          segments: [],
         };
         setNoteText(demo);
         setCurrentNote(note);
         setHistory((entries) => [note, ...entries].slice(0, 50));
         setExpandedFrom("capture");
         setNoteView("expanded");
-        toast(captureMode === "meeting" ? "Meeting saved to Dictations" : "Conversation note saved");
+        toast("Conversation note saved");
       }, 800);
       return;
     }
-    const stop = captureMode === "meeting" ? ipc.stopMeetingRecording : ipc.stopNoteRecording;
-    stop()
+    ipc.stopNoteRecording()
       .then(applyNoteState)
       .catch((e) => toast(e.message || "Could not finish recording", { bad: true }));
   };
@@ -1483,8 +1407,7 @@ export default function App() {
       return;
     }
     discardPendingRef.current = true;
-    const discard = captureMode === "meeting" ? ipc.discardMeetingRecording : ipc.discardNoteRecording;
-    discard()
+    ipc.discardNoteRecording()
       .then((r) => {
         applyNoteState(r);
         reset();
@@ -1845,8 +1768,8 @@ export default function App() {
     device, hotwords, addHotword, removeHotword,
     history, clearHistory, archiveNote, leavingNoteIds, theme, setTheme, startup, setStartup, trayOnly, setTrayOnly,
     overlay, setOverlay, sound, setSound, ambient, setAmbient,
-    recording, noteRecording, sessionStarted, notePaused, notePauseReason, captureMode, noteText,
-    startNoteRecording, startMeetingRecording, pauseNoteRecording, resumeNoteRecording,
+    recording, noteRecording, sessionStarted, notePaused, notePauseReason, noteText,
+    startNoteRecording, pauseNoteRecording, resumeNoteRecording,
     finishNoteRecording, discardNoteRecording, toggleNoteRecording,
     transcript, typing, targetText, dictateStart, dictateStop, dictateOnce,
     palette, setPalette, toasts, toast, dismiss, micConnected: true, setCapturing,
@@ -1857,7 +1780,6 @@ export default function App() {
     noteElapsed, reduced, audioLevel, live,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
-    meetingModel, meetingReadiness,
     aboutOpen, setAboutOpen, setHistory,
   };
 

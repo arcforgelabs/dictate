@@ -130,16 +130,11 @@ function Invoke-ColdStart([int]$Run) {
     $psi.EnvironmentVariables["LOCALAPPDATA"] = $local
     $psi.EnvironmentVariables["APPDATA"] = $roaming
     $psi.EnvironmentVariables["DICTATE_UI_SERVER"] = "1"
-    $psi.EnvironmentVariables["PYANNOTE_METRICS_ENABLED"] = "0"
     $psi.EnvironmentVariables["HF_HUB_DISABLE_TELEMETRY"] = "1"
     $psi.EnvironmentVariables["ORT_DISABLE_TELEMETRY"] = "1"
     $parakeet = Join-Path $EngineDir "models\parakeet-tdt-0.6b-v2-onnx"
     if (Test-Path (Join-Path $parakeet "config.json")) {
         $psi.EnvironmentVariables["DICTATE_PARAKEET_MODEL_PATH"] = $parakeet
-    }
-    $pyannote = Join-Path $EngineDir "models\pyannote-speaker-diarization-community-1"
-    if (Test-Path (Join-Path $pyannote "config.yaml")) {
-        $psi.EnvironmentVariables["DICTATE_PYANNOTE_MODEL_PATH"] = $pyannote
     }
 
     $clock = [System.Diagnostics.Stopwatch]::StartNew()

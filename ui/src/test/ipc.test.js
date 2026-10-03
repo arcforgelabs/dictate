@@ -214,30 +214,11 @@ describe("ipc bridge", () => {
     );
   });
 
-  it("starts and stops meetings through authenticated backend routes", async () => {
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ recording: true, mode: "meeting" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ recording: false, mode: "meeting" }),
-      });
-
-    await expect(ipc.startMeetingRecording()).resolves.toEqual({ recording: true, mode: "meeting" });
-    await expect(ipc.stopMeetingRecording()).resolves.toEqual({ recording: false, mode: "meeting" });
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:1/api/meetings/start",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:1/api/meetings/stop",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
+  it("has no Meeting routes", () => {
+    // Meeting capture was removed (#140).
+    expect(ipc.startMeetingRecording).toBeUndefined();
+    expect(ipc.stopMeetingRecording).toBeUndefined();
+    expect(ipc.discardMeetingRecording).toBeUndefined();
   });
 
   it("exports local data through the authenticated backend route", async () => {

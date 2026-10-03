@@ -495,15 +495,6 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 
 /* ── capture home layout ── */
 .note-home{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);position:relative;}
-/* Segmented control — reused by the notes category filter (views.jsx). */
-.engine-seg{display:inline-flex;align-items:center;margin-left:12px;padding:2px;gap:2px;
-  border-radius:var(--r-pill);background:var(--surface-2);border:1px solid var(--border);
-  -webkit-app-region:no-drag;}
-.engine-opt{height:20px;padding:0 9px;border:0;border-radius:var(--r-pill);background:transparent;
-  color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;white-space:nowrap;
-  cursor:pointer;transition:var(--t-fast);}
-.engine-opt:hover{color:var(--fg);}
-.engine-opt.on{background:var(--surface-3);color:var(--fg);}
 /* Update affordance — one quiet pill; Skip/Later revealed on proximity. */
 .updpill{display:inline-flex;align-items:center;gap:4px;-webkit-app-region:no-drag;}
 .upd-check{width:30px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;
@@ -657,13 +648,6 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .note-copylast-label{font-size:12.5px;color:var(--fg);}
 .note-copylast-preview{display:block;max-width:270px;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;color:var(--muted);font-size:12.5px;font-weight:500;}
-.meeting-action{height:30px;padding:0 12px;border-radius:var(--r-pill);
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--surface-2);
-  border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:650;
-  transition:var(--t-fast);white-space:nowrap;flex:0 0 auto;-webkit-app-region:no-drag;}
-.home-bar .meeting-action{height:28px;margin-top:0;}
-.meeting-action:hover{background:var(--surface-3);border-color:var(--border-2);color:var(--fg);}
-.meeting-action:focus-visible{outline:2px solid var(--fg);outline-offset:3px;}
 /* Config-gap: quiet amber pill on home when online mode but no API key configured */
 .config-hint{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-pill);
   background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber-text);font-size:11.5px;font-weight:600;}

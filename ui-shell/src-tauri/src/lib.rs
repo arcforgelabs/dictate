@@ -181,19 +181,6 @@ fn bundled_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     None
 }
 
-fn bundled_pyannote_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
-    for base in engine_resource_dirs(app) {
-        let candidate = base
-            .join("engine")
-            .join("models")
-            .join("pyannote-speaker-diarization-community-1");
-        if candidate.join("config.yaml").exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 fn bundled_parakeet_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     for base in engine_resource_dirs(app) {
         let candidate = base
@@ -233,8 +220,7 @@ fn engine_binary_names() -> &'static [&'static str] {
 /// Opt-outs for third-party library telemetry, set on every engine the shell
 /// starts. The engine sets these itself on import; this covers any engine,
 /// including an older or custom one, before its first import runs.
-const ENGINE_PRIVACY_ENV: [(&str, &str); 3] = [
-    ("PYANNOTE_METRICS_ENABLED", "0"),
+const ENGINE_PRIVACY_ENV: [(&str, &str); 2] = [
     ("HF_HUB_DISABLE_TELEMETRY", "1"),
     ("ORT_DISABLE_TELEMETRY", "1"),
 ];
@@ -267,9 +253,6 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         cmd.env("DICTATE_SHELL_VERSION", shell_version);
         if let Some(model_path) = bundled_parakeet_model(app) {
             cmd.env("DICTATE_PARAKEET_MODEL_PATH", model_path);
-        }
-        if let Some(model_path) = bundled_pyannote_model(app) {
-            cmd.env("DICTATE_PYANNOTE_MODEL_PATH", model_path);
         }
         if let Some(path) = shell_path.as_ref() {
             cmd.env("DICTATE_SHELL_PATH", path);

@@ -76,10 +76,7 @@ try {
             "Run the canonical benchmark commands from benchmarks/README.md, then collect this bundle again.",
             "Expected artifact names:",
             "  benchmark-results/parakeet-v2-cpu-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-v3-cpu-flite-long-3x-gated.json",
-            "  benchmark-results/parakeet-pyannote-cpu-flite-meeting.json",
-            "  benchmark-results/parakeet-diarizen-cpu-flite-meeting.json",
-            "  benchmark-results/parakeet-sortformer-cpu-flite-meeting.json"
+            "  benchmark-results/parakeet-v3-cpu-flite-long-3x-gated.json"
         ) | Set-Content -Path $LaneDryRun -Encoding UTF8
     }
 
@@ -87,10 +84,7 @@ try {
     if ($Bash) {
         $HumanLanes = @(
             "cpu-human",
-            "cpu-human-v3",
-            "meeting-human",
-            "meeting-diarizen-human",
-            "meeting-sortformer-human"
+            "cpu-human-v3"
         )
         Set-Content -Path $HumanLaneDryRun -Value "" -Encoding UTF8
         foreach ($Lane in $HumanLanes) {
@@ -104,10 +98,7 @@ try {
             "Use benchmarks/README.md for curated-human promotion commands.",
             "Expected human artifact names:",
             "  benchmark-results/parakeet-v2-cpu-human-gated.json",
-            "  benchmark-results/parakeet-v3-cpu-human-gated.json",
-            "  benchmark-results/parakeet-pyannote-cpu-human-meeting.json",
-            "  benchmark-results/parakeet-diarizen-cpu-human-meeting.json",
-            "  benchmark-results/parakeet-sortformer-cpu-human-meeting.json"
+            "  benchmark-results/parakeet-v3-cpu-human-gated.json"
         ) | Set-Content -Path $HumanLaneDryRun -Encoding UTF8
     }
 
@@ -119,10 +110,7 @@ try {
     ) | Set-Content -Path $PromotionStatus -Encoding UTF8
     $ExpectedPromotionArtifacts = @(
         "benchmark-results/parakeet-v2-cpu-human-gated.json",
-        "benchmark-results/parakeet-v3-cpu-human-gated.json",
-        "benchmark-results/parakeet-pyannote-cpu-human-meeting.json",
-        "benchmark-results/parakeet-diarizen-cpu-human-meeting.json",
-        "benchmark-results/parakeet-sortformer-cpu-human-meeting.json"
+        "benchmark-results/parakeet-v3-cpu-human-gated.json"
     )
     foreach ($Relative in $ExpectedPromotionArtifacts) {
         $Path = Join-Path $RepoRoot $Relative
@@ -154,9 +142,6 @@ try {
 
     Invoke-LaneReadiness "cpu-parakeet-v2" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
     Invoke-LaneReadiness "cpu-parakeet-v3" @("-m", "dictate", "doctor", "--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3", "--device", "cpu", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-pyannote" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-pyannote", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-diarizen" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-diarizen", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
-    Invoke-LaneReadiness "meeting-sortformer" @("-m", "dictate", "doctor", "--stt-backend", "parakeet-sortformer", "--model", "parakeet-tdt-0.6b-v2", "--device", "cpu", "--quick", "--type-backend", "pynput")
 
     $Machine = Join-Path $BundleDir "machine.txt"
     @(
