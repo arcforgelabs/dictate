@@ -68,13 +68,3 @@ None. The last tracked advisory, the transformers `Trainer` RCE
 (GHSA-69w3-r845-3855), came in only through the experimental `[sortformer]`
 Meeting extra, which was removed with Meeting capture (#140). torch,
 transformers and NLTK are no longer dependencies.
-
-## Maintainers and Agents
-
-This section is Arc Forge's own rule. It has no equivalent in OpenClaw's security files.
-
-This repository is **public**. Any real credential committed here, or posted in an issue, PR, release note or log, is a public exposure. Stop and tell the maintainer, so it can be revoked at the source straight away. Redact the current text, but don't draw attention to edit history in public comments.
-
-A credential seen only somewhere private, such as a maintainer's machine, a private repo or an agent transcript, is not urgent. Log it with the `credential-exposure` procedure and carry on with the task. The scheduled rotation pass handles it.
-
-Test fixtures use obviously fake values, such as `example-hf-token-not-real` or `${HF_TOKEN}`. Never use realistic prefixes like `hf_…` or `sk-…`. The existing allowlisted fakes in `.gitleaks.toml` stay for the unit tests that already use them.
