@@ -18,13 +18,14 @@ Usage:
 """
 
 import argparse
+import functools
 import logging
 import os
 import signal
 import sys
 import threading
 from types import FrameType
-from typing import Sequence
+from typing import Callable, Sequence
 
 # Disable HF Xet transport by default to avoid observed hangs on large model artifacts.
 # Users can override by setting HF_HUB_DISABLE_XET=0 before launch.
@@ -269,6 +270,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     _acquire_daemon_lock_or_exit()
     try:
         _ensure_desktop_integration()
+        # The desktop window's engine (--no-tray with the UI server) starts its
+        # server and writes the handshake first, then loads the speech model in
+        # the background, so the window connects while the model loads. The
+        # speech runtime is checked by that load, which reports a failure in the
+        # window instead of exiting.
+        load_model_in_background = bool(args.no_tray and _ui_server_requested())
         _run_preflight_or_exit(
             require_typing=True,
             require_clipboard=True,
@@ -276,12 +283,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             push_to_talk_combo=push_to_talk_combo,
             stt_backend=stt_backend,
             stt_model=model_name,
+            check_stt_runtime=not load_model_in_background,
         )
-        stt = _load_stt_or_exit(
-            stt_backend=stt_backend,
-            model_name=model_name,
-            compute_type=stt_compute_type,
-        )
+        if load_model_in_background:
+            stt = _create_stt_or_exit(
+                stt_backend=stt_backend,
+                model_name=model_name,
+                compute_type=stt_compute_type,
+            )
+        else:
+            stt = _load_stt_or_exit(
+                stt_backend=stt_backend,
+                model_name=model_name,
+                compute_type=stt_compute_type,
+            )
         language = _resolve_language(stt, args.language)
         hotwords = _resolve_hotwords(
             stt,
@@ -290,6 +305,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             lexicon_mode=lexicon_mode,
         )
         if args.no_tray:
+            model_load = None
+            if load_model_in_background:
+                model_load = functools.partial(
+                    _load_stt_model,
+                    stt_backend=stt_backend,
+                    model_name=model_name,
+                    compute_type=stt_compute_type,
+                )
             _run_headless(
                 stt,
                 type_backend=args.type_backend,
@@ -299,6 +322,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 lexicon_replacements=config.lexicon_replacements,
                 push_to_talk_combo=push_to_talk_combo,
                 stt_backend=stt_backend,
+                model_load=model_load,
             )
             return 0
         _run_tray(
@@ -556,6 +580,7 @@ def _run_preflight_or_exit(
     push_to_talk_combo: str,
     stt_backend: SttBackend,
     stt_model: str,
+    check_stt_runtime: bool = True,
 ) -> None:
     from dictate.preflight import run_preflight
 
@@ -566,6 +591,7 @@ def _run_preflight_or_exit(
         push_to_talk_combo=push_to_talk_combo,
         stt_backend=stt_backend,
         stt_model=stt_model,
+        check_stt_runtime=check_stt_runtime,
     )
     for note in report.notes:
         print(f"Preflight: {note}", file=sys.stderr)
@@ -575,6 +601,63 @@ def _run_preflight_or_exit(
         for error in report.errors:
             print(f"Preflight error: {error}", file=sys.stderr)
         raise SystemExit(2)
+
+
+def _ui_server_requested() -> bool:
+    return bool(os.environ.get("DICTATE_UI_SERVER"))
+
+
+def _create_stt_or_exit(
+    *,
+    stt_backend: SttBackend,
+    model_name: str,
+    compute_type: ComputeType,
+) -> SpeechToText:
+    """Build the STT backend without loading its model."""
+    try:
+        return create_speech_to_text(
+            backend=stt_backend,
+            model=model_name,
+            compute_type=compute_type,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"Failed to create backend '{stt_backend}' model '{model_name}': {exc}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from exc
+
+
+def _load_stt_model(
+    stt: SpeechToText,
+    *,
+    stt_backend: SttBackend,
+    model_name: str,
+    compute_type: ComputeType,
+) -> None:
+    """Load the model of ``stt``; release it and re-raise on failure."""
+    print(
+        (
+            f"Loading STT backend '{stt_backend}' model '{model_name}' "
+            f"on CPU ({compute_type})..."
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        _ = stt.model
+    except Exception as exc:  # noqa: BLE001
+        try:
+            stt.release()
+        except Exception as release_exc:  # noqa: BLE001
+            print(f"Failed to release STT resources: {release_exc}", file=sys.stderr)
+        print(
+            f"Failed to load backend '{stt_backend}' model '{model_name}': {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
+    print("Ready.\n", file=sys.stderr, flush=True)
 
 
 def _load_stt_or_exit(
@@ -588,26 +671,15 @@ def _load_stt_or_exit(
         model=model_name,
         compute_type=compute_type,
     )
-    print(
-        (
-            f"Loading STT backend '{stt_backend}' model '{model_name}' "
-            f"on CPU ({compute_type})..."
-        ),
-        file=sys.stderr,
-    )
     try:
-        _ = stt.model
-    except Exception as exc:  # noqa: BLE001
-        try:
-            stt.release()
-        except Exception as release_exc:  # noqa: BLE001
-            print(f"Failed to release STT resources: {release_exc}", file=sys.stderr)
-        print(
-            f"Failed to load backend '{stt_backend}' model '{model_name}': {exc}",
-            file=sys.stderr,
+        _load_stt_model(
+            stt,
+            stt_backend=stt_backend,
+            model_name=model_name,
+            compute_type=compute_type,
         )
+    except Exception as exc:  # noqa: BLE001
         raise SystemExit(2) from exc
-    print("Ready.\n", file=sys.stderr)
     return stt
 
 
@@ -1077,7 +1149,14 @@ def _run_headless(
     lexicon_replacements: dict[str, str] | None,
     push_to_talk_combo: str,
     stt_backend: str,
+    model_load: Callable[[SpeechToText], None] | None = None,
 ) -> None:
+    """Run the headless daemon.
+
+    With ``model_load`` the model of ``stt`` is not loaded yet: the UI server
+    starts (and writes its handshake) first, then ``model_load`` runs on a
+    background thread. The shortcut listener starts once the model is ready.
+    """
     from dictate.daemon import Daemon
     output = _resolve_typing_output_or_exit(type_backend)
     daemon = Daemon(
@@ -1088,8 +1167,11 @@ def _run_headless(
         lexicon_mode=lexicon_mode,
         lexicon_replacements=lexicon_replacements,
         push_to_talk_combo=push_to_talk_combo,
+        model_loaded=model_load is None,
     )
     _maybe_start_ui_server(daemon)
+    if model_load is not None:
+        daemon.start_model_load(model_load)
     with _DaemonSignalHandlers(daemon):
         daemon.run()
 

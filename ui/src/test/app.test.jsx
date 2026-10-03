@@ -1326,6 +1326,111 @@ describe("Quiet Console app (mock mode)", () => {
 });
 
 /* =====================================================================
+   Feature: speech-model readiness (#155) — the engine answers before its
+   model has loaded; the home says "Getting ready…" until it has.
+   ===================================================================== */
+describe("Speech model readiness", () => {
+  function liveEngine(states) {
+    const sources = [];
+    let stateCalls = 0;
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        const st = states[Math.min(stateCalls, states.length - 1)];
+        stateCalls += 1;
+        return { ok: true, json: async () => ({ history: [], ...st }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    return { sources, fetchSpy, stateCalls: () => stateCalls };
+  }
+  const loading = { modelReady: false, modelLoad: { phase: "loading", error: null } };
+  const ready = { modelReady: true, modelLoad: { phase: "ready", error: null } };
+
+  it("shows Getting ready… until the model event, and holds the mic until then", async () => {
+    const { sources, fetchSpy } = liveEngine([loading]);
+    const { container } = render(<App />);
+
+    // In the desktop shell the home says "Getting ready…" before the engine answers.
+    expect(screen.getByText("Getting ready…")).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/Dictation works in a few seconds/i);
+    expect(screen.queryByText("Click to dictate")).not.toBeInTheDocument();
+    // The shortcut is not offered yet: the engine starts its listener once the model is ready.
+    expect(screen.queryByText(/or hold/i)).not.toBeInTheDocument();
+    expect(container.querySelector(".gs-kbd")).not.toBeInTheDocument();
+
+    // A mic click while loading says so instead of hanging on a busy engine.
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    expect(screen.getByText("Getting ready — the speech model is still loading")).toBeInTheDocument();
+    const noteStarts = () => fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/api/notes/start")).length;
+    expect(noteStarts()).toBe(0);
+
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "model", ready: true, phase: "ready", error: null }) });
+    });
+
+    expect(screen.getByText("Click to dictate")).toBeInTheDocument();
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+    expect(screen.getByText(/or hold/i)).toBeInTheDocument();
+    expect(container.querySelector(".gs-kbd")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Start recording"));
+    await waitFor(() => expect(noteStarts()).toBe(1));
+  });
+
+  it("re-reads the state while loading in case the model event was missed", async () => {
+    const { stateCalls } = liveEngine([loading, ready]);
+    render(<App />);
+    expect(await screen.findByRole("status")).toHaveTextContent("Getting ready…");
+
+    await waitFor(() => expect(screen.getByText("Click to dictate")).toBeInTheDocument(), { timeout: 4000 });
+    expect(stateCalls()).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows a model load failure as an error instead of waiting forever", async () => {
+    const { sources } = liveEngine([loading]);
+    render(<App />);
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "model", ready: false, phase: "failed", error: "model.onnx is missing" }),
+      });
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("The speech model didn't load");
+    expect(alert).toHaveTextContent("model.onnx is missing");
+    expect(alert).toHaveTextContent("Restart Dictate to try again.");
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+
+  it("shows a failure already reported by /api/state", async () => {
+    liveEngine([{ modelReady: false, modelLoad: { phase: "failed", error: "no runtime" } }]);
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("no runtime");
+  });
+
+  it("treats an engine that reports no readiness as ready", async () => {
+    liveEngine([{}]);
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("Click to dictate")).toBeInTheDocument());
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+
+  it("is ready at once in the browser demo", () => {
+    render(<App />);
+    expect(screen.getByText("Click to dictate")).toBeInTheDocument();
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+});
+
+/* =====================================================================
    Feature: Notes list + search (reachable from the capture home)
    ===================================================================== */
 describe("Notes list (history view)", () => {

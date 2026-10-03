@@ -44,6 +44,8 @@ _FINAL_CHUNK_EMPTY = object()
 # Fallback poll while idle; queued work wakes the worker straight away.
 WORKER_IDLE_POLL_SECONDS = 0.1
 RecordingMode = Literal["dictation", "note"]
+ModelPhase = Literal["loading", "ready", "failed"]
+MODEL_LOADING_MESSAGE = "Getting ready: the speech model is still loading"
 
 
 class Daemon:
@@ -67,7 +69,9 @@ class Daemon:
         note_recording_callback: Callable[[bool], None] | None = None,
         note_callback: Callable[[dict[str, object]], None] | None = None,
         audio_level_callback: Callable[[float], None] | None = None,
+        model_status_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
+        model_loaded: bool = True,
     ):
         self.active = True
         self.language = language
@@ -81,6 +85,19 @@ class Daemon:
         self.note_recording_callback = note_recording_callback
         self.note_callback = note_callback
         self.audio_level_callback = audio_level_callback
+        self.model_status_callback = model_status_callback
+        # With model_loaded=False the speech model is loaded later, by
+        # start_model_load(). Until it is ready, recordings are refused with
+        # MODEL_LOADING_MESSAGE and the shortcut listener is not started: the
+        # model load holds the GIL for seconds, which would starve the audio
+        # callback and the keyboard hook.
+        self._model_loaded = threading.Event()
+        self._model_phase: ModelPhase = "ready" if model_loaded else "loading"
+        self._model_error: str | None = None
+        self._hotkey_lock = threading.Lock()
+        self._hotkey_start_pending = False
+        if model_loaded:
+            self._model_loaded.set()
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -150,7 +167,7 @@ class Daemon:
             self._hotkey_backend.set_combo(self.push_to_talk_combo)
         else:
             self._ensure_worker_started()
-            self._start_hotkey_backend()
+            self._start_hotkey_backend_when_ready()
         if self.recorder.is_recording:
             self._finalize_recording()
 
@@ -382,6 +399,101 @@ class Daemon:
             return None
         return self._note_pause_reason
 
+    @property
+    def model_ready(self) -> bool:
+        return self._model_phase == "ready"
+
+    @property
+    def model_status(self) -> dict[str, object]:
+        """Readiness of the speech model: ``{"ready", "phase", "error"}``."""
+        phase = self._model_phase
+        return {
+            "ready": phase == "ready",
+            "phase": phase,
+            "error": self._model_error if phase == "failed" else None,
+        }
+
+    def start_model_load(
+        self,
+        load: Callable[[SpeechToText], None] | None = None,
+    ) -> threading.Thread:
+        """Load the speech model on a background thread.
+
+        For a daemon built with ``model_loaded=False``. ``load`` does the
+        loading (default: touch ``stt.model``) and raises on failure. When it
+        succeeds, recording is allowed and a pending shortcut listener starts;
+        when it fails, recordings are refused with the load error.
+        """
+        if self._model_loaded.is_set():
+            raise RuntimeError("the speech model load has already finished")
+        with self._engine_lock:
+            stt = self.engine.stt
+        self._notify_model_status()
+        thread = threading.Thread(
+            target=self._run_model_load,
+            args=(stt, load),
+            name="dictate-model-load",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _run_model_load(
+        self,
+        stt: SpeechToText,
+        load: Callable[[SpeechToText], None] | None,
+    ) -> None:
+        try:
+            if load is not None:
+                load(stt)
+            else:
+                _ = stt.model
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc).strip() or exc.__class__.__name__
+            logger.error("Speech model failed to load: %s", message)
+            self._model_error = message
+            self._model_phase = "failed"
+            self._model_loaded.set()
+            self._notify_model_status()
+            self._surface_status(f"Speech model failed to load: {message}")
+            return
+        self._model_phase = "ready"
+        self._model_loaded.set()
+        self._start_pending_hotkey_backend()
+        self._notify_model_status()
+
+    def _start_pending_hotkey_backend(self) -> None:
+        with self._hotkey_lock:
+            pending = self._hotkey_start_pending
+            self._hotkey_start_pending = False
+        if not pending or self._stop.is_set():
+            return
+        try:
+            self._start_hotkey_backend()
+        except HotkeyBackendUnavailableError as exc:
+            self._surface_status(f"Shortcut unavailable: {exc}")
+
+    def _start_hotkey_backend_when_ready(self) -> None:
+        with self._hotkey_lock:
+            if not self._model_loaded.is_set():
+                self._hotkey_start_pending = True
+                return
+        if self._model_phase == "ready":
+            self._start_hotkey_backend()
+
+    def _wait_for_model_load(self) -> None:
+        while not self._model_loaded.wait(timeout=0.1):
+            if self._stop.is_set():
+                return
+
+    def _notify_model_status(self) -> None:
+        if self.model_status_callback is None:
+            return
+        try:
+            self.model_status_callback(self.model_status)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Model status callback failed: {exc}", file=sys.stderr)
+
     def switch_speech_to_text(self, stt: SpeechToText, *, hotwords: str | None = None) -> None:
         """Swap STT backend/model at runtime."""
         previous_stt: SpeechToText | None = None
@@ -434,6 +546,12 @@ class Daemon:
                 if self.recorder.is_recording or not self.active:
                     return False
                 if self._note_recording_paused:
+                    return False
+                if self._model_phase == "loading":
+                    self._surface_status(MODEL_LOADING_MESSAGE)
+                    return False
+                if self._model_phase == "failed":
+                    self._surface_status(f"Speech model failed to load: {self._model_error}")
                     return False
 
                 self._note_pause_reason = None
@@ -637,7 +755,7 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Note store recovery failed: %s", exc)
         self._ensure_worker_started()
-        self._start_hotkey_backend()
+        self._start_hotkey_backend_when_ready()
 
     def _ensure_worker_started(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -680,6 +798,7 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
+        self._wait_for_model_load()
         while not self._stop.is_set():
             # Cleared before the queues are checked, so a chunk queued after
             # the check still wakes the wait below.

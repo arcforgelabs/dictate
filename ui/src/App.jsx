@@ -474,9 +474,25 @@ function CaptureHome() {
               </>
             ) : (
               <>
-                <div className="note-status-sub">Click to dictate</div>
+                {s.modelPhase === "failed" ? (
+                  <div className="model-state model-state--failed" role="alert">
+                    <div className="note-status-sub">The speech model didn't load</div>
+                    {s.modelError && <div className="model-state-detail">{s.modelError}</div>}
+                    <div className="model-state-detail">Restart Dictate to try again.</div>
+                  </div>
+                ) : !s.modelReady ? (
+                  <div className="model-state" role="status" aria-live="polite">
+                    <div className="note-status-sub">Getting ready…</div>
+                    <div className="model-state-detail">
+                      Loading the speech model. Dictation works in a few seconds.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="note-status-sub">Click to dictate</div>
+                )}
                 {/* Getting started (per-session): teach the key on a fresh launch. */}
-                {gettingStarted && (
+                {/* Not while the model loads: the engine's shortcut listener starts once it is ready. */}
+                {gettingStarted && s.modelReady && (
                   <>
                     <div className="note-status-hint">or hold <Combo keys={s.shortcut.map(shortcutKeyLabel)} /></div>
                     <GsKeyboard />
@@ -683,6 +699,12 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [platform, setPlatform] = useState(initialPlatform);
   const [live, setLive] = useState(false);
+  // Speech-model readiness. The engine answers before its model has loaded;
+  // until then the home shows "Getting ready…" and recording waits. In the
+  // desktop shell this starts as "loading" until the engine's state says
+  // otherwise; mock mode and engines without the field are ready.
+  const [modelPhase, setModelPhase] = useState(() => (ipc.isShell() ? "loading" : "ready")); // "loading" | "ready" | "failed"
+  const [modelError, setModelError] = useState(null);
   // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
@@ -991,6 +1013,9 @@ export default function App() {
         else if (ev.type === "audio-level") {
           if (typeof ev.level === "number") setAudioLevel(ev.level);
         }
+        else if (ev.type === "model") {
+          applyModelStatus(!!ev.ready, ev.phase, ev.error);
+        }
         else if (ev.type === "note") {
           // The backend now sends a `status` field on every terminal note outcome.
           // Old daemons without the field default to "ok" for backward compatibility.
@@ -1095,7 +1120,42 @@ export default function App() {
     }
   };
 
+  const applyModelStatus = useCallback((ready, phase, error) => {
+    const next = phase === "loading" || phase === "ready" || phase === "failed"
+      ? phase
+      : (ready ? "ready" : "loading");
+    setModelPhase(next);
+    setModelError(next === "failed" ? (error || null) : null);
+  }, []);
+
+  const applyStateModelStatus = useCallback((st) => {
+    if (!st) return;
+    // An engine from before readiness reporting loads its model first: ready.
+    if (typeof st.modelReady !== "boolean") { applyModelStatus(true, "ready", null); return; }
+    const load = st.modelLoad || {};
+    applyModelStatus(st.modelReady, load.phase, load.error);
+  }, [applyModelStatus]);
+
+  // The "model" event is the normal path; re-read the state while the model is
+  // loading in case the event fired before the event stream was open.
+  // One request at a time: the engine answers nothing until the load ends, so
+  // an interval would pile up connections waiting on it.
+  useEffect(() => {
+    if (!live || modelPhase !== "loading") return;
+    let cancelled = false;
+    let timer = null;
+    const poll = () => {
+      ipc.getState()
+        .then((st) => { if (!cancelled) applyStateModelStatus(st); })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) timer = setTimeout(poll, 2000); });
+    };
+    timer = setTimeout(poll, 2000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [live, modelPhase, applyStateModelStatus]);
+
   const hydrate = useCallback((st) => {
+    applyStateModelStatus(st);
     if (st.model && st.model.id) setModelState(st.model.id);
     if (st.shortcut) {
       if (Array.isArray(st.shortcut.display)) setShortcutState(st.shortcut.display);
@@ -1311,6 +1371,14 @@ export default function App() {
       setNoteView(null);
       setCurrentNote(null);
       toast("Note recording started");
+      return;
+    }
+    if (modelPhase === "loading") {
+      toast("Getting ready — the speech model is still loading");
+      return;
+    }
+    if (modelPhase === "failed") {
+      toast("The speech model didn't load — restart Dictate", { bad: true });
       return;
     }
     ipc.startNoteRecording()
@@ -1778,6 +1846,7 @@ export default function App() {
     updatePhase, updateProgress, updateInstallElapsed, updateErrorReason, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
     noteElapsed, reduced, audioLevel, live,
+    modelReady: modelPhase === "ready", modelPhase, modelError,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
     aboutOpen, setAboutOpen, setHistory,

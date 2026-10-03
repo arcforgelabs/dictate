@@ -120,7 +120,14 @@ def check_backend_readiness(
     *,
     backend: SttBackend,
     model: str | None,
+    check_runtime: bool = True,
 ) -> BackendReadiness:
+    """Check the backend/model selection.
+
+    ``check_runtime=False`` skips importing the speech runtime (onnx-asr and
+    onnxruntime); the caller then reports a missing runtime when it loads the
+    model.
+    """
     report = BackendReadiness()
     model_name = resolve_model_name(backend, model)
     report.notes.append(f"STT backend: {backend}")
@@ -132,7 +139,9 @@ def check_backend_readiness(
                 f"Parakeet model '{model_name}' is not one of the wired models: "
                 f"{', '.join(PARAKEET_MODELS)}."
             )
-        if parakeet_available():
+        if not check_runtime:
+            report.notes.append("Parakeet runtime is checked when the model loads.")
+        elif parakeet_available():
             report.notes.append("Parakeet (onnx-asr) importable.")
         else:
             report.errors.append(

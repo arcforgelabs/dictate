@@ -247,8 +247,13 @@ class UiBackend:
         cfg = self._load_ui_config()
         prefs = self.prefs_store.load()
         backend, model = self._dictation_selection(cfg)
+        model_status = self.model_status()
         return {
             "version": RELEASE_VERSION,
+            # False while the engine is still loading the speech model;
+            # recording starts working once it is ready.
+            "modelReady": model_status["ready"],
+            "modelLoad": {"phase": model_status["phase"], "error": model_status["error"]},
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
             "models": self._models(),
             "shortcut": self._shortcut(cfg, prefs),
@@ -505,8 +510,31 @@ class UiBackend:
             self.broker.publish("history-changed")
         return {"history": self.get_history()}
 
+    def model_status(self) -> dict[str, Any]:
+        """Speech-model readiness of the attached daemon (ready without one)."""
+        status = getattr(self.daemon, "model_status", None) if self.daemon is not None else None
+        if not isinstance(status, dict):
+            return {"ready": True, "phase": "ready", "error": None}
+        phase = status.get("phase")
+        if phase not in ("loading", "ready", "failed"):
+            phase = "ready" if status.get("ready") else "loading"
+        error = status.get("error")
+        return {
+            "ready": phase == "ready",
+            "phase": phase,
+            "error": str(error) if phase == "failed" and error else None,
+        }
+
     def start_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
+        model_status = self.model_status()
+        if model_status["phase"] == "loading":
+            raise ApiError(409, "Getting ready: the speech model is still loading")
+        if model_status["phase"] == "failed":
+            raise ApiError(
+                503,
+                f"The speech model didn't load: {model_status['error'] or 'unknown error'}",
+            )
         started = bool(daemon.start_note_recording())
         return self._notes_payload()
 
@@ -904,6 +932,15 @@ def write_runtime_handshake(
     return path
 
 
+class _UiHttpServer(ThreadingHTTPServer):
+    # The engine answers nothing while the speech model loads (the load holds
+    # the GIL for seconds). Connections the window opens meanwhile wait in the
+    # listen backlog; with the default of 5 it fills, and the shell's liveness
+    # check (a TCP connect) then fails and it deletes the handshake.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 @dataclass
 class UiServerHandle:
     server: ThreadingHTTPServer
@@ -941,7 +978,7 @@ def serve(
         backend.broker = broker
     token = token or secrets.token_urlsafe(32)
 
-    server = ThreadingHTTPServer((host, port), UiRequestHandler)
+    server = _UiHttpServer((host, port), UiRequestHandler)
     server.backend = backend  # type: ignore[attr-defined]
     server.token = token  # type: ignore[attr-defined]
     server.broker = broker  # type: ignore[attr-defined]
