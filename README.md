@@ -184,16 +184,11 @@ config that still names one falls back to Parakeet. The desktop UI keeps engine 
 advanced users and tests can still select an explicit local engine through CLI
 options and `dictate config`.
 
-GPU lanes are explicit:
+Dictate runs on the CPU. GPU support (NVIDIA CUDA, AMD) was dropped on
+2026-10-01 to focus on CPU latency. The `gpu` and `amd` extras, the installers'
+GPU flags and `--device cuda|amd` still exist but are unsupported, and are
+being removed (#110, #111, #112).
 
-- NVIDIA CUDA: install with the `gpu` extra (ONNX Runtime 1.30 with CUDA 13
-  runtime wheels; needs NVIDIA driver 580 or newer) and verify with
-  `dictate doctor --stt-backend parakeet --device cuda --quick`.
-- Windows AMD GPU: install with the `amd` extra for ONNX Runtime DirectML
-  (1.24.x, the last published DirectML wheel) and verify with
-  `dictate doctor --stt-backend parakeet --device amd --quick`.
-- Linux AMD GPU: install a ROCm/MIGraphX-capable ONNX Runtime build, then verify
-  with `dictate doctor --stt-backend parakeet --device amd --quick`.
 - The Meeting button and the dictation-list filter are beta-channel chrome.
   The normal channel is dictation only. Meeting uses a dedicated
   speaker-attribution lane. Inspect it with
@@ -201,7 +196,7 @@ GPU lanes are explicit:
   `dictate config set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2`.
   Source installs can add pyannote support with `./install.sh --meeting` or
   `.\install-windows.ps1 -Meeting`, then verify with
-  `dictate doctor --stt-backend parakeet-pyannote --device cuda --quick`.
+  `dictate doctor --stt-backend parakeet-pyannote --quick`.
   Experimental preflight targets also exist for
   `parakeet-diarizen/parakeet-tdt-0.6b-v2` and
   `parakeet-sortformer/parakeet-tdt-0.6b-v2`; these still require their

@@ -18,6 +18,10 @@
 
 ### Removed
 
+- GPU support. Dictate runs on the CPU only; NVIDIA CUDA and AMD lanes are
+  no longer supported. The GPU install flags and extras still exist until
+  they are removed, but are not maintained and are known to be broken
+  (`install.sh --gpu` never enabled CUDA).
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A
