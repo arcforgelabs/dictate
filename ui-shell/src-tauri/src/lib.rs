@@ -233,9 +233,10 @@ fn engine_binary_names() -> &'static [&'static str] {
 /// Opt-outs for third-party library telemetry, set on every engine the shell
 /// starts. The engine sets these itself on import; this covers any engine,
 /// including an older or custom one, before its first import runs.
-const ENGINE_PRIVACY_ENV: [(&str, &str); 2] = [
+const ENGINE_PRIVACY_ENV: [(&str, &str); 3] = [
     ("PYANNOTE_METRICS_ENABLED", "0"),
     ("HF_HUB_DISABLE_TELEMETRY", "1"),
+    ("ORT_DISABLE_TELEMETRY", "1"),
 ];
 
 fn engine_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
