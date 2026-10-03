@@ -4,6 +4,7 @@ import ast
 import ctypes
 import os
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -429,7 +430,15 @@ class WindowsPlatformTests(unittest.TestCase):
         script = (root / "install.sh").read_text(encoding="utf-8")
         self.assertNotIn("INSTALL_GPU", script)
         self.assertNotIn('EXTRAS+=("gpu")', script)
+        self.assertIn("--gpu|--no-gpu)", script)
+        self.assertIn('echo "Ignoring $1: Dictate runs on the CPU only." >&2', script)
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "install.sh is the Linux installer; on Windows, bash can resolve to the WSL launcher",
+    )
+    def test_linux_installer_runs_with_retired_gpu_flags(self) -> None:
+        root = Path(__file__).resolve().parents[1]
         # Parsing stops at --help before any install step runs.
         completed = subprocess.run(
             ["bash", str(root / "install.sh"), "--gpu", "--no-gpu", "--help"],
