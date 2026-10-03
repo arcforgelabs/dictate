@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,10 +192,7 @@ class ParakeetPyannoteSpeechToText(SpeechToText):
         self._pipeline = None
 
     def _speaker_turns(self, audio: np.ndarray) -> list[SpeakerTurn]:
-        with tempfile.TemporaryDirectory(prefix="dictate-pyannote-") as temp_dir:
-            wav_path = Path(temp_dir) / "audio.wav"
-            _write_wav(wav_path, audio)
-            diarization = self._pyannote_pipeline()(str(wav_path))
+        diarization = self._pyannote_pipeline()(_pyannote_audio(audio))
         annotation = getattr(diarization, "exclusive_speaker_diarization", diarization)
         return _annotation_turns(annotation)
 
@@ -350,6 +346,22 @@ def _format_segments(segments: list[TranscriptSegment]) -> str:
             if segment.text.strip()
         ]
     )
+
+
+def _pyannote_audio(audio: np.ndarray) -> dict[str, Any]:
+    """Hand pyannote the audio in memory instead of as a file.
+
+    pyannote 4 decodes file paths with torchcodec, which needs FFmpeg shared
+    libraries. The frozen engine ships neither, so a path fails there.
+    """
+    samples = np.ascontiguousarray(np.clip(np.asarray(audio, dtype=np.float32), -1.0, 1.0))
+    try:
+        import torch
+    except ImportError:  # only with a stub pipeline; pyannote itself needs torch
+        waveform: Any = samples[np.newaxis, :]
+    else:
+        waveform = torch.from_numpy(samples).unsqueeze(0)
+    return {"waveform": waveform, "sample_rate": _SAMPLE_RATE}
 
 
 def _write_wav(path: Path, audio: np.ndarray) -> None:
