@@ -100,7 +100,7 @@ Deployment blockers before calling this plan complete:
 5. Decide the public Windows promotion path: current VM evidence proves the
    no-bundle executable and MSIX packaging paths; MSI/NSIS direct-download
    bundling is still not promoted.
-7. Staged update preparation is deferred out of the human-test release. The
+6. Staged update preparation is deferred out of the human-test release. The
    human-test release uses the tested immediate source update path plus the
    documented MSIX/manual package path.
 
