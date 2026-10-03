@@ -9,12 +9,14 @@ import time
 import threading
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Literal
 
 import numpy as np
 
 from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
 from dictate.cue_sound import play_pause_cue
+from dictate.dictation_timing import DictationTiming, log_timing_line
 from dictate.engine import DictationEngine, TranscriptionResult
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
@@ -109,6 +111,8 @@ class Daemon:
         self._recording_prompt_tails: dict[int, str] = {}
         self._recording_note_chunk_cursors: dict[int, tuple[int, float]] = {}
         self._note_streaming_recordings: set[int] = set()
+        # Step timings of dictations between key release and the paste.
+        self._recording_timings: dict[int, DictationTiming] = {}
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -544,6 +548,7 @@ class Daemon:
                 return True
 
     def _finalize_recording(self) -> None:
+        timing = DictationTiming()
         with self._recorder_control_lock:
             with self._recording_lock:
                 recording_id = self._active_recording_id
@@ -551,6 +556,10 @@ class Daemon:
                 failed = recording_id is not None and self._is_recording_failed(recording_id)
             if recording_id is None:
                 return
+            if mode == "dictation" and not failed:
+                with self._queue_lock:
+                    if self._recording_session_known_locked(recording_id):
+                        self._recording_timings[recording_id] = timing
             try:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
@@ -566,6 +575,10 @@ class Daemon:
                 if mode == "note":
                     self._notify_note_recording(False, paused=False, mode=mode)
                 return
+            timing.mark_stopped()
+            processing_s = getattr(self.recorder, "last_processing_seconds", None)
+            if isinstance(processing_s, (int, float)):
+                timing.capture_processing_s = float(processing_s)
             if failed or self._is_recording_failed(recording_id):
                 with self._recording_lock:
                     if self._active_recording_id == recording_id:
@@ -693,6 +706,10 @@ class Daemon:
             if self._is_recording_failed(chunk.recording_id):
                 return
             if audio.size > 0:
+                with self._queue_lock:
+                    timing = self._recording_timings.get(chunk.recording_id)
+                if timing is not None:
+                    timing.audio_s = len(audio) / SAMPLE_RATE
                 min_duration_s = 0.0 if self._assembled_recording_text(chunk.recording_id) else None
                 result = self._transcribe_recording_audio(
                     chunk.recording_id,
@@ -1267,19 +1284,28 @@ class Daemon:
             self._finalize_note_session(recording_id, assembled_text)
             self._clear_recording_state(recording_id)
             return
+        with self._queue_lock:
+            timing = self._recording_timings.pop(recording_id, None)
         self._clear_recording_state(recording_id)
+        step_started = time.perf_counter()
         try:
             self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  History save failed: {exc}", file=sys.stderr)
         else:
             self._notify_history_changed()
+        if timing is not None:
+            timing.history_s = time.perf_counter() - step_started
 
+        step_started = time.perf_counter()
         try:
-            self.output.send(assembled_text)
+            clipboard = self.output.send(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Output backend failed ({self.output.name}): {exc}", file=sys.stderr)
             return
+        if timing is not None:
+            timing.paste_s = time.perf_counter() - step_started
+            timing.mark_typed()
 
         self._surface_transcript(
             phase="final",
@@ -1289,6 +1315,23 @@ class Daemon:
             stale=False,
         )
         echo_dictated_text("Typed", assembled_text)
+        if timing is not None:
+            self._log_dictation_timing(timing, clipboard)
+
+    def _log_dictation_timing(self, timing: DictationTiming, clipboard: object) -> None:
+        """Log the step timings once the clipboard is back, or now without a keeper."""
+        if not isinstance(clipboard, Future):
+            log_timing_line(timing.format_line())
+            return
+
+        def _done(future: Future) -> None:
+            try:
+                outcome = future.result()
+            except Exception:  # noqa: BLE001
+                outcome = None
+            log_timing_line(timing.format_line(outcome))
+
+        clipboard.add_done_callback(_done)
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
         note_id: str | None = None
@@ -1370,6 +1413,7 @@ class Daemon:
             self._recording_last_audio_status.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
+            self._recording_timings.pop(recording_id, None)
         if note_id:
             try:
                 self.note_store.mark_failed(note_id, error=reason)
@@ -1424,6 +1468,7 @@ class Daemon:
             self._recording_prompt_tails.pop(recording_id, None)
             self._recording_note_chunk_cursors.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
+            self._recording_timings.pop(recording_id, None)
 
     def _cleanup_failed_recording_session(self, recording_id: int) -> None:
         with self._recorder_control_lock:
@@ -1573,9 +1618,27 @@ class Daemon:
         *,
         min_duration_s: float | None = None,
     ) -> TranscriptionResult | None:
+        with self._queue_lock:
+            timing = self._recording_timings.get(recording_id)
+        if timing is not None:
+            timing.mark_decode_started()
+        result = self._decode_recording_audio(recording_id, audio, min_duration_s=min_duration_s)
+        if timing is not None and result is not None:
+            timing.add_decode(getattr(result, "stt_s", None), getattr(result, "fixes_s", None))
+        return result
+
+    def _decode_recording_audio(
+        self,
+        recording_id: int,
+        audio: np.ndarray,
+        *,
+        min_duration_s: float | None = None,
+    ) -> TranscriptionResult | None:
         duration = len(audio) / SAMPLE_RATE
+        # The audio length, not how long the decode takes; that is in the
+        # "Dictation timing" line once the text is pasted.
         print(
-            f"\r  Transcribing {duration:.1f}s...   ",
+            f"\r  Transcribing {duration:.1f} s of audio...   ",
             end="",
             file=sys.stderr,
             flush=True,

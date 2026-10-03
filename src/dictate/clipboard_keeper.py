@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -74,7 +75,11 @@ class ClipboardKeeperUnavailable(RuntimeError):
 
 @dataclass(slots=True)
 class PasteOutcome:
-    """What happened to the clipboard around one paste. Never holds contents."""
+    """What happened to the clipboard around one paste. Never holds contents.
+
+    The ``*_s`` fields are how long each step took, in seconds, for the
+    dictation timing line; None when the step did not run.
+    """
 
     saved: bool = False
     read_signal: bool = False
@@ -82,12 +87,22 @@ class PasteOutcome:
     restored: bool = False
     kept_newer_copy: bool = False
     error: str = ""
+    # Waiting for the previous dictation's restore to finish.
+    lock_wait_s: float | None = None
+    save_s: float | None = None
+    write_s: float | None = None
+    # Settle before the keystroke, plus sending it.
+    keys_s: float | None = None
+    # Paste keystroke sent until the target read the text, or the wait ended.
+    read_wait_s: float | None = None
+    restore_s: float | None = None
 
 
 @dataclass(slots=True)
 class _Job:
     pasted: threading.Event = field(default_factory=threading.Event)
     error: BaseException | None = None
+    finished: Future = field(default_factory=Future)
 
 
 class ClipboardKeeper:
@@ -124,13 +139,18 @@ class ClipboardKeeper:
         *,
         plain_text: bool = False,
         after_write: Callable[[ClipboardSession], None] | None = None,
-    ) -> None:
+    ) -> Future:
+        """Paste ``text`` and return once the paste keystroke has been sent.
+
+        The returned future resolves with this paste's ``PasteOutcome`` when
+        the transaction ends, after the restore.
+        """
         job = _Job()
         if not self._background:
             self._run(job, text, send_paste, plain_text, after_write)
             if job.error is not None:
                 raise job.error
-            return
+            return job.finished
         worker = threading.Thread(
             target=self._run,
             args=(job, text, send_paste, plain_text, after_write),
@@ -143,6 +163,7 @@ class ClipboardKeeper:
         job.pasted.wait()
         if job.error is not None:
             raise job.error
+        return job.finished
 
     def wait_idle(self, timeout: float | None = None) -> bool:
         """Block until the last transaction has restored. For tests and shutdown."""
@@ -160,8 +181,27 @@ class ClipboardKeeper:
         plain_text: bool,
         after_write: Callable[[ClipboardSession], None] | None,
     ) -> None:
+        outcome = PasteOutcome()
+        waited_from = time.perf_counter()
+        try:
+            self._run_locked(job, outcome, waited_from, text, send_paste, plain_text, after_write)
+        finally:
+            # After the lock is released, so whoever the outcome is reported
+            # to does not hold up the next paste.
+            job.finished.set_result(outcome)
+
+    def _run_locked(
+        self,
+        job: _Job,
+        outcome: PasteOutcome,
+        waited_from: float,
+        text: str,
+        send_paste: Callable[[], None],
+        plain_text: bool,
+        after_write: Callable[[ClipboardSession], None] | None,
+    ) -> None:
         with self._lock:
-            outcome = PasteOutcome()
+            outcome.lock_wait_s = time.perf_counter() - waited_from
             try:
                 self._transaction(job, outcome, text, send_paste, plain_text, after_write)
             except BaseException as exc:  # noqa: BLE001
@@ -198,6 +238,7 @@ class ClipboardKeeper:
             raise ClipboardKeeperUnavailable(type(exc).__name__) from exc
         try:
             snapshot: Any = None
+            started = time.perf_counter()
             try:
                 snapshot = session.snapshot()
                 outcome.saved = True
@@ -209,14 +250,20 @@ class ClipboardKeeper:
                     type(exc).__name__,
                 )
 
+            outcome.save_s = time.perf_counter() - started
+
             try:
+                started = time.perf_counter()
                 session.write_text(text)
                 if after_write is not None:
                     after_write(session)
+                outcome.write_s = time.perf_counter() - started
+                started = time.perf_counter()
                 # Reads before this point (clipboard managers reacting to the
                 # write) are not the paste target.
                 session.before_paste()
                 send_paste()
+                outcome.keys_s = time.perf_counter() - started
             except BaseException:
                 # Nothing will read the text. If the write got far enough to
                 # replace the clipboard, put the old contents straight back.
@@ -224,13 +271,17 @@ class ClipboardKeeper:
                 raise
             job.pasted.set()
 
+            started = time.perf_counter()
             self._wait_for_read(session, outcome)
+            outcome.read_wait_s = time.perf_counter() - started
             if not outcome.saved:
                 return
             if session.changed_since_write():
                 outcome.kept_newer_copy = True
                 return
+            started = time.perf_counter()
             self._restore(session, snapshot, outcome)
+            outcome.restore_s = time.perf_counter() - started
         finally:
             session.close()
 
