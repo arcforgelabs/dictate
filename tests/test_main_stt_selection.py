@@ -107,6 +107,14 @@ class MainSttSelectionTests(unittest.TestCase):
                 backend, model, _ = self._startup_stt([], saved)
                 self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v2"))
 
+    def test_saved_parakeet_model_without_backend_is_kept(self) -> None:
+        backend, model, stderr = self._startup_stt([], Config(stt_model="parakeet-tdt-0.6b-v3"))
+
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
+        self.assertIn(
+            "Using saved STT selection: backend='parakeet' model='parakeet-tdt-0.6b-v3'", stderr
+        )
+
     def test_default_startup_stt_is_parakeet(self) -> None:
         backend, model, stderr = self._startup_stt([], Config())
 

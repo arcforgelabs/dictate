@@ -126,9 +126,36 @@ a = Analysis(
 )
 
 # Analysis dependency walking can re-introduce host audio libs (_sounddevice →
-# libportaudio, av.libs → libasound). Strip them again on Linux from both TOCs.
+# libportaudio). Strip them again on Linux from both TOCs.
 a.binaries = filter_pyinstaller_binaries(a.binaries)
 a.datas = filter_pyinstaller_binaries(a.datas)
+
+# The Whisper-family runtimes were removed: faster-whisper, WhisperX,
+# CTranslate2 and PyAV, whose FFmpeg build carried GPL libx264/libx265. Fail the
+# build if a transitive import brings any of them back, in either layout.
+_REMOVED_PACKAGES = {"av", "ctranslate2", "faster_whisper", "whisperx"}
+_REMOVED_DIRS = _REMOVED_PACKAGES | {"av.libs", "ctranslate2.libs"}
+
+
+def _removed_file(dest):
+    parts = dest.replace("\\", "/").split("/")
+    name = parts[-1].lower()
+    return parts[0] in _REMOVED_DIRS or name.startswith(("libx264", "libx265"))
+
+
+_found = sorted(
+    {entry[0] for entry in a.pure if entry[0].split(".", 1)[0] in _REMOVED_PACKAGES}
+    | {entry[0] for entry in list(a.binaries) + list(a.datas) if _removed_file(entry[0])}
+)
+if _found:
+    raise SystemExit(
+        "dictate-engine.spec: removed Whisper-family runtime in the frozen engine: "
+        + ", ".join(_found[:20])
+    )
+print(
+    f"dictate-engine.spec: no av, av.libs, ctranslate2, faster_whisper, whisperx, libx264 "
+    f"or libx265 among {len(a.pure)} modules, {len(a.binaries)} binaries, {len(a.datas)} data files"
+)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
