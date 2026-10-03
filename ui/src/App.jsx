@@ -937,130 +937,144 @@ export default function App() {
   // ---- hydrate from the engine + subscribe to live events ----
   useEffect(() => {
     setPlatform(ipc.platform());
-    if (!ipc.isLive()) return;
-    setLive(true);
     let cancelled = false;
-    ipc.getState().then((st) => {
-      if (cancelled || !st) return;
-      hydrate(st);
-    }).catch(() => {});
-    const unsub = ipc.subscribe((ev) => {
-      if (ev.type === "recording") {
-        setRecording(!!ev.active);
-        if (ev.active) setSessionStarted(true);
-        if (ev.active) setTranscript({ phase: null, text: "", stale: false });
-        else setAudioLevel(null);
-      }
-      else if (ev.type === "note-recording") {
-        if (ev.paused) {
-          setNoteRecording(true);
-          setNotePaused(true);
-          setNotePauseReason(ev.pauseReason || null);
-          setAudioLevel(null);
-        } else if (ev.active) {
-          setNoteRecording(true);
-          setSessionStarted(true);
-          setNotePaused(false);
-          setNotePauseReason(null);
-          setAudioLevel(null);
-          // New recording started — clear any stale watchdog, reset note surface.
-          clearWatchdog();
-          setNoteView(null);
-          setCurrentNote(null);
-        } else {
-          setNoteRecording(false);
-          setNotePaused(false);
-          setNotePauseReason(null);
-          setAudioLevel(null);
-          if (ev.discarded || discardPendingRef.current) {
-            discardPendingRef.current = false;
+    let unsub = null;
+    let stopWaiting = null;
+    const connect = () => {
+      if (cancelled) return;
+      setLive(true);
+      ipc.getState().then((st) => {
+        if (cancelled || !st) return;
+        hydrate(st);
+      }).catch(() => {});
+      unsub = ipc.subscribe((ev) => {
+        if (ev.type === "recording") {
+          setRecording(!!ev.active);
+          if (ev.active) setSessionStarted(true);
+          if (ev.active) setTranscript({ phase: null, text: "", stale: false });
+          else setAudioLevel(null);
+        }
+        else if (ev.type === "note-recording") {
+          if (ev.paused) {
+            setNoteRecording(true);
+            setNotePaused(true);
+            setNotePauseReason(ev.pauseReason || null);
+            setAudioLevel(null);
+          } else if (ev.active) {
+            setNoteRecording(true);
+            setSessionStarted(true);
+            setNotePaused(false);
+            setNotePauseReason(null);
+            setAudioLevel(null);
+            // New recording started — clear any stale watchdog, reset note surface.
             clearWatchdog();
             setNoteView(null);
             setCurrentNote(null);
-            setTranscript({ phase: null, text: "", stale: false });
           } else {
-            // Recording finished — show Transcribing… and arm the safety-net watchdog.
-            setNoteView("processing");
-            armWatchdog();
-          }
-        }
-      }
-      else if (ev.type === "audio-level") {
-        if (typeof ev.level === "number") setAudioLevel(ev.level);
-      }
-      else if (ev.type === "note") {
-        // The backend now sends a `status` field on every terminal note outcome.
-        // Old daemons without the field default to "ok" for backward compatibility.
-        const status = ev.status || (ev.text ? "ok" : "empty");
-        clearWatchdog();
-        if (status === "ok" && typeof ev.text === "string" && ev.text) {
-          setNoteText(ev.text);
-          const note = {
-            id: ev.id || "n" + Date.now(),
-            text: ev.text,
-            createdAt: ev.createdAt || new Date().toISOString(),
-            mode: ev.mode || "note",
-            segments: normalizeSegments(ev.segments),
-          };
-          setCurrentNote(note);
-          setHistory((entries) => [note, ...entries.filter((entry) => entry.id !== note.id)].slice(0, 50));
-          setExpandedFrom("capture");
-          setNoteView("expanded");
-          toast("Conversation note saved");
-        } else if (status === "empty") {
-          setNoteView(null);
-          toast("No speech detected", { bad: true });
-        } else if (status === "failed") {
-          setNoteView(null);
-          toast("Couldn't transcribe — try again", { bad: true });
-        }
-      }
-      else if (ev.type === "transcript") {
-        const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
-        if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) {
-          if (transcriptIdRef.current - eventId > TERMINAL_TRANSCRIPT_ID_LIMIT) resetTranscriptOrdering();
-          else return;
-        }
-        if (eventId !== null && terminalTranscriptIdsRef.current.has(eventId) && ev.phase !== "final" && !ev.stale) return;
-        if (eventId !== null) transcriptIdRef.current = eventId;
-        if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
-        if (ev.stale) {
-          // Belt-and-suspenders: _fail_recording_session fires a stale transcript
-          // AND a note "failed" event. Resolve the view here (silent — the note
-          // "failed" handler is the authoritative toaster to avoid a duplicate).
-          // Old daemons without note "failed": UI unblocks but no toast; the 60 s
-          // watchdog was also cleared here so it won't double-fire.
-          if (noteViewRef.current === "processing") {
-            clearWatchdog();
-            setNoteView(null);
-          }
-          setTranscript({ phase: ev.phase || "final", text: "", stale: true });
-        } else if (typeof ev.text === "string") {
-          setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
-        }
-      } else if (ev.type === "history-changed") {
-        ipc.getState().then((st) => {
-          if (!st) return;
-          const entries = mapHistory(st);
-          setHistory(entries);
-          // Fallback: if still waiting for a "note" event, resolve from latest history.
-          setNoteView((nv) => {
-            if (nv === "processing" && entries.length > 0) {
+            setNoteRecording(false);
+            setNotePaused(false);
+            setNotePauseReason(null);
+            setAudioLevel(null);
+            if (ev.discarded || discardPendingRef.current) {
+              discardPendingRef.current = false;
               clearWatchdog();
-              setCurrentNote(entries[0]);
-              setExpandedFrom("capture");
-              return "expanded";
+              setNoteView(null);
+              setCurrentNote(null);
+              setTranscript({ phase: null, text: "", stale: false });
+            } else {
+              // Recording finished — show Transcribing… and arm the safety-net watchdog.
+              setNoteView("processing");
+              armWatchdog();
             }
-            return nv;
+          }
+        }
+        else if (ev.type === "audio-level") {
+          if (typeof ev.level === "number") setAudioLevel(ev.level);
+        }
+        else if (ev.type === "note") {
+          // The backend now sends a `status` field on every terminal note outcome.
+          // Old daemons without the field default to "ok" for backward compatibility.
+          const status = ev.status || (ev.text ? "ok" : "empty");
+          clearWatchdog();
+          if (status === "ok" && typeof ev.text === "string" && ev.text) {
+            setNoteText(ev.text);
+            const note = {
+              id: ev.id || "n" + Date.now(),
+              text: ev.text,
+              createdAt: ev.createdAt || new Date().toISOString(),
+              mode: ev.mode || "note",
+              segments: normalizeSegments(ev.segments),
+            };
+            setCurrentNote(note);
+            setHistory((entries) => [note, ...entries.filter((entry) => entry.id !== note.id)].slice(0, 50));
+            setExpandedFrom("capture");
+            setNoteView("expanded");
+            toast("Conversation note saved");
+          } else if (status === "empty") {
+            setNoteView(null);
+            toast("No speech detected", { bad: true });
+          } else if (status === "failed") {
+            setNoteView(null);
+            toast("Couldn't transcribe — try again", { bad: true });
+          }
+        }
+        else if (ev.type === "transcript") {
+          const eventId = Number.isInteger(ev.recording_id) ? ev.recording_id : null;
+          if (eventId !== null && transcriptIdRef.current !== null && eventId < transcriptIdRef.current) {
+            if (transcriptIdRef.current - eventId > TERMINAL_TRANSCRIPT_ID_LIMIT) resetTranscriptOrdering();
+            else return;
+          }
+          if (eventId !== null && terminalTranscriptIdsRef.current.has(eventId) && ev.phase !== "final" && !ev.stale) return;
+          if (eventId !== null) transcriptIdRef.current = eventId;
+          if (eventId !== null && (ev.phase === "final" || ev.stale)) markTerminalTranscriptId(eventId);
+          if (ev.stale) {
+            // Belt-and-suspenders: _fail_recording_session fires a stale transcript
+            // AND a note "failed" event. Resolve the view here (silent — the note
+            // "failed" handler is the authoritative toaster to avoid a duplicate).
+            // Old daemons without note "failed": UI unblocks but no toast; the 60 s
+            // watchdog was also cleared here so it won't double-fire.
+            if (noteViewRef.current === "processing") {
+              clearWatchdog();
+              setNoteView(null);
+            }
+            setTranscript({ phase: ev.phase || "final", text: "", stale: true });
+          } else if (typeof ev.text === "string") {
+            setTranscript({ phase: ev.phase || "partial", text: ev.text, stale: false });
+          }
+        } else if (ev.type === "history-changed") {
+          ipc.getState().then((st) => {
+            if (!st) return;
+            const entries = mapHistory(st);
+            setHistory(entries);
+            // Fallback: if still waiting for a "note" event, resolve from latest history.
+            setNoteView((nv) => {
+              if (nv === "processing" && entries.length > 0) {
+                clearWatchdog();
+                setCurrentNote(entries[0]);
+                setExpandedFrom("capture");
+                return "expanded";
+              }
+              return nv;
+            });
           });
-        });
-      }
-    }, () => {
-      // SSE reconnected (e.g. engine restarted after an update) — re-sync the
-      // full state so history + quick-copy reflect anything missed while offline.
-      ipc.getState().then((st) => { if (!cancelled && st) hydrate(st); }).catch(() => {});
-    });
-    return () => { cancelled = true; resetTranscriptOrdering(); clearWatchdog(); unsub && unsub(); };
+        }
+      }, () => {
+        // SSE reconnected (e.g. engine restarted after an update) — re-sync the
+        // full state so history + quick-copy reflect anything missed while offline.
+        ipc.getState().then((st) => { if (!cancelled && st) hydrate(st); }).catch(() => {});
+      });
+    };
+    // A packaged window can open before its engine is up; keep waiting for the
+    // bridge instead of staying disconnected for the life of the window.
+    if (ipc.isLive()) connect();
+    else if (ipc.isShell()) stopWaiting = ipc.waitForBridge(connect);
+    return () => {
+      cancelled = true;
+      if (stopWaiting) stopWaiting();
+      resetTranscriptOrdering();
+      clearWatchdog();
+      if (unsub) unsub();
+    };
   }, []);
 
   const resetTranscriptOrdering = () => {
@@ -1606,6 +1620,9 @@ export default function App() {
       }, 900);
       return () => { clearTimeout(t1); };
     }
+    // Check once the hydrate effect has marked the window live, so a bridge
+    // injected at launch and one that arrives later each get exactly one check.
+    if (!live) return;
     let cancelled = false;
     ipc.checkUpdates().then((st) => {
       if (cancelled || !st) return;
@@ -1632,7 +1649,7 @@ export default function App() {
     }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [live]);
 
   // ---- dictation demo (mock mode only; live mode is driven by SSE) ----
   const typeText = (phrase) => {
