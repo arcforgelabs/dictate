@@ -474,9 +474,24 @@ function CaptureHome() {
               </>
             ) : (
               <>
-                <div className="note-status-sub">Click to dictate</div>
+                {s.modelPhase === "failed" ? (
+                  <div className="model-state model-state--failed" role="alert">
+                    <div className="note-status-sub">The speech model didn't load</div>
+                    {s.modelError && <div className="model-state-detail">{s.modelError}</div>}
+                    <div className="model-state-detail">Restart Dictate to try again.</div>
+                  </div>
+                ) : !s.modelReady ? (
+                  <div className="model-state" role="status" aria-live="polite">
+                    <div className="note-status-sub">Getting ready…</div>
+                    <div className="model-state-detail">
+                      Loading the speech model. You can start now; your words are typed once it's ready.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="note-status-sub">Click to dictate</div>
+                )}
                 {/* Getting started (per-session): teach the key on a fresh launch. */}
-                {gettingStarted && (
+                {gettingStarted && s.modelPhase !== "failed" && (
                   <>
                     <div className="note-status-hint">or hold <Combo keys={s.shortcut.map(shortcutKeyLabel)} /></div>
                     <GsKeyboard />
@@ -522,12 +537,15 @@ function CaptureHome() {
 
 /* ── Transcribing… (indeterminate, shown between stop and note event) ── */
 function NoteProcessing() {
+  const s = useStore();
   return (
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
         <div className="note-status-sub">
-          Turning your words into a note.
+          {s.modelReady
+            ? "Turning your words into a note."
+            : "Getting ready… the speech model is still loading."}
         </div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
       </div>
@@ -683,6 +701,11 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [platform, setPlatform] = useState(initialPlatform);
   const [live, setLive] = useState(false);
+  // Speech-model readiness. The engine answers before its model has loaded;
+  // until then the home shows "Getting ready…" (recordings still work and are
+  // transcribed once the model is ready). Mock mode and older engines: ready.
+  const [modelPhase, setModelPhase] = useState("ready"); // "loading" | "ready" | "failed"
+  const [modelError, setModelError] = useState(null);
   // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
   const [currentNote, setCurrentNote] = useState(null);
@@ -991,6 +1014,9 @@ export default function App() {
         else if (ev.type === "audio-level") {
           if (typeof ev.level === "number") setAudioLevel(ev.level);
         }
+        else if (ev.type === "model") {
+          applyModelStatus(!!ev.ready, ev.phase, ev.error);
+        }
         else if (ev.type === "note") {
           // The backend now sends a `status` field on every terminal note outcome.
           // Old daemons without the field default to "ok" for backward compatibility.
@@ -1095,7 +1121,35 @@ export default function App() {
     }
   };
 
+  const applyModelStatus = useCallback((ready, phase, error) => {
+    const next = phase === "loading" || phase === "ready" || phase === "failed"
+      ? phase
+      : (ready ? "ready" : "loading");
+    setModelPhase(next);
+    setModelError(next === "failed" ? (error || null) : null);
+  }, []);
+
+  const applyStateModelStatus = useCallback((st) => {
+    if (!st || typeof st.modelReady !== "boolean") return;
+    const load = st.modelLoad || {};
+    applyModelStatus(st.modelReady, load.phase, load.error);
+  }, [applyModelStatus]);
+
+  // The "model" event is the normal path; re-read the state while the model is
+  // loading in case the event fired before the event stream was open.
+  useEffect(() => {
+    if (!live || modelPhase !== "loading") return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      ipc.getState()
+        .then((st) => { if (!cancelled) applyStateModelStatus(st); })
+        .catch(() => {});
+    }, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [live, modelPhase, applyStateModelStatus]);
+
   const hydrate = useCallback((st) => {
+    applyStateModelStatus(st);
     if (st.model && st.model.id) setModelState(st.model.id);
     if (st.shortcut) {
       if (Array.isArray(st.shortcut.display)) setShortcutState(st.shortcut.display);
@@ -1778,6 +1832,7 @@ export default function App() {
     updatePhase, updateProgress, updateInstallElapsed, updateErrorReason, updateVisible, runUpdate, skipUpdate, dismissUpdate,
     // Note Capture additions
     noteElapsed, reduced, audioLevel, live,
+    modelReady: modelPhase === "ready", modelPhase, modelError,
     noteView, setNoteView, currentNote, setCurrentNote,
     expandedFrom, setExpandedFrom,
     aboutOpen, setAboutOpen, setHistory,

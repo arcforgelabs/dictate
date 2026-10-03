@@ -40,6 +40,7 @@ FINAL_WINDOW_QUEUE_SIZE = 128
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
 RecordingMode = Literal["dictation", "note"]
+ModelPhase = Literal["loading", "ready", "failed"]
 
 
 class Daemon:
@@ -63,7 +64,9 @@ class Daemon:
         note_recording_callback: Callable[[bool], None] | None = None,
         note_callback: Callable[[dict[str, object]], None] | None = None,
         audio_level_callback: Callable[[float], None] | None = None,
+        model_status_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
+        model_loaded: bool = True,
     ):
         self.active = True
         self.language = language
@@ -77,6 +80,15 @@ class Daemon:
         self.note_recording_callback = note_recording_callback
         self.note_callback = note_callback
         self.audio_level_callback = audio_level_callback
+        self.model_status_callback = model_status_callback
+        # With model_loaded=False the speech model is still to be loaded by
+        # start_model_load(). Recording works meanwhile; the transcription worker
+        # holds queued audio until the load has finished.
+        self._model_loaded = threading.Event()
+        self._model_phase: ModelPhase = "ready" if model_loaded else "loading"
+        self._model_error: str | None = None
+        if model_loaded:
+            self._model_loaded.set()
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -374,6 +386,100 @@ class Daemon:
             return None
         return self._note_pause_reason
 
+    @property
+    def model_ready(self) -> bool:
+        return self._model_phase == "ready"
+
+    @property
+    def model_status(self) -> dict[str, object]:
+        """Readiness of the speech model: ``{"ready", "phase", "error"}``."""
+        phase = self._model_phase
+        return {
+            "ready": phase == "ready",
+            "phase": phase,
+            "error": self._model_error if phase == "failed" else None,
+        }
+
+    def start_model_load(
+        self,
+        load: Callable[[SpeechToText], None] | None = None,
+    ) -> threading.Thread:
+        """Load the speech model on a background thread.
+
+        ``load`` does the loading (default: touch ``stt.model``) and raises on
+        failure. Recording works while it runs: finished recordings wait in the
+        transcription queue and are transcribed once the model is ready. A
+        failed load fails those recordings with the load error, and later
+        recordings are refused with the same message.
+        """
+        with self._engine_lock:
+            stt = self.engine.stt
+        self._model_loaded.clear()
+        self._model_error = None
+        self._model_phase = "loading"
+        self._notify_model_status()
+        thread = threading.Thread(
+            target=self._run_model_load,
+            args=(stt, load),
+            name="dictate-model-load",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _run_model_load(
+        self,
+        stt: SpeechToText,
+        load: Callable[[SpeechToText], None] | None,
+    ) -> None:
+        try:
+            if load is not None:
+                load(stt)
+            else:
+                _ = stt.model
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc).strip() or exc.__class__.__name__
+            logger.error("Speech model failed to load: %s", message)
+            self._model_error = message
+            # Phase first, so a recording starting now is refused; then fail the
+            # recordings already waiting; then release the worker.
+            self._model_phase = "failed"
+            self._fail_recordings_waiting_for_model(message)
+            self._model_loaded.set()
+            self._notify_model_status()
+            self._surface_status(f"Speech model failed to load: {message}")
+            return
+        self._model_phase = "ready"
+        self._model_loaded.set()
+        self._notify_model_status()
+
+    def _fail_recordings_waiting_for_model(self, message: str) -> None:
+        with self._queue_lock:
+            waiting = [
+                recording_id
+                for recording_id in self._recording_stt_ids
+                if recording_id not in self._terminal_recordings
+            ]
+        for recording_id in waiting:
+            self._fail_recording_session(
+                recording_id,
+                f"Speech model failed to load: {message}",
+                transcript_reason="model-unavailable",
+            )
+
+    def _wait_for_model_load(self) -> None:
+        while not self._model_loaded.wait(timeout=0.1):
+            if self._stop.is_set():
+                return
+
+    def _notify_model_status(self) -> None:
+        if self.model_status_callback is None:
+            return
+        try:
+            self.model_status_callback(self.model_status)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Model status callback failed: {exc}", file=sys.stderr)
+
     def switch_speech_to_text(self, stt: SpeechToText, *, hotwords: str | None = None) -> None:
         """Swap STT backend/model at runtime."""
         previous_stt: SpeechToText | None = None
@@ -426,6 +532,9 @@ class Daemon:
                 if self.recorder.is_recording or not self.active:
                     return False
                 if self._note_recording_paused:
+                    return False
+                if self._model_phase == "failed":
+                    self._surface_status(f"Speech model failed to load: {self._model_error}")
                     return False
 
                 self._note_pause_reason = None
@@ -663,6 +772,8 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
+        # Audio recorded while the speech model loads stays queued until it is ready.
+        self._wait_for_model_load()
         while not self._stop.is_set():
             try:
                 chunk = self._partial_audio_queue.get_nowait()

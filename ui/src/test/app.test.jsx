@@ -1326,6 +1326,108 @@ describe("Quiet Console app (mock mode)", () => {
 });
 
 /* =====================================================================
+   Feature: speech-model readiness (#155) — the engine answers before its
+   model has loaded; the home says "Getting ready…" until it has.
+   ===================================================================== */
+describe("Speech model readiness", () => {
+  function liveEngine(states) {
+    const sources = [];
+    let stateCalls = 0;
+    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
+    window.EventSource = class {
+      constructor() { sources.push(this); }
+      close() {}
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url).replace("http://127.0.0.1:1", "");
+      if (path === "/api/state") {
+        const st = states[Math.min(stateCalls, states.length - 1)];
+        stateCalls += 1;
+        return { ok: true, json: async () => ({ history: [], ...st }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    return { sources, fetchSpy, stateCalls: () => stateCalls };
+  }
+  const loading = { modelReady: false, modelLoad: { phase: "loading", error: null } };
+  const ready = { modelReady: true, modelLoad: { phase: "ready", error: null } };
+
+  it("shows Getting ready… while the model loads, then the normal home on the model event", async () => {
+    const { sources } = liveEngine([loading]);
+    render(<App />);
+
+    expect(await screen.findByText("Getting ready…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/typed once it's ready/i);
+    expect(screen.queryByText("Click to dictate")).not.toBeInTheDocument();
+    // The mic stays usable: a recording made now is transcribed once the model is ready.
+    expect(screen.getByLabelText("Start recording")).toBeEnabled();
+
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "model", ready: true, phase: "ready", error: null }) });
+    });
+
+    expect(screen.getByText("Click to dictate")).toBeInTheDocument();
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+
+  it("re-reads the state while loading in case the model event was missed", async () => {
+    const { stateCalls } = liveEngine([loading, ready]);
+    render(<App />);
+    expect(await screen.findByText("Getting ready…")).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByText("Click to dictate")).toBeInTheDocument(), { timeout: 4000 });
+    expect(stateCalls()).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows a model load failure as an error instead of waiting forever", async () => {
+    const { sources } = liveEngine([loading]);
+    render(<App />);
+    expect(await screen.findByText("Getting ready…")).toBeInTheDocument();
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    act(() => {
+      sources[0].onmessage({
+        data: JSON.stringify({ type: "model", ready: false, phase: "failed", error: "model.onnx is missing" }),
+      });
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("The speech model didn't load");
+    expect(alert).toHaveTextContent("model.onnx is missing");
+    expect(alert).toHaveTextContent("Restart Dictate to try again.");
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+
+  it("shows a failure already reported by /api/state", async () => {
+    liveEngine([{ modelReady: false, modelLoad: { phase: "failed", error: "no runtime" } }]);
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("no runtime");
+  });
+
+  it("treats an engine that reports no readiness as ready", async () => {
+    liveEngine([{}]);
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("Click to dictate")).toBeInTheDocument());
+    expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+  });
+
+  it("says the model is still loading on Transcribing…", async () => {
+    const { sources } = liveEngine([loading]);
+    render(<App />);
+    expect(await screen.findByText("Getting ready…")).toBeInTheDocument();
+    await waitFor(() => expect(sources).toHaveLength(1));
+
+    act(() => {
+      sources[0].onmessage({ data: JSON.stringify({ type: "note-recording", active: false }) });
+    });
+
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+    expect(screen.getByText(/the speech model is still loading/i)).toBeInTheDocument();
+  });
+});
+
+/* =====================================================================
    Feature: Notes list + search (reachable from the capture home)
    ===================================================================== */
 describe("Notes list (history view)", () => {

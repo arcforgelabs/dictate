@@ -292,3 +292,20 @@ def _wire_daemon_events(daemon: object, broker: object) -> None:
         broker.publish("audio-level", level=float(level))
 
     daemon.audio_level_callback = on_audio_level
+
+    prev_model_status = getattr(daemon, "model_status_callback", None)
+
+    def on_model_status(status: dict[str, object]) -> None:
+        if prev_model_status is not None:
+            try:
+                prev_model_status(status)
+            except Exception:  # noqa: BLE001
+                logger.exception("prior model status callback failed")
+        broker.publish(
+            "model",
+            ready=bool(status.get("ready")),
+            phase=status.get("phase"),
+            error=status.get("error"),
+        )
+
+    daemon.model_status_callback = on_model_status

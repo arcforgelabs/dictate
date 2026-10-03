@@ -638,6 +638,10 @@ button.minic:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border
 .confirm-danger:focus-visible{outline:2px solid var(--danger);outline-offset:2px;}
 .note-status-sub{font-size:13px;color:var(--muted);text-align:center;max-width:280px;}
 .note-status-hint{font-size:12.5px;color:var(--muted);text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;}
+/* Speech-model readiness under the cradle: "Getting ready…" or a load error. */
+.model-state{display:flex;flex-direction:column;align-items:center;gap:4px;max-width:320px;}
+.model-state-detail{font-size:12px;color:var(--muted);text-align:center;line-height:1.45;}
+.model-state--failed .note-status-sub{color:var(--danger);font-weight:650;}
 /* Copy-last: quiet pill under the cradle once a dictation exists this session. */
 .note-copylast{margin:9px auto 0;min-height:38px;max-width:330px;padding:5px 12px;border-radius:14px;
   display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--surface-2);
