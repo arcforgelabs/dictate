@@ -284,7 +284,8 @@ to try the latest code, not as the everyday install.
 
 - [Windows 11 support](docs/windows-11.md)
 - [Transcription deployment plan](docs/TRANSCRIPTION_PLAN.md)
-- [Release/versioning](docs/release-versioning.md)
+- [Release policy: channels, versions, validation](docs/RELEASING.md)
+- [Release/versioning (current procedure)](docs/release-versioning.md)
 - [Desktop packaging & CI runbook](docs/desktop-packaging.md)
 - [Microsoft Store automation](docs/msstore-automation.md)
 - [Microsoft Store listing draft](docs/msstore-listing.md)
