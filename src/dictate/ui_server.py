@@ -250,8 +250,8 @@ class UiBackend:
         model_status = self.model_status()
         return {
             "version": RELEASE_VERSION,
-            # False while the engine is still loading the speech model; a
-            # recording made meanwhile is transcribed once it is ready.
+            # False while the engine is still loading the speech model;
+            # recording starts working once it is ready.
             "modelReady": model_status["ready"],
             "modelLoad": {"phase": model_status["phase"], "error": model_status["error"]},
             "model": {"id": f"{backend}/{model}", "backend": backend, "model": model},
@@ -528,6 +528,8 @@ class UiBackend:
     def start_note_recording(self) -> dict[str, Any]:
         daemon = self._require_daemon()
         model_status = self.model_status()
+        if model_status["phase"] == "loading":
+            raise ApiError(409, "Getting ready: the speech model is still loading")
         if model_status["phase"] == "failed":
             raise ApiError(
                 503,

@@ -42,7 +42,7 @@ for _mod_name, _attrs in _stub_modules.items():
 from dictate import __main__ as main_module  # noqa: E402
 from dictate import ui_launcher, ui_server  # noqa: E402
 from dictate.config import Config  # noqa: E402
-from dictate.daemon import FINAL_AUDIO_QUEUE_SIZE, Daemon  # noqa: E402
+from dictate.daemon import MODEL_LOADING_MESSAGE, Daemon  # noqa: E402
 from dictate.history import HistoryStore  # noqa: E402
 from dictate.note_store import NoteStore  # noqa: E402
 from dictate.stt import check_backend_readiness  # noqa: E402
@@ -177,140 +177,94 @@ class DaemonModelLoadTests(unittest.TestCase):
         self.assertEqual(self.model_events[-1], {"ready": True, "phase": "ready", "error": None})
         self.assertEqual(self.model_events[0]["phase"], "loading")
 
-    def test_recording_made_while_loading_is_transcribed_once_ready(self) -> None:
+    def test_recording_is_refused_with_a_message_until_the_model_is_ready(self) -> None:
         stt = _SlowStt()
         daemon = self._daemon(stt)
         daemon._ensure_worker_started()
         daemon.start_model_load()
         self.assertTrue(stt.load_started.wait(timeout=5))
 
-        # A shortcut press and release while the model loads.
-        self.assertTrue(daemon._start_recording())
-        daemon._finalize_recording()
-        time.sleep(0.3)
-
-        # Held, not dropped: nothing transcribed or typed yet, nothing failed.
-        self.assertEqual(stt.transcribe_calls, [])
-        self.output.send.assert_not_called()
-        self.assertEqual(len(daemon._held_final_chunks), 1)
+        # A shortcut press or mic click while the model loads: refused, and said so.
+        self.assertFalse(daemon._start_recording())
+        self.assertFalse(daemon.start_note_recording())
+        self.assertFalse(daemon.recorder.is_recording)
+        self.assertEqual(self.statuses, [MODEL_LOADING_MESSAGE, MODEL_LOADING_MESSAGE])
 
         stt.release_load.set()
-        self.assertTrue(_wait_until(lambda: self.output.send.called))
+        self.assertTrue(_wait_until(lambda: daemon.model_ready))
 
+        # Once ready, the first dictation records and is typed as usual.
+        self.assertTrue(daemon._start_recording())
+        daemon._finalize_recording()
+        self.assertTrue(_wait_until(lambda: self.output.send.called))
         self.output.send.assert_called_once_with("words 16000")
         self.assertEqual(stt.transcribe_calls, [(16000, True)])
-        self.assertFalse(any("failed" in (s or "").lower() for s in self.statuses), self.statuses)
-        self.assertFalse(any(event.get("stale") for event in self.transcripts), self.transcripts)
 
-    def test_note_recording_made_while_loading_is_saved_once_ready(self) -> None:
+    def test_shortcut_listener_starts_only_once_the_model_is_ready(self) -> None:
         stt = _SlowStt()
         daemon = self._daemon(stt)
-        notes: list[dict[str, object]] = []
-        daemon.note_callback = notes.append
-        daemon._ensure_worker_started()
-        daemon.start_model_load()
+        backend = MagicMock()
+        with patch("dictate.daemon.create_hotkey_backend", return_value=backend) as create:
+            daemon.start_model_load()
+            daemon.start()
+            self.assertTrue(stt.load_started.wait(timeout=5))
+            time.sleep(0.1)
+            # The model load holds the GIL, which would starve a keyboard hook.
+            create.assert_not_called()
 
-        self.assertTrue(daemon.start_note_recording())
-        self.assertTrue(daemon.stop_note_recording())
-        time.sleep(0.2)
-        self.assertEqual(notes, [])
+            stt.release_load.set()
+            self.assertTrue(_wait_until(lambda: backend.start.called))
+        create.assert_called_once()
+        backend.start.assert_called_once_with()
 
-        stt.release_load.set()
-        self.assertTrue(_wait_until(lambda: bool(notes)))
-        self.assertEqual(notes[0]["status"], "ok")
-        self.assertEqual(notes[0]["text"], "words 16000")
-        self.output.send.assert_not_called()
+    def test_shortcut_listener_starts_at_once_when_the_model_is_already_loaded(self) -> None:
+        daemon = Daemon(
+            _SlowStt(),
+            output=self.output,
+            history_store=HistoryStore(self.tmp / "history.json"),
+            note_store=NoteStore(self.tmp / "notes"),
+            recorder=_Recorder(),
+        )
+        self.addCleanup(daemon.shutdown)
+        backend = MagicMock()
+        with patch("dictate.daemon.create_hotkey_backend", return_value=backend):
+            daemon.start()
+        backend.start.assert_called_once_with()
 
-    def test_more_recordings_than_the_final_queue_holds_are_all_kept(self) -> None:
-        stt = _SlowStt()
-        daemon = self._daemon(stt)
-        daemon._ensure_worker_started()
-        daemon.start_model_load()
-
-        presses = FINAL_AUDIO_QUEUE_SIZE + 3
-        for _ in range(presses):
-            self.assertTrue(daemon._start_recording())
-            daemon._finalize_recording()
-        self.assertEqual(len(daemon._held_final_chunks), presses)
-
-        stt.release_load.set()
-        self.assertTrue(_wait_until(lambda: self.output.send.call_count == presses))
-
-        typed = [call.args[0] for call in self.output.send.call_args_list]
-        self.assertEqual(typed, [f"words {16000 + 1600 * n}" for n in range(presses)])
-        self.assertEqual(self.statuses, [])
-
-        # After the load, recordings take the normal queue again.
-        self.assertTrue(daemon._start_recording())
-        daemon._finalize_recording()
-        self.assertTrue(_wait_until(lambda: self.output.send.call_count == presses + 1))
-        self.assertEqual(len(daemon._held_final_chunks), 0)
-
-    def test_note_paused_while_loading_keeps_its_paused_audio(self) -> None:
-        stt = _SlowStt()
-        daemon = self._daemon(stt)
-        notes: list[dict[str, object]] = []
-        daemon.note_callback = notes.append
-        daemon._ensure_worker_started()
-        daemon.start_model_load()
-
-        with patch("dictate.daemon.play_pause_cue"):
-            self.assertTrue(daemon.start_note_recording())
-            self.assertTrue(daemon.pause_note_recording())
-            self.assertTrue(daemon.stop_note_recording())
-
-        stt.release_load.set()
-        self.assertTrue(_wait_until(lambda: bool(notes)))
-        self.assertEqual(notes[0]["status"], "ok")
-        self.assertEqual(notes[0]["text"], "words 16000")
-
-    def test_load_failure_fails_waiting_recordings_and_refuses_new_ones(self) -> None:
+    def test_load_failure_is_reported_and_refuses_recordings(self) -> None:
         stt = _SlowStt(fail_with=RuntimeError("model.onnx is missing"))
         daemon = self._daemon(stt)
-        daemon._ensure_worker_started()
-        daemon.start_model_load()
+        backend = MagicMock()
+        with patch("dictate.daemon.create_hotkey_backend", return_value=backend) as create:
+            daemon.start_model_load()
+            daemon.start()
+            stt.release_load.set()
+            self.assertTrue(_wait_until(lambda: daemon.model_status["phase"] == "failed"))
+        create.assert_not_called()
 
-        self.assertTrue(daemon._start_recording())
-        daemon._finalize_recording()
-        stt.release_load.set()
-
-        self.assertTrue(_wait_until(lambda: daemon.model_status["phase"] == "failed"))
         self.assertEqual(
             daemon.model_status,
             {"ready": False, "phase": "failed", "error": "model.onnx is missing"},
         )
-        self.assertTrue(_wait_until(lambda: not daemon._hold_final_chunks))
         self.assertEqual(self.model_events[-1]["phase"], "failed")
         self.assertIn("Speech model failed to load: model.onnx is missing", self.statuses)
-        stale = [event for event in self.transcripts if event.get("stale")]
-        self.assertEqual([event.get("reason") for event in stale], ["model-unavailable"])
-        self.assertEqual(stt.transcribe_calls, [])
-        self.output.send.assert_not_called()
 
-        # A later press is refused with the same message, not silently dropped.
+        # A later recording is refused with the same message, not silently dropped.
         self.statuses.clear()
         self.assertFalse(daemon._start_recording())
         self.assertEqual(self.statuses, ["Speech model failed to load: model.onnx is missing"])
         self.assertFalse(daemon.recorder.is_recording)
-
-    def test_load_failure_while_the_key_is_held_discards_that_recording(self) -> None:
-        stt = _SlowStt(fail_with=RuntimeError("no runtime"))
-        daemon = self._daemon(stt)
-        daemon._ensure_worker_started()
-        daemon.start_model_load()
-
-        self.assertTrue(daemon._start_recording())
-        stt.release_load.set()
-        self.assertTrue(_wait_until(lambda: daemon.model_status["phase"] == "failed"))
-
-        daemon._finalize_recording()
-        time.sleep(0.2)
-
-        self.assertFalse(daemon.recorder.is_recording)
-        self.assertIsNone(daemon._active_recording_id)
         self.assertEqual(stt.transcribe_calls, [])
         self.output.send.assert_not_called()
-        self.assertIn("Speech model failed to load: no runtime", self.statuses)
+
+    def test_model_load_cannot_start_twice(self) -> None:
+        stt = _SlowStt()
+        daemon = self._daemon(stt)
+        daemon.start_model_load()
+        stt.release_load.set()
+        self.assertTrue(_wait_until(lambda: daemon.model_ready))
+        with self.assertRaises(RuntimeError):
+            daemon.start_model_load()
 
 
 class HeadlessStartupOrderTests(unittest.TestCase):
@@ -382,7 +336,7 @@ class HeadlessStartupOrderTests(unittest.TestCase):
             daemon = self.daemons[0]
 
             # The server started before the model load even began, and the
-            # daemon was listening with the handshake written while it loaded.
+            # daemon ran with the handshake written while the model loaded.
             self.assertEqual(order, [("server", False, False), ("run", True, False)])
             self.assertEqual(daemon.model_status["phase"], "loading")
             self.assertTrue(self.stt.load_started.wait(timeout=5))
@@ -558,7 +512,7 @@ class ReadinessReportingTests(unittest.TestCase):
             self.assertTrue(state["modelReady"])
             self.assertEqual(state["modelLoad"], {"phase": "ready", "error": None})
 
-    def test_note_start_after_a_failed_load_is_an_error(self) -> None:
+    def test_note_start_while_loading_or_after_a_failed_load_is_an_error(self) -> None:
         class _Daemon:
             model_status = {"ready": False, "phase": "failed", "error": "no runtime"}
             long_recording_active = False
@@ -575,6 +529,12 @@ class ReadinessReportingTests(unittest.TestCase):
             backend.start_note_recording()
         self.assertEqual(raised.exception.status, 503)
         self.assertIn("no runtime", raised.exception.message)
+
+        backend.daemon.model_status = {"ready": False, "phase": "loading", "error": None}
+        with self.assertRaises(ui_server.ApiError) as raised:
+            backend.start_note_recording()
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.message, MODEL_LOADING_MESSAGE)
 
     def test_model_status_is_published_to_the_window(self) -> None:
         class _Daemon:

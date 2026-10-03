@@ -484,7 +484,7 @@ function CaptureHome() {
                   <div className="model-state" role="status" aria-live="polite">
                     <div className="note-status-sub">Getting ready…</div>
                     <div className="model-state-detail">
-                      Loading the speech model. You can start now; your words are typed once it's ready.
+                      Loading the speech model. Dictation works in a few seconds.
                     </div>
                   </div>
                 ) : (
@@ -537,15 +537,12 @@ function CaptureHome() {
 
 /* ── Transcribing… (indeterminate, shown between stop and note event) ── */
 function NoteProcessing() {
-  const s = useStore();
   return (
     <div className="note-proc-wrap">
       <div className="note-proc-inner">
         <div className="note-status" style={{ marginBottom: 6 }}>Transcribing…</div>
         <div className="note-status-sub">
-          {s.modelReady
-            ? "Turning your words into a note."
-            : "Getting ready… the speech model is still loading."}
+          Turning your words into a note.
         </div>
         <div className="note-proc-bar" aria-hidden="true"><span /></div>
       </div>
@@ -702,9 +699,10 @@ export default function App() {
   const [platform, setPlatform] = useState(initialPlatform);
   const [live, setLive] = useState(false);
   // Speech-model readiness. The engine answers before its model has loaded;
-  // until then the home shows "Getting ready…" (recordings still work and are
-  // transcribed once the model is ready). Mock mode and older engines: ready.
-  const [modelPhase, setModelPhase] = useState("ready"); // "loading" | "ready" | "failed"
+  // until then the home shows "Getting ready…" and recording waits. In the
+  // desktop shell this starts as "loading" until the engine's state says
+  // otherwise; mock mode and engines without the field are ready.
+  const [modelPhase, setModelPhase] = useState(() => (ipc.isShell() ? "loading" : "ready")); // "loading" | "ready" | "failed"
   const [modelError, setModelError] = useState(null);
   // Note surface state machine: null=home, "processing"=transcribing, "expanded"=full note view
   const [noteView, setNoteView] = useState(null);
@@ -1130,7 +1128,9 @@ export default function App() {
   }, []);
 
   const applyStateModelStatus = useCallback((st) => {
-    if (!st || typeof st.modelReady !== "boolean") return;
+    if (!st) return;
+    // An engine from before readiness reporting loads its model first: ready.
+    if (typeof st.modelReady !== "boolean") { applyModelStatus(true, "ready", null); return; }
     const load = st.modelLoad || {};
     applyModelStatus(st.modelReady, load.phase, load.error);
   }, [applyModelStatus]);
@@ -1365,6 +1365,14 @@ export default function App() {
       setNoteView(null);
       setCurrentNote(null);
       toast("Note recording started");
+      return;
+    }
+    if (modelPhase === "loading") {
+      toast("Getting ready — the speech model is still loading");
+      return;
+    }
+    if (modelPhase === "failed") {
+      toast("The speech model didn't load — restart Dictate", { bad: true });
       return;
     }
     ipc.startNoteRecording()

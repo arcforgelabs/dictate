@@ -104,8 +104,11 @@ scripts/build-windows-desktop.ps1
   Parakeet model, and loads the model on a background thread (#155), so the
   window connects while the model loads. `/api/state` reports `modelReady` and
   `modelLoad` (`{phase: loading | ready | failed, error}`), and the event stream
-  sends a `model` event when that changes. A recording made while the model
-  loads is transcribed once it is ready; a failed load is shown in the window.
+  sends a `model` event when that changes. The model load holds the Python
+  GIL for its whole length (the engine answers no request meanwhile, measured
+  on Windows), so recording and the shortcut listener start once the model is
+  ready; until then the window says "Getting ready…". A failed load is shown
+  in the window and the engine stays up.
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the

@@ -41,6 +41,7 @@ TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
 RecordingMode = Literal["dictation", "note"]
 ModelPhase = Literal["loading", "ready", "failed"]
+MODEL_LOADING_MESSAGE = "Getting ready: the speech model is still loading"
 
 
 class Daemon:
@@ -81,16 +82,16 @@ class Daemon:
         self.note_callback = note_callback
         self.audio_level_callback = audio_level_callback
         self.model_status_callback = model_status_callback
-        # With model_loaded=False the speech model is still to be loaded by
-        # start_model_load(). Recording works meanwhile: every finished
-        # recording is held, in order and without the final-queue cap, and the
-        # transcription worker takes them once the load has finished.
+        # With model_loaded=False the speech model is loaded later, by
+        # start_model_load(). Until it is ready, recordings are refused with
+        # MODEL_LOADING_MESSAGE and the shortcut listener is not started: the
+        # model load holds the GIL for seconds, which would starve the audio
+        # callback and the keyboard hook.
         self._model_loaded = threading.Event()
         self._model_phase: ModelPhase = "ready" if model_loaded else "loading"
         self._model_error: str | None = None
-        self._held_lock = threading.Lock()
-        self._hold_final_chunks = not model_loaded
-        self._held_final_chunks: deque[AudioChunk] = deque()
+        self._hotkey_lock = threading.Lock()
+        self._hotkey_start_pending = False
         if model_loaded:
             self._model_loaded.set()
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
@@ -158,7 +159,7 @@ class Daemon:
             self._hotkey_backend.set_combo(self.push_to_talk_combo)
         else:
             self._ensure_worker_started()
-            self._start_hotkey_backend()
+            self._start_hotkey_backend_when_ready()
         if self.recorder.is_recording:
             self._finalize_recording()
 
@@ -411,17 +412,14 @@ class Daemon:
         """Load the speech model on a background thread.
 
         For a daemon built with ``model_loaded=False``. ``load`` does the
-        loading (default: touch ``stt.model``) and raises on failure. Recording
-        works while it runs: finished recordings are held and transcribed once
-        the model is ready. A failed load fails those recordings with the load
-        error, and later recordings are refused with the same message.
+        loading (default: touch ``stt.model``) and raises on failure. When it
+        succeeds, recording is allowed and a pending shortcut listener starts;
+        when it fails, recordings are refused with the load error.
         """
         if self._model_loaded.is_set():
             raise RuntimeError("the speech model load has already finished")
         with self._engine_lock:
             stt = self.engine.stt
-        self._model_error = None
-        self._model_phase = "loading"
         self._notify_model_status()
         thread = threading.Thread(
             target=self._run_model_load,
@@ -446,54 +444,39 @@ class Daemon:
             message = str(exc).strip() or exc.__class__.__name__
             logger.error("Speech model failed to load: %s", message)
             self._model_error = message
-            # Phase first, so a recording starting now is refused; then fail the
-            # recordings already waiting; then release the worker.
             self._model_phase = "failed"
-            self._fail_recordings_waiting_for_model(message)
             self._model_loaded.set()
             self._notify_model_status()
             self._surface_status(f"Speech model failed to load: {message}")
             return
         self._model_phase = "ready"
         self._model_loaded.set()
+        self._start_pending_hotkey_backend()
         self._notify_model_status()
 
-    def _fail_recordings_waiting_for_model(self, message: str) -> None:
-        with self._queue_lock:
-            waiting = [
-                recording_id
-                for recording_id in self._recording_stt_ids
-                if recording_id not in self._terminal_recordings
-            ]
-        for recording_id in waiting:
-            self._fail_recording_session(
-                recording_id,
-                f"Speech model failed to load: {message}",
-                transcript_reason="model-unavailable",
-            )
+    def _start_pending_hotkey_backend(self) -> None:
+        with self._hotkey_lock:
+            pending = self._hotkey_start_pending
+            self._hotkey_start_pending = False
+        if not pending or self._stop.is_set():
+            return
+        try:
+            self._start_hotkey_backend()
+        except HotkeyBackendUnavailableError as exc:
+            self._surface_status(f"Shortcut unavailable: {exc}")
+
+    def _start_hotkey_backend_when_ready(self) -> None:
+        with self._hotkey_lock:
+            if not self._model_loaded.is_set():
+                self._hotkey_start_pending = True
+                return
+        if self._model_phase == "ready":
+            self._start_hotkey_backend()
 
     def _wait_for_model_load(self) -> None:
         while not self._model_loaded.wait(timeout=0.1):
             if self._stop.is_set():
                 return
-        # Recordings finished during the load come first, oldest first; from
-        # here on new ones go through the normal final-audio queue.
-        with self._held_lock:
-            held = list(self._held_final_chunks)
-            self._held_final_chunks.clear()
-            self._hold_final_chunks = False
-        for chunk in held:
-            if self._stop.is_set():
-                return
-            # As in the loop below, earlier partial chunks (a paused note's
-            # audio) go before a final chunk.
-            while True:
-                try:
-                    partial = self._partial_audio_queue.get_nowait()
-                except queue.Empty:
-                    break
-                self._handle_partial_chunk(partial)
-            self._handle_final_chunk(chunk)
 
     def _notify_model_status(self) -> None:
         if self.model_status_callback is None:
@@ -555,6 +538,9 @@ class Daemon:
                 if self.recorder.is_recording or not self.active:
                     return False
                 if self._note_recording_paused:
+                    return False
+                if self._model_phase == "loading":
+                    self._surface_status(MODEL_LOADING_MESSAGE)
                     return False
                 if self._model_phase == "failed":
                     self._surface_status(f"Speech model failed to load: {self._model_error}")
@@ -752,7 +738,7 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Note store recovery failed: %s", exc)
         self._ensure_worker_started()
-        self._start_hotkey_backend()
+        self._start_hotkey_backend_when_ready()
 
     def _ensure_worker_started(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -795,7 +781,6 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
-        # Audio recorded while the speech model loads stays queued until it is ready.
         self._wait_for_model_load()
         while not self._stop.is_set():
             try:
@@ -1139,12 +1124,6 @@ class Daemon:
     def _queue_final_chunk(self, chunk: AudioChunk) -> bool:
         if chunk.recording_id != 0 and not self._recording_session_known(chunk.recording_id):
             return False
-        with self._held_lock:
-            if self._hold_final_chunks:
-                # The speech model is still loading: keep every finished
-                # recording, however many, until the worker can transcribe it.
-                self._held_final_chunks.append(chunk)
-                return True
         try:
             self._audio_queue.put_nowait(chunk)
             return True

@@ -1155,7 +1155,7 @@ def _run_headless(
 
     With ``model_load`` the model of ``stt`` is not loaded yet: the UI server
     starts (and writes its handshake) first, then ``model_load`` runs on a
-    background thread while the daemon already listens for the shortcut.
+    background thread. The shortcut listener starts once the model is ready.
     """
     from dictate.daemon import Daemon
     output = _resolve_typing_output_or_exit(type_backend)
