@@ -178,6 +178,28 @@ One-shot:
 - Start Menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Dictate.lnk`
 - Startup shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Dictate.lnk`
 
+### Dictation timing in the log
+
+Each finished dictation adds one line to `logs\latest.log`, after
+`Typed: [N characters, not logged]`. It holds durations only, never the words:
+
+```text
+Dictation timing: audio=5.60s release_to_text=931ms stop=45ms wait=12ms decode=820ms fixes=0ms history=3ms paste=51ms | clipboard lock=0ms save=4ms write=1ms keys=25ms read=120ms restore=15ms | capture_processing=30ms
+```
+
+- `audio`: length of the recording. `Transcribing 5.6 s of audio...` is this
+  same length, not a wait.
+- `release_to_text`: key release until the paste keystroke is sent; the wait a
+  user sees. It is made of `stop` (microphone stopped), `wait` (queue to the
+  decoder), `decode` (Parakeet), `fixes` (hotword and replacement fixes),
+  `history` (saving to recent history) and `paste`.
+- `clipboard`: the parts of `paste` (`lock` waits for the previous dictation's
+  restore, `save`, `write`, `keys`), then the time until the target app read
+  the text (`read`) and the restore of what was on the clipboard (`restore`).
+  These last two happen after the text has appeared.
+- `capture_processing`: resampling and gain control done while recording. It
+  is not part of `release_to_text`.
+
 ## Desktop App
 
 Open `Dictate` from the Start Menu. The desktop app includes:

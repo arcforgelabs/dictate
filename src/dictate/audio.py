@@ -283,6 +283,10 @@ class SoundDeviceRecorder:
         # ``sample_rate`` before preprocessing / STT.
         self._capture_rate = sample_rate
         self._capture_device: int | None = None
+        # Seconds the audio callback spent resampling and preprocessing during
+        # the current recording; kept after stop for the dictation timing line.
+        self._processing_s = 0.0
+        self.last_processing_seconds: float | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -321,6 +325,8 @@ class SoundDeviceRecorder:
         self._chunk_sequence = 0
         self._recording_id = 0 if recording_id is None else int(recording_id)
         self._window_count = 0
+        self._processing_s = 0.0
+        self.last_processing_seconds = None
         self._on_chunk = on_chunk
         self._on_samples = on_samples
         self._note_chunks = bool(note_chunks)
@@ -402,7 +408,9 @@ class SoundDeviceRecorder:
             if self._preprocessor is not None:
                 # Drain the ~10 ms the preprocessor was still buffering so the tail
                 # of the utterance is not lost, then feed it through the same path.
+                flush_started = time.perf_counter()
                 tail = self._preprocessor.flush()
+                self._processing_s += time.perf_counter() - flush_started
                 self._preprocessor = None
                 if tail.size:
                     if not (self._note_chunks or self._overlap_stream):
@@ -450,6 +458,7 @@ class SoundDeviceRecorder:
                 ).astype(np.float32, copy=False)
             self._sample_count = 0
             self._write_pos = 0
+            self.last_processing_seconds = self._processing_s
         if callback is not None:
             for chunk_event in chunk_events:
                 try:
@@ -487,16 +496,16 @@ class SoundDeviceRecorder:
         samples = np.asarray(indata, dtype=np.float32).reshape(-1)
         if samples.size == 0:
             return
+        processing_started = time.perf_counter()
         if self._capture_rate != self.sample_rate:
             samples = resample_audio(samples, self._capture_rate, self.sample_rate)
-            if samples.size == 0:
-                return
-        if self._preprocessor is not None:
+        if self._preprocessor is not None and samples.size:
             # AGC + noise suppression before anything downstream sees the audio.
             # Emits only whole 10 ms frames; the ~10 ms remainder is flushed on stop.
             samples = self._preprocessor.process(samples)
-            if samples.size == 0:
-                return
+        self._processing_s += time.perf_counter() - processing_started
+        if samples.size == 0:
+            return
         with self._lock:
             if not (self._note_chunks or self._overlap_stream):
                 self._write_capture(samples)
