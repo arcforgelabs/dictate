@@ -14,18 +14,18 @@ class MainPrepareDispatchTests(unittest.TestCase):
                 [
                     "prepare-model",
                     "--stt-backend",
-                    "faster-whisper",
+                    "parakeet",
                     "--model",
-                    "turbo",
+                    "parakeet-tdt-0.6b-v3",
                 ]
             )
         self.assertEqual(result, 9)
         run_prepare_model.assert_called_once_with(
             [
                 "--stt-backend",
-                "faster-whisper",
+                "parakeet",
                 "--model",
-                "turbo",
+                "parakeet-tdt-0.6b-v3",
             ]
         )
 

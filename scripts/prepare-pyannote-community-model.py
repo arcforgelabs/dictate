@@ -30,7 +30,6 @@ def main() -> int:
         repo_id=MODEL_ID,
         token=token,
         local_dir=str(output),
-        local_dir_use_symlinks=False,
     )
 
     snapshot_path = Path(snapshot).resolve()

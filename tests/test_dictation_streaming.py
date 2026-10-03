@@ -48,8 +48,8 @@ class _FakeRecorder:
 class _ScriptedStreamingStt:
     """Local streaming-capable STT that returns scripted text per call and records kwargs."""
 
-    backend_name = "faster-whisper"
-    model_name = "turbo"
+    backend_name = "fake-streaming"
+    model_name = "fake-streaming-model"
     capabilities = SttCapabilities(supports_streaming_chunks=True)
 
     def __init__(self, responses: list[str]) -> None:
@@ -158,8 +158,8 @@ class DictationOverlapStreamAssemblyTests(unittest.TestCase):
 class _ProfileCapturingStt:
     """Streaming-capable local STT that records decode_profile + long_form it receives."""
 
-    backend_name = "faster-whisper"
-    model_name = "turbo"
+    backend_name = "fake-streaming"
+    model_name = "fake-streaming-model"
     capabilities = SttCapabilities(supports_streaming_chunks=True)
 
     def __init__(self) -> None:

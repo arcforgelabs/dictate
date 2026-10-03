@@ -43,9 +43,8 @@ def tearDownModule() -> None:  # noqa: N802
         _notes_patch.stop()
     _NOTES_TMP.cleanup()
 
-# Stub out heavy dependencies so tests work without faster-whisper / numpy / pynput.
+# Stub out heavy dependencies so tests work without pynput / sounddevice.
 _stub_modules = {
-    "faster_whisper": {"WhisperModel": MagicMock},
     "pynput": {},
     "pynput.keyboard": {"Listener": MagicMock, "Key": MagicMock()},
     "sounddevice": {"InputStream": MagicMock},
@@ -144,9 +143,9 @@ class _ChunkingStt(_FakeStt):
         return self.mapping.get(len(audio), "")
 
 
-class _FakeFasterWhisperStt(_ChunkingStt):
-    backend_name = "faster-whisper"
-    model_name = "turbo"
+class _FakeStreamingStt(_ChunkingStt):
+    backend_name = "fake-streaming"
+    model_name = "fake-streaming-model"
 
 
 class _ErrorStt(_FakeStt):
@@ -169,7 +168,7 @@ class _FailingChunkStt(_FakeStt):
         raise RuntimeError("boom")
 
 
-class _FailingFasterWhisperStt(_FakeFasterWhisperStt):
+class _FailingStreamingStt(_FakeStreamingStt):
     def __init__(self) -> None:
         super().__init__({16: "first"})
         self.calls = 0
@@ -417,7 +416,7 @@ class DaemonHistoryTests(unittest.TestCase):
             notes = NoteStore(root=Path(tmp) / "notes")
             output = MagicMock()
             output.name = "mock"
-            stt = _FakeFasterWhisperStt({4: "hello", 8: "world"})
+            stt = _FakeStreamingStt({4: "hello", 8: "world"})
             recorder = _FakeRecorder()
             transcripts: list[dict[str, object]] = []
             note_events: list[dict[str, object]] = []
@@ -478,7 +477,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             note_events: list[dict[str, object]] = []
             statuses: list[str | None] = []
-            stt = _FakeFasterWhisperStt({16: "hello"})
+            stt = _FakeStreamingStt({16: "hello"})
             recorder = _FakeRecorder()
             daemon = Daemon(
                 stt,
@@ -530,7 +529,7 @@ class DaemonHistoryTests(unittest.TestCase):
             notes = NoteStore(root=Path(tmp) / "notes")
             output = MagicMock()
             output.name = "mock"
-            stt = _FakeFasterWhisperStt({4: "hello", 8: "world"})
+            stt = _FakeStreamingStt({4: "hello", 8: "world"})
             recorder = _NoteStreamingRecorder()
             daemon = Daemon(
                 stt,
@@ -587,15 +586,15 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             daemon = Daemon(_FakeStt(), output=output, history_store=hist, note_store=notes)
 
-            note_id = notes.create_note(provider="faster-whisper", model="turbo", recording_id=3)
+            note_id = notes.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2", recording_id=3)
             notes.append_segment(
                 note_id,
                 NoteSegment(
                     seq=0,
                     t_start=0.0,
                     t_end=0.5,
-                    provider="faster-whisper",
-                    model="turbo",
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
                     text="hello",
                 ),
             )
@@ -605,8 +604,8 @@ class DaemonHistoryTests(unittest.TestCase):
                     seq=1,
                     t_start=0.3,
                     t_end=0.8,
-                    provider="faster-whisper",
-                    model="turbo",
+                    provider="parakeet",
+                    model="parakeet-tdt-0.6b-v2",
                     text="world",
                 ),
             )
@@ -625,7 +624,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _PauseFlushRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({4: "first", 8: "second"}),
+                _FakeStreamingStt({4: "first", 8: "second"}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -674,7 +673,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _FakeRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({16: "hello"}),
+                _FakeStreamingStt({16: "hello"}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -722,7 +721,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _FakeRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({16: "alpha"}),
+                _FakeStreamingStt({16: "alpha"}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -802,7 +801,7 @@ class DaemonHistoryTests(unittest.TestCase):
             note_events: list[tuple[bool, bool, str | None]] = []
             recorder = _PauseFlushRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({4: "first"}),
+                _FakeStreamingStt({4: "first"}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -844,7 +843,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _StopCallbackRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -882,7 +881,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _BlockingStopRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=hist,
                 note_store=notes,
@@ -934,7 +933,7 @@ class DaemonHistoryTests(unittest.TestCase):
             recording_events: list[bool] = []
             note_events: list[tuple[bool, bool, str | None]] = []
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=store,
                 recorder=_FakeRecorder(),
@@ -980,7 +979,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output = MagicMock()
             output.name = "mock"
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=store,
                 recorder=_FakeRecorder(),
@@ -1009,7 +1008,7 @@ class DaemonHistoryTests(unittest.TestCase):
             recording_events: list[bool] = []
             note_events: list[tuple[bool, bool, str | None]] = []
             daemon = Daemon(
-                _FakeFasterWhisperStt({16: "hello"}),
+                _FakeStreamingStt({16: "hello"}),
                 output=output,
                 history_store=store,
                 recorder=_FakeRecorder(),
@@ -1080,7 +1079,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output = MagicMock()
             output.name = "mock"
             daemon = Daemon(
-                _FakeFasterWhisperStt({4: "hello"}),
+                _FakeStreamingStt({4: "hello"}),
                 output=output,
                 history_store=HistoryStore(path=Path(tmp) / "h.json"),
                 note_store=notes,
@@ -1253,7 +1252,7 @@ class DaemonHistoryTests(unittest.TestCase):
             notes: list[dict[str, object]] = []
             recorder = _FakeRecorder()
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=store,
                 recorder=recorder,
@@ -1744,7 +1743,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output = MagicMock()
             output.name = "mock"
             daemon = Daemon(
-                _FakeFasterWhisperStt({}),
+                _FakeStreamingStt({}),
                 output=output,
                 history_store=HistoryStore(path=Path(tmp) / "h.json"),
                 note_store=notes,
@@ -1756,7 +1755,7 @@ class DaemonHistoryTests(unittest.TestCase):
             self._seed_recording(daemon, 8)
             daemon._streaming_recordings.add(8)
             daemon._note_streaming_recordings.add(8)
-            note_id = notes.create_note(provider="faster-whisper", model="turbo", recording_id=8)
+            note_id = notes.create_note(provider="parakeet", model="parakeet-tdt-0.6b-v2", recording_id=8)
             daemon._recording_note_ids[8] = note_id
 
             first = AudioChunk(samples=np.ones(4, dtype=np.float32), final=False, recording_id=8)
@@ -1997,7 +1996,7 @@ class DaemonHistoryTests(unittest.TestCase):
             output.name = "mock"
             recorder = _NoteStreamingRecorder()
             daemon = Daemon(
-                _FailingFasterWhisperStt(),
+                _FailingStreamingStt(),
                 output=output,
                 history_store=hist,
                 note_store=notes,

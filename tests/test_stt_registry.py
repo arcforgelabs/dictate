@@ -25,12 +25,10 @@ class SttRegistryTests(unittest.TestCase):
         self.assertEqual(
             STT_BACKENDS,
             (
-                "faster-whisper",
                 "parakeet",
                 "parakeet-pyannote",
                 "parakeet-diarizen",
                 "parakeet-sortformer",
-                "whisperx",
             ),
         )
         self.assertEqual(tuple(BACKEND_REGISTRY.keys()), STT_BACKENDS)
@@ -39,35 +37,17 @@ class SttRegistryTests(unittest.TestCase):
         self.assertEqual(COMPUTE_DEVICES, ("cpu", "cuda", "amd", "auto"))
 
     def test_resolve_model_name_defaults(self) -> None:
-        self.assertEqual(resolve_model_name("faster-whisper", None), "turbo")
         self.assertEqual(resolve_model_name("parakeet-pyannote", None), "parakeet-tdt-0.6b-v2")
         self.assertEqual(resolve_model_name("parakeet-diarizen", None), "parakeet-tdt-0.6b-v2")
         self.assertEqual(resolve_model_name("parakeet-sortformer", None), "parakeet-tdt-0.6b-v2")
-        self.assertEqual(resolve_model_name("whisperx", None), "large-v3")
         self.assertEqual(resolve_model_name("parakeet", None), "parakeet-tdt-0.6b-v2")
 
     def test_create_backend_instances_without_loading_models(self) -> None:
-        whisper = create_speech_to_text(
-            backend="faster-whisper",
-            model="turbo",
-            device="cpu",
-        )
         parakeet = create_speech_to_text(
             backend="parakeet",
             model="parakeet-tdt-0.6b-v2",
             device="cpu",
         )
-        fake_whisperx = types.SimpleNamespace(
-            load_model=lambda *args, **kwargs: types.SimpleNamespace(
-                transcribe=lambda *a, **kw: {"segments": [{"text": "hello"}], "language": "en"}
-            )
-        )
-        with patch.dict("sys.modules", {"whisperx": fake_whisperx}):
-            whisperx = create_speech_to_text(
-                backend="whisperx",
-                model="large-v3",
-                device="cpu",
-            )
         parakeet_pyannote = create_speech_to_text(
             backend="parakeet-pyannote",
             model="parakeet-tdt-0.6b-v2",
@@ -83,27 +63,26 @@ class SttRegistryTests(unittest.TestCase):
             model="parakeet-tdt-0.6b-v2",
             device="cpu",
         )
-        self.assertEqual(whisper.backend_name, "faster-whisper")
         self.assertEqual(parakeet.backend_name, "parakeet")
         self.assertEqual(parakeet_pyannote.backend_name, "parakeet-pyannote")
         self.assertEqual(parakeet_diarizen.backend_name, "parakeet-diarizen")
         self.assertEqual(parakeet_sortformer.backend_name, "parakeet-sortformer")
-        self.assertEqual(whisperx.backend_name, "whisperx")
 
     @unittest.skipIf(
         sys.platform == "win32",
         "Windows CI intermittently interrupts this subprocess-only import isolation check.",
     )
-    def test_registry_import_does_not_require_faster_whisper_runtime(self) -> None:
+    def test_registry_import_does_not_require_whisper_runtime(self) -> None:
         code = textwrap.dedent(
             """
             import builtins
 
             original_import = builtins.__import__
+            blocked = ("faster_whisper", "whisperx", "ctranslate2", "av")
 
             def blocked_import(name, *args, **kwargs):
-                if name == "faster_whisper" or name.startswith("faster_whisper."):
-                    raise FileNotFoundError("missing faster-whisper runtime")
+                if name.split(".")[0] in blocked:
+                    raise ModuleNotFoundError(f"removed Whisper runtime: {name}")
                 return original_import(name, *args, **kwargs)
 
             builtins.__import__ = blocked_import
@@ -128,22 +107,12 @@ class SttRegistryTests(unittest.TestCase):
 
     def test_backend_readiness_returns_metadata(self) -> None:
         report = check_backend_readiness(
-            backend="faster-whisper",
-            model="turbo",
+            backend="parakeet",
+            model="parakeet-tdt-0.6b-v2",
             device="cpu",
         )
         self.assertTrue(any(note.startswith("STT backend:") for note in report.notes))
         self.assertTrue(any(note.startswith("STT model:") for note in report.notes))
-
-    def test_faster_whisper_readiness_rejects_amd_device(self) -> None:
-        report = check_backend_readiness(
-            backend="faster-whisper",
-            model="turbo",
-            device="amd",
-        )
-        self.assertTrue(
-            any("AMD GPU device requested for faster-whisper" in error for error in report.errors)
-        )
 
     def test_parakeet_amd_readiness_requires_onnx_amd_provider(self) -> None:
         fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
@@ -208,6 +177,17 @@ class SttRegistryTests(unittest.TestCase):
         self.assertTrue(any("pyannote.audio" in dependency for dependency in meeting_deps))
         self.assertTrue(any("torch" in dependency for dependency in meeting_deps))
 
+    def test_pyproject_ships_no_whisper_backends(self) -> None:
+        pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        project = pyproject["project"]
+        deps = [*project["dependencies"]]
+        for extra in project["optional-dependencies"].values():
+            deps.extend(extra)
+        self.assertFalse(any("whisper" in dependency.lower() for dependency in deps))
+        self.assertNotIn("whisperx", project["optional-dependencies"])
+        # Parakeet's model download used to arrive transitively via faster-whisper.
+        self.assertTrue(any(dep.startswith("huggingface-hub") for dep in project["dependencies"]))
+
     def test_parakeet_amd_readiness_accepts_migraphx_provider(self) -> None:
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: [
@@ -226,16 +206,6 @@ class SttRegistryTests(unittest.TestCase):
             )
         self.assertFalse(report.errors)
         self.assertTrue(any("MIGraphXExecutionProvider" in note for note in report.notes))
-
-    def test_whisperx_readiness_reports_missing_optional_package(self) -> None:
-        with patch("dictate.stt.factory.whisperx_available", return_value=False):
-            report = check_backend_readiness(
-                backend="whisperx",
-                model="large-v3",
-                device="cpu",
-            )
-        self.assertTrue(any("WhisperX package" in error for error in report.errors))
-        self.assertTrue(any("Hugging Face token" in warning for warning in report.warnings))
 
     def test_parakeet_pyannote_readiness_reports_missing_optional_package(self) -> None:
         with (

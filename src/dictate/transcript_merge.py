@@ -42,7 +42,7 @@ def merge_transcript_piece(previous_tail: str, new_text: str, *, max_overlap_wor
 
 
 def prompt_tail(text: str, *, max_chars: int = 224) -> str:
-    """Whisper initial-prompt tail — last words that fit the char budget."""
+    """Initial-prompt tail for prompt-biased backends — last words that fit the char budget."""
     cleaned = text.strip()
     if not cleaned:
         return ""

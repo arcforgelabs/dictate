@@ -13,8 +13,7 @@ channel) lives in the `dictate config` CLI.
 - Clipboard output: `dictate --once --copy` through `pyperclip`.
 - Push-to-talk tray app: `dictate --type-backend pynput`.
 - Headless push-to-talk daemon: `dictate --no-tray --type-backend pynput`.
-- Speech-to-text: `faster-whisper` on CPU or CUDA where the local Python/CUDA stack supports it.
-- Local AMD GPU path: `whisper-cpp` with a Vulkan-enabled `whisper-server.exe` and `ggml-large-v3-turbo-q5_0.bin`.
+- Speech-to-text: Parakeet through ONNX Runtime on CPU, CUDA (`gpu` extra) or AMD via DirectML (`amd` extra).
 
 The Windows tray uses the native notification area. The Linux GTK/Ayatana tray remains a separate implementation.
 
@@ -145,7 +144,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\dictate.exe doctor --quick --type-backend pynput
 .\.venv\Scripts\dictate.exe doctor --quick --fix --type-backend pynput
 .\.venv\Scripts\dictate.exe doctor --quick --update-paths --type-backend pynput
-.\.venv\Scripts\dictate.exe doctor --quick --stt-backend whisper-cpp --model large-v3-turbo-q5_0 --type-backend pynput
+.\.venv\Scripts\dictate.exe doctor --quick --stt-backend parakeet --device amd --type-backend pynput
 ```
 
 ## Run

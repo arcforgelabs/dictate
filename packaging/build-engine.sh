@@ -91,4 +91,16 @@ if [ "$(uname -s)" = "Linux" ] && [ -z "${DICTATE_BUNDLE_GPU_LIBS:-}" ]; then
   echo "✓ nvidia/triton trees not bundled"
 fi
 
+# The Whisper-family runtimes were removed. dictate-engine.spec already fails
+# on them; this checks the files that actually landed (onedir: _internal/).
+ENGINE_DIR="$(cd "$(dirname "$BIN")" && pwd)"
+REMOVED_RUNTIME="$(find "$ENGINE_DIR" \( -name 'av' -o -name 'av.libs' -o -name 'ctranslate2*' \
+  -o -name 'faster_whisper*' -o -name 'whisperx*' -o -name 'libx264*' -o -name 'libx265*' \) 2>/dev/null || true)"
+if [ -n "$REMOVED_RUNTIME" ]; then
+  echo "✗ frozen engine contains a removed Whisper-family runtime:" >&2
+  printf '%s\n' "$REMOVED_RUNTIME" | head -20 >&2
+  exit 1
+fi
+echo "✓ no av, av.libs, ctranslate2, faster_whisper, whisperx, libx264 or libx265 under $ENGINE_DIR ($(find "$ENGINE_DIR" -type f | wc -l) files)"
+
 echo "✓ engine frozen: $BIN  ($(du -sh "$BIN" | cut -f1))"

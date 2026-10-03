@@ -24,21 +24,26 @@ class ConfigSetModelTests(unittest.TestCase):
 
     def test_set_model_persists(self) -> None:
         from dictate.config import Config
-        with patch("dictate.__main__.load_config", return_value=Config(stt_backend="xai")):
+        with patch(
+            "dictate.__main__.load_config",
+            return_value=Config(stt_backend="parakeet-pyannote"),
+        ):
             with patch("dictate.__main__.set_stt_selection") as mock_sel:
-                code, out, _ = _run_config(["set-model", "grok-speech-to-text"])
+                code, out, _ = _run_config(["set-model", "parakeet-tdt-0.6b-v3"])
         self.assertEqual(code, 0)
-        mock_sel.assert_called_once_with("xai", "grok-speech-to-text")
-        self.assertIn("grok-speech-to-text", out)
+        mock_sel.assert_called_once_with("parakeet-pyannote", "parakeet-tdt-0.6b-v3")
+        self.assertIn("parakeet-tdt-0.6b-v3", out)
 
-    def test_set_model_defaults_to_faster_whisper_backend(self) -> None:
-        """When no backend is configured, falls back to faster-whisper."""
+    def test_set_model_defaults_to_parakeet_backend(self) -> None:
+        """No configured backend, or a removed Whisper one, falls back to parakeet."""
         from dictate.config import Config
-        with patch("dictate.__main__.load_config", return_value=Config(stt_backend=None)):
-            with patch("dictate.__main__.set_stt_selection") as mock_sel:
-                code, _, _ = _run_config(["set-model", "turbo"])
-        self.assertEqual(code, 0)
-        mock_sel.assert_called_once_with("faster-whisper", "turbo")
+        for backend in (None, "faster-whisper", "whisperx"):
+            with self.subTest(backend=backend):
+                with patch("dictate.__main__.load_config", return_value=Config(stt_backend=backend)):
+                    with patch("dictate.__main__.set_stt_selection") as mock_sel:
+                        code, _, _ = _run_config(["set-model", "parakeet-tdt-0.6b-v3"])
+                self.assertEqual(code, 0)
+                mock_sel.assert_called_once_with("parakeet", "parakeet-tdt-0.6b-v3")
 
     def test_set_meeting_model_defaults_to_parakeet_pyannote_backend(self) -> None:
         with patch("dictate.__main__.set_meeting_stt_selection") as mock_sel:
@@ -68,21 +73,48 @@ class ConfigShowTests(unittest.TestCase):
     def test_show_reports_local_backend_and_model(self) -> None:
         from dictate.config import Config
 
-        cfg = Config(stt_backend="faster-whisper", stt_model="turbo")
+        cfg = Config(stt_backend="parakeet", stt_model="parakeet-tdt-0.6b-v3")
         with patch("dictate.__main__.load_config", return_value=cfg):
             code, out, _ = _run_config(["show"])
         self.assertEqual(code, 0)
-        self.assertIn("stt_backend: faster-whisper", out)
-        self.assertIn("model: turbo", out)
+        self.assertIn("stt_backend: parakeet", out)
+        self.assertIn("model: parakeet-tdt-0.6b-v3", out)
         self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
         self.assertIn("shortcut: ", out)
         self.assertIn("update_channel: stable", out)
+
+    def test_show_reports_saved_parakeet_model_without_backend(self) -> None:
+        from dictate.config import Config
+
+        cfg = Config(stt_model="parakeet-tdt-0.6b-v3")
+        with patch("dictate.__main__.load_config", return_value=cfg):
+            code, out, _ = _run_config(["show"])
+        self.assertEqual(code, 0)
+        self.assertIn("stt_backend: parakeet\n", out)
+        self.assertIn("model: parakeet-tdt-0.6b-v3\n", out)
+
+    def test_show_reports_parakeet_for_legacy_whisper_config(self) -> None:
+        from dictate.config import Config
+
+        cfg = Config(
+            stt_backend="faster-whisper",
+            stt_model="turbo",
+            meeting_stt_backend="whisperx",
+            meeting_stt_model="large-v3",
+        )
+        with patch("dictate.__main__.load_config", return_value=cfg):
+            code, out, _ = _run_config(["show"])
+        self.assertEqual(code, 0)
+        self.assertIn("stt_backend: parakeet\n", out)
+        self.assertIn("model: (default)", out)
+        self.assertNotIn("turbo", out)
+        self.assertIn("meeting_model: parakeet-pyannote/parakeet-tdt-0.6b-v2", out)
 
     def test_show_redacts_hotword_values(self) -> None:
         from dictate.config import Config
 
         cfg = Config(
-            stt_backend="faster-whisper",
+            stt_backend="parakeet",
             hotwords=["PrivateProject", "PatientSurname"],
         )
         with patch("dictate.__main__.load_config", return_value=cfg):

@@ -14,6 +14,7 @@ on:
       - "src/dictate/stt/parakeet_backend.py"
       - "src/dictate/stt/parakeet_pyannote_backend.py"
       - "pyproject.toml"
+      - "uv.lock"
       - "scripts/ci_privacy_trace.py"
       - "tests/test_third_party_telemetry.py"
       - "tests/test_runtime_logging.py"
@@ -42,15 +43,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg strace
 
+      - name: Check uv.lock is consistent with pyproject.toml
+        run: |
+          python -m pip install --upgrade pip uv
+          uv lock --check
+
       - name: Install Dictate with the meeting extra (CPU torch, versions from uv.lock)
         run: |
-          python -m pip install --upgrade pip
-          # The CPU index keeps the CUDA wheels out. torch, torchaudio and
-          # torchcodec are ABI-coupled, so take the set uv.lock resolves together.
-          python -m pip install "torch==2.8.0" "torchaudio==2.8.0" \
+          # Read the versions from uv.lock so this proof runs what the lock pins.
+          eval "$(python - <<'EOF'
+          import tomllib
+          lock = tomllib.load(open("uv.lock", "rb"))
+          wanted = {"torch": "TORCH", "torchaudio": "TORCHAUDIO", "torchcodec": "TORCHCODEC",
+                    "pyannote-audio": "PYANNOTE", "onnx": "ONNX"}
+          found = {}
+          for package in lock["package"]:
+              if package["name"] in wanted:
+                  found.setdefault(package["name"], []).append(package["version"])
+          for name, var in wanted.items():
+              versions = found.get(name, [])
+              if len(versions) != 1:
+                  raise SystemExit(f"uv.lock: expected one {name} version, found {versions}")
+              print(f"{var}={versions[0]}")
+          EOF
+          )"
+          # torch, torchaudio and torchcodec are ABI-coupled, and torchcodec's
+          # Linux wheels on PyPI are CUDA builds that will not load next to CPU
+          # torch, so all three come from the CPU index.
+          python -m pip install "torch==$TORCH" "torchaudio==$TORCHAUDIO" "torchcodec==$TORCHCODEC" \
             --index-url https://download.pytorch.org/whl/cpu
           # onnx: lets the ONNX Runtime telemetry-store test run instead of skipping.
-          python -m pip install -e ".[meeting]" "pyannote.audio==4.0.7" "torchcodec==0.7.0" "onnx==1.22.0"
+          python -m pip install -e ".[meeting]" "pyannote.audio==$PYANNOTE" "onnx==$ONNX"
           python -m pip list 2>/dev/null | grep -Ei '^(torch|torchaudio|torchcodec|pyannote\.audio|onnxruntime|onnx|opentelemetry-sdk) '
 
       - name: Telemetry and log tests (none may skip)

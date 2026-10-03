@@ -33,7 +33,7 @@ from dictate.model_state import (
     mark_model_failed,
     mark_model_prepared,
 )
-from dictate.stt import BACKEND_REGISTRY, create_speech_to_text, resolve_default_local_model
+from dictate.stt import BACKEND_REGISTRY, create_speech_to_text, resolve_model_name
 
 ICON_ACTIVE = "microphone-sensitivity-high-symbolic"
 ICON_PAUSED = "microphone-disabled-symbolic"
@@ -41,6 +41,8 @@ SWITCH_LOCK_SECONDS = 15
 SWITCH_ABORT_SECONDS = 300
 PREPARE_ABORT_SECONDS = 900
 SWITCH_STATUS_CLEAR_SECONDS = 6
+# The backend behind the tray's "Local" menu and its CPU/GPU runtime profiles.
+LOCAL_BACKEND = "parakeet"
 LOCAL_RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
     ("cpu", "int8", "CPU"),
     ("cuda", "int8", "GPU"),
@@ -49,23 +51,16 @@ LOCAL_RUNTIME_PROFILES: tuple[tuple[str, str, str], ...] = (
 
 
 def _device_for_backend(backend: str, current_device: str) -> str:
-    if backend == "faster-whisper":
+    if backend == LOCAL_BACKEND:
         return current_device if current_device in {"cpu", "cuda", "amd", "auto"} else "auto"
     return "auto"
 
 
 def _compute_type_for_backend(backend: str, current_compute_type: str) -> str:
-    if backend == "faster-whisper":
+    if backend == LOCAL_BACKEND:
         if current_compute_type in {"int8", "float16", "float32"}:
             return current_compute_type
     return "int8"
-
-
-def _hotwords_available_for_backend(backend: str) -> bool:
-    spec = BACKEND_REGISTRY.get(backend)  # type: ignore[arg-type]
-    if spec is None:
-        return False
-    return spec.capabilities.supports_hotwords or spec.capabilities.supports_prompt_bias
 
 
 def _local_runtime_name(device: str) -> str:
@@ -187,15 +182,16 @@ class TrayIcon:
 
         local_item = Gtk.MenuItem(label=f"Local ({_local_runtime_name(self._stt_device)})")
         local_menu = Gtk.Menu()
-        for model in self._models_for_backend("faster-whisper"):
-            append_model_item(local_menu, "faster-whisper", model)
+        for model in self._models_for_backend(LOCAL_BACKEND):
+            append_model_item(local_menu, LOCAL_BACKEND, model)
         local_menu.append(Gtk.SeparatorMenuItem())
         self._append_local_runtime_items(local_menu)
-        if _hotwords_available_for_backend("faster-whisper"):
-            local_menu.append(Gtk.SeparatorMenuItem())
-            hotwords_item = Gtk.MenuItem(label="Hotwords")
-            hotwords_item.connect("activate", self._on_manage_hotwords, "faster-whisper")
-            local_menu.append(hotwords_item)
+        # Parakeet has no native hotword decoding; saved hotwords apply through
+        # the post/hybrid lexicon modes.
+        local_menu.append(Gtk.SeparatorMenuItem())
+        hotwords_item = Gtk.MenuItem(label="Hotwords")
+        hotwords_item.connect("activate", self._on_manage_hotwords, LOCAL_BACKEND)
+        local_menu.append(hotwords_item)
         local_item.set_submenu(local_menu)
         submenu.append(local_item)
 
@@ -336,15 +332,13 @@ class TrayIcon:
             return
         if self._switch_in_progress:
             return
-        target_backend = "faster-whisper"
-        # Keep the active model only when the user EXPLICITLY saved one; otherwise
-        # (including a resolver-chosen turbo on a CUDA box) resolve for the NEWLY
-        # selected device, so picking the CPU profile can't pin turbo on a weak CPU.
-        saved_model = load_config().stt_model
+        target_backend = LOCAL_BACKEND
+        # A runtime profile change keeps the active Local model; coming from any
+        # other backend, switch to the Local default.
         target_model = (
             self._active_model
-            if (self._active_backend == "faster-whisper" and saved_model)
-            else resolve_default_local_model(device)
+            if self._active_backend == target_backend
+            else resolve_model_name(target_backend, None)
         )
         if (
             self._active_backend == target_backend
@@ -1008,7 +1002,7 @@ class TrayIcon:
 
     @staticmethod
     def _should_retry_switch_on_cpu(exc: Exception, *, backend: str, requested_device: str) -> bool:
-        if backend != "faster-whisper":
+        if backend != LOCAL_BACKEND:
             return False
         if requested_device not in {"auto", "cuda"}:
             return False

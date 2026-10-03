@@ -176,9 +176,11 @@ also want to remove config, logs, history, and downloaded model data.
 
 ## Models
 
-The default English path is Parakeet where the runtime is available, falling
-back to local Whisper variants otherwise. Every supported model runs on your
-machine. The desktop UI keeps engine names out of the primary workflow;
+Dictation runs NVIDIA Parakeet TDT 0.6B through ONNX Runtime: v2 for English
+(the default, bundled with the desktop app) or v3 for 25 European languages.
+Every supported model runs on your machine. The Whisper-family backends
+(faster-whisper, WhisperX, whisper.cpp) were removed on 2026-09-30; a saved
+config that still names one falls back to Parakeet. The desktop UI keeps engine names out of the primary workflow;
 advanced users and tests can still select an explicit local engine through CLI
 options and `dictate config`.
 
@@ -220,8 +222,7 @@ dictate doctor --check-model-load
 Advanced configuration remains available for automation and testing:
 
 ```bash
-dictate --stt-backend faster-whisper --model turbo
-dictate --stt-backend parakeet
+dictate --stt-backend parakeet --model parakeet-tdt-0.6b-v3
 dictate config show
 dictate --add-hotword AcmeWidget
 dictate --list-hotwords

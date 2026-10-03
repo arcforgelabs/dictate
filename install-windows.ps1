@@ -447,8 +447,7 @@ Register-InstalledApp -InstallLocation $PSScriptRoot -DisplayIcon (Join-Path $PS
 
 if (-not $NoPrepareTurbo) {
     # Keep the legacy switch name for installer compatibility, but prepare the
-    # fresh local default: Parakeet v2. Explicit faster-whisper users can still
-    # prepare that backend manually.
+    # fresh local default: Parakeet v2.
     Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "dictate", "prepare-model", "--stt-backend", "parakeet", "--device", "auto", "--compute-type", "int8") -Description "Preparing Parakeet model"
 }
 

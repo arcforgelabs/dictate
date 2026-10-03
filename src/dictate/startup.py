@@ -166,7 +166,7 @@ def _linux_desktop_entry(*, autostart: bool) -> str:
         f"Icon={_linux_icon_path()}",
         "Type=Application",
         "Categories=AudioVideo;Audio;",
-        "Keywords=voice;speech;transcription;dictation;asr;whisper;canary;",
+        "Keywords=voice;speech;transcription;dictation;asr;parakeet;",
         "Terminal=false",
         "StartupWMClass=dictate-ui-shell",
     ]

@@ -191,7 +191,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-pyannote"], "parakeet-tdt-0.6b-v2")
         self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-diarizen"], "parakeet-tdt-0.6b-v2")
         self.assertEqual(assignments["DEFAULT_MODELS"]["parakeet-sortformer"], "parakeet-tdt-0.6b-v2")
-        self.assertEqual(assignments["DEFAULT_MODELS"]["faster-whisper"], "small")
 
     def test_windows_tray_controls_open_full_dictate_app_before_legacy_panel(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "src" / "dictate" / "windows_tray.py").read_text(
@@ -416,7 +415,7 @@ class WindowsPlatformTests(unittest.TestCase):
     def test_doctor_fix_items_include_vc_runtime_hint(self) -> None:
         report = types.SimpleNamespace(
             warnings=[],
-            errors=["faster-whisper package is not importable."],
+            errors=["Parakeet backend selected but onnx-asr is not importable."],
         )
 
         with patch("dictate.doctor.sys.platform", "win32"):
@@ -428,7 +427,7 @@ class WindowsPlatformTests(unittest.TestCase):
     def test_doctor_fix_items_use_linux_dependency_hint(self) -> None:
         report = types.SimpleNamespace(
             warnings=[],
-            errors=["faster-whisper package is not importable."],
+            errors=["Parakeet backend selected but onnx-asr is not importable."],
         )
 
         with patch("dictate.doctor.sys.platform", "linux"):
@@ -658,7 +657,7 @@ class WindowsPlatformTests(unittest.TestCase):
         tray = WindowsTrayIcon.__new__(WindowsTrayIcon)
         tray.daemon = types.SimpleNamespace(
             active=True,
-            current_backend_model=lambda: ("faster-whisper", "turbo"),
+            current_backend_model=lambda: ("parakeet", "parakeet-tdt-0.6b-v2"),
         )
         tray._hwnd = 123
         tray._recording = True

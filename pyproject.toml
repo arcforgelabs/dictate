@@ -6,7 +6,6 @@ requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 
 dependencies = [
-    "faster-whisper>=1.1.0",
     "numpy>=1.26.0",
     "PyYAML>=6.0.0",
     "sounddevice>=0.5.0",
@@ -19,6 +18,9 @@ dependencies = [
     # minor so the CPU and CUDA lanes share one runtime.
     "onnx-asr>=0.12.0",
     "onnxruntime>=1.30,<1.31",
+    # Parakeet model download (hf_hub_download into a flat local_dir). Came in
+    # transitively through faster-whisper until that was removed.
+    "huggingface-hub>=0.36",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +33,6 @@ amd = [
     # Microsoft stopped publishing onnxruntime-directml after 1.24.x.
     "onnxruntime-directml>=1.24,<1.25; (platform_machine == 'x86_64' or platform_machine == 'AMD64') and sys_platform == 'win32'",
 ]
-whisperx = ["whisperx>=3.8.6", "nltk>=3.10.3"]
 meeting = ["pyannote.audio>=4.0.0", "torch>=2.4.0"]
 sortformer = [
     "nemo-toolkit[asr]>=2.6,<2.7",

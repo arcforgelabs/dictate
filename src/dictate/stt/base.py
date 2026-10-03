@@ -7,24 +7,6 @@ from typing import Any, Literal
 
 import numpy as np
 
-FasterWhisperModel = Literal[
-    "tiny",
-    "base",
-    "small",
-    "medium",
-    "large-v3",
-    "turbo",
-    "large-v3-turbo",
-    "distil-large-v3.5",
-]
-WhisperCppModel = Literal[
-    "base",
-    "small",
-    "turbo",
-    "large-v3-turbo",
-    "large-v3-turbo-q5_0",
-    "large-v3-turbo-q8_0",
-]
 ComputeDevice = Literal["cpu", "cuda", "amd", "auto"]
 COMPUTE_DEVICES: tuple[ComputeDevice, ...] = ("cpu", "cuda", "amd", "auto")
 ComputeType = Literal["int8", "float16", "float32"]
@@ -35,12 +17,10 @@ ONNX_AMD_PROVIDERS: tuple[str, ...] = (
     "DmlExecutionProvider",
 )
 SttBackend = Literal[
-    "faster-whisper",
     "parakeet",
     "parakeet-pyannote",
     "parakeet-diarizen",
     "parakeet-sortformer",
-    "whisperx",
 ]
 
 
