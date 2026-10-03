@@ -161,8 +161,9 @@ Use this wording as the basis for Partner Center privacy/certification answers:
 - Speech is transcribed on the device by the bundled Parakeet model. Audio and
   text are never sent anywhere; there is no hosted transcription path.
 - There is no account, no sign-in, no API key, no analytics and no crash
-  reporting. Telemetry in bundled third-party libraries (pyannote.audio usage
-  metrics, Hugging Face Hub) is switched off.
+  reporting. Telemetry in bundled third-party libraries (ONNX Runtime's
+  Microsoft telemetry, pyannote.audio usage metrics, Hugging Face Hub) is
+  switched off.
 - Dictate stores its settings, logs and a recent dictation history on the
   device only. Logs do not contain dictated text. Users can export or delete
   their data, and remove it by uninstalling.

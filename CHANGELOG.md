@@ -8,6 +8,11 @@
   the speaker-labelling library, reports pipeline use to otel.pyannote.ai by
   default; Dictate now turns that off, along with Hugging Face Hub telemetry,
   before either library loads. Dictate makes no analytics requests.
+- Transcription no longer reports to Microsoft. ONNX Runtime, which runs the
+  Parakeet model, has Microsoft's telemetry client built in: it kept a device
+  ID and an event queue under `~/.cache/Microsoft/DeveloperTools` and uploaded
+  to mobile.events.data.microsoft.com. Dictate now sets
+  `ORT_DISABLE_TELEMETRY=1`, so it does neither.
 - Logs no longer contain what you dictated. Finished dictations and notes are
   logged as their length; the words appear only in an interactive terminal.
 
@@ -20,7 +25,8 @@
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A
-  config that still names a Whisper backend or model falls back to Parakeet.
+  config that still names a Whisper backend or model falls back to Parakeet
+  v2; a config that sets only `stt_model: parakeet-tdt-0.6b-v3` keeps v3.
   The engine no longer bundles CTranslate2 or PyAV, and with PyAV goes the
   GPL-licensed FFmpeg build (libx264/libx265) it carried.
 
