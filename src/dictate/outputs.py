@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -123,7 +124,12 @@ class PasteOutput:
     def name(self) -> str:
         return f"paste/{self.typing_output.name}"
 
-    def send(self, text: str) -> None:
+    def send(self, text: str) -> Future | None:
+        """Paste ``text``; return once the paste keystroke has been sent.
+
+        With a keeper, returns a future that resolves with the clipboard's
+        ``PasteOutcome`` after the restore; otherwise None.
+        """
         # Terminals such as the Grok CLI treat Ctrl+V as a media paste. A
         # clipboard that still carries the Dictate window's WebKit target
         # lands as an octet-stream chip instead of the words. Shift+Insert
@@ -140,13 +146,12 @@ class PasteOutput:
                     _set_x_selection("primary", text)
 
             try:
-                self.keeper.paste(
+                return self.keeper.paste(
                     text,
                     lambda: _send_paste_shortcut(self.typing_output, plain_text=plain_text),
                     plain_text=plain_text,
                     after_write=set_primary,
                 )
-                return
             except ClipboardKeeperUnavailable as exc:
                 logger.warning(
                     "Clipboard could not be saved (%s); pasting without restoring it.", exc
@@ -156,6 +161,7 @@ class PasteOutput:
         if plain_text and command_exists("xclip"):
             _set_x_selection("primary", text)
         _send_paste_shortcut(self.typing_output, plain_text=plain_text)
+        return None
 
 
 @dataclass(slots=True)

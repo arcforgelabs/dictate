@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -26,6 +27,10 @@ class TranscriptionResult:
     text: str = ""
     segments: list[TranscriptSegment] | None = None
     error: str | None = None
+    # Seconds spent in the speech-to-text backend, and on hotword and
+    # replacement fixes around it. For the dictation timing line.
+    stt_s: float | None = None
+    fixes_s: float | None = None
 
 
 class DictationEngine:
@@ -111,12 +116,15 @@ class DictationEngine:
         if duration < duration_floor:
             return TranscriptionResult(status="too_short", duration_s=duration)
 
+        fixes_started = time.perf_counter()
         lexicon_plan = build_lexicon_plan(
             stt=self.stt,
             hotwords=self.hotwords,
             lexicon_mode=self.lexicon_mode,
             replacements=self.lexicon_replacements,
         )
+        fixes_s = time.perf_counter() - fixes_started
+        stt_started = time.perf_counter()
         try:
             try:
                 text = self.stt.transcribe(
@@ -154,21 +162,28 @@ class DictationEngine:
                 duration_s=duration,
                 error=str(exc),
             )
+        stt_s = time.perf_counter() - stt_started
 
+        fixes_started = time.perf_counter()
         if lexicon_plan.post_hotwords or lexicon_plan.post_replacements:
             text = apply_post_corrections(
                 text,
                 hotwords=lexicon_plan.post_hotwords,
                 replacements=lexicon_plan.post_replacements,
             ).strip()
+        fixes_s += time.perf_counter() - fixes_started
 
         if not text:
-            return TranscriptionResult(status="no_speech", duration_s=duration)
+            return TranscriptionResult(
+                status="no_speech", duration_s=duration, stt_s=stt_s, fixes_s=fixes_s
+            )
 
         return TranscriptionResult(
             status="ok",
             duration_s=duration,
             text=text,
+            stt_s=stt_s,
+            fixes_s=fixes_s,
         )
 
     def _do_transcribe(
@@ -188,12 +203,15 @@ class DictationEngine:
         if duration < duration_floor:
             return TranscriptionResult(status="too_short", duration_s=duration)
 
+        fixes_started = time.perf_counter()
         lexicon_plan = build_lexicon_plan(
             stt=self.stt,
             hotwords=self.hotwords,
             lexicon_mode=self.lexicon_mode,
             replacements=self.lexicon_replacements,
         )
+        fixes_s = time.perf_counter() - fixes_started
+        stt_started = time.perf_counter()
         try:
             segments: list[TranscriptSegment] | None = None
             plain_segment_transcriber = _defined_method(self.stt, "transcribe_segments")
@@ -239,7 +257,9 @@ class DictationEngine:
                 duration_s=duration,
                 error=str(exc),
             )
+        stt_s = time.perf_counter() - stt_started
 
+        fixes_started = time.perf_counter()
         if lexicon_plan.post_hotwords or lexicon_plan.post_replacements:
             text = apply_post_corrections(
                 text,
@@ -259,15 +279,20 @@ class DictationEngine:
                     )
                     for segment in segments
                 ]
+        fixes_s += time.perf_counter() - fixes_started
 
         if not text:
-            return TranscriptionResult(status="no_speech", duration_s=duration)
+            return TranscriptionResult(
+                status="no_speech", duration_s=duration, stt_s=stt_s, fixes_s=fixes_s
+            )
 
         return TranscriptionResult(
             status="ok",
             duration_s=duration,
             text=text,
             segments=segments,
+            stt_s=stt_s,
+            fixes_s=fixes_s,
         )
 
     def release(self) -> None:
