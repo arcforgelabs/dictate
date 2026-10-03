@@ -19,6 +19,7 @@ value here is that none of that exists.
 
 A user installs one package and it works. They do not assemble a UI, fetch a
 model, wire a runtime, or read a setup guide to get their first sentence typed.
+It runs on the CPU of the machine they already have; no GPU is needed or used.
 
 The honest gap today is packaging, not capability: the local transcription path
 already works, and the effort is in shipping it as something pleasant to install

@@ -6,7 +6,8 @@ Date: 2026-07-05
 
 This is the authoritative planning document only for Dictate local
 transcription, recordings, meetings, model lanes, timestamping, speaker
-attribution, GPU support, and their release evidence. `VISION.md` is the
+attribution, and their release evidence. Dictate runs on the CPU only; GPU
+material below is history unless it says otherwise. `VISION.md` is the
 current cross-system authority; this plan is subordinate for account, cloud,
 commerce, and Deck decisions. Older research/cost notes are archived under
 `docs/archive/`.
@@ -17,12 +18,16 @@ Ship a clean local-first transcription stack where:
 
 1. Push-to-talk dictation and plain recordings use the same verbatim ASR path.
 2. Meeting mode always produces a speaker-attributed transcript.
-3. Parakeet is the local ASR foundation across CPU, NVIDIA GPU, and AMD GPU
-   lanes.
+3. Parakeet on the CPU is the local ASR foundation. Dictate does not support
+   GPUs: NVIDIA CUDA and AMD lanes were dropped on 2026-10-01 to focus on CPU
+   latency on the machines people already have. Removing the remaining GPU code
+   is tracked in #110, #111 and #112; GPU may return later as a separate
+   decision.
 4. Whisper is gone: faster-whisper, WhisperX and whisper.cpp were removed on
    2026-09-30. Parakeet v2 (English) and v3 (25 European languages) cover
    dictation.
-5. AMD GPU support is first-class, not a fallback footnote.
+5. Latency from releasing the shortcut to text appearing, measured on everyday
+   CPU machines, is the performance target.
 
 ## Deployable Goal
 
@@ -30,9 +35,8 @@ Set this document as the active scoped deployment goal for local transcription
 and release evidence:
 
 > Implement `docs/TRANSCRIPTION_PLAN.md` end to end so Dictate is ready for
-> human testing on machines with the capabilities named here, including local
-> CPU, NVIDIA CUDA, AMD GPU readiness, meeting speaker attribution, and a
-> Windows build verified in the local VM lab.
+> human testing on everyday CPU machines, including meeting speaker
+> attribution and a Windows build verified in the local VM lab.
 
 This document is the source of truth only for the scoped transcription/model
 deployment. Older goal, model-research, and cost-planning notes are archived or
@@ -64,10 +68,11 @@ Current verified state:
 1. Linux source/local install is usable for human testing on this workstation.
 2. Fresh CPU English installs default to Parakeet v2 where the runtime is
    available.
-3. Parakeet CUDA loaded and passed doctor, model-prepare, and silence-smoke
-   checks on the CUDA 12 lane (onnxruntime-gpu 1.23.2). The GPU has since moved
-   out of the Linux host into the `win11-gpu` GPU-passthrough VM (with WSL2),
-   and the CUDA 13 lane (onnxruntime 1.30) has not yet been run there.
+3. GPU lanes are no longer supported (2026-10-01). Last evidence, for the
+   record: Parakeet v2 int8 loaded on CUDA 13 (onnxruntime-gpu 1.30, RTX 4090 in
+   `win11-gpu` WSL2) on 2026-10-01, but only after working around a broken GPU
+   install path (#109, closed), and with 742 CPU/GPU memcpy nodes, so int8 on
+   CUDA was not a clear win.
 4. The Windows `win11-dev` VM passes source install, update, uninstall, and
    desktop build smokes, including Store MSIX packaging.
 5. The Windows human-test artifacts currently proven in the local VM are the
@@ -80,25 +85,23 @@ Current verified state:
 
 Deployment blockers before calling this plan complete:
 
-1. Promote Parakeet CUDA from synthetic benchmark evidence to curated human
-   speech benchmark evidence suitable for a product lane.
-2. Validate AMD GPU execution on representative Linux ROCm/MIGraphX and Windows
-   DirectML or AMD-capable ONNX Runtime machines.
-3. Benchmark and promote at least one local speaker-attribution lane for
-   Meeting mode.
-4. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
+1. Measure end-to-end dictation latency on CPU on the two daily machines
+   (X Forge and the Framework laptop) and tune where the numbers point.
+2. Benchmark and promote at least one local speaker-attribution lane for
+   Meeting mode, on CPU.
+3. Prototype and benchmark DiariZen, NVIDIA Streaming Sortformer v2.1, and the
    initial Parakeet+pyannote Community-1 backend against the same meeting
    fixtures.
-5. Ship integrated timestamp/segment/speaker metadata instead of string-only
+4. Ship integrated timestamp/segment/speaker metadata instead of string-only
    transcripts all the way through the meeting UI/export workflow. The backend,
    engine, daemon, note-store, live expanded-note UI, and Markdown export
    foundation now exists, and persisted notes rehydrate with speaker/timestamp
    segments after restart. Notes search and list-level Markdown export are
    segment-aware. Timestamp quality validation remains.
-6. Decide the public Windows promotion path: current VM evidence proves the
+5. Decide the public Windows promotion path: current VM evidence proves the
    no-bundle executable and MSIX packaging paths; MSI/NSIS direct-download
    bundling is still not promoted.
-7. Staged update preparation is deferred out of the human-test release. The
+6. Staged update preparation is deferred out of the human-test release. The
    human-test release uses the tested immediate source update path plus the
    documented MSIX/manual package path.
 
@@ -119,16 +122,18 @@ or similar engine terms.
 | Lane | Target | Status | Decision |
 | --- | --- | --- | --- |
 | English CPU | Parakeet v2, `nvidia/parakeet-tdt-0.6b-v2` | Wired today through ONNX/onnx-asr CPU path | Default English local lane. |
-| English NVIDIA GPU | Parakeet v2 through CUDA-capable runtime | Fresh default when Parakeet is available; wired for smoke, not benchmark-promoted | Same English model, GPU runtime for speed. |
-| Multilingual NVIDIA GPU | Parakeet v3, `nvidia/parakeet-tdt-0.6b-v3` | Wired for model selection, not benchmark-promoted | Strategic multilingual local lane. |
-| Multilingual CPU | Parakeet v3 | Feasibility benchmark | Use only if CPU latency is acceptable. |
-| English AMD GPU | Parakeet v2 through AMD runtime | Fresh default when Parakeet is available; explicit provider readiness wired | First-class AMD lane. |
-| Multilingual AMD GPU | Parakeet v3 through AMD runtime | Model wired, representative AMD validation still required | First-class AMD lane. |
+| Multilingual CPU | Parakeet v3, `nvidia/parakeet-tdt-0.6b-v3` | Feasibility benchmark | Use only if CPU latency is acceptable. |
+
+NVIDIA CUDA and AMD (ROCm/MIGraphX, DirectML) lanes were dropped on
+2026-10-01. Their code is still present until #110, #111 and #112 land; treat
+it as unsupported, and do not add GPU evidence gates.
 
 The `faster-whisper/large-v3` bridge for this workstation was removed on
 2026-09-30.
 
 ## Implementation Status
+
+The GPU paragraphs below are history: GPU lanes were dropped on 2026-10-01.
 
 As of 2026-07-05, Dictate accepts `amd` as an explicit compute-device lane in
 the CLI/runtime profile surface and doctor/preflight can verify whether ONNX
@@ -332,7 +337,8 @@ Benchmark evidence foundation:
    promoted.
 4. `scripts/run-transcription-lane-benchmarks.sh` is the canonical local lane
    runner for writing the CPU, CUDA, CUDA multilingual, AMD, AMD multilingual,
-   and Meeting JSON artifacts consumed by this plan and the plan audit. Use
+   and Meeting JSON artifacts consumed by this plan and the plan audit (its
+   CUDA and AMD lanes are unsupported since 2026-10-01 and go with #112). Use
    `--dry-run` first on target machines to verify the exact commands without
    loading models.
 5. The canonical lane runner preflights each selected lane with `dictate doctor
@@ -348,35 +354,15 @@ Benchmark evidence foundation:
    `evidence-bundles/` for AMD, CUDA, Windows, and Meeting test-machine
    handoff. The plan audit requires that output directory to be ignored by Git.
 
-## AMD GPU Path
+## AMD GPU Path (dropped)
 
-AMD GPU support is essential. If CUDA is unavailable but an AMD GPU is present,
-Dictate should still provide a high-performance local Parakeet path.
-
-| Runtime Path | Platform | Plan |
-| --- | --- | --- |
-| ONNX Runtime `MIGraphXExecutionProvider` | Linux / ROCm | Primary Linux AMD target. |
-| MIGraphX native API | Linux / ROCm | Fallback if ONNX Runtime packaging or operator coverage blocks Parakeet. |
-| ONNX Runtime DirectML EP | Windows | Windows AMD evaluation path. |
-| CPU Parakeet | All desktop OSes | Required fallback, not the desired high-performance AMD outcome. |
-
-AMD acceptance gates:
-
-1. Parakeet v2 and v3 load on the selected AMD runtime.
-2. Unsupported operator fallback does not erase GPU benefit.
-3. WER matches CPU/CUDA Parakeet within benchmark tolerance.
-4. RTFx is materially better than CPU on representative AMD GPUs.
-5. Packaging does not require non-technical users to compile ONNX Runtime.
-6. Doctor/logs clearly report the AMD lane while the UI remains product-level.
-
-The audit requires both AMD promotion artifacts before this lane can pass:
-`benchmark-results/parakeet-v2-amd-human-gated.json` for English and
-`benchmark-results/parakeet-v3-amd-human-gated.json` for multilingual. Each
-artifact must use `device=amd`, be marked `fixture_class=curated-human`, have
-no failed gates, include timestamp boundary evidence, include AMD/Radeon
-hardware-provider provenance in the benchmark `environment`, and beat the CPU
-RTFx baseline. Synthetic DirectML readiness remains package/provider evidence,
-not representative Radeon performance evidence.
+AMD GPU lanes were dropped on 2026-10-01 with the rest of GPU support. There is
+no AMD acceptance gate, and the readiness audit no longer requires the AMD
+promotion artifacts (`benchmark-results/parakeet-v2-amd-human-gated.json` and
+`benchmark-results/parakeet-v3-amd-human-gated.json`). The `amd` extra, the
+DirectML and ROCm/MIGraphX provider checks and the AMD benchmark runners are
+still in the tree, unsupported, until #110, #111 and #112 remove them. Earlier
+revisions of this file hold the old AMD runtime plan and gates.
 
 ## Meeting Stack
 
@@ -497,10 +483,12 @@ Remaining app-level gates:
 
 | Lane | ASR | Speaker Attribution | Decision |
 | --- | --- | --- | --- |
-| Local GPU quality default | Parakeet v2/v3 | DiariZen | Selectable/preflightable as `parakeet-diarizen`; preferred if runtime benchmarks show processing time is bearable. |
-| Local GPU live/speed | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. |
-| Local AMD GPU | Parakeet v2/v3 on AMD runtime | DiariZen / Sortformer if supported, otherwise pyannote fallback | Required benchmark lane. |
-| Local CPU/offline fallback | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; ship after packaging/licensing and benchmark gates pass. |
+| Local quality candidate | Parakeet v2/v3 | DiariZen | Selectable/preflightable as `parakeet-diarizen`; preferred if CPU benchmarks show processing time is bearable. |
+| Local live/speed candidate | Parakeet v2/v3 | NVIDIA Streaming Sortformer v2.1 | Selectable/preflightable as `parakeet-sortformer`; use where responsiveness matters or DiariZen is too slow. Its passing benchmark so far ran on CUDA, so it needs a CPU benchmark before promotion. |
+| Local CPU baseline | Parakeet v2, or v3 if CPU benchmark passes | pyannote Community-1 | Initial backend exists as `parakeet-pyannote`; ship after packaging/licensing and benchmark gates pass. |
+
+Every Meeting lane runs on the CPU. The GPU lanes in earlier revisions of this
+table (CUDA quality and speed, AMD) were dropped on 2026-10-01.
 
 WhisperX is not the main meeting stack. Reuse timestamp/alignment ideas where
 useful, but do not build the product dependency around WhisperX.
@@ -527,7 +515,7 @@ Before promoting a lane to default, benchmark:
 2. DER for speaker attribution where Meeting mode is involved.
 3. Speaker-confusion rate separately from DER.
 4. RTFx and live latency.
-5. RAM/VRAM use.
+5. RAM use.
 6. First-run download size and install/package weight.
 7. Runtime failure rate and fallback behavior.
 8. Windows and Linux coverage where that lane is intended to ship.
@@ -537,9 +525,8 @@ report documented in `benchmarks/README.md`. Human-readable console output is
 not enough for promotion because it cannot be compared reliably across hardware
 lanes.
 
-AMD GPU benchmark coverage is mandatory for the advanced local GPU tier. Test at
-least one Linux ROCm/MIGraphX Radeon machine and one Windows AMD GPU path if
-Windows packaging is in scope for that release.
+There is no GPU tier: GPU lanes were dropped on 2026-10-01. Lanes are
+benchmarked and promoted on the CPU of everyday machines.
 
 ## Human-Test Acceptance Checklist
 
@@ -547,30 +534,25 @@ The deployment is ready for human testing only when these checks are true:
 
 1. **CPU English:** fresh install selects Parakeet v2, records real microphone
    speech, stores the note transcript, and does not repeat stale fixture text.
-2. **NVIDIA English:** CUDA Parakeet v2 loads, doctor reports the CUDA provider,
-   and benchmark RTFx is materially better than CPU on the same fixture set.
-3. **NVIDIA multilingual:** Parakeet v3 loads on CUDA, exposes timestamp
-   metadata where available, and passes multilingual fixture smoke tests.
-4. **AMD English:** Parakeet v2 runs on the selected AMD execution path, and
-   doctor/preflight clearly report the AMD provider instead of falling back
-   silently to CPU.
-5. **AMD multilingual:** Parakeet v3 either passes the same AMD gates or remains
-   visibly blocked with a documented packaging/runtime reason.
-6. **Meeting:** pressing `Meeting` produces speaker-attributed transcript output
+2. **Meeting:** pressing `Meeting` produces speaker-attributed transcript output
    and durable speaker/timestamp segment metadata. If no speaker-attribution
    lane is available, the app must block the meeting path with a clear state
    rather than producing an undiarized transcript.
-7. **Plain recording:** pressing `Record` uses the same ASR behavior as
+3. **Plain recording:** pressing `Record` uses the same ASR behavior as
    push-to-talk and does not expose speaker-attribution engine terms.
-8. **Windows VM:** install, lifecycle, no-bundle build, and MSIX package smokes
+4. **Windows VM:** install, lifecycle, no-bundle build, and MSIX package smokes
    pass on `win11-dev`; the tested artifact paths are documented for human
    testers.
-9. **Packaging:** the public Windows path is either a tested Store/MSIX route or
+5. **Packaging:** the public Windows path is either a tested Store/MSIX route or
    an explicitly approved temporary artifact; no stale MSI/NSIS assumption is
    presented as ready.
-10. **Regression:** focused Python tests for STT selection, model preparation,
-    UI server state, tray helpers, Windows platform behavior, and meeting
-    speaker-attribution rules pass locally.
+6. **Regression:** focused Python tests for STT selection, model preparation,
+   UI server state, tray helpers, Windows platform behavior, and meeting
+   speaker-attribution rules pass locally.
+
+These six items are exactly the items `--readiness` reports. The NVIDIA English,
+NVIDIA multilingual, AMD English and AMD multilingual items were removed on
+2026-10-01 when GPU lanes were dropped.
 
 Run `python3 scripts/transcription_plan_audit.py` before handing a build to a
 tester. It summarizes which plan gates have local evidence and which are still
@@ -578,11 +560,14 @@ blocked. Use `--strict` in automation; it exits `2` while required promotion
 evidence is missing.
 Run `python3 scripts/transcription_plan_audit.py --readiness` for the
 tester-facing checklist view. It maps the human-test acceptance items above to
-the audit gates and currently marks CPU English, NVIDIA English, NVIDIA
-multilingual, Meeting, plain recording, Windows VM, packaging, and regression
-as `READY`, while AMD English and AMD multilingual remain `BLOCKED` until the
-two Radeon promotion artifacts are imported. Use `--readiness --json` for a
-machine-readable handoff report.
+the audit gates and reports six items: CPU English, Meeting, Plain recording,
+Windows VM, Packaging and Regression. CPU English, Plain recording, Windows VM,
+Packaging and Regression are decided by files in the repository. Meeting is
+`READY` only when at least one curated-human meeting benchmark artifact in
+`benchmark-results/` (not tracked in Git) passes its gates, so a fresh checkout
+reports Meeting as `BLOCKED`. Those artifact names still say `cuda`; renaming
+them to CPU artifacts is part of #112. No GPU item is reported. Use
+`--readiness --json` for a machine-readable handoff report.
 Use `scripts/run-human-test-readiness.sh --device auto` on Linux source
 installs, or `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
 scripts\run-human-test-readiness.ps1 -Device auto` on Windows source installs,
@@ -610,10 +595,11 @@ also succeeded on the same worktree.
 Latest readiness-report evidence: `uv run pytest
 tests/test_transcription_plan_audit.py tests/test_benchmark_fixtures.py -q`
 passed with `30 passed` after adding the `--readiness` and `--readiness --json`
-audit outputs plus source-install human-test readiness wrappers. On this current worktree,
-`python3 scripts/transcription_plan_audit.py --readiness` reports every
+audit outputs plus source-install human-test readiness wrappers. On that worktree,
+`python3 scripts/transcription_plan_audit.py --readiness` reported every
 human-test checklist item as `READY` except AMD English and AMD multilingual,
-which remain `BLOCKED` on the missing Radeon benchmark artifacts.
+which were `BLOCKED` on the missing Radeon benchmark artifacts. Both AMD items
+were removed from the report on 2026-10-01.
 `scripts/run-human-test-readiness.sh` and
 `scripts/run-human-test-readiness.ps1` provide the source-install handoff
 wrapper for that report plus the manual microphone and Meeting checks.
@@ -625,8 +611,9 @@ and `scripts/windows-vm-smoke.sh --vm win11-dev --mode syntax --timeout 900
 --keep-guest-workdir` passed after parsing
 `scripts/run-human-test-readiness.ps1` in the Windows guest.
 
-Latest transcription-plan audit evidence: `python3
-scripts/transcription_plan_audit.py` reports `pass` for the canonical plan,
+Transcription-plan audit evidence from 2026-07-05, before GPU lanes were
+dropped (the audit no longer runs the CUDA and AMD gates described here):
+`python3 scripts/transcription_plan_audit.py` reported `pass` for the canonical plan,
 benchmark fixture tooling, synthetic CUDA-vs-CPU comparison, synthetic
 multilingual CUDA evidence, documented Windows VM package evidence covering
 install, lifecycle, no-bundle build, AMD DirectML, and MSIX, and the explicit
@@ -647,8 +634,8 @@ reports `blocked` for AMD Radeon performance because the required v2 English
 and v3 multilingual curated-human AMD artifacts are missing. Synthetic DirectML
 package readiness is not counted as representative Radeon performance evidence.
 `python3
-scripts/transcription_plan_audit.py --strict` exits `2` in this current state
-because AMD Radeon performance artifacts are still missing.
+scripts/transcription_plan_audit.py --strict` exited `2` at the time because
+the AMD Radeon performance artifacts were missing.
 Benchmark JSON reports now include ONNX Runtime provider names and detected GPU
 summary lines where available, and the AMD gate rejects curated-human artifacts
 that lack `MIGraphXExecutionProvider`/`ROCMExecutionProvider` or
@@ -1097,12 +1084,11 @@ src/dictate/model_prepare.py` succeeded; and `uv run dictate doctor
    - Keep recordings and push-to-talk on the same ASR path.
    - Keep Meeting as the only path that requires speaker attribution.
 
-2. **Parakeet runtime coverage**
-   - Wire Parakeet v2 CUDA.
-   - Wire Parakeet v3 CUDA.
+2. **Parakeet on the CPU**
    - Benchmark Parakeet v3 CPU feasibility.
-   - Build AMD GPU runtime probe and prototype with MIGraphX/ROCm.
-   - Evaluate Windows AMD DirectML/MIGraphX packaging.
+   - Measure and tune release-to-text latency on everyday CPU machines.
+   - The CUDA and AMD runtime tasks that were here were dropped on 2026-10-01;
+     removing their code is #110, #111 and #112.
 
 3. **Meeting speaker attribution**
    - Validate DiariZen runtime loading and benchmark `parakeet-diarizen`.
@@ -1186,12 +1172,12 @@ noisy-input fixtures, not only clean read speech.
    `nvidia-cudnn-cu13`), which need NVIDIA driver 580 or newer; 1.26 was the
    last CUDA 12 build. The old `<1.24` pin existed for the external-data path
    check; Dictate stages Parakeet as flat real files, and an external-data
-   model loads on 1.30 (verified 2026-09-20 on CPU). CUDA execution on 1.30
-   still needs a `dictate doctor --stt-backend parakeet --device cuda` pass
-   on NVIDIA hardware before the GPU lane is called re-validated.
+   model loads on 1.30 (verified 2026-09-20 on CPU). The CUDA lane was dropped
+   on 2026-10-01 and is not re-validated.
 3. `onnxruntime-directml` stopped at 1.24.4; the `amd` extra is capped at
-   `<1.25`. Microsoft has retired that wheel, so the Windows AMD lane needs a
-   replacement runtime decision (ORT's WinML/DirectML EP plugin or ROCm).
+   `<1.25`. Microsoft has retired that wheel. The Windows AMD lane would have
+   needed a replacement runtime; that question closed when GPU lanes were
+   dropped on 2026-10-01.
 4. `sherpa-onnx` 1.13.8 supports Parakeet Unified (offline and streaming),
    Nemotron streaming, Moonshine, Qwen3-ASR, and Cohere Transcribe. It is the
    runtime to evaluate if a streaming lane is opened.
