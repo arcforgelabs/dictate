@@ -59,6 +59,15 @@
 - Third-party notices ship with the app: `THIRD_PARTY_NOTICES.md`, the GNU
   licence texts, and an attribution file beside each bundled model.
 
+### Fixed
+
+- Dictation works on Windows. The engine read the system's default microphone
+  from sounddevice as a list, but sounddevice returns a pair object, so the
+  default was lost; on Windows nothing else matched, and every recording
+  failed with "no microphone input devices detected" even with microphones
+  plugged in. The engine now reads the default correctly and, failing that,
+  tries any device that can capture.
+
 ## 2026-09-27
 
 ### Fixed

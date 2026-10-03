@@ -113,6 +113,64 @@ class ResolveInputCaptureTests(unittest.TestCase):
         device, rate = resolve_input_capture(sd, target_rate=16000)
         self.assertEqual((device, rate), (0, 44100))
 
+    def test_reads_default_from_sounddevice_pair_object(self) -> None:
+        # sounddevice.default.device is an _InputOutputPair: indexable, not a
+        # list or tuple. Windows names its microphones after the hardware, so
+        # the default is the only way in; losing it meant "no microphone".
+        class Pair:
+            def __init__(self, values):
+                self._values = values
+
+            def __getitem__(self, index):
+                return self._values[index]
+
+        devices = [
+            {"name": "Microsoft Sound Mapper - Input", "max_input_channels": 2, "default_samplerate": 44100.0},
+            {"name": "Microphone (Scarlett Solo USB)", "max_input_channels": 2, "default_samplerate": 44100.0},
+        ]
+        sd = self._sd(default=0, devices=devices, supported={(1, 16000): True, (0, 16000): True})
+        sd.default = SimpleNamespace(device=Pair([1, 3]))
+        device, rate = resolve_input_capture(sd, target_rate=16000)
+        self.assertEqual((device, rate), (1, 16000))
+
+    def test_uses_portaudio_default_input_query_when_pair_is_unset(self) -> None:
+        devices = [
+            {"name": "Microphone (AUDIO 2.0)", "max_input_channels": 2, "default_samplerate": 48000.0},
+            {"name": "Microphone (2- Antlion Wireless Microphone)", "max_input_channels": 1, "default_samplerate": 48000.0},
+        ]
+        sd = self._sd(default=-1, devices=devices, supported={(0, 16000): True, (1, 16000): True})
+
+        def query_devices(index=None, kind=None):
+            if kind == "input":
+                return {**devices[1], "index": 1}
+            return devices if index is None else devices[index]
+
+        sd.query_devices.side_effect = query_devices
+        device, rate = resolve_input_capture(sd, target_rate=16000)
+        self.assertEqual((device, rate), (1, 16000))
+
+    def test_falls_back_to_any_input_device_without_a_default(self) -> None:
+        # Windows: no PulseAudio, no default reported, hardware-named devices.
+        devices = [
+            {"name": "Speakers (Realtek(R) Audio)", "max_input_channels": 0, "default_samplerate": 48000.0},
+            {"name": "Microphone (2- RIG 800HX)", "max_input_channels": 2, "default_samplerate": 44100.0},
+        ]
+        sd = self._sd(default=-1, devices=devices, supported={(1, 16000): True})
+        device, rate = resolve_input_capture(sd, target_rate=16000)
+        self.assertEqual((device, rate), (1, 16000))
+
+    def test_real_sounddevice_default_pair_is_indexable(self) -> None:
+        try:
+            import sounddevice
+        except Exception as exc:  # noqa: BLE001 - PortAudio missing on this host
+            self.skipTest(f"sounddevice unavailable: {exc}")
+        pair = sounddevice.default.device
+        self.assertNotIsInstance(pair, (list, tuple))
+        from dictate.audio import _default_input_device
+
+        expected = int(pair[0])
+        self.assertEqual(_default_input_device(sounddevice), expected if expected >= 0 else None)
+
     def test_raises_when_nothing_works(self) -> None:
         devices = [
             {"name": "hw:0,0", "max_input_channels": 2, "default_samplerate": 44100.0},

@@ -55,15 +55,27 @@ def resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarra
 
 
 def _default_input_device(sd: Any) -> int | None:
+    # sounddevice's ``default.device`` is an _InputOutputPair: indexable, but
+    # not a list or tuple. Index it rather than type-checking it, or the
+    # PortAudio default is silently lost (on Windows that left no candidates).
     pair = getattr(sd, "default", None)
     device = getattr(pair, "device", None) if pair is not None else None
-    if isinstance(device, (list, tuple)):
-        index = device[0] if device else None
-    else:
-        index = device
+    index: Any = device
+    if device is not None and not isinstance(device, (int, str)):
+        try:
+            index = device[0]
+        except (TypeError, IndexError, KeyError):
+            index = None
     try:
         value = int(index)  # type: ignore[arg-type]
     except (TypeError, ValueError):
+        value = -1
+    if value >= 0:
+        return value
+    try:
+        info = sd.query_devices(kind="input")
+        value = int(info.get("index", -1))
+    except Exception:  # noqa: BLE001
         return None
     return value if value >= 0 else None
 
@@ -88,7 +100,7 @@ def _pulse_default_input(sd: Any) -> int | None:
 
 
 def _input_device_candidates(sd: Any) -> list[int]:
-    """Prefer Pulse default, then PortAudio default, then soft PCMs."""
+    """Prefer Pulse default, then PortAudio default, then soft PCMs, then any input."""
     seen: set[int] = set()
     candidates: list[int] = []
 
@@ -113,6 +125,14 @@ def _input_device_candidates(sd: Any) -> list[int]:
             continue
         if any(token in name for token in _PREFERRED_INPUT_NAMES):
             add(index)
+    # Last resort: any device that can capture. Windows names its microphones
+    # after the hardware, so none match the preferred names above.
+    for index, device in enumerate(devices):
+        try:
+            if int(device.get("max_input_channels", 0)) > 0:
+                add(index)
+        except Exception:  # noqa: BLE001
+            continue
     return candidates
 
 
