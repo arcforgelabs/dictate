@@ -1,5 +1,9 @@
 # Release Versioning
 
+> The target release policy (stable, beta and dev channels; `YYYY.M.PATCH`
+> versions) is [RELEASING.md](RELEASING.md). This page describes the current
+> procedure until that lands.
+
 Dictate uses calendar versioning for public releases:
 
 ```text
