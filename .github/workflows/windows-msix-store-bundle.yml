@@ -58,6 +58,10 @@ jobs:
         shell: pwsh
         run: .\scripts\build-windows-msix-store.ps1 -Python "${{ env.pythonLocation }}\python.exe" 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-msix.log"
 
+      - name: Cold-start smoke of the Store engine payload
+        shell: pwsh
+        run: .\scripts\windows-engine-smoke.ps1 -EngineDir "packaging\msix\dist\engine" -Label "Store MSIX payload" -JsonPath "$env:RUNNER_TEMP\windows-engine-smoke.json"
+
       - name: Upload Store MSIX artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -72,5 +76,7 @@ jobs:
         with:
           name: windows-msix-log
           retention-days: 7
-          path: ${{ runner.temp }}\windows-msix.log
+          path: |
+            ${{ runner.temp }}\windows-msix.log
+            ${{ runner.temp }}\windows-engine-smoke.json
           if-no-files-found: ignore

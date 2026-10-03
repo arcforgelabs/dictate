@@ -11,8 +11,9 @@ The desktop app is **two pieces that ship as one package**:
 - **`ui-shell/`** - a Tauri 2 shell (Rust) that draws the frameless window + tray
   and hosts the web UI built from **`ui/`** (React/Vite). See `ui-shell/README.md`.
 - **The Python engine** - the real product (STT, audio, push-to-talk, typing). It
-  is **PyInstaller-frozen** (`packaging/`) into a single `dictate-engine` binary
-  and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
+  is **PyInstaller-frozen** (`packaging/`) into a `dictate-engine` folder (the
+  launcher plus `_internal/`; a single self-extracting binary only for the
+  AppImage) and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
 
 ### Linux host audio (do not freeze PortAudio)
 
@@ -74,18 +75,31 @@ scripts/build-linux-desktop.sh
 
 ## Windows build / release flow
 
-The Windows path mirrors the Linux bundle architecture, but stages
-`dictate-engine.exe` and builds Tauri's Windows bundle targets:
+The Windows path mirrors the Linux `.deb`/`.rpm` architecture: it stages the
+onedir engine folder and builds Tauri's Windows bundle targets:
 
 ```
 scripts/build-windows-desktop.ps1
   ├─ npm --prefix ui run build
   ├─ create packaging\.build-venv-windows
   ├─ pip install -e ".[windows]" pyinstaller
-  ├─ DICTATE_ONEFILE=1 pyinstaller packaging\dictate-engine.spec
-  ├─ stage engine -> ui-shell\src-tauri\engine\dictate-engine.exe
+  ├─ pyinstaller packaging\dictate-engine.spec   (onedir; DICTATE_ONEFILE unset)
+  ├─ stage packaging\dist\dictate-engine\* -> ui-shell\src-tauri\engine\
+  │    (dictate-engine.exe + _internal\, then models and notices)
+  ├─ fail if any engine path is over 150 chars
   └─ tauri build --bundles msi,nsis
 ```
+
+- The engine is installed as a folder (`engine\dictate-engine.exe` beside
+  `engine\_internal\`), not a onefile exe. A onefile exe unpacks its whole
+  runtime into `%TEMP%` on every launch; the 333 MB Store build spent ~7 s on
+  that and missed the shell's 8 s handshake wait (#131). The Windows spec also
+  drops build-only files (headers, `.lib`, CMake files, `.pdb`) from the folder.
+- `scripts/windows-engine-smoke.ps1` starts the staged engine the way the shell
+  does (`--no-tray`, `DICTATE_UI_SERVER=1`, throwaway `LOCALAPPDATA`/`APPDATA`)
+  and writes the handshake time, first authenticated `/api/state` time, file
+  count and size to the job summary. The manual Windows bundle and Store MSIX
+  workflows run it after the build.
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the
@@ -143,7 +157,8 @@ scripts/build-windows-msix-store.ps1
   ├─ run scripts\build-windows-desktop.ps1 -Bundles no-bundle
   ├─ read shared target\release\dictate-ui-shell.exe
   ├─ read shared target\release\engine\dictate-engine.exe
-  ├─ stage shell + engine into the MSIX loose layout
+  ├─ stage shell + engine folder into the MSIX loose layout
+  ├─ fail unless engine\_internal\ is present and every path is <= 150 chars
   ├─ render packaging\msix\Package.appxmanifest.in
   ├─ winapp tool makeappx pack, or Windows SDK makeappx.exe
   └─ unpack and validate manifest identity + shell/engine payloads
@@ -203,12 +218,13 @@ scripts/build-windows-msix-store.ps1
 
 ## Gotchas (the expensive lessons)
 
-### Match the engine layout to the Linux bundle format
+### Match the engine layout to the bundle format
 A PyInstaller **onedir** engine ships its libraries in `_internal/`, which native
-`.deb` and RPM packages can carry safely without a memory-heavy final archive
-compression step. Use onedir for those native packages. AppImage's linuxdeploy
-walks the internal libraries and is less reliable with that layout, so AppImage
-builds set `DICTATE_ONEFILE=1` and stage one self-extracting ELF instead.
+`.deb` and RPM packages and every Windows package (MSI, NSIS, Store MSIX) carry
+as an installed folder, with no unpacking at launch. Use onedir for those.
+AppImage's linuxdeploy walks the internal libraries and is less reliable with
+that layout, so AppImage builds alone set `DICTATE_ONEFILE=1` and stage one
+self-extracting ELF instead.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if

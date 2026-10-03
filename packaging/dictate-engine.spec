@@ -5,11 +5,14 @@
 # works offline from the first run.
 #
 # Two layouts, selected by DICTATE_ONEFILE:
-#   - onedir (default): dist/dictate-engine/dictate-engine  — fast start; used
-#     by the .deb/.rpm (their bundlers don't walk the engine's internal libs).
+#   - onedir (default): dist/dictate-engine/dictate-engine[.exe] + _internal/  —
+#     starts without unpacking; used by the .deb/.rpm (their bundlers don't walk
+#     the engine's internal libs) and by every Windows package (MSI, NSIS, Store
+#     MSIX), which install the folder as is.
 #   - onefile (DICTATE_ONEFILE=1): dist/dictate-engine  — a single self-extracting
-#     binary, used by the AppImage so linuxdeploy sees one ELF, not the mangled
-#     PyInstaller _internal/*.so tree it can't resolve.
+#     binary, used only by the AppImage so linuxdeploy sees one ELF, not the
+#     mangled PyInstaller _internal/*.so tree it can't resolve. It unpacks its
+#     whole runtime into a temp dir on every launch, which costs seconds.
 #
 # Build:  pyinstaller packaging/dictate-engine.spec --noconfirm
 # (the build script packaging/build-engine.sh wraps this with a clean venv)
@@ -117,6 +120,29 @@ a = Analysis(
 # libportaudio). Strip them again on Linux from both TOCs.
 a.binaries = filter_pyinstaller_binaries(a.binaries)
 a.datas = filter_pyinstaller_binaries(a.datas)
+
+# Windows installs the onedir folder file by file (MSI, NSIS, MSIX), so drop the
+# build-time files collect_all() drags in: C/C++ headers, import/static
+# libraries, CMake config and debug symbols. Nothing loads them at runtime.
+# Linux builds are left as they are.
+_BUILD_ONLY_SUFFIXES = (".h", ".hpp", ".hxx", ".cuh", ".inl", ".lib", ".a", ".cmake", ".pdb")
+
+
+def _build_only_file(dest):
+    parts = dest.replace("\\", "/").lower().split("/")
+    return parts[-1].endswith(_BUILD_ONLY_SUFFIXES) or "include" in parts[:-1] or (
+        "share" in parts[:-1] and "cmake" in parts[:-1]
+    )
+
+
+if os.name == "nt":
+    _before = len(a.datas) + len(a.binaries)
+    a.datas = [entry for entry in a.datas if not _build_only_file(entry[0])]
+    a.binaries = [entry for entry in a.binaries if not _build_only_file(entry[0])]
+    print(
+        f"dictate-engine.spec: dropped {_before - len(a.datas) - len(a.binaries)} "
+        "build-only files (headers, .lib, CMake, .pdb) from the Windows engine"
+    )
 
 # Removed runtimes. The Whisper family went first: faster-whisper, WhisperX,
 # CTranslate2 and PyAV, whose FFmpeg build carried GPL libx264/libx265. Meeting

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import ctypes
+import json
 import os
 import subprocess
 import sys
@@ -255,6 +256,48 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("-name 'libtorch*' -o -name 'pyannote*'", engine_script)
         self.assertIn("DICTATE_PARAKEET_MODEL_PATH", shell)
         self.assertIn("bundled_parakeet_model", shell)
+
+    def test_windows_desktop_bundle_installs_the_onedir_engine(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        script = (root / "scripts" / "build-windows-desktop.ps1").read_text(encoding="utf-8")
+        spec = (root / "packaging" / "dictate-engine.spec").read_text(encoding="utf-8")
+        tauri = json.loads(
+            (root / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
+        )
+        bundle_workflow = (
+            root / ".github" / "workflows" / "windows-desktop-bundle.yml"
+        ).read_text(encoding="utf-8")
+        msix_workflow = (
+            root / ".github" / "workflows" / "windows-msix-store-bundle.yml"
+        ).read_text(encoding="utf-8")
+
+        # A onefile engine unpacks itself on every launch (#131).
+        self.assertNotIn('$env:DICTATE_ONEFILE = "1"', script)
+        self.assertIn("Remove-Item Env:DICTATE_ONEFILE", script)
+        self.assertIn('"packaging\\dist\\dictate-engine"', script)
+        self.assertIn('Copy-Item (Join-Path $EngineDist "*") $StageDir -Recurse -Force', script)
+        self.assertIn('"_internal"', script)
+        self.assertIn("$MaxEnginePathLength = 150", script)
+        self.assertIn("engine/**/*", tauri["bundle"]["resources"])
+        self.assertIn('if os.name == "nt":', spec)
+        self.assertIn('".lib"', spec)
+        for workflow in (bundle_workflow, msix_workflow):
+            self.assertIn("scripts\\windows-engine-smoke.ps1", workflow)
+
+    def test_windows_engine_smoke_starts_the_engine_like_the_shell(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        smoke = (root / "scripts" / "windows-engine-smoke.ps1").read_text(encoding="utf-8")
+        shell = (root / "ui-shell" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+
+        self.assertIn('cmd.arg("--no-tray").env("DICTATE_UI_SERVER", "1");', shell)
+        self.assertIn('$psi.Arguments = "--no-tray"', smoke)
+        self.assertIn('$psi.EnvironmentVariables["DICTATE_UI_SERVER"] = "1"', smoke)
+        self.assertIn('$psi.EnvironmentVariables["LOCALAPPDATA"] = $local', smoke)
+        self.assertIn('$psi.EnvironmentVariables["APPDATA"] = $roaming', smoke)
+        self.assertIn("DICTATE_PARAKEET_MODEL_PATH", smoke)
+        self.assertIn('Join-Path $local "dictate\\ui-server.json"', smoke)
+        self.assertIn('"$base/api/state"', smoke)
+        self.assertIn('Authorization = "Bearer $($handshake.token)"', smoke)
 
     def test_windows_installer_prunes_stale_user_install_surfaces(self) -> None:
         script = (Path(__file__).resolve().parents[1] / "install-windows.ps1").read_text(
