@@ -18,7 +18,7 @@ if ($ForceCuda -or $NoCuda) {
     Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$DictateVersion = "2026.10.1"
+$DictateVersion = "2026.10.2"
 
 if (-not $ArchiveUrl) {
     $ArchiveUrl = "https://github.com/arcforgelabs/dictate/archive/refs/tags/v$DictateVersion.zip"

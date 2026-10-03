@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026.10.2 (2026-10-04)
+
+### Fixed
+
+- Dictating no longer wipes the clipboard. Dictate pastes through the
+  clipboard, then puts back exactly what was there before, once the app has
+  read the dictation: text, images, file lists and rich text on Windows, and
+  the copied item on Linux. If you copy something yourself mid-dictation,
+  Dictate leaves it alone. On Windows, dictated text stays out of Win+V
+  clipboard history and cloud clipboard sync. (#153)
+- The window connects to the engine in about a second instead of waiting for
+  the speech model to load, and shows "Getting ready…" until it can dictate.
+  A model that fails to load is shown in the window instead of the engine
+  exiting. (#158)
+- Decoding starts the moment the shortcut is released, instead of up to
+  100 ms later. (#160)
+
+### Changed
+
+- Each dictation adds one `Dictation timing:` line to the log, with how long
+  each step took and never the text. The status line now reads
+  "Transcribing N s of audio", because the old wording looked like a
+  processing time. (#159)
+
 ## 2026.10.1 (2026-10-03)
 
 ### Privacy

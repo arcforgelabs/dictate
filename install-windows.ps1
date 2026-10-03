@@ -303,7 +303,7 @@ function Register-InstalledApp {
     $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate"
     New-Item -Force -Path $keyPath | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "DisplayName" -Value "Dictate" -PropertyType String | Out-Null
-    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.10.1" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.10.2" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "Publisher" -Value "Arc Forge Labs" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "InstallLocation" -Value $InstallLocation -PropertyType String | Out-Null
     if (Test-Path $DisplayIcon) {
