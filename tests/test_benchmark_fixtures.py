@@ -29,33 +29,32 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
         output = completed.stdout
         for artifact in [
             "parakeet-v2-cpu-flite-long-3x-gated.json",
-            "parakeet-v2-cuda-flite-long-3x-gated.json",
-            "parakeet-v3-cuda-flite-long-3x-gated.json",
-            "parakeet-v2-amd-flite-long-3x-gated.json",
-            "parakeet-v3-amd-flite-long-3x-gated.json",
-            "parakeet-pyannote-cuda-flite-meeting.json",
-            "parakeet-diarizen-cuda-flite-meeting.json",
-            "parakeet-sortformer-cuda-flite-meeting.json",
+            "parakeet-v3-cpu-flite-long-3x-gated.json",
+            "parakeet-pyannote-cpu-flite-meeting.json",
+            "parakeet-diarizen-cpu-flite-meeting.json",
+            "parakeet-sortformer-cpu-flite-meeting.json",
         ]:
             self.assertIn(artifact, output)
-        self.assertIn("doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device amd", output)
+        self.assertIn("doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device cpu", output)
         self.assertIn(
-            "doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cuda",
+            "doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cpu",
             output,
         )
         self.assertIn(
-            "doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cuda",
+            "doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cpu",
             output,
         )
         self.assertIn(
-            "doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cuda",
+            "doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu",
             output,
         )
+        for gpu_marker in ("cuda", "amd", "--device gpu"):
+            self.assertNotIn(gpu_marker, output)
         self.assertIn("--require-speaker-attribution", output)
         self.assertIn("--require-der-metrics", output)
         self.assertIn("--max-mean-wer 0.60", output)
 
-    def test_curated_human_fixture_generator_is_registered_for_cuda_promotion(self) -> None:
+    def test_curated_human_fixture_generator_is_registered_for_cpu_promotion(self) -> None:
         text = Path("scripts/generate-curated-human-asr-fixture.sh").read_text(encoding="utf-8")
         self.assertIn("Open Speech Repository", text)
         self.assertIn("OSR_us_000_0010_8k.wav", text)
@@ -70,10 +69,10 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
         self.assertIn("Speaker 1", text)
         self.assertIn("Speaker 2", text)
 
-    def test_transcription_lane_runner_can_select_amd_only(self) -> None:
+    def test_transcription_lane_runner_can_select_cpu_human_lane(self) -> None:
         command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
         completed = subprocess.run(
-            [*command, "--lane", "amd", "--dry-run"],
+            [*command, "--lane", "cpu-human", "--dry-run"],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -82,41 +81,24 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("--device amd", completed.stdout)
-        self.assertIn("parakeet-v2-amd-flite-long-3x-gated.json", completed.stdout)
-        self.assertNotIn("parakeet-v2-cuda-flite-long-3x-gated.json", completed.stdout)
+        self.assertIn("--device cpu", completed.stdout)
+        self.assertIn("--fixture-class curated-human", completed.stdout)
+        self.assertIn("parakeet-v2-cpu-human-gated.json", completed.stdout)
+        self.assertNotIn("parakeet-v2-cpu-flite-long-3x-gated.json", completed.stdout)
 
-    def test_amd_promotion_runner_dry_run_lists_required_human_artifacts(self) -> None:
-        command = _shell_script_command("scripts/run-amd-promotion-benchmarks.sh")
-        completed = subprocess.run(
-            [*command, "--dry-run", "--collect-evidence"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=10,
-        )
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("generate-curated-human-asr-fixture.sh", completed.stdout)
-        self.assertIn("--lane amd-human", completed.stdout)
-        self.assertIn("--lane amd-human-v3", completed.stdout)
-        self.assertIn("transcription_plan_audit.py", completed.stdout)
-        self.assertIn("collect-transcription-evidence.sh", completed.stdout)
-
-    def test_windows_amd_promotion_runner_contains_required_markers(self) -> None:
-        text = Path("scripts/run-amd-promotion-benchmarks.ps1").read_text(encoding="utf-8")
-        for marker in [
-            "parakeet-v2-amd-human-gated.json",
-            "parakeet-v3-amd-human-gated.json",
-            "DmlExecutionProvider",
-            "pip\", \"install\", \"-e\", \".[amd]",
-            "NoInstallAmdExtra",
-            "DICTATE_HUMAN_MANIFEST",
-            "collect-transcription-evidence.ps1",
-            "transcription_plan_audit.py",
-        ]:
-            self.assertIn(marker, text)
+    def test_transcription_lane_runner_rejects_removed_gpu_lanes(self) -> None:
+        command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
+        for lane in ("cuda", "cuda-human", "amd", "amd-human"):
+            completed = subprocess.run(
+                [*command, "--lane", lane, "--dry-run"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(completed.returncode, 2, lane)
+            self.assertIn(f"Unknown lane: {lane}", completed.stderr)
 
     def test_human_test_readiness_wrappers_contain_manual_smoke_markers(self) -> None:
         shell_text = Path("scripts/run-human-test-readiness.sh").read_text(encoding="utf-8")
@@ -124,10 +106,11 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             "transcription_plan_audit.py --readiness",
             "dictate doctor",
             "dictate --once",
-            "run-amd-promotion-benchmarks.sh",
+            "--device cpu",
             "real audio",
         ]:
             self.assertIn(marker, shell_text)
+        self.assertNotIn("amd", shell_text.lower())
 
         ps_text = Path("scripts/run-human-test-readiness.ps1").read_text(encoding="utf-8")
         for marker in [
@@ -135,10 +118,11 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             "--readiness",
             "-m dictate doctor",
             "-m dictate --once",
-            "run-amd-promotion-benchmarks.ps1",
+            "--device cpu",
             "real audio",
         ]:
             self.assertIn(marker, ps_text)
+        self.assertNotIn("amd", ps_text.lower())
 
     def test_transcription_lane_runner_can_skip_preflight_for_failure_artifacts(self) -> None:
         command = _shell_script_command("scripts/run-transcription-lane-benchmarks.sh")
@@ -153,7 +137,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn(" doctor ", completed.stdout)
-        self.assertIn("parakeet-pyannote-cuda-flite-meeting.json", completed.stdout)
+        self.assertIn("parakeet-pyannote-cpu-flite-meeting.json", completed.stdout)
 
     def test_transcription_evidence_collector_dry_run_lists_handoff_bundle_contents(self) -> None:
         command = _shell_script_command("scripts/collect-transcription-evidence.sh")
@@ -183,15 +167,15 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             bundle_root = root / "transcription-evidence-test"
             results = bundle_root / "benchmark-results"
             results.mkdir(parents=True)
-            (results / "parakeet-v2-amd-human-gated.json").write_text(
-                '{"config":{"device":"amd"},"summary":{"mean_rtfx":12}}',
+            (results / "parakeet-v2-cpu-human-gated.json").write_text(
+                '{"config":{"device":"cpu"},"summary":{"mean_rtfx":12}}',
                 encoding="utf-8",
             )
             archive = root / "bundle.zip"
             with zipfile.ZipFile(archive, "w") as handle:
                 handle.write(
-                    results / "parakeet-v2-amd-human-gated.json",
-                    "transcription-evidence-test/benchmark-results/parakeet-v2-amd-human-gated.json",
+                    results / "parakeet-v2-cpu-human-gated.json",
+                    "transcription-evidence-test/benchmark-results/parakeet-v2-cpu-human-gated.json",
                 )
             repo = root / "repo"
             repo.mkdir()
@@ -214,7 +198,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("would import", completed.stdout)
-            self.assertFalse((repo / "benchmark-results" / "parakeet-v2-amd-human-gated.json").exists())
+            self.assertFalse((repo / "benchmark-results" / "parakeet-v2-cpu-human-gated.json").exists())
 
     def test_import_transcription_evidence_reads_tar_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -222,9 +206,9 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             bundle_root = root / "transcription-evidence-test"
             results = bundle_root / "benchmark-results"
             results.mkdir(parents=True)
-            artifact = results / "parakeet-v3-amd-human-gated.json"
+            artifact = results / "parakeet-v3-cpu-human-gated.json"
             artifact.write_text(
-                '{"config":{"device":"amd"},"summary":{"mean_rtfx":12}}',
+                '{"config":{"device":"cpu"},"summary":{"mean_rtfx":12}}',
                 encoding="utf-8",
             )
             archive = root / "bundle.tar.gz"
@@ -259,8 +243,8 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             bundle = root / "bundle"
             results = bundle / "benchmark-results"
             results.mkdir(parents=True)
-            (results / "parakeet-v2-amd-human-gated.json").write_text(
-                '{"config":{"device":"amd"}}',
+            (results / "parakeet-v2-cpu-human-gated.json").write_text(
+                '{"config":{"device":"cpu"}}',
                 encoding="utf-8",
             )
             repo = root / "repo"
@@ -283,7 +267,7 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 2)
             self.assertIn("missing object field: summary", completed.stderr)
-            self.assertFalse((repo / "benchmark-results" / "parakeet-v2-amd-human-gated.json").exists())
+            self.assertFalse((repo / "benchmark-results" / "parakeet-v2-cpu-human-gated.json").exists())
 
     def test_import_transcription_evidence_preserves_existing_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -291,9 +275,9 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             bundle = root / "bundle"
             results = bundle / "benchmark-results"
             results.mkdir(parents=True)
-            artifact = results / "parakeet-v2-amd-human-gated.json"
+            artifact = results / "parakeet-v2-cpu-human-gated.json"
             artifact.write_text(
-                '{"config":{"device":"amd"},"summary":{"mean_rtfx":12}}',
+                '{"config":{"device":"cpu"},"summary":{"mean_rtfx":12}}',
                 encoding="utf-8",
             )
             repo = root / "repo"
@@ -330,31 +314,36 @@ class BenchmarkFixtureGeneratorTests(unittest.TestCase):
             "human-lane-dry-run.txt",
             "lane-readiness.txt",
             "promotion-status.txt",
-            "cuda-parakeet-v2",
+            "cpu-parakeet-v2",
             "meeting-sortformer",
             "machine.txt",
             "Compress-Archive",
-            "parakeet-v2-amd-flite-long-3x-gated.json",
-            "parakeet-v3-amd-flite-long-3x-gated.json",
-            "parakeet-pyannote-cuda-flite-meeting.json",
-            "parakeet-diarizen-cuda-flite-meeting.json",
-            "parakeet-sortformer-cuda-flite-meeting.json",
-            "parakeet-v2-cuda-human-gated.json",
-            "parakeet-v3-cuda-human-gated.json",
-            "parakeet-v2-amd-human-gated.json",
-            "parakeet-v3-amd-human-gated.json",
-            "parakeet-pyannote-cuda-human-meeting.json",
-            "parakeet-diarizen-cuda-human-meeting.json",
-            "parakeet-sortformer-cuda-human-meeting.json",
+            "parakeet-v2-cpu-flite-long-3x-gated.json",
+            "parakeet-v3-cpu-flite-long-3x-gated.json",
+            "parakeet-pyannote-cpu-flite-meeting.json",
+            "parakeet-diarizen-cpu-flite-meeting.json",
+            "parakeet-sortformer-cpu-flite-meeting.json",
+            "parakeet-v2-cpu-human-gated.json",
+            "parakeet-v3-cpu-human-gated.json",
+            "parakeet-pyannote-cpu-human-meeting.json",
+            "parakeet-diarizen-cpu-human-meeting.json",
+            "parakeet-sortformer-cpu-human-meeting.json",
         ]:
             self.assertIn(marker, text)
         self.assertNotIn("Get-ChildItem Env:", text)
+        for gpu_marker in ("cuda", "amd", "nvidia", "gpu"):
+            self.assertNotIn(gpu_marker, text.lower())
+
+    def test_shell_transcription_evidence_collector_has_no_gpu_lanes(self) -> None:
+        text = Path("scripts/collect-transcription-evidence.sh").read_text(encoding="utf-8")
+        for gpu_marker in ("cuda", "amd", "nvidia", "gpu"):
+            self.assertNotIn(gpu_marker, text.lower())
 
     def test_gitignore_excludes_default_evidence_bundle_directory(self) -> None:
         ignored = Path(".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("evidence-bundles/", ignored)
 
-    def test_generate_long_fixtures_writes_repeat_manifest_for_gpu_comparison(self) -> None:
+    def test_generate_long_fixtures_writes_repeat_manifest_for_cpu_latency(self) -> None:
         if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
             self.skipTest("ffmpeg and ffprobe are required for fixture generation")
 

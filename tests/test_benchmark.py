@@ -243,7 +243,7 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(report["run_label"], "unit")
             self.assertEqual(report["config"]["backend"], "parakeet-pyannote")
             self.assertTrue(report["config"]["diarize"])
-            self.assertIn("onnxruntime_providers", report["environment"])
+            self.assertNotIn("onnxruntime_providers", report["environment"])
             self.assertIn("machine", report["environment"])
             self.assertEqual(report["summary"]["samples"], 1)
             self.assertEqual(
@@ -463,7 +463,7 @@ class BenchmarkTests(unittest.TestCase):
                 audio_root=str(root),
                 stt_backend="parakeet-pyannote",
                 model="parakeet-tdt-0.6b-v2",
-                device="cuda",
+                device="cpu",
                 language="en",
                 hotwords=None,
                 limit=0,
@@ -506,7 +506,7 @@ class BenchmarkTests(unittest.TestCase):
                 audio_root=str(root),
                 stt_backend="parakeet-pyannote",
                 model="parakeet-tdt-0.6b-v2",
-                device="cuda",
+                device="cpu",
                 language="en",
                 hotwords=None,
                 limit=0,
