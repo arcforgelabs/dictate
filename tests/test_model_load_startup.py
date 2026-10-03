@@ -536,6 +536,29 @@ class ReadinessReportingTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.message, MODEL_LOADING_MESSAGE)
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Windows CI intermittently interrupts threaded localhost server startup.",
+    )
+    def test_server_accepts_connections_while_it_answers_nothing(self) -> None:
+        # While the model loads the engine runs no Python code, so connections
+        # wait in the listen backlog. The shell's liveness check is a TCP
+        # connect; a full backlog made it delete the handshake (seen on Windows).
+        import socket
+
+        server = ui_server._UiHttpServer(("127.0.0.1", 0), ui_server.UiRequestHandler)
+        self.addCleanup(server.server_close)
+        port = server.server_address[1]
+        sockets = []
+        try:
+            for _ in range(30):  # never accepted: serve_forever is not running
+                s = socket.create_connection(("127.0.0.1", port), timeout=1)
+                sockets.append(s)
+        finally:
+            for s in sockets:
+                s.close()
+        self.assertEqual(len(sockets), 30)
+
     def test_model_status_is_published_to_the_window(self) -> None:
         class _Daemon:
             pass

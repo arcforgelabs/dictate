@@ -1138,15 +1138,20 @@ export default function App() {
 
   // The "model" event is the normal path; re-read the state while the model is
   // loading in case the event fired before the event stream was open.
+  // One request at a time: the engine answers nothing until the load ends, so
+  // an interval would pile up connections waiting on it.
   useEffect(() => {
     if (!live || modelPhase !== "loading") return;
     let cancelled = false;
-    const id = setInterval(() => {
+    let timer = null;
+    const poll = () => {
       ipc.getState()
         .then((st) => { if (!cancelled) applyStateModelStatus(st); })
-        .catch(() => {});
-    }, 2000);
-    return () => { cancelled = true; clearInterval(id); };
+        .catch(() => {})
+        .finally(() => { if (!cancelled) timer = setTimeout(poll, 2000); });
+    };
+    timer = setTimeout(poll, 2000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [live, modelPhase, applyStateModelStatus]);
 
   const hydrate = useCallback((st) => {

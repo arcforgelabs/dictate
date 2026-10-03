@@ -932,6 +932,15 @@ def write_runtime_handshake(
     return path
 
 
+class _UiHttpServer(ThreadingHTTPServer):
+    # The engine answers nothing while the speech model loads (the load holds
+    # the GIL for seconds). Connections the window opens meanwhile wait in the
+    # listen backlog; with the default of 5 it fills, and the shell's liveness
+    # check (a TCP connect) then fails and it deletes the handshake.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 @dataclass
 class UiServerHandle:
     server: ThreadingHTTPServer
@@ -969,7 +978,7 @@ def serve(
         backend.broker = broker
     token = token or secrets.token_urlsafe(32)
 
-    server = ThreadingHTTPServer((host, port), UiRequestHandler)
+    server = _UiHttpServer((host, port), UiRequestHandler)
     server.backend = backend  # type: ignore[attr-defined]
     server.token = token  # type: ignore[attr-defined]
     server.broker = broker  # type: ignore[attr-defined]
