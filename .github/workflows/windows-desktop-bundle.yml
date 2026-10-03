@@ -45,6 +45,10 @@ jobs:
           DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-desktop.ps1 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\windows-bundle.log"
 
+      - name: Cold-start smoke of the built engine
+        shell: pwsh
+        run: .\scripts\windows-engine-smoke.ps1 -EngineDir "ui-shell\src-tauri\engine" -Label "MSI/NSIS payload" -JsonPath "$env:RUNNER_TEMP\windows-engine-smoke.json"
+
       - name: Upload artifacts (.msi / setup .exe)
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
@@ -62,5 +66,7 @@ jobs:
         with:
           name: windows-bundle-log
           retention-days: 7
-          path: ${{ runner.temp }}\windows-bundle.log
+          path: |
+            ${{ runner.temp }}\windows-bundle.log
+            ${{ runner.temp }}\windows-engine-smoke.json
           if-no-files-found: warn
