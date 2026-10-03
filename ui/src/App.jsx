@@ -491,7 +491,8 @@ function CaptureHome() {
                   <div className="note-status-sub">Click to dictate</div>
                 )}
                 {/* Getting started (per-session): teach the key on a fresh launch. */}
-                {gettingStarted && s.modelPhase !== "failed" && (
+                {/* Not while the model loads: the engine's shortcut listener starts once it is ready. */}
+                {gettingStarted && s.modelReady && (
                   <>
                     <div className="note-status-hint">or hold <Combo keys={s.shortcut.map(shortcutKeyLabel)} /></div>
                     <GsKeyboard />

@@ -1354,12 +1354,15 @@ describe("Speech model readiness", () => {
 
   it("shows Getting ready… until the model event, and holds the mic until then", async () => {
     const { sources, fetchSpy } = liveEngine([loading]);
-    render(<App />);
+    const { container } = render(<App />);
 
     // In the desktop shell the home says "Getting ready…" before the engine answers.
     expect(screen.getByText("Getting ready…")).toBeInTheDocument();
     expect(await screen.findByRole("status")).toHaveTextContent(/Dictation works in a few seconds/i);
     expect(screen.queryByText("Click to dictate")).not.toBeInTheDocument();
+    // The shortcut is not offered yet: the engine starts its listener once the model is ready.
+    expect(screen.queryByText(/or hold/i)).not.toBeInTheDocument();
+    expect(container.querySelector(".gs-kbd")).not.toBeInTheDocument();
 
     // A mic click while loading says so instead of hanging on a busy engine.
     fireEvent.click(screen.getByLabelText("Start recording"));
@@ -1374,6 +1377,8 @@ describe("Speech model readiness", () => {
 
     expect(screen.getByText("Click to dictate")).toBeInTheDocument();
     expect(screen.queryByText("Getting ready…")).not.toBeInTheDocument();
+    expect(screen.getByText(/or hold/i)).toBeInTheDocument();
+    expect(container.querySelector(".gs-kbd")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Start recording"));
     await waitFor(() => expect(noteStarts()).toBe(1));
   });
