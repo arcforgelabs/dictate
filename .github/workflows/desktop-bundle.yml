@@ -69,7 +69,9 @@ jobs:
           set -euo pipefail
           ENGINE_DIR="$PWD/ui-shell/src-tauri/engine"
           echo "engine resources: $(du -sh "$ENGINE_DIR" | cut -f1), $(find "$ENGINE_DIR" -type f | wc -l) files"
-          found="$(find "$ENGINE_DIR" \( -iname '*torch*' -o -iname '*pyannote*' \) | head -20)"
+          # pyannote counts as a directory (package, dist-info, model folder):
+          # onnx-asr ships its own onnx_asr/models/pyannote.py, which is not it.
+          found="$(find "$ENGINE_DIR" \( -iname '*torch*' -o \( -type d -iname '*pyannote*' \) \) | head -20)"
           if [ -n "$found" ]; then
             echo "::error::torch or pyannote files in the staged engine"
             printf '%s\n' "$found"
@@ -79,11 +81,11 @@ jobs:
           shopt -s nullglob
           for deb in ui-shell/src-tauri/target/release/bundle/deb/*.deb; do
             listing="$(dpkg-deb -c "$deb")"
-            count="$(printf '%s\n' "$listing" | grep -ciE 'torch|pyannote' || true)"
+            count="$(printf '%s\n' "$listing" | grep -ciE 'torch|/[^/]*pyannote[^/]*/' || true)"
             echo "$(basename "$deb"): $(stat -c%s "$deb") bytes, $(printf '%s\n' "$listing" | wc -l) entries, ${count} torch/pyannote entries"
             if [ "$count" != "0" ]; then
               echo "::error::$(basename "$deb") contains torch or pyannote"
-              printf '%s\n' "$listing" | grep -iE 'torch|pyannote' | head -20
+              printf '%s\n' "$listing" | grep -iE 'torch|/[^/]*pyannote[^/]*/' | head -20
               exit 1
             fi
           done

@@ -253,7 +253,7 @@ class WindowsPlatformTests(unittest.TestCase):
         removed = spec[spec.index("_REMOVED_PACKAGES = {"):spec.index("_REMOVED_DIRS")]
         for package in ("torch", "torchaudio", "torchcodec", "pyannote"):
             self.assertIn(f'"{package}"', removed)
-        self.assertIn("-name 'libtorch*' -o -name 'pyannote*'", engine_script)
+        self.assertIn(r"-o -name 'libtorch*' -o \( -type d -name 'pyannote*' \)", engine_script)
         self.assertIn("DICTATE_PARAKEET_MODEL_PATH", shell)
         self.assertIn("bundled_parakeet_model", shell)
 

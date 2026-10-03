@@ -79,11 +79,14 @@ fi
 # The Whisper-family runtimes and the Meeting runtime (torch, pyannote; #140)
 # were removed. dictate-engine.spec already fails on them; this checks the
 # files that actually landed (onedir: _internal/) and the staged models.
+# pyannote is matched as a directory (the package, its dist-info, a model
+# folder): onnx-asr ships its own onnx_asr/models/pyannote.py, which needs
+# neither torch nor pyannote.
 ENGINE_DIR="$(cd "$(dirname "$BIN")" && pwd)"
 REMOVED_RUNTIME="$(find "$ENGINE_DIR" "$STAGE_DIR" \( -name 'av' -o -name 'av.libs' -o -name 'ctranslate2*' \
   -o -name 'faster_whisper*' -o -name 'whisperx*' -o -name 'libx264*' -o -name 'libx265*' \
   -o -name 'torch' -o -name 'torch.libs' -o -name 'torchaudio*' -o -name 'torchcodec*' \
-  -o -name 'libtorch*' -o -name 'pyannote*' \) 2>/dev/null || true)"
+  -o -name 'libtorch*' -o \( -type d -name 'pyannote*' \) \) 2>/dev/null || true)"
 if [ -n "$REMOVED_RUNTIME" ]; then
   echo "✗ frozen engine contains a removed Whisper-family or Meeting runtime:" >&2
   printf '%s\n' "$REMOVED_RUNTIME" | head -20 >&2
