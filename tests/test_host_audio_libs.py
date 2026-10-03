@@ -34,6 +34,8 @@ class HostAudioBinaryTests(unittest.TestCase):
             "libpulse-simple.so.0",
             "libpulsecommon-15.0.so",
             "_internal/libportaudio.so.2",
+            "libjack.so.0",
+            "libdb-5.3.so",
         ):
             with self.subTest(name=name):
                 self.assertTrue(is_host_audio_binary(name))
@@ -44,6 +46,7 @@ class HostAudioBinaryTests(unittest.TestCase):
             "libtorch.so",
             "libonnxruntime.so",
             "libgcc_s.so.1",
+            "libdbus-1.so.3",
         ):
             with self.subTest(name=name):
                 self.assertFalse(is_host_audio_binary(name))

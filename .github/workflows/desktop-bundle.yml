@@ -2,7 +2,8 @@ name: Desktop bundle (manual)
 
 # Manual builder for the Linux desktop bundle — lets us iterate on the .deb /
 # AppImage packaging (e.g. debug linuxdeploy) without cutting a release. Uploads
-# whatever artifacts are produced plus the full build log.
+# whatever artifacts are produced plus the full build log. It also runs one
+# Meeting pass (pyannote + Parakeet) through the frozen engine it just built.
 on:
   workflow_dispatch:
     inputs:
@@ -18,8 +19,30 @@ permissions:
   contents: read
 
 jobs:
+  meeting-fixture:
+    # A separate runner, so the FFmpeg that renders the two-voice fixture is
+    # never on the machine that freezes and runs the engine. The engine ships
+    # without FFmpeg, and the Meeting smoke below must run that way too.
+    name: Two-voice Meeting fixture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Render the flite two-voice fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          bash scripts/generate-meeting-benchmark-fixtures.sh "$RUNNER_TEMP/fixture"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: meeting-fixture
+          retention-days: 1
+          path: |
+            ${{ runner.temp }}/fixture/manifest.csv
+            ${{ runner.temp }}/fixture/flite_meeting.wav
+
   bundle:
     name: Build desktop bundle
+    needs: meeting-fixture
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -59,7 +82,58 @@ jobs:
           DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
           NO_STRIP: "true"
           ARCH: "x86_64"
-        run: ./scripts/build-linux-desktop.sh 2>&1 | tee /tmp/bundle.log
+        run: |
+          set -o pipefail
+          ./scripts/build-linux-desktop.sh 2>&1 | tee /tmp/bundle.log
+
+      - name: Check the freeze imported torchaudio and pyannote.audio
+        run: |
+          if grep -E "Failed to collect submodules for '(torchaudio|pyannote\.audio)'" /tmp/bundle.log; then
+            echo "::error::PyInstaller could not import torchaudio or pyannote.audio, so Meeting's model modules are missing"
+            exit 1
+          fi
+          echo "torchaudio and pyannote.audio imported at freeze time"
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: meeting-fixture
+          path: ${{ runner.temp }}/fixture
+
+      - name: "Meeting through the frozen engine (pyannote + Parakeet, CPU, offline)"
+        env:
+          HOME: ${{ runner.temp }}/home-meeting
+          XDG_DATA_HOME: ${{ runner.temp }}/dictate-data
+          HF_HUB_OFFLINE: "1"
+        run: |
+          mkdir -p "$HOME"
+          ENGINE_DIR="$PWD/ui-shell/src-tauri/engine"
+          # The packaged engine ships no FFmpeg; say whether the runner has one.
+          ldconfig -p | grep -E 'libav(codec|format)\.so' \
+            && echo "::warning::system FFmpeg libraries are visible to the engine" \
+            || echo "no system FFmpeg libraries visible to the engine"
+          DICTATE_PARAKEET_MODEL_PATH="$ENGINE_DIR/models/parakeet-tdt-0.6b-v2-onnx" \
+          DICTATE_PYANNOTE_MODEL_PATH="$ENGINE_DIR/models/pyannote-speaker-diarization-community-1" \
+            "$ENGINE_DIR/dictate-engine" benchmark \
+              --manifest "$RUNNER_TEMP/fixture/manifest.csv" \
+              --audio-root "$RUNNER_TEMP/fixture" \
+              --stt-backend parakeet-pyannote \
+              --model parakeet-tdt-0.6b-v2 \
+              --device cpu \
+              --diarize \
+              --require-speaker-attribution \
+              --require-der-metrics \
+              --max-mean-der 0.30 \
+              --json-output "$RUNNER_TEMP/meeting-frozen.json" \
+              --run-label ci-frozen-engine-cpu-flite-meeting
+
+      - name: Upload the Meeting smoke report
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: meeting-frozen-engine
+          retention-days: 14
+          path: ${{ runner.temp }}/meeting-frozen.json
+          if-no-files-found: warn
 
       - name: Upload artifacts (.deb / .AppImage)
         if: always()
