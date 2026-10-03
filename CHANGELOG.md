@@ -61,6 +61,13 @@
 
 ### Fixed
 
+- Dictation works on Windows. The engine read the system's default microphone
+  from sounddevice as a list, but sounddevice returns a pair object, so the
+  default was lost; on Windows nothing else matched, and every recording
+  failed with "no microphone input devices detected" even with microphones
+  plugged in. The engine now reads the default correctly and, failing that,
+  tries any device that can capture.
+
 - The window connects to its engine even when the engine is slow to start.
   It used to wait 8 seconds and then stay on "Dictate engine is not
   connected" for good, even after the engine came up; the Windows Store
