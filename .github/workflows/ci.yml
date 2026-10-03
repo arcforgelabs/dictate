@@ -136,7 +136,7 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: src
-        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python python -EnableHistoryForTest
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File scripts\windows-clipboard-smoke.ps1 -Python python -EnableHistoryForTest -RequireHistory
 
   npm:
     name: npm package check

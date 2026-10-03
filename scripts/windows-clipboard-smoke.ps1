@@ -19,6 +19,9 @@ real Ctrl+V; use it on an unlocked desktop and close Notepad without saving.
 -EnableHistoryForTest turns clipboard history on for the current user first.
 It changes a user setting, so it is meant for throwaway CI machines only.
 
+-RequireHistory fails the run unless history is readable, records an ordinary
+copy, and does not hold the dictated text.
+
 Two OLE bookkeeping formats ("DataObject", "Ole Private Data") point at the
 source app's live data object; Dictate does not carry them over, so they are
 left out of the comparison. The restored clipboard also carries
@@ -29,7 +32,8 @@ param(
     [string]$Python = ".\.venv\Scripts\python.exe",
     [ValidateSet("edit", "notepad")]
     [string]$Target = "edit",
-    [switch]$EnableHistoryForTest
+    [switch]$EnableHistoryForTest,
+    [switch]$RequireHistory
 )
 
 $ErrorActionPreference = "Stop"
@@ -250,6 +254,9 @@ if ($historyAfter.Readable) {
     }
 } else {
     Write-Host "    history not readable: $($historyAfter.Reason)"
+}
+if ($RequireHistory -and -not ($historyWorks -and $historyAfter.Readable)) {
+    $failures += "clipboard history could not be checked here (-RequireHistory)"
 }
 
 Remove-Item -LiteralPath $dropFile -ErrorAction SilentlyContinue
