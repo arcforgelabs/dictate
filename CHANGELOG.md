@@ -24,6 +24,9 @@
   the Windows installer's CUDA step. Updating removes a leftover GPU ONNX
   Runtime from a Windows install, and old flags (`--gpu`, `-ForceCuda`,
   `-NoCuda`) are ignored with a notice.
+- GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
+  CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
+  GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A

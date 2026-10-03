@@ -184,8 +184,8 @@ scripts/build-windows-msix-store.ps1
   Microsoft certification.
 - Local VM evidence: `scripts/windows-vm-smoke.sh --vm win11-dev --mode msix
   --timeout 2400 --keep-guest-workdir` passed on 2026-07-05 after the current
-  Parakeet-first installer/default, Meeting readiness, benchmark, Windows AMD
-  DirectML, AMD evidence-import, and segment-aware UI changes. It produced
+  Parakeet-first installer/default, Meeting readiness, benchmark,
+  evidence-import, and segment-aware UI changes. It produced
   `C:\Users\Public\dictate-vm-smoke\source\packaging\msix\out\ArcForgeDictate_2026.7.4.0_x64.msix`,
   smoke-tested the frozen engine binary, and validated the unpacked manifest,
   shell executable, and engine sidecar.
@@ -200,15 +200,8 @@ scripts/build-windows-msix-store.ps1
   win11-dev --mode lifecycle --timeout 2400 --keep-guest-workdir` passed on
   2026-07-05 after the same fresh-config install path, update, default Parakeet
   doctor check, and uninstall.
-- Windows AMD DirectML smoke evidence: `scripts/windows-vm-smoke.sh --vm
-  win11-dev --mode amd --timeout 1800 --keep-guest-workdir` passed on
-  2026-07-05 after the Parakeet-first installer/default and fresh-config smoke
-  changes. It resets guest Dictate app data, seeds a fresh config, runs 196
-  focused Windows tests with 15 skips, installs the `amd` extra, verifies
-  `DmlExecutionProvider`, and runs `dictate doctor --stt-backend parakeet
-  --device amd --quick --type-backend pynput` in the guest. This checks
-  DirectML packaging/readiness, not Radeon performance. Historical: the `amd`
-  extra was removed on 2026-10-01.
+- The Windows AMD DirectML smoke (`--mode amd`) was removed with the GPU lanes
+  on 2026-10-01 (#112); its last evidence is in this file's git history.
 - The manifest identity is pinned to Partner Center:
   `ArcForgeLabs.ArcForgeDictate` and
   `CN=56989B1A-E9FD-45E0-827B-FDB65D3C9B3C`.
