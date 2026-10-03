@@ -31,9 +31,6 @@ def audit(root: Path) -> list[Gate]:
     gates = [
         _plan_doc_gate(root),
         _fixture_tooling_gate(root),
-        # CUDA and AMD lanes are no longer supported (CPU only); their gates
-        # are not readiness blockers. Removal of the gate code is tracked in
-        # the GPU extraction issues.
         _meeting_promotion_gate(root),
         _windows_vm_evidence_gate(root),
         _update_scope_gate(root),
@@ -147,8 +144,6 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "scripts/generate-long-benchmark-fixtures.sh",
         "scripts/generate-meeting-benchmark-fixtures.sh",
         "scripts/import-transcription-evidence.py",
-        "scripts/run-amd-promotion-benchmarks.sh",
-        "scripts/run-amd-promotion-benchmarks.ps1",
         "scripts/run-human-test-readiness.sh",
         "scripts/run-human-test-readiness.ps1",
         "scripts/run-transcription-lane-benchmarks.sh",
@@ -165,12 +160,10 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "parakeet-pyannote",
         "parakeet-diarizen",
         "parakeet-sortformer",
-        "cuda-human",
-        "amd-human",
+        "cpu-human",
         "meeting-human",
         "--fixture-class",
-        "--device",
-        "amd",
+        "--device cpu",
     ]
     missing_runner_markers = [needle for needle in required if needle not in runner_text]
     if missing_runner_markers:
@@ -179,50 +172,12 @@ def _fixture_tooling_gate(root: Path) -> Gate:
             "fail",
             f"lane runner missing preflight markers: {', '.join(missing_runner_markers)}",
         )
-    amd_runner = root / "scripts" / "run-amd-promotion-benchmarks.sh"
-    amd_runner_text = amd_runner.read_text(encoding="utf-8")
-    required_amd_runner = [
-        "generate-curated-human-asr-fixture.sh",
-        "amd-human",
-        "amd-human-v3",
-        "transcription_plan_audit.py",
-        "collect-transcription-evidence.sh",
-    ]
-    missing_amd_runner_markers = [
-        needle for needle in required_amd_runner if needle not in amd_runner_text
-    ]
-    if missing_amd_runner_markers:
-        return Gate(
-            "benchmark_fixture_tooling",
-            "fail",
-            "AMD promotion runner missing markers: " + ", ".join(missing_amd_runner_markers),
-        )
-    amd_runner_ps1 = root / "scripts" / "run-amd-promotion-benchmarks.ps1"
-    amd_runner_ps1_text = amd_runner_ps1.read_text(encoding="utf-8")
-    required_amd_runner_ps1 = [
-        "parakeet-v2-amd-human-gated.json",
-        "parakeet-v3-amd-human-gated.json",
-        "DmlExecutionProvider",
-        "transcription_plan_audit.py",
-        "collect-transcription-evidence.ps1",
-    ]
-    missing_amd_runner_ps1_markers = [
-        needle for needle in required_amd_runner_ps1 if needle not in amd_runner_ps1_text
-    ]
-    if missing_amd_runner_ps1_markers:
-        return Gate(
-            "benchmark_fixture_tooling",
-            "fail",
-            "Windows AMD promotion runner missing markers: "
-            + ", ".join(missing_amd_runner_ps1_markers),
-        )
     readiness_runner = root / "scripts" / "run-human-test-readiness.sh"
     readiness_runner_text = readiness_runner.read_text(encoding="utf-8")
     required_readiness_runner = [
         "transcription_plan_audit.py --readiness",
         "dictate doctor",
         "dictate --once",
-        "run-amd-promotion-benchmarks.sh",
     ]
     missing_readiness_runner_markers = [
         needle for needle in required_readiness_runner if needle not in readiness_runner_text
@@ -241,7 +196,6 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "--readiness",
         "-m dictate doctor",
         "-m dictate --once",
-        "run-amd-promotion-benchmarks.ps1",
     ]
     missing_readiness_runner_ps1_markers = [
         needle for needle in required_readiness_runner_ps1 if needle not in readiness_runner_ps1_text
@@ -261,12 +215,11 @@ def _fixture_tooling_gate(root: Path) -> Gate:
             "human-lane-dry-run.txt",
             "lane-readiness.txt",
             "promotion-status.txt",
-            "cuda-parakeet-v2",
+            "cpu-parakeet-v2",
             "meeting-sortformer",
             "machine.txt",
-            "parakeet-v2-cuda-human-gated.json",
-            "parakeet-v2-amd-human-gated.json",
-            "parakeet-pyannote-cuda-human-meeting.json",
+            "parakeet-v2-cpu-human-gated.json",
+            "parakeet-pyannote-cpu-human-meeting.json",
         ],
         "scripts/collect-transcription-evidence.ps1": [
             "benchmark-results/*.json",
@@ -275,16 +228,15 @@ def _fixture_tooling_gate(root: Path) -> Gate:
             "human-lane-dry-run.txt",
             "lane-readiness.txt",
             "promotion-status.txt",
-            "cuda-parakeet-v2",
+            "cpu-parakeet-v2",
             "meeting-sortformer",
             "machine.txt",
             "Compress-Archive",
-            "parakeet-v2-amd-flite-long-3x-gated.json",
-            "parakeet-diarizen-cuda-flite-meeting.json",
-            "parakeet-sortformer-cuda-flite-meeting.json",
-            "parakeet-v2-cuda-human-gated.json",
-            "parakeet-v2-amd-human-gated.json",
-            "parakeet-pyannote-cuda-human-meeting.json",
+            "parakeet-v2-cpu-flite-long-3x-gated.json",
+            "parakeet-diarizen-cpu-flite-meeting.json",
+            "parakeet-sortformer-cpu-flite-meeting.json",
+            "parakeet-v2-cpu-human-gated.json",
+            "parakeet-pyannote-cpu-human-meeting.json",
         ],
     }
     missing_collector_markers: list[str] = []
@@ -332,166 +284,35 @@ def _fixture_tooling_gate(root: Path) -> Gate:
     )
 
 
-def _cuda_cpu_comparison_gate(root: Path) -> Gate:
-    cpu_path = root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json"
-    cuda_path = root / "benchmark-results" / "parakeet-v2-cuda-flite-long-3x-gated.json"
-    missing = [str(path.relative_to(root)) for path in (cpu_path, cuda_path) if not path.exists()]
-    if missing:
-        return Gate("cuda_vs_cpu_synthetic", "missing", f"missing benchmark artifacts: {', '.join(missing)}")
-    try:
-        cpu = _read_json(cpu_path)
-        cuda = _read_json(cuda_path)
-        cpu_summary = cpu["summary"]
-        cuda_summary = cuda["summary"]
-        cpu_rtfx = float(cpu_summary["mean_rtfx"])
-        cuda_rtfx = float(cuda_summary["mean_rtfx"])
-    except Exception as exc:  # noqa: BLE001
-        return Gate("cuda_vs_cpu_synthetic", "fail", f"could not parse benchmark artifacts: {exc}")
-
-    cpu_device = cpu.get("config", {}).get("device")
-    cuda_device = cuda.get("config", {}).get("device")
-    if cpu_device != "cpu" or cuda_device != "cuda":
-        return Gate(
-            "cuda_vs_cpu_synthetic",
-            "fail",
-            f"unexpected devices: cpu artifact={cpu_device!r}, cuda artifact={cuda_device!r}",
-        )
-    if cuda_rtfx <= cpu_rtfx:
-        return Gate(
-            "cuda_vs_cpu_synthetic",
-            "blocked",
-            f"CUDA RTFx {cuda_rtfx:.2f} is not above CPU RTFx {cpu_rtfx:.2f}",
-        )
-    return Gate(
-        "cuda_vs_cpu_synthetic",
-        "pass",
-        f"CUDA RTFx {cuda_rtfx:.2f} > CPU RTFx {cpu_rtfx:.2f} on synthetic long fixture",
-    )
-
-
-def _cuda_multilingual_gate(root: Path) -> Gate:
-    path = root / "benchmark-results" / "parakeet-v3-cuda-flite-long-3x-gated.json"
-    if not path.exists():
-        return Gate("cuda_multilingual_synthetic", "missing", "missing Parakeet v3 CUDA benchmark artifact")
-    try:
-        report = _read_json(path)
-        config = report["config"]
-        summary = report["summary"]
-        rtfx = float(summary["mean_rtfx"])
-    except Exception as exc:  # noqa: BLE001
-        return Gate("cuda_multilingual_synthetic", "fail", f"could not parse Parakeet v3 CUDA artifact: {exc}")
-
-    model = config.get("model")
-    device = config.get("device")
-    if model != "parakeet-tdt-0.6b-v3" or device != "cuda":
-        return Gate(
-            "cuda_multilingual_synthetic",
-            "fail",
-            f"unexpected model/device: model={model!r}, device={device!r}",
-        )
-    failed_gates = [
-        gate.get("name", "unknown")
-        for gate in report.get("gates", [])
-        if gate.get("passed") is False
-    ]
-    if failed_gates:
-        return Gate(
-            "cuda_multilingual_synthetic",
-            "blocked",
-            f"Parakeet v3 CUDA benchmark has failed gates: {', '.join(failed_gates)}",
-        )
-    boundary_pairs = summary.get("segment_boundary_pair_count")
-    if not isinstance(boundary_pairs, int) or boundary_pairs <= 0:
-        return Gate("cuda_multilingual_synthetic", "blocked", "Parakeet v3 CUDA artifact has no timestamp evidence")
-    return Gate(
-        "cuda_multilingual_synthetic",
-        "pass",
-        f"Parakeet v3 CUDA RTFx {rtfx:.2f} with timestamp metrics on synthetic long fixture",
-    )
-
-
-def _cuda_human_promotion_gate(root: Path) -> Gate:
-    targets = [
-        (
-            "benchmark-results/parakeet-v2-cuda-human-gated.json",
-            "parakeet-tdt-0.6b-v2",
-            "CUDA English",
-        ),
-        (
-            "benchmark-results/parakeet-v3-cuda-human-gated.json",
-            "parakeet-tdt-0.6b-v3",
-            "CUDA multilingual",
-        ),
-    ]
-    missing = [relative for relative, _model, _label in targets if not (root / relative).exists()]
-    if missing:
-        return Gate(
-            "cuda_human_promotion",
-            "blocked",
-            "missing curated-human CUDA benchmark artifacts: " + ", ".join(missing),
-        )
-
-    details: list[str] = []
-    for relative, expected_model, label in targets:
-        try:
-            report = _read_json(root / relative)
-            config = report["config"]
-            summary = report["summary"]
-            rtfx = float(summary["mean_rtfx"])
-        except Exception as exc:  # noqa: BLE001
-            return Gate("cuda_human_promotion", "fail", f"could not parse {relative}: {exc}")
-        if config.get("fixture_class") != "curated-human":
-            return Gate(
-                "cuda_human_promotion",
-                "fail",
-                f"{label} artifact is not marked fixture_class='curated-human'",
-            )
-        model = config.get("model")
-        device = config.get("device")
-        if model != expected_model or device != "cuda":
-            return Gate(
-                "cuda_human_promotion",
-                "fail",
-                f"{label} artifact has unexpected model/device: model={model!r}, device={device!r}",
-            )
-        failed_gates = [
-            gate.get("name", "unknown")
-            for gate in report.get("gates", [])
-            if gate.get("passed") is False
-        ]
-        if failed_gates:
-            return Gate(
-                "cuda_human_promotion",
-                "blocked",
-                f"{label} curated-human benchmark has failed gates: {', '.join(failed_gates)}",
-            )
-        completed = summary.get("completed_samples", summary.get("samples"))
-        if not isinstance(completed, int) or completed <= 0:
-            return Gate("cuda_human_promotion", "blocked", f"{label} has no completed samples")
-        boundary_pairs = summary.get("segment_boundary_pair_count")
-        if not isinstance(boundary_pairs, int) or boundary_pairs <= 0:
-            return Gate("cuda_human_promotion", "blocked", f"{label} has no timestamp evidence")
-        details.append(f"{label} RTFx {rtfx:.2f}")
-    return Gate(
-        "cuda_human_promotion",
-        "pass",
-        f"curated-human CUDA promotion artifacts pass gates: {'; '.join(details)}",
-    )
-
-
 def _meeting_promotion_gate(root: Path) -> Gate:
     targets = [
-        ("benchmark-results/parakeet-pyannote-cuda-human-meeting.json", "parakeet-pyannote"),
-        ("benchmark-results/parakeet-diarizen-cuda-human-meeting.json", "parakeet-diarizen"),
-        ("benchmark-results/parakeet-sortformer-cuda-human-meeting.json", "parakeet-sortformer"),
+        ("benchmark-results/parakeet-pyannote-cpu-human-meeting.json", "parakeet-pyannote"),
+        ("benchmark-results/parakeet-diarizen-cpu-human-meeting.json", "parakeet-diarizen"),
+        ("benchmark-results/parakeet-sortformer-cpu-human-meeting.json", "parakeet-sortformer"),
     ]
     missing = [relative for relative, _backend in targets if not (root / relative).exists()]
     if missing:
-        return Gate(
-            "meeting_speaker_attribution",
-            "blocked",
-            "missing curated-human meeting benchmark artifacts: " + ", ".join(missing),
+        detail = "missing curated-human meeting benchmark artifacts: " + ", ".join(missing)
+        # Artifacts written before the gate moved to CPU runs keep their old
+        # names. Name them so a workstation that used to pass sees why it no
+        # longer does, instead of only a list of missing files.
+        expected = {Path(relative).name for relative, _backend in targets}
+        results = root / "benchmark-results"
+        unread = (
+            sorted(
+                path.name
+                for path in results.glob("parakeet-*-human-meeting.json")
+                if path.name not in expected
+            )
+            if results.is_dir()
+            else []
         )
+        if unread:
+            detail += (
+                "; not read (only *-cpu-human-meeting.json counts; rerun the "
+                "meeting-*-human lanes on the CPU): " + ", ".join(unread)
+            )
+        return Gate("meeting_speaker_attribution", "blocked", detail)
 
     details: list[str] = []
     blockers: list[str] = []
@@ -522,6 +343,12 @@ def _meeting_promotion_gate(root: Path) -> Gate:
                 "meeting_speaker_attribution",
                 "fail",
                 f"{expected_backend} artifact is not marked fixture_class='curated-human'",
+            )
+        if config.get("device") != "cpu":
+            return Gate(
+                "meeting_speaker_attribution",
+                "fail",
+                f"{expected_backend} artifact was not a CPU run: device={config.get('device')!r}",
             )
         if config.get("require_speaker_attribution") is not True:
             return Gate(
@@ -557,109 +384,6 @@ def _meeting_promotion_gate(root: Path) -> Gate:
         + "; ".join(details)
         + (f"; remaining candidates: {'; '.join(blockers)}" if blockers else ""),
     )
-
-
-def _amd_performance_gate(root: Path) -> Gate:
-    cpu_path = root / "benchmark-results" / "parakeet-v2-cpu-flite-long-3x-gated.json"
-    targets = [
-        (
-            "benchmark-results/parakeet-v2-amd-human-gated.json",
-            "parakeet-tdt-0.6b-v2",
-            "AMD English",
-        ),
-        (
-            "benchmark-results/parakeet-v3-amd-human-gated.json",
-            "parakeet-tdt-0.6b-v3",
-            "AMD multilingual",
-        ),
-    ]
-    missing = [relative for relative, _model, _label in targets if not (root / relative).exists()]
-    if missing:
-        return Gate(
-            "amd_radeon_performance",
-            "blocked",
-            "missing AMD benchmark artifacts: "
-            + ", ".join(missing)
-            + "; synthetic DirectML readiness is not Radeon performance evidence",
-        )
-    try:
-        cpu_rtfx = float(_read_json(cpu_path)["summary"]["mean_rtfx"])
-    except Exception as exc:  # noqa: BLE001
-        return Gate("amd_radeon_performance", "fail", f"could not parse CPU baseline artifact: {exc}")
-
-    details: list[str] = []
-    for relative, expected_model, label in targets:
-        path = root / relative
-        try:
-            report = _read_json(path)
-            config = report["config"]
-            summary = report["summary"]
-            rtfx = float(summary["mean_rtfx"])
-        except Exception as exc:  # noqa: BLE001
-            return Gate("amd_radeon_performance", "fail", f"could not parse {relative}: {exc}")
-        model = config.get("model")
-        device = config.get("device")
-        if model != expected_model or device != "amd":
-            return Gate(
-                "amd_radeon_performance",
-                "fail",
-                f"{label} artifact has unexpected model/device: model={model!r}, device={device!r}",
-            )
-        if config.get("fixture_class") != "curated-human":
-            return Gate(
-                "amd_radeon_performance",
-                "fail",
-                f"{label} artifact is not marked fixture_class='curated-human'",
-            )
-        if not _has_amd_hardware_signal(report):
-            return Gate(
-                "amd_radeon_performance",
-                "blocked",
-                f"{label} artifact has no AMD/Radeon hardware provenance in benchmark environment",
-            )
-        failed_gates = [
-            gate.get("name", "unknown")
-            for gate in report.get("gates", [])
-            if gate.get("passed") is False
-        ]
-        if failed_gates:
-            return Gate(
-                "amd_radeon_performance",
-                "blocked",
-                f"{label} benchmark has failed gates: {', '.join(failed_gates)}",
-            )
-        boundary_pairs = summary.get("segment_boundary_pair_count")
-        if not isinstance(boundary_pairs, int) or boundary_pairs <= 0:
-            return Gate("amd_radeon_performance", "blocked", f"{label} artifact has no timestamp evidence")
-        if rtfx <= cpu_rtfx:
-            return Gate(
-                "amd_radeon_performance",
-                "blocked",
-                f"{label} RTFx {rtfx:.2f} is not above CPU baseline {cpu_rtfx:.2f}",
-            )
-        details.append(f"{label} RTFx {rtfx:.2f}")
-    return Gate(
-        "amd_radeon_performance",
-        "pass",
-        f"{'; '.join(details)} above CPU RTFx {cpu_rtfx:.2f} on representative AMD artifacts",
-    )
-
-
-def _has_amd_hardware_signal(report: dict[str, Any]) -> bool:
-    environment = report.get("environment", {})
-    if not isinstance(environment, dict):
-        return False
-    providers = environment.get("onnxruntime_providers", [])
-    provider_text = " ".join(str(provider).lower() for provider in providers if isinstance(provider, str))
-    hardware_text = " ".join(
-        str(line).lower()
-        for line in environment.get("gpu_summary", [])
-        if isinstance(line, str)
-    )
-    linux_amd_provider = any(provider in provider_text for provider in ("migraphxexecutionprovider", "rocmexecutionprovider"))
-    amd_hardware = any(token in hardware_text for token in ("radeon", "advanced micro devices", "amd/ati"))
-    windows_amd_provider = "dmlexecutionprovider" in provider_text and amd_hardware
-    return linux_amd_provider or windows_amd_provider
 
 
 def _windows_vm_evidence_gate(root: Path) -> Gate:

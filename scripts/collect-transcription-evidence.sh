@@ -10,7 +10,7 @@ usage() {
 Usage: scripts/collect-transcription-evidence.sh [--output DIR] [--dry-run]
 
 Collect non-secret transcription readiness evidence into a timestamped archive.
-The bundle is intended for human-test handoff from AMD, CUDA, or Meeting test
+The bundle is intended for human-test handoff from CPU or Meeting test
 machines after running scripts/run-transcription-lane-benchmarks.sh.
 
 Collected:
@@ -22,7 +22,7 @@ Collected:
   human promotion lane dry-run output
   lane doctor readiness output
   promotion artifact status
-  basic machine/provider context without environment variables or secrets
+  basic machine/CPU context without environment variables or secrets
 EOF
 }
 
@@ -109,7 +109,7 @@ shopt -u nullglob
 
 {
   cd "$repo_root"
-  for lane in cuda-human cuda-human-v3 amd-human amd-human-v3 meeting-human meeting-diarizen-human meeting-sortformer-human; do
+  for lane in cpu-human cpu-human-v3 meeting-human meeting-diarizen-human meeting-sortformer-human; do
     echo "## $lane"
     scripts/run-transcription-lane-benchmarks.sh --dry-run --lane "$lane"
     echo
@@ -121,13 +121,11 @@ shopt -u nullglob
   echo "Collected at UTC: $timestamp"
   echo
   expected=(
-    benchmark-results/parakeet-v2-cuda-human-gated.json
-    benchmark-results/parakeet-v3-cuda-human-gated.json
-    benchmark-results/parakeet-v2-amd-human-gated.json
-    benchmark-results/parakeet-v3-amd-human-gated.json
-    benchmark-results/parakeet-pyannote-cuda-human-meeting.json
-    benchmark-results/parakeet-diarizen-cuda-human-meeting.json
-    benchmark-results/parakeet-sortformer-cuda-human-meeting.json
+    benchmark-results/parakeet-v2-cpu-human-gated.json
+    benchmark-results/parakeet-v3-cpu-human-gated.json
+    benchmark-results/parakeet-pyannote-cpu-human-meeting.json
+    benchmark-results/parakeet-diarizen-cpu-human-meeting.json
+    benchmark-results/parakeet-sortformer-cpu-human-meeting.json
   )
   for relative in "${expected[@]}"; do
     if [[ -s "$repo_root/$relative" ]]; then
@@ -162,13 +160,10 @@ shopt -u nullglob
   }
   cd "$repo_root"
   run_readiness "cpu-parakeet-v2" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
-  run_readiness "cuda-parakeet-v2" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device cuda --quick --type-backend pynput
-  run_readiness "cuda-parakeet-v3" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v3 --device cuda --quick --type-backend pynput
-  run_readiness "amd-parakeet-v2" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device amd --quick --type-backend pynput
-  run_readiness "amd-parakeet-v3" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v3 --device amd --quick --type-backend pynput
-  run_readiness "meeting-pyannote" uv run dictate doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cuda --quick --type-backend pynput
-  run_readiness "meeting-diarizen" uv run dictate doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cuda --quick --type-backend pynput
-  run_readiness "meeting-sortformer" uv run dictate doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cuda --quick --type-backend pynput
+  run_readiness "cpu-parakeet-v3" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v3 --device cpu --quick --type-backend pynput
+  run_readiness "meeting-pyannote" uv run dictate doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
+  run_readiness "meeting-diarizen" uv run dictate doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
+  run_readiness "meeting-sortformer" uv run dictate doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
 } >"$bundle_dir/lane-readiness.txt" 2>&1 || true
 
 {
@@ -183,22 +178,6 @@ shopt -u nullglob
     lscpu | sed -n '1,25p'
     echo
   fi
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    echo "NVIDIA:"
-    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
-    echo
-  fi
-  echo "ONNX Runtime providers:"
-  (
-    cd "$repo_root"
-    uv run python - <<'PY'
-try:
-    import onnxruntime as ort
-    print(",".join(ort.get_available_providers()))
-except Exception as exc:  # noqa: BLE001
-    print(f"unavailable: {exc}")
-PY
-  ) || true
 } >"$bundle_dir/machine.txt" 2>&1
 
 (
