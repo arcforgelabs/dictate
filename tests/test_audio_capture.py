@@ -164,7 +164,12 @@ class ResolveInputCaptureTests(unittest.TestCase):
             import sounddevice
         except Exception as exc:  # noqa: BLE001 - PortAudio missing on this host
             self.skipTest(f"sounddevice unavailable: {exc}")
+        # Other tests may leave a stub module in sys.modules; only the real
+        # library has the pair class this test is about.
+        if not hasattr(sounddevice, "_InputOutputPair") or not hasattr(sounddevice, "default"):
+            self.skipTest("sounddevice in sys.modules is a test stub, not the library")
         pair = sounddevice.default.device
+        self.assertIsInstance(pair, sounddevice._InputOutputPair)
         self.assertNotIsInstance(pair, (list, tuple))
         from dictate.audio import _default_input_device
 
