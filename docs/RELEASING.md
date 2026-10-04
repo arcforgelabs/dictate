@@ -117,11 +117,17 @@ sort in the order above; the npm strings are only names (see above).
 | ----------------------- | ----------------- | ----------------------- | ------------------------ |
 | Python (PEP 440)        | `2026.10.1`       | `2026.10.1b2`           | `2026.10.1.post1`        |
 | npm (named by dist-tag) | `2026.10.1`       | `2026.10.1-beta.2`      | `2026.10.1-1`            |
-| MSI (`YY.M.P.N`, WiX)   | `26.10.1.100`     | `26.10.1.2`             | `26.10.1.101`            |
+| MSI (WiX)               | `26.10.1100.0`    | `26.10.1002.0`          | `26.10.1101.0`           |
 
-MSI versions are numeric, with major and minor at most 255. The fourth field
-orders betas (1–99) below the final (100) and corrections (101+) of the same
-release, so every later build installs over an earlier one.
+MSI versions are numeric: major `YY` and minor `M`, each at most 255, then a
+build number of at most 65535. Windows Installer compares only those three
+fields and ignores a fourth, so the order lives in the build number:
+`patch × 1000 + slot`, where the slot is N for beta N (1–99), 100 for the
+final and 100 + K for correction K. The fourth field is always 0. Every later
+build therefore has a higher version than an earlier one, and the patch can
+reach 65 in a month before the build number runs out. The first release on
+this map jumps the build number from today's `P` to `P × 1000 + 100`, which
+is still higher than every earlier MSI.
 
 ## Release cadence
 
@@ -204,4 +210,4 @@ Each row is tracked in [#145](https://github.com/arcforgelabs/dictate/issues/145
 | Releases tagged from `master` | `release/YYYY.M.P` branches with pinned tooling |
 | Unsigned annotated tags | Signed annotated tags, verified before publishing |
 | Release assets are packages and install scripts | Packages plus release manifest, dependency evidence and post-publish evidence |
-| MSI `YY.M.P.N` with the final at `.0` and corrections at `.1` and up (2026.10.2 is `26.10.2.0`); an unstable build keeps the MSI number of the commit it was built from | MSI `YY.M.P.N`: betas `.1`–`.99`, the final `.100`, corrections `.101` and up |
+| MSI `YY.M.P.N` (`_msi_safe_version` in `scripts/sync_release_version.py`): the release counter is the build number (2026.10.2 is `26.10.2.0`) and a correction `-N` goes in the fourth field, which Windows Installer ignores, so a correction compares equal to its final; an unstable build keeps the MSI number of the commit it was built from | MSI `YY.M.(P × 1000 + slot).0`: betas slot 1–99, the final 100, corrections 101 and up |
