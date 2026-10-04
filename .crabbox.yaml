@@ -1,0 +1,51 @@
+# Crabbox: run Dictate's Linux unit suite on another machine.
+# The runner (host, user, port, key, provider) comes from each user's
+# ~/.config/crabbox/config.yaml. Keep it out of this file.
+profile: dictate-check
+sync:
+  delete: true
+  checksum: false
+  gitSeed: true
+  fingerprint: true
+  baseRef: master
+  exclude:
+    - .venv
+    - node_modules
+    - benchmark-fixtures
+    - benchmark-curated
+    - benchmark-results
+    - evidence-bundles
+env:
+  allow:
+    - CI
+jobs:
+  # Install the CPU test environment the way CI does and leave the box warm.
+  prewarm:
+    shell: true
+    command: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+      [ -x .venv/bin/python ] || uv venv --python 3.12 .venv
+      uv pip install --python .venv/bin/python -e ".[x11]" pillow
+    stop: never
+  # The Linux lane of .github/workflows/ci.yml: same install, compile, then the
+  # unittest suite (Python 3.12, CPU only).
+  # Dictate has no changed-file selector, so this runs the whole suite.
+  changed:
+    shell: true
+    command: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      echo CRABBOX_PHASE:install
+      command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+      [ -x .venv/bin/python ] || uv venv --python 3.12 .venv
+      uv pip install --python .venv/bin/python -e ".[x11]" pillow
+      # Like setup-python in CI: the venv's python is the one on PATH, so
+      # scripts the tests shell out to (python3 ...) see the same packages.
+      export PATH="$PWD/.venv/bin:$PATH"
+      echo CRABBOX_PHASE:compile
+      python -m compileall -q src tests scripts
+      echo CRABBOX_PHASE:test
+      env CI=1 python -m unittest discover -s tests
+    stop: auto
