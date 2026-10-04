@@ -39,6 +39,7 @@ def run_preflight(
     push_to_talk_combo: str = "ctrl_r",
     stt_backend: SttBackend = "parakeet",
     stt_model: str | None = None,
+    check_stt_runtime: bool = True,
 ) -> PreflightReport:
     report = PreflightReport()
 
@@ -47,6 +48,7 @@ def run_preflight(
         report,
         stt_backend=stt_backend,
         stt_model=stt_model,
+        check_runtime=check_stt_runtime,
     )
     _check_typing(
         report,
@@ -148,10 +150,12 @@ def _check_stt_backend(
     *,
     stt_backend: SttBackend,
     stt_model: str | None,
+    check_runtime: bool = True,
 ) -> None:
     backend_report = check_backend_readiness(
         backend=stt_backend,
         model=stt_model,
+        check_runtime=check_runtime,
     )
     report.errors.extend(backend_report.errors)
     report.warnings.extend(backend_report.warnings)

@@ -47,6 +47,43 @@ describe("ipc bridge", () => {
     expect(() => unsub()).not.toThrow();
   });
 
+  it("keeps asking the shell for a bridge until a slow engine comes up", async () => {
+    vi.useFakeTimers();
+    window.__DICTATE__ = { platform: "win11" };
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ baseUrl: "http://127.0.0.1:3", token: "late", platform: "win11" });
+    window.__TAURI__ = { core: { invoke } };
+    const onLive = vi.fn();
+
+    ipc.waitForBridge(onLive, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onLive).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(onLive).toHaveBeenCalledTimes(1);
+    expect(ipc.isLive()).toBe(true);
+    expect(window.__DICTATE__).toMatchObject({ baseUrl: "http://127.0.0.1:3", token: "late", platform: "win11" });
+  });
+
+  it("stops waiting for a bridge once cancelled", async () => {
+    vi.useFakeTimers();
+    window.__DICTATE__ = { platform: "win11" };
+    const invoke = vi.fn().mockResolvedValue(null);
+    window.__TAURI__ = { core: { invoke } };
+    const onLive = vi.fn();
+
+    const cancel = ipc.waitForBridge(onLive, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    cancel();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(onLive).not.toHaveBeenCalled();
+  });
+
   it("refreshes the bridge and retries when the server port is stale", async () => {
     window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "old", platform: "gnome" };
     window.__TAURI__ = {
@@ -177,30 +214,11 @@ describe("ipc bridge", () => {
     );
   });
 
-  it("starts and stops meetings through authenticated backend routes", async () => {
-    window.__DICTATE__ = { baseUrl: "http://127.0.0.1:1", token: "t", platform: "gnome" };
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ recording: true, mode: "meeting" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ recording: false, mode: "meeting" }),
-      });
-
-    await expect(ipc.startMeetingRecording()).resolves.toEqual({ recording: true, mode: "meeting" });
-    await expect(ipc.stopMeetingRecording()).resolves.toEqual({ recording: false, mode: "meeting" });
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:1/api/meetings/start",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:1/api/meetings/stop",
-      expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer t" } }),
-    );
+  it("has no Meeting routes", () => {
+    // Meeting capture was removed (#140).
+    expect(ipc.startMeetingRecording).toBeUndefined();
+    expect(ipc.stopMeetingRecording).toBeUndefined();
+    expect(ipc.discardMeetingRecording).toBeUndefined();
   });
 
   it("exports local data through the authenticated backend route", async () => {

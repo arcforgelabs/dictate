@@ -16,9 +16,11 @@ each hardware tier:
 - **Speed multiple:** real-time factor multiple (`RTFx`), calculated as audio
   seconds divided by processing seconds. Higher is faster; `10.0` means ten
   times real time.
-- **Meeting quality:** optional diarization error rate (`DER`),
-  speaker-confusion rate, and segment-boundary mean absolute error when a
+- **Timestamps:** optional segment-boundary mean absolute error when a
   manifest provides reference segments.
+
+Meeting speaker-labelling benchmarks (DER, speaker confusion) were removed with
+Meeting capture on 2026-10-03 (#140).
 
 Quality is the product invariant. Minimum-spec machines may run slower and may
 disable heavy features, but they should not fall to a materially worse transcript
@@ -33,7 +35,7 @@ clearly `minimum` or clearly `advanced`.
 | --- | --- | --- |
 | `minimum` | x64 desktop OS, 4 CPU cores, 8 GB RAM, enough disk for the packaged app and normal local model cache | CPU-safe local dictation, conservative compute, heavy/experimental features disabled |
 | `recommended` | x64 desktop OS, recent 6 CPU cores, 16 GB RAM, adequate disk | Default local dictation config for most users |
-| `advanced` | Recommended baseline plus 8 or more recent CPU cores, 32 GB RAM preferred, large model disk headroom | Parakeet v3 multilingual on the CPU plus local meeting speaker-attribution experiments |
+| `advanced` | Recommended baseline plus 8 or more recent CPU cores, 32 GB RAM preferred, large model disk headroom | Parakeet v3 multilingual on the CPU |
 
 Windows must be included in tier proof before a tier is considered production
 ready.
@@ -45,9 +47,9 @@ dataset and hardware matrix are stable.
 
 | Tier | Quality Gate | Speed Gate | Feature Gate |
 | --- | --- | --- | --- |
-| `minimum` | Within 10% relative WER of the recommended tier on the core dictation set | Dictation RTF <= `1.50` for short-form local captures | Local dictation works; local meeting speaker attribution is hidden unless a CPU wrapper passes benchmarks |
+| `minimum` | Within 10% relative WER of the recommended tier on the core dictation set | Dictation RTF <= `1.50` for short-form local captures | Local dictation works |
 | `recommended` | Baseline quality target for stable releases | Dictation RTF <= `1.00` for short-form local captures | Default stable experience |
-| `advanced` | No worse than recommended on dictation; speaker-attribution quality separately measured for Meeting mode | Dictation RTF <= `0.70`; meeting RTF targets set per DiariZen / Sortformer / pyannote benchmark | Optional early-access/experimental local meetings only after packaging and legal gates |
+| `advanced` | No worse than recommended on dictation | Dictation RTF <= `0.70` | Parakeet v3 multilingual |
 
 ## Canonical Model Plan
 
@@ -55,10 +57,9 @@ The canonical model lanes live in
 [../docs/TRANSCRIPTION_PLAN.md](../docs/TRANSCRIPTION_PLAN.md). This benchmark
 document defines dataset and measurement format only.
 
-Dictate runs on the CPU only. Do not promote any CPU or meeting lane to
-default from marketing claims alone. Run the same manifest on representative
-hardware and record WER, DER where applicable, RTF/RTFx, RAM, install size, and
-package/runtime dependencies.
+Dictate runs on the CPU only. Do not promote any lane to default from
+marketing claims alone. Run the same manifest on representative hardware and
+record WER, RTF/RTFx, RAM, install size, and package/runtime dependencies.
 
 The first curated dataset should include:
 
@@ -67,7 +68,7 @@ The first curated dataset should include:
 - names/product terms without relying on default hotwords,
 - punctuation-heavy prose,
 - short command-like phrases,
-- at least one longer meeting-style recording for future diarization timing.
+- at least one longer recording for note-length timing.
 
 Do not use built-in default hotwords in benchmark runs. Hotword-specific tests
 should be separate and should seed their terms explicitly.
@@ -83,8 +84,8 @@ Optional columns:
 
 - `id`: stable sample identifier used in output
 - `segments_json` or `segments`: JSON array or path to a JSON file containing
-  reference segments. Each segment can include `text`, `start`/`end` or
-  `t_start`/`t_end`, and `speaker` or `speaker_label`.
+  reference segments. Each segment can include `text` and `start`/`end` or
+  `t_start`/`t_end`. A `speaker` key from an older Meeting fixture is ignored.
 
 ## Example
 
@@ -115,19 +116,6 @@ CPU speed runs. It is still synthetic speech, so it is promotion
 evidence for runtime plumbing and relative speed only; curated human recordings
 remain the product-quality gate.
 
-For a repeatable local meeting smoke dataset, generate a two-speaker synthetic
-fixture:
-
-```bash
-scripts/generate-meeting-benchmark-fixtures.sh
-```
-
-This writes a speaker-labelled WAV and manifest under
-`benchmark-fixtures/flite-meeting-smoke/`. Use it to validate meeting benchmark
-JSON shape, DER/speaker/timestamp gates, and backend integration before running
-curated human meeting recordings. Do not use flite DER/WER as final promotion
-evidence.
-
 Promotion artifacts must be generated from curated human fixtures and marked
 with `--fixture-class curated-human`. The canonical lane runner exposes human
 lanes for this:
@@ -138,22 +126,11 @@ scripts/generate-curated-human-asr-fixture.sh
 DICTATE_HUMAN_MANIFEST=/path/to/asr-human-manifest.csv \
 DICTATE_HUMAN_AUDIO_ROOT=/path/to/audio \
 scripts/run-transcription-lane-benchmarks.sh --lane cpu-human
-
-scripts/generate-curated-human-meeting-fixture.sh
-
-DICTATE_MEETING_HUMAN_MANIFEST=/path/to/meeting-human-manifest.csv \
-DICTATE_MEETING_HUMAN_AUDIO_ROOT=/path/to/audio \
-scripts/run-transcription-lane-benchmarks.sh --lane meeting-human
 ```
 
-Use `cpu-human-v3`, `meeting-diarizen-human`, and
-`meeting-sortformer-human` for the multilingual and alternate Meeting
-promotion artifacts. `scripts/generate-curated-human-asr-fixture.sh` prepares a
-small Open Speech Repository Harvard-sentence ASR fixture for CPU smoke
-promotion. `scripts/generate-curated-human-meeting-fixture.sh` prepares a
-two-speaker Open Speech Repository Harvard-sentence fixture with timestamped
-speaker turns for Meeting runtime validation; it is not a natural meeting
-recording.
+Use `cpu-human-v3` for the multilingual promotion artifact.
+`scripts/generate-curated-human-asr-fixture.sh` prepares a small Open Speech
+Repository Harvard-sentence ASR fixture for CPU smoke promotion.
 
 After a tester returns an evidence bundle, import its benchmark JSON
 artifacts and rerun the plan audit:
@@ -182,8 +159,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-human-test-r
 ```
 
 These wrappers run the readiness report, perform a quick local Parakeet doctor
-unless skipped, and print the exact `dictate --once` and Meeting checks a human
-tester must perform with real spoken audio.
+unless skipped, and print the exact `dictate --once` checks a human tester must
+perform with real spoken audio.
 
 Validate curated manifests before loading models:
 
@@ -197,25 +174,11 @@ dictate benchmark \
   --fixture-class curated-human \
   --require-timestamp-metrics \
   --validate-manifest-only
-
-dictate benchmark \
-  --manifest /path/to/meeting-human-manifest.csv \
-  --audio-root /path/to/audio \
-  --stt-backend parakeet-pyannote \
-  --model parakeet-tdt-0.6b-v2 \
-  --device cpu \
-  --fixture-class curated-human \
-  --diarize \
-  --require-speaker-attribution \
-  --require-timestamp-metrics \
-  --require-der-metrics \
-  --validate-manifest-only
 ```
 
 For `fixture_class=curated-human`, validation rejects generated
 `benchmark-fixtures/` paths, `flite` sample IDs or filenames, missing audio
-files, missing timestamp references, and missing timestamped speaker references
-for Meeting/DER lanes.
+files, and missing timestamp references.
 
 ## Run
 
@@ -272,24 +235,15 @@ To run the canonical local lane matrix with consistent artifact names, use:
 scripts/run-transcription-lane-benchmarks.sh --dry-run
 scripts/run-transcription-lane-benchmarks.sh --lane cpu
 scripts/run-transcription-lane-benchmarks.sh --lane cpu-multilingual
-scripts/run-transcription-lane-benchmarks.sh --lane meeting
-scripts/run-transcription-lane-benchmarks.sh --lane meeting-diarizen
-scripts/run-transcription-lane-benchmarks.sh --lane meeting-sortformer
 ```
 
 The lane runner writes the JSON artifact names consumed by
 `docs/TRANSCRIPTION_PLAN.md` and `scripts/transcription_plan_audit.py`. Use
 `--dry-run` on a target machine first to confirm the command sequence without
 loading models. By default, each lane runs `dictate doctor --quick` first for
-the exact backend/model on the CPU so missing runtime or gated Meeting model
-problems fail before long benchmark work starts. Use `--skip-preflight` only
-when deliberately collecting a failed benchmark JSON artifact.
-
-For source installs, `./install.sh --meeting` or
-`.\install-windows.ps1 -Meeting` installs the pyannote/torch dependencies for
-the `parakeet-pyannote` Meeting lane. DiariZen and Sortformer are separate
-experimental runtime lanes; install/configure their upstream runtimes before
-selecting `parakeet-diarizen` or `parakeet-sortformer`.
+the exact backend/model on the CPU so a missing runtime fails before long
+benchmark work starts. Use `--skip-preflight` only when deliberately collecting
+a failed benchmark JSON artifact.
 
 After running lanes on a target machine, collect a handoff bundle:
 
@@ -305,51 +259,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\collect-transc
 
 The collector writes a timestamped archive under `evidence-bundles/` containing
 the plan, benchmark JSON reports, audit output, lane dry-run output,
-`lane-readiness.txt` doctor output for CPU and Meeting lanes, and basic
-machine/CPU context. It intentionally does not collect environment
-variables or tokens. `evidence-bundles/` is ignored by Git so local handoff
-archives do not accidentally enter commits.
-
-Meeting/speaker-attribution lanes should run with the same audio fixtures and
-`--diarize --require-speaker-attribution`:
-
-```bash
-dictate benchmark \
-  --manifest benchmark-fixtures/flite-meeting-smoke/manifest.csv \
-  --audio-root benchmark-fixtures/flite-meeting-smoke \
-  --stt-backend parakeet-pyannote \
-  --model parakeet-tdt-0.6b-v2 \
-  --device cpu \
-  --language en \
-  --diarize \
-  --require-speaker-attribution \
-  --require-timestamp-metrics \
-  --require-der-metrics \
-  --max-mean-der 0.20 \
-  --max-mean-segment-boundary-mae-s 0.50 \
-  --max-mean-speaker-confusion-rate 0.15 \
-  --json-output benchmark-results/parakeet-pyannote-cpu-flite-meeting.json \
-  --run-label workstation-cpu-flite-meeting
-```
+`lane-readiness.txt` doctor output for the CPU lanes, and basic machine/CPU
+context. It intentionally does not collect environment variables or tokens.
+`evidence-bundles/` is ignored by Git so local handoff archives do not
+accidentally enter commits.
 
 The JSON report is the promotion artifact. It records backend/model/device,
 capabilities, Python/platform/CPU context, WER, RTF, RTFx, peak RSS when
-available, optional DER and speaker metrics, timestamp boundary-pair counts,
-gates, and per-sample hypotheses/segments.
+available, timestamp boundary-pair counts, gates, and per-sample
+hypotheses/segments.
 
 Promotion gates can fail the command with exit code `2`:
 
 - `--max-mean-wer`
 - `--max-mean-rtf`
-- `--max-mean-der`
-- `--max-mean-speaker-confusion-rate`
 - `--max-mean-segment-boundary-mae-s`
 - `--require-timestamp-metrics`
-- `--require-der-metrics`
 
-Use `--require-timestamp-metrics` and `--require-der-metrics` for Meeting lanes
-before promotion. The timestamp gate fails when the manifest/backend combination
-does not produce comparable timestamped reference and hypothesis segment
-boundaries. The DER gate fails when there is no comparable timestamped speaker
-assignment evidence. Together they prevent a meeting lane from being promoted on
-plain text, speaker labels alone, or non-diarized timestamp segments.
+The timestamp gate fails when the manifest/backend combination does not produce
+comparable timestamped reference and hypothesis segment boundaries.

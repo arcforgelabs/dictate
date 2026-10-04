@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""CI proof that Meeting mode stays on the device and keeps dictated text out of logs.
+"""CI proof that a note stays on the device and keeps dictated text out of logs.
 
-Run by .github/workflows/privacy-proof.yml. Three subcommands:
+Run by .github/workflows/privacy-proof.yml. Two subcommands:
 
-``baseline``
-    pyannote Community-1 diarizes the fixture without Dictate loaded, the way
-    2026.9.27 left pyannote's metrics switch. Every Python-level socket call is
-    recorded and refused, so the trace shows what pyannote tries to reach.
-
-``meeting``
-    One Meeting-mode pass through Dictate's own backend (pyannote speakers,
-    Parakeet text) under the startup logger, with the same socket guard. The
-    finished note goes through ``echo_dictated_text`` exactly as the daemon does
-    when it saves a note. Run it under ``strace`` to see native code too.
+``note``
+    One note-mode pass through Dictate's own engine (Parakeet on ONNX Runtime)
+    under the startup logger, with every Python-level socket call recorded and
+    refused. The finished note goes through ``echo_dictated_text`` exactly as
+    the daemon does when it saves a note. Run it under ``strace`` to see native
+    code too.
 
 ``summarize``
-    Checks both reports, the strace output, the terminal capture and
+    Checks the report, the strace output, the terminal capture and
     ``latest.log``, prints a redacted trace and fails if anything leaked.
+
+Until #140 this also traced Meeting mode (pyannote); Meeting was removed, so
+the Parakeet path every note and dictation takes is what is left to prove.
 
 The trace never holds a token. Transcript text appears only in the terminal
 capture, which is the one place Dictate is meant to show it; the fixture is
@@ -38,6 +37,7 @@ import numpy as np
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "", None}
 _ATTEMPTS: list[dict[str, Any]] = []
+_TELEMETRY_SWITCHES = ("HF_HUB_DISABLE_TELEMETRY", "ORT_DISABLE_TELEMETRY")
 
 
 class NetworkBlocked(OSError):
@@ -103,22 +103,6 @@ def _read_wav(path: Path) -> np.ndarray:
     return pcm.astype(np.float32) / 32768.0
 
 
-def _flush_pyannote_metrics() -> bool | None:
-    """Push any queued pyannote spans to the exporter now, and say whether metrics were on."""
-    try:
-        from pyannote.audio.telemetry import metrics
-    except Exception:  # noqa: BLE001
-        return None
-    try:
-        metrics.provider.force_flush()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        return bool(metrics.is_metrics_enabled())
-    except Exception:  # noqa: BLE001
-        return None
-
-
 def _summarise_attempts(attempts: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for attempt in attempts:
@@ -132,92 +116,56 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def cmd_baseline(args: argparse.Namespace) -> int:
-    # 2026.9.27 never set these, so pyannote and the Hub ran on their defaults.
-    for name in ("PYANNOTE_METRICS_ENABLED", "HF_HUB_DISABLE_TELEMETRY"):
-        os.environ.pop(name, None)
-    install_network_guard()
-    if "dictate" in sys.modules:
-        raise SystemExit("baseline must run without Dictate loaded")
-
-    from pyannote.audio import Pipeline
-
-    pipeline = Pipeline.from_pretrained(str(args.pyannote_model))
-    diarization = pipeline(str(args.audio))
-    annotation = getattr(diarization, "exclusive_speaker_diarization", diarization)
-    speakers = sorted({str(label) for _seg, _track, label in annotation.itertracks(yield_label=True)})
-    metrics_enabled = _flush_pyannote_metrics()
-
-    report = {
-        "mode": "baseline (pyannote without Dictate, 2026.9.27 behaviour)",
-        "dictate_imported": "dictate" in sys.modules,
-        "pyannote_metrics_enabled": metrics_enabled,
-        "speakers_found": len(speakers),
-        "python_network_attempts": len(_ATTEMPTS),
-        "otel_pyannote_lookups": sum(
-            1 for a in _ATTEMPTS if a["call"] == "getaddrinfo" and "otel.pyannote.ai" in a["target"]
-        ),
-        "attempts": _summarise_attempts(_ATTEMPTS),
-    }
-    _write_report(args.report, report)
-    print(json.dumps(report, indent=2, sort_keys=True))
-    return 0
-
-
-def cmd_meeting(args: argparse.Namespace) -> int:
+def cmd_note(args: argparse.Namespace) -> int:
     install_network_guard()
 
     # Importing anything from dictate runs the package initializer first.
     from dictate import runtime_logging
-    from dictate.stt.parakeet_pyannote_backend import ParakeetPyannoteSpeechToText, _format_segments
+    from dictate.engine import DictationEngine
+    from dictate.stt import create_speech_to_text
 
     audio = _read_wav(args.audio)
     result: dict[str, Any] = {}
 
     def main() -> int:
-        backend = ParakeetPyannoteSpeechToText()
-        segments = backend.transcribe_diarized_segments(audio)
-        note = _format_segments(segments).strip()
-        result["segments"] = len(segments)
-        result["speakers"] = len({s.speaker_label for s in segments if s.speaker_label})
+        stt = create_speech_to_text(backend="parakeet", model="parakeet-tdt-0.6b-v2")
+        engine = DictationEngine(stt=stt)
+        # What the daemon does for a note recording: the note decode profile.
+        transcribed = engine.transcribe(audio, decode_profile="note")
+        note = transcribed.text.strip()
+        result["status"] = transcribed.status
         result["note"] = note
-        # What daemon._finalize_note_session does once a meeting note is saved.
+        # What daemon._finalize_note_session does once a note is saved.
         runtime_logging.echo_dictated_text("Saved note", note)
-        backend.release()
+        engine.release()
         return 0 if note else 1
 
     exit_code = runtime_logging.run_with_startup_logging(main)
-    metrics_enabled = _flush_pyannote_metrics()
     log_paths = runtime_logging.resolve_log_paths()
     latest_log = log_paths[0] if log_paths else None
     log_text = latest_log.read_text(encoding="utf-8") if latest_log and latest_log.exists() else ""
     note = result.get("note", "")
-    # Each speaker's words, without the "Speaker N: " label the log may legitimately share.
-    phrases = [line.split(": ", 1)[-1].strip() for line in note.splitlines()]
-    leaked_phrases = [phrase for phrase in phrases if phrase and phrase in log_text]
+    words = [word.strip(".,!?").lower() for word in note.split()]
+    phrase = " ".join(note.split()[:4])
     ort_store = Path.home() / ".cache" / "Microsoft" / "DeveloperTools"
+    loaded = sorted(
+        name for name in ("torch", "torchaudio", "torchcodec", "pyannote") if name in sys.modules
+    )
 
     report = {
-        "mode": "meeting (Dictate Parakeet + pyannote backend)",
+        "mode": "note (Dictate Parakeet backend)",
         "exit_code": exit_code,
-        "env_after_import": {
-            name: os.environ.get(name)
-            for name in ("PYANNOTE_METRICS_ENABLED", "HF_HUB_DISABLE_TELEMETRY", "ORT_DISABLE_TELEMETRY")
-        },
-        "pyannote_metrics_enabled": metrics_enabled,
-        "segments": result.get("segments", 0),
-        "speakers": result.get("speakers", 0),
+        "status": result.get("status"),
+        "env_after_import": {name: os.environ.get(name) for name in _TELEMETRY_SWITCHES},
+        "removed_runtimes_loaded": loaded,
         "note_characters": len(note),
+        "note_words": len(words),
         "python_network_attempts": len(_ATTEMPTS),
-        "otel_pyannote_lookups": sum(
-            1 for a in _ATTEMPTS if a["call"] == "getaddrinfo" and "otel.pyannote.ai" in a["target"]
-        ),
         "attempts": _summarise_attempts(_ATTEMPTS),
         "onnxruntime_telemetry_store_exists": ort_store.exists(),
         "latest_log": str(latest_log) if latest_log else None,
         "log_has_redacted_note_line": f"Saved note: [{len(note)} characters, not logged]" in log_text,
-        "log_transcript_phrases_checked": len([p for p in phrases if p]),
-        "log_transcript_phrases_found": len(leaked_phrases),
+        "log_has_note_phrase": bool(phrase) and phrase in log_text,
         "log_redacted_lines": [line.strip() for line in log_text.splitlines() if "not logged]" in line],
     }
     _write_report(args.report, report)
@@ -239,8 +187,7 @@ def _strace_lines(strace_path: Path) -> list[str]:
 
 def cmd_summarize(args: argparse.Namespace) -> int:
     trace_dir: Path = args.trace_dir
-    baseline = json.loads((trace_dir / "baseline.json").read_text(encoding="utf-8"))
-    meeting = json.loads((trace_dir / "meeting.json").read_text(encoding="utf-8"))
+    note_report = json.loads((trace_dir / "note.json").read_text(encoding="utf-8"))
     traced = _strace_lines(trace_dir / "strace.txt")
     # execve is traced only to show strace was attached to the engine process.
     engine_exec = [line for line in traced if "execve(" in line and "ci_privacy_trace.py" in line]
@@ -248,50 +195,37 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     inet = [line for line in traced if "sa_family=AF_INET" in line]
     note = (trace_dir / "note.txt").read_text(encoding="utf-8")
     terminal = (trace_dir / "terminal.txt").read_text(encoding="utf-8", errors="replace")
-    first_line = note.splitlines()[0] if note else ""
-    terminal_has_text = bool(first_line) and f"Saved note: {first_line}" in terminal
+    terminal_has_text = bool(note) and f"Saved note: {note}" in terminal
 
     checks = [
-        ("baseline: pyannote tried otel.pyannote.ai (so the guard can see it)", baseline["otel_pyannote_lookups"] > 0),
-        ("meeting: run finished and produced a note", meeting["exit_code"] == 0 and meeting["note_characters"] > 0),
-        ("meeting: telemetry switches forced off over a shell opt-in", meeting["env_after_import"] == {
-            "PYANNOTE_METRICS_ENABLED": "0", "HF_HUB_DISABLE_TELEMETRY": "1", "ORT_DISABLE_TELEMETRY": "1"
+        ("note: run finished and produced text", note_report["exit_code"] == 0 and note_report["note_characters"] > 0),
+        ("note: telemetry switches forced off over a shell opt-in", note_report["env_after_import"] == {
+            "HF_HUB_DISABLE_TELEMETRY": "1", "ORT_DISABLE_TELEMETRY": "1"
         }),
-        ("meeting: pyannote metrics disabled", meeting["pyannote_metrics_enabled"] is False),
-        ("meeting: 0 Python-level network attempts", meeting["python_network_attempts"] == 0),
-        ("meeting: strace -f was attached to the engine process", bool(engine_exec)),
-        ("meeting: 0 AF_INET/AF_INET6 connect/send syscalls (strace -f)", not inet),
-        ("meeting: no ONNX Runtime telemetry store", meeting["onnxruntime_telemetry_store_exists"] is False),
-        ("log: finished note recorded as a character count", meeting["log_has_redacted_note_line"]),
-        (
-            f"log: none of the {meeting['log_transcript_phrases_checked']} spoken phrases appear",
-            meeting["log_transcript_phrases_checked"] > 0 and meeting["log_transcript_phrases_found"] == 0,
-        ),
+        ("note: no torch or pyannote module loaded", note_report["removed_runtimes_loaded"] == []),
+        ("note: 0 Python-level network attempts", note_report["python_network_attempts"] == 0),
+        ("note: strace -f was attached to the engine process", bool(engine_exec)),
+        ("note: 0 AF_INET/AF_INET6 connect/send syscalls (strace -f)", not inet),
+        ("note: no ONNX Runtime telemetry store", note_report["onnxruntime_telemetry_store_exists"] is False),
+        ("log: finished note recorded as a character count", note_report["log_has_redacted_note_line"]),
+        ("log: the spoken text does not appear", note_report["log_has_note_phrase"] is False),
         ("terminal (a TTY): note shown in full", terminal_has_text),
     ]
 
     lines = [
-        "## Meeting-mode privacy trace",
+        "## Note-mode privacy trace (Parakeet)",
         "",
-        "| | Baseline: pyannote without Dictate (2026.9.27) | Meeting mode through Dictate |",
-        "|---|---|---|",
-        f"| `otel.pyannote.ai` lookups | {baseline['otel_pyannote_lookups']} | {meeting['otel_pyannote_lookups']} |",
-        f"| Python-level network attempts | {baseline['python_network_attempts']} | {meeting['python_network_attempts']} |",
-        f"| AF_INET/AF_INET6 syscalls (strace -f) | not traced | {len(inet)} |",
-        f"| strace -f: traced syscall lines / processes+threads | not traced | {len(traced)} / {len(traced_pids)} |",
-        f"| pyannote metrics enabled | {baseline['pyannote_metrics_enabled']} | {meeting['pyannote_metrics_enabled']} |",
-        f"| Speakers | {baseline['speakers_found']} | {meeting['speakers']} |",
-        "",
-        "Baseline attempts (all refused):",
-        "",
-        "```",
-        *(f"{count}x {target}" for target, count in sorted(baseline["attempts"].items())),
-        "```",
+        "| | Note through Dictate |",
+        "|---|---|",
+        f"| Python-level network attempts | {note_report['python_network_attempts']} |",
+        f"| AF_INET/AF_INET6 syscalls (strace -f) | {len(inet)} |",
+        f"| strace -f: traced syscall lines / processes+threads | {len(traced)} / {len(traced_pids)} |",
+        f"| Words transcribed | {note_report['note_words']} |",
         "",
         "`latest.log` lines for the finished note:",
         "",
         "```",
-        *meeting["log_redacted_lines"],
+        *note_report["log_redacted_lines"],
         "```",
         "",
         "| Check | Result |",
@@ -300,6 +234,10 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     ]
     if inet:
         lines += ["", "Unexpected network syscalls:", "", "```", *inet[:50], "```"]
+    if note_report["attempts"]:
+        lines += ["", "Refused attempts:", "", "```"]
+        lines += [f"{count}x {target}" for target, count in sorted(note_report["attempts"].items())]
+        lines += ["```"]
     summary = "\n".join(lines) + "\n"
     print(summary)
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -313,16 +251,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    baseline = sub.add_parser("baseline")
-    baseline.add_argument("--pyannote-model", type=Path, required=True)
-    baseline.add_argument("--audio", type=Path, required=True)
-    baseline.add_argument("--report", type=Path, required=True)
-    baseline.set_defaults(func=cmd_baseline)
-
-    meeting = sub.add_parser("meeting")
-    meeting.add_argument("--audio", type=Path, required=True)
-    meeting.add_argument("--report", type=Path, required=True)
-    meeting.set_defaults(func=cmd_meeting)
+    note = sub.add_parser("note")
+    note.add_argument("--audio", type=Path, required=True)
+    note.add_argument("--report", type=Path, required=True)
+    note.set_defaults(func=cmd_note)
 
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--trace-dir", type=Path, required=True)

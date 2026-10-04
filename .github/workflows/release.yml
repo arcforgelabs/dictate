@@ -279,7 +279,7 @@ jobs:
           python-version: "3.12"
 
       - name: Free runner disk space
-        # The .deb stages the offline Parakeet model and the meeting runtime,
+        # The .deb stages the offline Parakeet model beside the frozen engine,
         # and tar/gzip needs a second copy; the stock image runs out mid-bundle.
         run: |
           df -h / | tail -1
@@ -303,7 +303,6 @@ jobs:
       - name: Build the desktop bundle (freezes engine + builds .deb)
         env:
           DICTATE_BUNDLES: "deb"
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
           NO_STRIP: "true"
           ARCH: "x86_64"
         run: ./scripts/build-linux-desktop.sh
@@ -353,8 +352,6 @@ jobs:
 
       - name: Build the Windows desktop bundle
         shell: pwsh
-        env:
-          DICTATE_HF_TOKEN: ${{ secrets.DICTATE_HF_TOKEN }}
         run: .\scripts\build-windows-desktop.ps1
 
       - name: Sign Windows desktop artifacts

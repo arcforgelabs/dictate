@@ -19,20 +19,19 @@ baseline, and the artifact is the spec it must keep satisfying.
    the keyboard graphic pointing at that key. Once capture has begun this session, the
    `Copy last dictation` pill (fg label, muted preview) replaces the hint. Home bar: update
    pill (amber when an update is ready / restart pending; danger only on failure), About,
-   and the Dictations toggle. `Meeting` is beta-channel chrome only.
+   and the Dictations toggle. No `Meeting` button: Meeting capture was removed (#140).
    **No gear, no settings menu, no provider names.**
-2. **Recording** — `Recording` / `Meeting` in `live`, mono timer, wave timeline or the live
+2. **Recording** — `Recording` in `live`, mono timer, wave timeline or the live
    transcript preview. Reduced-motion: halo static at 50 %, never invisible.
 3. **Paused** — `Paused` / `Paused — no speech detected` in muted, timer, `Finish note`
-   (or `Finish meeting`) + a danger-on-hover discard button → alertdialog (`Discard note?`,
+   + a danger-on-hover discard button → alertdialog (`Discard note?`,
    `Cancel` + danger `Confirm`).
 4. **Transcribing** — indeterminate ink bar, prose sub in the UI face.
-5. **Dictations** — search row (`Search dictations`, toggle). The All / Meetings /
-   Quick segment is beta-channel chrome only; the normal channel has one list.
+5. **Dictations** — search row (`Search dictations`, toggle), one list on every channel.
    rows with fg text + mono meta line, archive / copy / export on hover; empty and
    no-results states in fg title + muted sub.
-6. **Expanded note** — `Note · time · ago` title, copy + export, back column. Meeting notes
-   render the **segment grid**: speaker label full-width (12.5px, 700), then a
+6. **Expanded note** — `Note · time · ago` title, copy + export, back column. A meeting
+   transcript saved before #140 renders the **segment grid**: speaker label full-width (12.5px, 700), then a
    `minmax(96px,120px)` gutter holding the mono `t-mono` timestamp on a 26px line box so it
    sits on the first prose line, then the 15px/1.75 text. Quick notes render one prose
    block at the 65ch measure.
@@ -55,7 +54,8 @@ baseline, and the artifact is the spec it must keep satisfying.
 
 ## Captures
 `captures/<state>-win-<theme>.png` at 1200×820, both themes, states: `ready`, `recording`,
-`paused`, `dictations`, `meeting-note`, `quick-note`, `about`, `palette`. `manifest.json`
+`paused`, `dictations`, `quick-note`, `about`, `palette`. (The `meeting-note` capture went with the
+mock meeting in #140.) `manifest.json`
 lists them. Rendered from the mock-mode dev server (`XDG_DATA_HOME` pointed at an empty
 dir so the bridge plugin does not attach to a running engine) with
 `design/tools/capture-lock.mjs`:

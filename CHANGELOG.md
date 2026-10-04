@@ -1,13 +1,35 @@
 # Changelog
 
-## Unreleased
+## 2026.10.2 (2026-10-04)
+
+### Fixed
+
+- Dictating no longer wipes the clipboard. Dictate pastes through the
+  clipboard, then puts back exactly what was there before, once the app has
+  read the dictation: text, images, file lists and rich text on Windows, and
+  the copied item on Linux. If you copy something yourself mid-dictation,
+  Dictate leaves it alone. On Windows, dictated text stays out of Win+V
+  clipboard history and cloud clipboard sync. (#153)
+- The window connects to the engine in about a second instead of waiting for
+  the speech model to load, and shows "Getting ready…" until it can dictate.
+  A model that fails to load is shown in the window instead of the engine
+  exiting. (#158)
+- Decoding starts the moment the shortcut is released, instead of up to
+  100 ms later. (#160)
+
+### Changed
+
+- Each dictation adds one `Dictation timing:` line to the log, with how long
+  each step took and never the text. The status line now reads
+  "Transcribing N s of audio", because the old wording looked like a
+  processing time. (#159)
+
+## 2026.10.1 (2026-10-03)
 
 ### Privacy
 
-- Meeting mode no longer sends usage metrics to pyannote. pyannote.audio,
-  the speaker-labelling library, reports pipeline use to otel.pyannote.ai by
-  default; Dictate now turns that off, along with Hugging Face Hub telemetry,
-  before either library loads. Dictate makes no analytics requests.
+- Hugging Face Hub telemetry is turned off before the library loads. Dictate
+  makes no analytics requests.
 - Transcription no longer reports to Microsoft. ONNX Runtime, which runs the
   Parakeet model, has Microsoft's telemetry client built in: it kept a device
   ID and an event queue under `~/.cache/Microsoft/DeveloperTools` and uploaded
@@ -19,6 +41,21 @@
 
 ### Removed
 
+- Meeting capture and local speaker labelling, from every build, beta and
+  stable (#140). Meetings are P3: not ready, and not a focus until dictation
+  is. The work is kept on the `archive/meeting-2026-10-03` branch and tag.
+  Gone with it: the Meeting button and the All / Meetings / Quick filter, the
+  pyannote, DiariZen and Sortformer backends, `dictate config
+  set-meeting-model`, the `/api/meetings/*` routes, the `meeting` and
+  `sortformer` extras (torch, torchaudio, torchcodec, pyannote.audio, NeMo),
+  the bundled pyannote model and the Hugging Face token the builds needed, and
+  the Meeting benchmark lanes and readiness item. The build fails if torch or
+  pyannote are frozen into the engine again. On upgrade a saved
+  `meeting_stt_backend` / `meeting_stt_model` is removed from `config.yaml`
+  with one notice, and a dictation backend set to a Meeting backend becomes
+  `parakeet` with its model kept. Meeting transcripts you saved stay in your
+  notes, readable and exportable with their speaker labels. `install.sh
+  --meeting` and `install-windows.ps1 -Meeting` are ignored with a notice.
 - GPU support. Dictate runs on the CPU only; NVIDIA CUDA and AMD lanes are
   no longer supported.
 - The GPU install paths: the `gpu` and `amd` extras, `install.sh --gpu`, and
@@ -32,7 +69,7 @@
   accepted so existing scripts and installers run, and is ignored.
 - GPU benchmark, evidence and audit tooling: the AMD promotion runners, the
   CUDA/AMD benchmark lanes, the `windows-vm-smoke.sh --mode amd` check, and the
-  GPU fields in benchmark reports; Meeting evidence now comes from CPU runs.
+  GPU fields in benchmark reports.
 - The Whisper-family speech backends: faster-whisper, WhisperX and the
   unregistered whisper.cpp backend. Parakeet (v2 English, v3 multilingual) is
   the only dictation engine; the desktop app already used nothing else. A
@@ -45,6 +82,22 @@
 
 - Third-party notices ship with the app: `THIRD_PARTY_NOTICES.md`, the GNU
   licence texts, and an attribution file beside each bundled model.
+
+### Fixed
+
+- Dictation works on Windows. The engine read the system's default microphone
+  from sounddevice as a list, but sounddevice returns a pair object, so the
+  default was lost; on Windows nothing else matched, and every recording
+  failed with "no microphone input devices detected" even with microphones
+  plugged in. The engine now reads the default correctly and, failing that,
+  tries any device that can capture.
+
+- The window connects to its engine even when the engine is slow to start.
+  It used to wait 8 seconds and then stay on "Dictate engine is not
+  connected" for good, even after the engine came up; the Windows Store
+  build's engine took about 11 seconds on a cold start. It now keeps checking
+  and connects as soon as the engine is ready, without freezing while it
+  waits.
 
 ## 2026-09-27
 

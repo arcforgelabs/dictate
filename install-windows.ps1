@@ -3,17 +3,21 @@ param(
     [switch]$NoPrepareTurbo,
     [switch]$NoShortcut,
     [switch]$NoStartup,
-    [switch]$Meeting,
     [switch]$RecreateVenv,
     # Retired with GPU support; accepted and ignored so older update commands still run.
     [switch]$ForceCuda,
-    [switch]$NoCuda
+    [switch]$NoCuda,
+    # Retired with Meeting capture (#140); accepted and ignored likewise.
+    [switch]$Meeting
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($ForceCuda -or $NoCuda) {
     Write-Host "Ignoring -ForceCuda/-NoCuda: Dictate runs on the CPU only."
+}
+if ($Meeting) {
+    Write-Host "Ignoring -Meeting: Meeting capture is no longer part of Dictate (#140)."
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
@@ -299,7 +303,7 @@ function Register-InstalledApp {
     $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dictate"
     New-Item -Force -Path $keyPath | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "DisplayName" -Value "Dictate" -PropertyType String | Out-Null
-    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.9.27" -PropertyType String | Out-Null
+    New-ItemProperty -Force -Path $keyPath -Name "DisplayVersion" -Value "2026.10.2" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "Publisher" -Value "Arc Forge Labs" -PropertyType String | Out-Null
     New-ItemProperty -Force -Path $keyPath -Name "InstallLocation" -Value $InstallLocation -PropertyType String | Out-Null
     if (Test-Path $DisplayIcon) {
@@ -427,9 +431,6 @@ if (-not (Test-Path $venvPython)) {
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip") -Description "Upgrading pip"
 $removedRetiredGpuRuntime = Remove-RetiredGpuRuntime -PythonExe $venvPython
 $installExtras = @("windows")
-if ($Meeting) {
-    $installExtras += "meeting"
-}
 $installTarget = "${PSScriptRoot}[$($installExtras -join ',')]"
 Invoke-Checked -Exe $venvPython -ArgumentList @("-m", "pip", "install", "-e", $installTarget) -Description "Installing Dictate Windows package"
 if ($removedRetiredGpuRuntime) {

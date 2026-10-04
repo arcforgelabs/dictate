@@ -58,13 +58,5 @@ Run these on each human-test machine and speak real audio when prompted:
 Expected:
   - The transcript reflects what was spoken.
   - It does not repeat stale fixture text.
-  - Plain Record and push-to-talk use the same non-meeting ASR behavior.
-
-For Meeting validation on a tester with the Sortformer lane installed:
-
-  uv run python -m dictate doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu --quick
-
-Expected:
-  - The app allows Meeting only when a speaker-attribution lane is ready.
-  - A Meeting capture produces speaker/timestamp segment metadata.
+  - Plain Record and push-to-talk use the same Parakeet ASR behavior.
 EOF

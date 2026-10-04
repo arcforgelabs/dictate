@@ -31,7 +31,6 @@ def audit(root: Path) -> list[Gate]:
     gates = [
         _plan_doc_gate(root),
         _fixture_tooling_gate(root),
-        _meeting_promotion_gate(root),
         _windows_vm_evidence_gate(root),
         _update_scope_gate(root),
     ]
@@ -70,20 +69,11 @@ def readiness_report(gates: Iterable[Gate]) -> list[ReadinessItem]:
             gates=["canonical_plan", "benchmark_fixture_tooling"],
         ),
         ReadinessItem(
-            name="Meeting",
-            status=status_for(["meeting_speaker_attribution"]),
-            detail=detail_for(
-                ["meeting_speaker_attribution"],
-                "At least one local Meeting lane has curated-human DER, speaker, and timestamp evidence.",
-            ),
-            gates=["meeting_speaker_attribution"],
-        ),
-        ReadinessItem(
             name="Plain recording",
             status=status_for(["canonical_plan"]),
             detail=detail_for(
                 ["canonical_plan"],
-                "Record and push-to-talk share the non-meeting ASR path; run a real microphone smoke on the target machine.",
+                "Record and push-to-talk share the same Parakeet ASR path; run a real microphone smoke on the target machine.",
             ),
             gates=["canonical_plan"],
         ),
@@ -140,9 +130,7 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "scripts/collect-transcription-evidence.sh",
         "scripts/generate-benchmark-fixtures.sh",
         "scripts/generate-curated-human-asr-fixture.sh",
-        "scripts/generate-curated-human-meeting-fixture.sh",
         "scripts/generate-long-benchmark-fixtures.sh",
-        "scripts/generate-meeting-benchmark-fixtures.sh",
         "scripts/import-transcription-evidence.py",
         "scripts/run-human-test-readiness.sh",
         "scripts/run-human-test-readiness.ps1",
@@ -157,11 +145,8 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "--skip-preflight",
         "doctor",
         "--stt-backend",
-        "parakeet-pyannote",
-        "parakeet-diarizen",
-        "parakeet-sortformer",
+        "parakeet",
         "cpu-human",
-        "meeting-human",
         "--fixture-class",
         "--device cpu",
     ]
@@ -216,10 +201,8 @@ def _fixture_tooling_gate(root: Path) -> Gate:
             "lane-readiness.txt",
             "promotion-status.txt",
             "cpu-parakeet-v2",
-            "meeting-sortformer",
             "machine.txt",
             "parakeet-v2-cpu-human-gated.json",
-            "parakeet-pyannote-cpu-human-meeting.json",
         ],
         "scripts/collect-transcription-evidence.ps1": [
             "benchmark-results/*.json",
@@ -229,14 +212,10 @@ def _fixture_tooling_gate(root: Path) -> Gate:
             "lane-readiness.txt",
             "promotion-status.txt",
             "cpu-parakeet-v2",
-            "meeting-sortformer",
             "machine.txt",
             "Compress-Archive",
             "parakeet-v2-cpu-flite-long-3x-gated.json",
-            "parakeet-diarizen-cpu-flite-meeting.json",
-            "parakeet-sortformer-cpu-flite-meeting.json",
             "parakeet-v2-cpu-human-gated.json",
-            "parakeet-pyannote-cpu-human-meeting.json",
         ],
     }
     missing_collector_markers: list[str] = []
@@ -281,108 +260,6 @@ def _fixture_tooling_gate(root: Path) -> Gate:
         "benchmark_fixture_tooling",
         "pass",
         "fixture generators, preflighted lane runner, and evidence collector exist",
-    )
-
-
-def _meeting_promotion_gate(root: Path) -> Gate:
-    targets = [
-        ("benchmark-results/parakeet-pyannote-cpu-human-meeting.json", "parakeet-pyannote"),
-        ("benchmark-results/parakeet-diarizen-cpu-human-meeting.json", "parakeet-diarizen"),
-        ("benchmark-results/parakeet-sortformer-cpu-human-meeting.json", "parakeet-sortformer"),
-    ]
-    missing = [relative for relative, _backend in targets if not (root / relative).exists()]
-    if missing:
-        detail = "missing curated-human meeting benchmark artifacts: " + ", ".join(missing)
-        # Artifacts written before the gate moved to CPU runs keep their old
-        # names. Name them so a workstation that used to pass sees why it no
-        # longer does, instead of only a list of missing files.
-        expected = {Path(relative).name for relative, _backend in targets}
-        results = root / "benchmark-results"
-        unread = (
-            sorted(
-                path.name
-                for path in results.glob("parakeet-*-human-meeting.json")
-                if path.name not in expected
-            )
-            if results.is_dir()
-            else []
-        )
-        if unread:
-            detail += (
-                "; not read (only *-cpu-human-meeting.json counts; rerun the "
-                "meeting-*-human lanes on the CPU): " + ", ".join(unread)
-            )
-        return Gate("meeting_speaker_attribution", "blocked", detail)
-
-    details: list[str] = []
-    blockers: list[str] = []
-    passing: list[str] = []
-    for relative, expected_backend in targets:
-        path = root / relative
-        try:
-            report = _read_json(path)
-        except Exception as exc:  # noqa: BLE001
-            return Gate("meeting_speaker_attribution", "fail", f"could not parse {relative}: {exc}")
-        failed_gates = [
-            gate.get("name", "unknown")
-            for gate in report.get("gates", [])
-            if gate.get("passed") is False
-        ]
-        if failed_gates:
-            blockers.append(f"{expected_backend} failed gates: {', '.join(failed_gates)}")
-            continue
-        config = report.get("config", {})
-        if config.get("backend") != expected_backend or config.get("diarize") is not True:
-            return Gate(
-                "meeting_speaker_attribution",
-                "fail",
-                f"{expected_backend} artifact is not a diarized {expected_backend} run",
-            )
-        if config.get("fixture_class") != "curated-human":
-            return Gate(
-                "meeting_speaker_attribution",
-                "fail",
-                f"{expected_backend} artifact is not marked fixture_class='curated-human'",
-            )
-        if config.get("device") != "cpu":
-            return Gate(
-                "meeting_speaker_attribution",
-                "fail",
-                f"{expected_backend} artifact was not a CPU run: device={config.get('device')!r}",
-            )
-        if config.get("require_speaker_attribution") is not True:
-            return Gate(
-                "meeting_speaker_attribution",
-                "fail",
-                f"{expected_backend} artifact did not require speaker attribution",
-            )
-        summary = report.get("summary", {})
-        if summary.get("mean_der") is None:
-            blockers.append(f"{expected_backend} has no DER metric")
-            continue
-        completed = summary.get("completed_samples", summary.get("samples"))
-        if not isinstance(completed, int) or completed <= 0:
-            blockers.append(f"{expected_backend} has no completed samples")
-            continue
-        boundary_pairs = summary.get("segment_boundary_pair_count")
-        if not isinstance(boundary_pairs, int) or boundary_pairs <= 0:
-            blockers.append(f"{expected_backend} has no timestamp boundary evidence")
-            continue
-        der = summary.get("mean_der")
-        details.append(f"{expected_backend} DER {float(der):.3f}")
-        passing.append(expected_backend)
-    if not passing:
-        return Gate(
-            "meeting_speaker_attribution",
-            "blocked",
-            "meeting candidate blockers: " + "; ".join(blockers),
-        )
-    return Gate(
-        "meeting_speaker_attribution",
-        "pass",
-        "local meeting lane promoted with DER, timestamps, speakers, and no failed gates: "
-        + "; ".join(details)
-        + (f"; remaining candidates: {'; '.join(blockers)}" if blockers else ""),
     )
 
 
