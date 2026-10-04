@@ -18,14 +18,26 @@ Keep changes focused, include tests when behavior changes, and do not include
 personal hotwords, private dictation text, or API keys in examples, logs, or
 fixtures.
 
+## Agent rules
+
+`AGENTS.md` holds the rules for coding agents. `CLAUDE.md` is a git symlink to
+it so Claude Code reads the same file; edit `AGENTS.md`, never `CLAUDE.md`.
+
+On Windows, Git only creates the link when `core.symlinks` is on, which needs
+Developer Mode or an elevated shell. Without it, `CLAUDE.md` is checked out as a
+plain file holding the text `AGENTS.md`, and Claude Code does not see the
+rules. Clone with `git clone -c core.symlinks=true`, or fix an existing clone
+with `git config core.symlinks true`, then delete `CLAUDE.md` and run
+`git checkout -- CLAUDE.md`.
+
 <!-- arc-forge-org-consistency:start -->
 ## Pull request body
 
 Use `.github/pull_request_template.md` and keep the body current:
 
 - **What Problem This Solves** — the concrete problem and when it happens.
-- **Why This Change Was Made** — the shipped solution and any boundary that matters.
 - **User Impact** — what someone can now do, or a plain statement that there is no user-visible change.
+- **Why This Change Was Made** — the shipped solution and any boundary that matters.
 - **Evidence** — the command, commit, result, and what was not run. Screenshots show the real product. Placeholder text does not count.
 
 Edit the pull request body when someone asks for more proof. A review comment can point at that edit. The body stays the record. Maintainer authorship does not remove this requirement.
