@@ -28,13 +28,6 @@ Set-StrictMode -Version Latest
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
-$HuggingFaceToken = @($env:DICTATE_HF_TOKEN, $env:HUGGINGFACE_HUB_TOKEN, $env:HF_TOKEN) |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($HuggingFaceToken)) {
-    throw "Staging pyannote Community-1 requires a Hugging Face token via DICTATE_HF_TOKEN, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-}
-
 if ([string]::IsNullOrWhiteSpace($Bundles)) {
     $Bundles = "msi,nsis"
 }
@@ -94,13 +87,16 @@ Invoke-Native "installing Windows build dependencies" $VenvPython @(
     "pip",
     "install",
     "-e",
-    "$Root[windows,meeting]",
+    "$Root[windows]",
     "pyinstaller",
     "--quiet"
 )
 
-Write-Host "freezing the Python engine sidecar (PyInstaller, onefile)"
-$env:DICTATE_ONEFILE = "1"
+# Onedir, not onefile: a onefile engine unpacks its whole runtime into %TEMP% on
+# every launch (~7 s for the 333 MB Store build), which outlasted the shell's
+# handshake wait. The installed folder starts without unpacking.
+Write-Host "freezing the Python engine sidecar (PyInstaller, onedir)"
+Remove-Item Env:DICTATE_ONEFILE -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
     (Join-Path $Root "packaging\dist"), `
     (Join-Path $Root "packaging\build")
@@ -123,19 +119,27 @@ try {
     Pop-Location
 }
 
-$Engine = Join-Path $Root "packaging\dist\dictate-engine.exe"
-if (-not (Test-Path $Engine)) {
+$EngineDist = Join-Path $Root "packaging\dist\dictate-engine"
+$Engine = Join-Path $EngineDist "dictate-engine.exe"
+if (-not (Test-Path $Engine -PathType Leaf)) {
     throw "Freeze did not produce $Engine"
+}
+if (-not (Test-Path (Join-Path $EngineDist "_internal") -PathType Container)) {
+    throw "Freeze did not produce the onedir runtime folder $EngineDist\_internal"
 }
 
 Write-Host "smoke-testing the frozen binary"
 Invoke-Native "smoke-testing frozen engine" $Engine @("--version")
 
-Write-Host "staging the engine into the Tauri bundle resources"
+Write-Host "staging the engine folder into the Tauri bundle resources"
 $StageDir = Join-Path $Root "ui-shell\src-tauri\engine"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $StageDir
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
-Copy-Item $Engine (Join-Path $StageDir "dictate-engine.exe")
+# engine\dictate-engine.exe + engine\_internal\ (the shell starts the exe).
+Copy-Item (Join-Path $EngineDist "*") $StageDir -Recurse -Force
+if (-not (Test-Path (Join-Path $StageDir "_internal") -PathType Container)) {
+    throw "Staging did not copy the engine runtime folder to $StageDir\_internal"
+}
 $PackageVersion = if ($env:DICTATE_PACKAGE_VERSION) { $env:DICTATE_PACKAGE_VERSION } else { "2026.7.4" }
 $Distribution = @{ distribution = "direct"; packageVersion = $PackageVersion } | ConvertTo-Json -Compress
 Set-Content -Path (Join-Path $StageDir "dictate-distribution.json") -Encoding ASCII -Value $Distribution
@@ -148,20 +152,27 @@ Invoke-Native "downloading Parakeet v2 int8 model files" $VenvPython @(
     $ParakeetModelDir
 )
 
-Write-Host "staging pyannote Community-1 for offline Meeting mode"
-$PyannoteModelDir = Join-Path $StageDir "models\pyannote-speaker-diarization-community-1"
-Invoke-Native "downloading pyannote Community-1 model snapshot" $VenvPython @(
-    (Join-Path $Root "scripts\prepare-pyannote-community-model.py"),
-    "--output",
-    $PyannoteModelDir
-)
-
 Write-Host "staging third-party notices and model attributions"
 Invoke-Native "staging third-party notices" $VenvPython @(
     (Join-Path $Root "scripts\stage-notices.py"),
     "--engine-dir",
     $StageDir
 )
+
+# The engine installs as a folder of files, so every path must fit under
+# Windows/MSIX path limits once it sits below the install root
+# (C:\Program Files\WindowsApps\<package full name>\ for the Store).
+Write-Host "checking engine payload path lengths"
+$MaxEnginePathLength = 150
+$StagePrefix = $StageDir.TrimEnd("\") + "\"
+$LongestEnginePath = Get-ChildItem -LiteralPath $StageDir -Recurse -File -Force |
+    ForEach-Object { "engine\" + $_.FullName.Substring($StagePrefix.Length) } |
+    Sort-Object Length -Descending |
+    Select-Object -First 1
+Write-Host "longest engine path ($($LongestEnginePath.Length) chars): $LongestEnginePath"
+if ($LongestEnginePath.Length -gt $MaxEnginePathLength) {
+    throw "Engine payload path is $($LongestEnginePath.Length) chars, over the $MaxEnginePathLength-char budget: $LongestEnginePath"
+}
 
 Write-Host "ensuring the Tauri CLI is available"
 Invoke-Native "installing UI shell dependencies" "npm" @("--prefix", "ui-shell", "install")

@@ -43,9 +43,6 @@ MODEL_CHOICES = {
 }
 DEFAULT_MODELS = {
     "parakeet": "parakeet-tdt-0.6b-v2",
-    "parakeet-pyannote": "parakeet-tdt-0.6b-v2",
-    "parakeet-diarizen": "parakeet-tdt-0.6b-v2",
-    "parakeet-sortformer": "parakeet-tdt-0.6b-v2",
 }
 HISTORY_PAGE_SIZE = 5
 
@@ -248,7 +245,7 @@ class ControlPanel:
     def _sync_status_line(self) -> None:
         backend = self.backend_var.get()
         model = self.model_var.get()
-        if backend in {"parakeet", "parakeet-pyannote"}:
+        if backend == "parakeet":
             selected = f"Selected: Local / {model}"
         else:
             selected = f"Selected: {backend} / {model}"

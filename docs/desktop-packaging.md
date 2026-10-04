@@ -11,8 +11,9 @@ The desktop app is **two pieces that ship as one package**:
 - **`ui-shell/`** - a Tauri 2 shell (Rust) that draws the frameless window + tray
   and hosts the web UI built from **`ui/`** (React/Vite). See `ui-shell/README.md`.
 - **The Python engine** - the real product (STT, audio, push-to-talk, typing). It
-  is **PyInstaller-frozen** (`packaging/`) into a single `dictate-engine` binary
-  and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
+  is **PyInstaller-frozen** (`packaging/`) into a `dictate-engine` folder (the
+  launcher plus `_internal/`; a single self-extracting binary only for the
+  AppImage) and embedded in the bundle as a Tauri **resource** (`bundle.resources`).
 
 ### Linux host audio (do not freeze PortAudio)
 
@@ -39,25 +40,12 @@ implemented in `src/dictate/ui_server.py`). The webview talks to that server ove
 loopback HTTP with a bearer token written to `~/.local/share/dictate/ui-server.json`.
 
 The desktop bundles stage the default offline resources beside the frozen
-engine: Parakeet v2 int8 ONNX for regular English dictation and pyannote
-Community-1 for Meeting speaker attribution. Customers should not need Hugging
-Face accounts or model downloads for those bundled paths.
-
-Hugging Face appears in the build pipeline only because pyannote Community-1 is
-a gated upstream model. The build needs access to the already-approved model
-once, before packaging, so it can copy the model snapshot into
-`ui-shell/src-tauri/engine/models/`. Parakeet v2 int8 is public and does not
-need a private token. Runtime customer installs must prefer the bundled model
-paths and must not ask customers for Hugging Face credentials for the shipped
-default dictation or Meeting paths.
-
-Operator credential source: use the existing secret-management lane, such as
-Bitwarden Secrets Manager materialized into GitHub Actions secrets or a
-protected runner environment. The app and customer runtime must not call
-Bitwarden or Hugging Face. If an internal model mirror/artifact becomes the
-source of truth, update `scripts/prepare-pyannote-community-model.py` to stage
-from that artifact before falling back to Hugging Face; do not reintroduce a
-customer-time download.
+engine: Parakeet v2 int8 ONNX for English dictation. Customers do not need
+Hugging Face accounts or model downloads for it, and the build needs no
+Hugging Face token: Parakeet v2 int8 is public. The pyannote Community-1 model
+the builds used to stage for Meeting, and the token it needed, went with Meeting
+(#140). `packaging/dictate-engine.spec` and `packaging/build-engine.sh` fail
+the build if torch or pyannote is frozen into the engine again.
 
 The bundled engine runs Parakeet on the CPU through the `onnxruntime` package.
 There are no GPU builds: the `gpu` and `amd` extras were removed when Dictate
@@ -87,18 +75,40 @@ scripts/build-linux-desktop.sh
 
 ## Windows build / release flow
 
-The Windows path mirrors the Linux bundle architecture, but stages
-`dictate-engine.exe` and builds Tauri's Windows bundle targets:
+The Windows path mirrors the Linux `.deb`/`.rpm` architecture: it stages the
+onedir engine folder and builds Tauri's Windows bundle targets:
 
 ```
 scripts/build-windows-desktop.ps1
   ├─ npm --prefix ui run build
   ├─ create packaging\.build-venv-windows
   ├─ pip install -e ".[windows]" pyinstaller
-  ├─ DICTATE_ONEFILE=1 pyinstaller packaging\dictate-engine.spec
-  ├─ stage engine -> ui-shell\src-tauri\engine\dictate-engine.exe
+  ├─ pyinstaller packaging\dictate-engine.spec   (onedir; DICTATE_ONEFILE unset)
+  ├─ stage packaging\dist\dictate-engine\* -> ui-shell\src-tauri\engine\
+  │    (dictate-engine.exe + _internal\, then models and notices)
+  ├─ fail if any engine path is over 150 chars
   └─ tauri build --bundles msi,nsis
 ```
+
+- The engine is installed as a folder (`engine\dictate-engine.exe` beside
+  `engine\_internal\`), not a onefile exe. A onefile exe unpacks its whole
+  runtime into `%TEMP%` on every launch; the 333 MB Store build spent ~7 s on
+  that and missed the shell's 8 s handshake wait (#131). The Windows spec also
+  drops build-only files (headers, `.lib`, CMake files, `.pdb`) from the folder.
+- `scripts/windows-engine-smoke.ps1` starts the staged engine the way the shell
+  does (`--no-tray`, `DICTATE_UI_SERVER=1`, throwaway `LOCALAPPDATA`/`APPDATA`)
+  and writes the handshake time, first authenticated `/api/state` time, file
+  count and size to the job summary. The manual Windows bundle and Store MSIX
+  workflows run it after the build.
+- The engine the shell starts writes the handshake before it loads the
+  Parakeet model, and loads the model on a background thread (#155), so the
+  window connects while the model loads. `/api/state` reports `modelReady` and
+  `modelLoad` (`{phase: loading | ready | failed, error}`), and the event stream
+  sends a `model` event when that changes. The model load holds the Python
+  GIL for its whole length (the engine answers no request meanwhile, measured
+  on Windows), so recording and the shortcut listener start once the model is
+  ready; until then the window says "Getting ready…". A failed load is shown
+  in the window and the engine stays up.
 
 - **Release (`.github/workflows/release.yml`, job `windows-desktop`)** runs the
   full Windows build after the manually dispatched release workflow verifies the
@@ -156,7 +166,8 @@ scripts/build-windows-msix-store.ps1
   ├─ run scripts\build-windows-desktop.ps1 -Bundles no-bundle
   ├─ read shared target\release\dictate-ui-shell.exe
   ├─ read shared target\release\engine\dictate-engine.exe
-  ├─ stage shell + engine into the MSIX loose layout
+  ├─ stage shell + engine folder into the MSIX loose layout
+  ├─ fail unless engine\_internal\ is present and every path is <= 150 chars
   ├─ render packaging\msix\Package.appxmanifest.in
   ├─ winapp tool makeappx pack, or Windows SDK makeappx.exe
   └─ unpack and validate manifest identity + shell/engine payloads
@@ -216,12 +227,13 @@ scripts/build-windows-msix-store.ps1
 
 ## Gotchas (the expensive lessons)
 
-### Match the engine layout to the Linux bundle format
+### Match the engine layout to the bundle format
 A PyInstaller **onedir** engine ships its libraries in `_internal/`, which native
-`.deb` and RPM packages can carry safely without a memory-heavy final archive
-compression step. Use onedir for those native packages. AppImage's linuxdeploy
-walks the internal libraries and is less reliable with that layout, so AppImage
-builds set `DICTATE_ONEFILE=1` and stage one self-extracting ELF instead.
+`.deb` and RPM packages and every Windows package (MSI, NSIS, Store MSIX) carry
+as an installed folder, with no unpacking at launch. Use onedir for those.
+AppImage's linuxdeploy walks the internal libraries and is less reliable with
+that layout, so AppImage builds alone set `DICTATE_ONEFILE=1` and stage one
+self-extracting ELF instead.
 
 ### Tauri icons must be RGBA PNG
 `tauri::generate_context!` panics at compile time with `icon ... is not RGBA` if

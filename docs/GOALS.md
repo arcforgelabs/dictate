@@ -8,7 +8,7 @@ This file is kept as a compatibility pointer for older links.
 and why.
 
 **Local transcription / model work:** [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md)
-— CPU/CUDA/AMD lanes, meetings, packaging evidence.
+— CPU lanes (GPU lanes dropped, Meetings shelved #140), packaging evidence.
 
 **Historical notes:** [archive/goals-2026-07-05.md](archive/goals-2026-07-05.md)
 and [archive/goal-2026-09-19.md](archive/goal-2026-09-19.md), the former

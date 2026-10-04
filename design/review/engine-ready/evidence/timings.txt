@@ -1,0 +1,60 @@
+Dictate desktop app, real window: engine handshake before the speech model (#155, PR #158)
+
+Build: head 0209cb1, windows-desktop-bundle.yml run 37145272559 (bundles=nsis),
+Dictate_2026.10.1_x64-setup.exe sha256 A107653250D26520A8DBE1FEC19A1F40DEE8EF9D47BE7E62A4607DB62FF89A82,
+downloaded on the VM and installed with `setup.exe /S`.
+
+Machine: Crabbox 0.70.0 Azure lease, `--target windows --desktop --class standard`,
+Standard_D2ds_v6 (2 vCPU, 8 GB), westus3, Windows Server 2022 Datacenter 10.0.20348,
+WebView2 Runtime installed, Defender real-time protection on, screen 1024x768.
+The crabbox user is auto-logged on to console session 1.
+No microphone exists on the VM (PortAudio lists no input device).
+
+Method: probe-session.ps1 in this folder ran as a scheduled task with Interactive
+logon, in session 1. It started dictate-ui-shell.exe the way a user does, and
+moved the window into the 1024x728 work area so the bottom of the window was
+visible. It then recorded the following times, in ms after the shell started:
+- handshake: the write time of ui-server.json;
+- WebView2 connections to the engine port: Get-NetTCPConnection CreationTime,
+  owner msedgewebview2 (whole-second resolution);
+- model ready: the first /api/state with modelReady=true, from one request at a
+  time with a non-blocking HttpClient.
+The probe took a window screenshot every 0.5 s, clicked the mic once while the
+model loaded, and took a screenshot 1.5 s after model ready.
+
+Launch 1 (first launch after install)
+   297 ms  shell started
+  3058 ms  handshake written (ui-server.json)
+  3975 ms  WebView2 connections to the engine port created (3)
+  4275 ms  main window seen by the probe
+  5323 ms  screenshot: "Getting ready..."
+  5639 ms  mic clicked on the cradle
+  6048 ms  screenshot: "Getting ready -- the speech model is still loading" toast
+  8117 ms  first /api/state answered (sent at the handshake; modelReady=false, phase=loading)
+  8396 ms  model ready (/api/state modelReady=true)
+ 10163 ms  screenshot: "Click to dictate / or hold Right Ctrl"
+
+Launch 2 (warm). The screenshots in this folder are from this launch.
+    63 ms  shell started
+   391 ms  handshake written (ui-server.json)
+   676 ms  WebView2 connections to the engine port created (3)
+   720 ms  main window seen by the probe
+  1896 ms  screenshot getting-ready.png ("Getting ready...", no shortcut hint, no
+           "engine is not connected")
+  2087 ms  mic clicked on the cradle
+  2494 ms  screenshot mic-click-while-loading.png (toast "Getting ready -- the speech
+           model is still loading"; no /api/notes/start reached the engine, and its
+           log shows no microphone attempt)
+  4865 ms  first /api/state answered (sent at the handshake; modelReady=false, phase=loading)
+  5164 ms  model ready (/api/state modelReady=true)
+  6922 ms  screenshot ready.png ("Click to dictate", "or hold Right Ctrl")
+
+The handshake file stayed in place for the whole load in both launches. On the
+build before 0209cb1, the shell deleted it while the model loaded: the window's
+connections filled the server's listen backlog of 5 while the engine was busy,
+and the shell's TCP liveness check failed. 0209cb1 raises the backlog to 128.
+
+Not shown: a spoken dictation. The VM has no microphone, so no recording or
+transcription after model ready is shown. The "Update available 2026.10.1" pill
+in ready.png is the existing update check on a branch build; this PR does not
+change it.

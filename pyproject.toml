@@ -1,6 +1,6 @@
 [project]
 name = "dictate"
-version = "2026.9.27"
+version = "2026.10.2"
 description = "Desktop dictation that types into the focused app."
 requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
@@ -23,13 +23,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-meeting = ["pyannote.audio>=4.0.0", "torch>=2.4.0"]
-sortformer = [
-    "nemo-toolkit[asr]>=2.6,<2.7",
-    # NeMo 2.6's ASR imports require the pre-0.22 tokenizer API.
-    "tokenizers>=0.21,<0.22",
-    "transformers>=4.53,<4.54",
-]
 x11 = ["pynput>=1.7.0"]
 wayland = ["evdev>=1.9.0"]
 windows = ["pynput>=1.7.0", "pyperclip>=1.9.0"]

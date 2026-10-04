@@ -8,7 +8,3 @@ stt_compute_type: int8
 # stt_model: parakeet-tdt-0.6b-v2
 # Multilingual (25 European languages):
 # stt_model: parakeet-tdt-0.6b-v3
-# Meeting mode uses a separate speaker-attribution lane. Leave these unset for
-# the default local Parakeet+pyannote Meeting backend, or set them explicitly.
-# meeting_stt_backend: parakeet-pyannote
-# meeting_stt_model: parakeet-tdt-0.6b-v2

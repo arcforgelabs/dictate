@@ -13,12 +13,7 @@ import numpy as np
 # Parakeet ONNX files. There is no device choice.
 ComputeType = Literal["int8", "float32"]
 COMPUTE_TYPES: tuple[ComputeType, ...] = ("int8", "float32")
-SttBackend = Literal[
-    "parakeet",
-    "parakeet-pyannote",
-    "parakeet-diarizen",
-    "parakeet-sortformer",
-]
+SttBackend = Literal["parakeet"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,19 +22,16 @@ class SttCapabilities:
     supports_prompt_bias: bool = False
     supports_language_hint: bool = True
     supports_word_timestamps: bool = False
-    supports_speaker_attribution: bool = False
     supports_streaming_chunks: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class TranscriptSegment:
-    """Structured transcript segment with optional speaker and timing metadata."""
+    """Structured transcript segment with optional timing metadata."""
 
     text: str
     t_start: float | None = None
     t_end: float | None = None
-    speaker_id: str | None = None
-    speaker_label: str | None = None
 
 
 class SpeechToText:

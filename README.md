@@ -168,6 +168,11 @@ also want to remove config, logs, history, and downloaded model data.
 - Runs as a tray app
 - Types dictated text into the focused app. A terminal, including the Grok
   CLI, receives that text with Shift+Insert so it is not filed as an attachment.
+- Leaves your clipboard as it was: the text is pasted through the clipboard,
+  then what you had copied is put back. On Windows the dictated text carries
+  the markers Windows defines to leave content out of clipboard history (Win+V)
+  and cloud clipboard. On Linux the most useful single format comes back (an
+  image, else text).
 - Supports configurable push-to-talk
 - Presents a simple capture-first desktop UI
 - Supports launch on startup
@@ -191,18 +196,12 @@ commands keep working. The engine has no device choice: a saved GPU device in
 `config.yaml` moves to CPU on upgrade, and `--device` is still accepted so the
 installers and old scripts run, and is ignored.
 
-- The Meeting button and the dictation-list filter are beta-channel chrome.
-  The normal channel is dictation only. Meeting uses a dedicated
-  speaker-attribution lane. Inspect it with
-  `dictate config show`; set it with
-  `dictate config set-meeting-model parakeet-pyannote/parakeet-tdt-0.6b-v2`.
-  Source installs can add pyannote support with `./install.sh --meeting` or
-  `.\install-windows.ps1 -Meeting`, then verify with
-  `dictate doctor --stt-backend parakeet-pyannote --quick`.
-  Experimental preflight targets also exist for
-  `parakeet-diarizen/parakeet-tdt-0.6b-v2` and
-  `parakeet-sortformer/parakeet-tdt-0.6b-v2`; these still require their
-  runtime-specific DiariZen or NeMo setup before selection.
+Meetings (speaker-labelled transcripts) are not part of Dictate for now: they
+were removed from every build on 2026-10-03 and are shelved as P3 (#140). On
+upgrade a saved Meeting model is removed from `config.yaml` with a one-line
+notice, and meeting transcripts you already saved stay in your notes with their
+speaker labels. The installers' old `--meeting` / `-Meeting` flags are accepted
+and ignored.
 
 ## Commands
 

@@ -18,10 +18,7 @@ from dictate.runtime_logging import (
     resolve_log_paths,
 )
 from dictate.stt import (
-    PARAKEET_DIARIZEN_MODELS,
     PARAKEET_MODELS,
-    PARAKEET_PYANNOTE_MODELS,
-    PARAKEET_SORTFORMER_MODELS,
     STT_BACKENDS,
     add_retired_device_argument,
     create_speech_to_text,
@@ -48,10 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Model name override for diagnosis. "
-            f"parakeet examples: {', '.join(PARAKEET_MODELS)}. "
-            f"parakeet-pyannote examples: {', '.join(PARAKEET_PYANNOTE_MODELS)}. "
-            f"parakeet-diarizen examples: {', '.join(PARAKEET_DIARIZEN_MODELS)}. "
-            f"parakeet-sortformer examples: {', '.join(PARAKEET_SORTFORMER_MODELS)}."
+            f"parakeet examples: {', '.join(PARAKEET_MODELS)}."
         ),
     )
     add_retired_device_argument(parser)
@@ -310,7 +304,7 @@ $startup.Save()
 $keyPath = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dictate'
 New-Item -Force -Path $keyPath | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'DisplayName' -Value 'Dictate' -PropertyType String | Out-Null
-New-ItemProperty -Force -Path $keyPath -Name 'DisplayVersion' -Value '2026.9.27' -PropertyType String | Out-Null
+New-ItemProperty -Force -Path $keyPath -Name 'DisplayVersion' -Value '2026.10.2' -PropertyType String | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'Publisher' -Value 'Arc Forge Labs' -PropertyType String | Out-Null
 New-ItemProperty -Force -Path $keyPath -Name 'InstallLocation' -Value $installLocation -PropertyType String | Out-Null
 if (Test-Path $displayIcon) {{ New-ItemProperty -Force -Path $keyPath -Name 'DisplayIcon' -Value $displayIcon -PropertyType String | Out-Null }}

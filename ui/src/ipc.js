@@ -82,10 +82,35 @@ async function call(method, path, body, retry = true) {
   return data;
 }
 
+// Keep asking the shell for the engine handshake until it appears, then call
+// `onLive` once. A packaged engine can take longer to come up than the shell
+// waits at launch (the Windows onefile engine unpacks itself on every start),
+// so a window that opened without a bridge must keep trying rather than stay
+// disconnected. Returns a cancel function.
+export function waitForBridge(onLive, intervalMs = 1000) {
+  let stopped = false;
+  let timer = null;
+  const attempt = async () => {
+    timer = null;
+    if (stopped) return;
+    if (bridge() || (await refreshBridge())) {
+      if (!stopped) onLive();
+      return;
+    }
+    if (!stopped) timer = setTimeout(attempt, intervalMs);
+  };
+  attempt();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+}
+
 export const ipc = {
   isLive,
   isShell,
   isMockMode,
+  waitForBridge,
 
   // Platform: "gnome" | "kde" | "win11" | "win10" | "mac" | "linux".
   // Read from the injected object directly so the chrome is correct even when
@@ -126,17 +151,8 @@ export const ipc = {
   async stopNoteRecording() {
     return call("POST", "/api/notes/stop");
   },
-  async startMeetingRecording() {
-    return call("POST", "/api/meetings/start");
-  },
-  async stopMeetingRecording() {
-    return call("POST", "/api/meetings/stop");
-  },
   async discardNoteRecording() {
     return call("POST", "/api/notes/discard");
-  },
-  async discardMeetingRecording() {
-    return call("POST", "/api/meetings/discard");
   },
   async pauseNoteRecording() {
     return call("POST", "/api/notes/pause");

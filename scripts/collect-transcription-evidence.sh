@@ -10,8 +10,7 @@ usage() {
 Usage: scripts/collect-transcription-evidence.sh [--output DIR] [--dry-run]
 
 Collect non-secret transcription readiness evidence into a timestamped archive.
-The bundle is intended for human-test handoff from CPU or Meeting test
-machines after running scripts/run-transcription-lane-benchmarks.sh.
+The bundle is intended for human-test handoff from CPU test machines after running scripts/run-transcription-lane-benchmarks.sh.
 
 Collected:
   docs/TRANSCRIPTION_PLAN.md
@@ -109,7 +108,7 @@ shopt -u nullglob
 
 {
   cd "$repo_root"
-  for lane in cpu-human cpu-human-v3 meeting-human meeting-diarizen-human meeting-sortformer-human; do
+  for lane in cpu-human cpu-human-v3; do
     echo "## $lane"
     scripts/run-transcription-lane-benchmarks.sh --dry-run --lane "$lane"
     echo
@@ -123,9 +122,6 @@ shopt -u nullglob
   expected=(
     benchmark-results/parakeet-v2-cpu-human-gated.json
     benchmark-results/parakeet-v3-cpu-human-gated.json
-    benchmark-results/parakeet-pyannote-cpu-human-meeting.json
-    benchmark-results/parakeet-diarizen-cpu-human-meeting.json
-    benchmark-results/parakeet-sortformer-cpu-human-meeting.json
   )
   for relative in "${expected[@]}"; do
     if [[ -s "$repo_root/$relative" ]]; then
@@ -161,9 +157,6 @@ shopt -u nullglob
   cd "$repo_root"
   run_readiness "cpu-parakeet-v2" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
   run_readiness "cpu-parakeet-v3" uv run dictate doctor --stt-backend parakeet --model parakeet-tdt-0.6b-v3 --device cpu --quick --type-backend pynput
-  run_readiness "meeting-pyannote" uv run dictate doctor --stt-backend parakeet-pyannote --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
-  run_readiness "meeting-diarizen" uv run dictate doctor --stt-backend parakeet-diarizen --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
-  run_readiness "meeting-sortformer" uv run dictate doctor --stt-backend parakeet-sortformer --model parakeet-tdt-0.6b-v2 --device cpu --quick --type-backend pynput
 } >"$bundle_dir/lane-readiness.txt" 2>&1 || true
 
 {

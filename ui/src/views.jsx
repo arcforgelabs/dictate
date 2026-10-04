@@ -51,13 +51,12 @@ export function NotebookToggle() {
 }
 
 /** Shared top bar — same row geometry as `.notes-search` on the dictations view. */
-export function HomeBar({ left, right, meeting }) {
+export function HomeBar({ left, right }) {
   return (
     <div className="notes-search home-bar">
       {left}
       <span className="notes-search-grow" aria-hidden="true" />
       {right}
-      {meeting}
       <NotebookToggle />
     </div>
   );
@@ -153,8 +152,6 @@ function noteMarkdown(note, titleDate) {
 function HistoryView() {
   const s = useStore();
   const [q, setQ] = useState("");
-  // Category filter (Phase 1): all | meetings | quick. View-only; capture is unchanged.
-  const [cat, setCat] = useState("all");
   const [, tick] = useState(0);
 
   // Refresh relative timestamps every 15 s without a full re-render.
@@ -164,19 +161,11 @@ function HistoryView() {
   }, []);
 
   const all = s.history || [];
-  // Prefer the persisted mode; segments remain a compatibility fallback for older records.
-  const isMeeting = (n) => n?.mode === "meeting"
-    || (n?.mode == null && Array.isArray(n?.segments) && n.segments.length > 0);
-  const byCat = useMemo(() => {
-    if (cat === "meetings") return all.filter(isMeeting);
-    if (cat === "quick") return all.filter((n) => !isMeeting(n));
-    return all;
-  }, [all, cat]);
   const filtered = useMemo(() => {
-    if (!q) return byCat;
+    if (!q) return all;
     const sq = q.toLowerCase();
-    return byCat.filter((n) => noteSearchText(n).includes(sq));
-  }, [q, byCat]);
+    return all.filter((n) => noteSearchText(n).includes(sq));
+  }, [q, all]);
 
   // Open a history note in the ExpandedNote read view.
   const openNote = (note) => {
@@ -229,21 +218,6 @@ function HistoryView() {
             <Icon name="x" size={15} />
           </button>
         )}
-        {s.updateChannel === "unstable" && (
-          <div className="engine-seg cat-seg" role="group" aria-label="Filter dictations">
-            {[["all", "All"], ["meetings", "Meetings"], ["quick", "Quick"]].map(([c, label]) => (
-              <button
-                key={c}
-                type="button"
-                className={"engine-opt" + (cat === c ? " on" : "")}
-                aria-pressed={cat === c}
-                onClick={() => setCat(c)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
         <NotebookToggle />
       </div>
 
@@ -257,21 +231,8 @@ function HistoryView() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="notes-blank">
-            {q ? (
-              <>
-                <div className="nb-title">No notes match &ldquo;{q}&rdquo;.</div>
-                <div className="nb-sub">Try a different word.</div>
-              </>
-            ) : (
-              <>
-                <div className="nb-title">{cat === "meetings" ? "No meetings yet." : "No quick records yet."}</div>
-                <div className="nb-sub">
-                  {cat === "meetings"
-                    ? "Meetings you record will appear here."
-                    : "Quick dictations will appear here."}
-                </div>
-              </>
-            )}
+            <div className="nb-title">No notes match &ldquo;{q}&rdquo;.</div>
+            <div className="nb-sub">Try a different word.</div>
           </div>
         ) : (
           filtered.map((note) => (

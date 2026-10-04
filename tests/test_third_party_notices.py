@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BUNDLED_MODELS = ("parakeet-tdt-0.6b-v2-onnx", "pyannote-speaker-diarization-community-1")
+BUNDLED_MODELS = ("parakeet-tdt-0.6b-v2-onnx",)
 
 
 def _stage_module():
@@ -23,7 +23,6 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         for required in (
             "istupakov/parakeet-tdt-0.6b-v2-onnx",
             "nvidia/parakeet-tdt-0.6b-v2",
-            "pyannote/speaker-diarization-community-1",
             "CC BY 4.0",
             "pynput | LGPL-3.0",
             "python-xlib | LGPL-2.1-or-later",
@@ -32,6 +31,12 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         # faster-whisper and the PyAV/FFmpeg build it pulled in no longer ship.
         for removed in ("faster-whisper", "CTranslate2", "PyAV", "FFmpeg", "libx264"):
             self.assertNotIn(removed, notices)
+        # Nor does Meeting capture (#140): no pyannote model or torch stack.
+        for removed in ("pyannote", "PyTorch", "torchaudio", "Meeting"):
+            self.assertNotIn(removed, notices)
+        self.assertFalse(
+            (ROOT / "packaging" / "notices" / "models" / "pyannote-speaker-diarization-community-1").exists()
+        )
 
     def test_every_bundled_model_has_a_cc_by_attribution(self) -> None:
         for model in BUNDLED_MODELS:

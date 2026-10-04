@@ -63,15 +63,15 @@ class MainSttSelectionTests(unittest.TestCase):
     def test_saved_selection_used_when_cli_does_not_override(self) -> None:
         backend, model, _ = self._startup_stt(
             [],
-            Config(stt_backend="parakeet-pyannote", stt_model="parakeet-tdt-0.6b-v3"),
+            Config(stt_backend="parakeet", stt_model="parakeet-tdt-0.6b-v3"),
         )
 
-        self.assertEqual((backend, model), ("parakeet-pyannote", "parakeet-tdt-0.6b-v3"))
+        self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
 
     def test_cli_flags_override_saved_selection(self) -> None:
         backend, model, _ = self._startup_stt(
-            ["--stt-backend", "parakeet", "--model", "parakeet-tdt-0.6b-v3"],
-            Config(stt_backend="parakeet-pyannote", stt_model="parakeet-tdt-0.6b-v2"),
+            ["--model", "parakeet-tdt-0.6b-v3"],
+            Config(stt_backend="parakeet", stt_model="parakeet-tdt-0.6b-v2"),
         )
 
         self.assertEqual((backend, model), ("parakeet", "parakeet-tdt-0.6b-v3"))
@@ -83,7 +83,7 @@ class MainSttSelectionTests(unittest.TestCase):
 
     def test_cli_rejects_removed_whisper_backends(self) -> None:
         parser = main_module.build_parser()
-        for backend in ("faster-whisper", "whisperx"):
+        for backend in ("faster-whisper", "whisperx", "parakeet-pyannote", "parakeet-diarizen"):
             with self.subTest(backend=backend), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     parser.parse_args(["--stt-backend", backend])

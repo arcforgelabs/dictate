@@ -22,7 +22,6 @@ PREPARE_TURBO=1
 SEED_DEFAULT_CONFIG=1
 STARTUP=1
 INSTALL_UI=1
-INSTALL_MEETING="${DICTATE_INSTALL_MEETING:-0}"
 INSTALL_SCOPE="user"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -34,7 +33,7 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 [--user|--system] [--meeting] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
+Usage: $0 [--user|--system] [--no-verify] [--no-prepare-turbo] [--no-seed-default-config] [--no-startup] [--no-ui] [--session-backend auto|x11|wayland]
 
 Default: --user.
 
@@ -47,10 +46,6 @@ missing.
 
 --system installs a Linux desktop package into system paths using apt/pkexec or
 sudo. It is intentionally explicit because it requires administrator approval.
-
---meeting installs Dictate's pyannote/torch optional dependencies for the
-parakeet-pyannote Meeting lane. DiariZen and Sortformer still require their
-runtime-specific setup before selecting those experimental lanes.
 EOF
 }
 
@@ -126,11 +121,9 @@ while [ "$#" -gt 0 ]; do
       # Retired with GPU support; accepted so older update commands still run.
       echo "Ignoring $1: Dictate runs on the CPU only." >&2
       ;;
-    --meeting)
-      INSTALL_MEETING=1
-      ;;
-    --no-meeting)
-      INSTALL_MEETING=0
+    --meeting|--no-meeting)
+      # Retired with Meeting capture (#140); accepted so older commands still run.
+      echo "Ignoring $1: Meeting capture is no longer part of Dictate." >&2
       ;;
     --user)
       INSTALL_SCOPE="user"
@@ -173,9 +166,6 @@ elif [ "$SESSION_BACKEND" = "wayland" ]; then
   EXTRAS+=("wayland")
 elif [ "$SESSION_BACKEND" = "unknown" ]; then
   EXTRAS+=("x11" "wayland")
-fi
-if [ "$INSTALL_MEETING" -eq 1 ]; then
-  EXTRAS+=("meeting")
 fi
 PIP_TARGET="$SCRIPT_DIR"
 if [ "${#EXTRAS[@]}" -gt 0 ]; then

@@ -55,15 +55,27 @@ def resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarra
 
 
 def _default_input_device(sd: Any) -> int | None:
+    # sounddevice's ``default.device`` is an _InputOutputPair: indexable, but
+    # not a list or tuple. Index it rather than type-checking it, or the
+    # PortAudio default is silently lost (on Windows that left no candidates).
     pair = getattr(sd, "default", None)
     device = getattr(pair, "device", None) if pair is not None else None
-    if isinstance(device, (list, tuple)):
-        index = device[0] if device else None
-    else:
-        index = device
+    index: Any = device
+    if device is not None and not isinstance(device, (int, str)):
+        try:
+            index = device[0]
+        except (TypeError, IndexError, KeyError):
+            index = None
     try:
         value = int(index)  # type: ignore[arg-type]
     except (TypeError, ValueError):
+        value = -1
+    if value >= 0:
+        return value
+    try:
+        info = sd.query_devices(kind="input")
+        value = int(info.get("index", -1))
+    except Exception:  # noqa: BLE001
         return None
     return value if value >= 0 else None
 
@@ -88,7 +100,7 @@ def _pulse_default_input(sd: Any) -> int | None:
 
 
 def _input_device_candidates(sd: Any) -> list[int]:
-    """Prefer Pulse default, then PortAudio default, then soft PCMs."""
+    """Prefer Pulse default, then PortAudio default, then soft PCMs, then any input."""
     seen: set[int] = set()
     candidates: list[int] = []
 
@@ -113,6 +125,18 @@ def _input_device_candidates(sd: Any) -> list[int]:
             continue
         if any(token in name for token in _PREFERRED_INPUT_NAMES):
             add(index)
+    # Last resort, only when nothing above matched: any device that can
+    # capture. Windows names its microphones after the hardware, so none match
+    # the preferred names. Kept out of the list otherwise, so a default that
+    # rejects 16 kHz falls back to its own rate rather than to another mic.
+    if candidates:
+        return candidates
+    for index, device in enumerate(devices):
+        try:
+            if int(device.get("max_input_channels", 0)) > 0:
+                add(index)
+        except Exception:  # noqa: BLE001
+            continue
     return candidates
 
 
@@ -259,6 +283,10 @@ class SoundDeviceRecorder:
         # ``sample_rate`` before preprocessing / STT.
         self._capture_rate = sample_rate
         self._capture_device: int | None = None
+        # Seconds the audio callback spent resampling and preprocessing during
+        # the current recording; kept after stop for the dictation timing line.
+        self._processing_s = 0.0
+        self.last_processing_seconds: float | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -297,6 +325,8 @@ class SoundDeviceRecorder:
         self._chunk_sequence = 0
         self._recording_id = 0 if recording_id is None else int(recording_id)
         self._window_count = 0
+        self._processing_s = 0.0
+        self.last_processing_seconds = None
         self._on_chunk = on_chunk
         self._on_samples = on_samples
         self._note_chunks = bool(note_chunks)
@@ -378,7 +408,9 @@ class SoundDeviceRecorder:
             if self._preprocessor is not None:
                 # Drain the ~10 ms the preprocessor was still buffering so the tail
                 # of the utterance is not lost, then feed it through the same path.
+                flush_started = time.perf_counter()
                 tail = self._preprocessor.flush()
+                self._processing_s += time.perf_counter() - flush_started
                 self._preprocessor = None
                 if tail.size:
                     if not (self._note_chunks or self._overlap_stream):
@@ -426,6 +458,7 @@ class SoundDeviceRecorder:
                 ).astype(np.float32, copy=False)
             self._sample_count = 0
             self._write_pos = 0
+            self.last_processing_seconds = self._processing_s
         if callback is not None:
             for chunk_event in chunk_events:
                 try:
@@ -463,16 +496,16 @@ class SoundDeviceRecorder:
         samples = np.asarray(indata, dtype=np.float32).reshape(-1)
         if samples.size == 0:
             return
+        processing_started = time.perf_counter()
         if self._capture_rate != self.sample_rate:
             samples = resample_audio(samples, self._capture_rate, self.sample_rate)
-            if samples.size == 0:
-                return
-        if self._preprocessor is not None:
+        if self._preprocessor is not None and samples.size:
             # AGC + noise suppression before anything downstream sees the audio.
             # Emits only whole 10 ms frames; the ~10 ms remainder is flushed on stop.
             samples = self._preprocessor.process(samples)
-            if samples.size == 0:
-                return
+        self._processing_s += time.perf_counter() - processing_started
+        if samples.size == 0:
+            return
         with self._lock:
             if not (self._note_chunks or self._overlap_stream):
                 self._write_capture(samples)

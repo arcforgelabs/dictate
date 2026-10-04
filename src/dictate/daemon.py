@@ -9,12 +9,14 @@ import time
 import threading
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Literal
 
 import numpy as np
 
 from dictate.audio import AudioCaptureError, AudioChunk, AudioRecorder, SoundDeviceRecorder
 from dictate.cue_sound import play_pause_cue
+from dictate.dictation_timing import DictationTiming, log_timing_line
 from dictate.engine import DictationEngine, TranscriptionResult
 from dictate.history import HistoryStore
 from dictate.note_store import NoteSegment, NoteStore
@@ -39,7 +41,11 @@ FINAL_AUDIO_QUEUE_SIZE = 4
 FINAL_WINDOW_QUEUE_SIZE = 128
 TERMINAL_RECORDING_CACHE_SIZE = FINAL_AUDIO_QUEUE_SIZE + FINAL_WINDOW_QUEUE_SIZE
 _FINAL_CHUNK_EMPTY = object()
-RecordingMode = Literal["dictation", "note", "meeting"]
+# Fallback poll while idle; queued work wakes the worker straight away.
+WORKER_IDLE_POLL_SECONDS = 0.1
+RecordingMode = Literal["dictation", "note"]
+ModelPhase = Literal["loading", "ready", "failed"]
+MODEL_LOADING_MESSAGE = "Getting ready: the speech model is still loading"
 
 
 class Daemon:
@@ -63,8 +69,9 @@ class Daemon:
         note_recording_callback: Callable[[bool], None] | None = None,
         note_callback: Callable[[dict[str, object]], None] | None = None,
         audio_level_callback: Callable[[float], None] | None = None,
+        model_status_callback: Callable[[dict[str, object]], None] | None = None,
         recorder: AudioRecorder | None = None,
-        meeting_stt: SpeechToText | None = None,
+        model_loaded: bool = True,
     ):
         self.active = True
         self.language = language
@@ -78,6 +85,19 @@ class Daemon:
         self.note_recording_callback = note_recording_callback
         self.note_callback = note_callback
         self.audio_level_callback = audio_level_callback
+        self.model_status_callback = model_status_callback
+        # With model_loaded=False the speech model is loaded later, by
+        # start_model_load(). Until it is ready, recordings are refused with
+        # MODEL_LOADING_MESSAGE and the shortcut listener is not started: the
+        # model load holds the GIL for seconds, which would starve the audio
+        # callback and the keyboard hook.
+        self._model_loaded = threading.Event()
+        self._model_phase: ModelPhase = "ready" if model_loaded else "loading"
+        self._model_error: str | None = None
+        self._hotkey_lock = threading.Lock()
+        self._hotkey_start_pending = False
+        if model_loaded:
+            self._model_loaded.set()
         self.push_to_talk_combo = normalize_push_to_talk_combo(push_to_talk_combo)
         self.engine = DictationEngine(
             stt=stt,
@@ -86,15 +106,6 @@ class Daemon:
             lexicon_mode=lexicon_mode,
             lexicon_replacements=lexicon_replacements,
         )
-        self.meeting_engine: DictationEngine | None = None
-        if meeting_stt is not None:
-            self.meeting_engine = DictationEngine(
-                stt=meeting_stt,
-                sample_rate=SAMPLE_RATE,
-                hotwords=hotwords,
-                lexicon_mode=lexicon_mode,
-                lexicon_replacements=lexicon_replacements,
-            )
         self.recorder = recorder or SoundDeviceRecorder(
             sample_rate=SAMPLE_RATE,
             max_recording_seconds=NOTE_MAX_RECORDING_SECONDS,
@@ -106,6 +117,8 @@ class Daemon:
         self._worker: threading.Thread | None = None
         self._audio_queue: queue.Queue[AudioChunk | None] = queue.Queue(maxsize=FINAL_AUDIO_QUEUE_SIZE)
         self._partial_audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=FINAL_WINDOW_QUEUE_SIZE)
+        # Set whenever either queue gets work, so the worker starts at once.
+        self._work_ready = threading.Event()
         self._hotkey_backend: HotkeyBackend | None = None
         self._recording_generation = 0
         self._recording_parts: dict[int, list[str]] = {}
@@ -119,6 +132,8 @@ class Daemon:
         self._recording_prompt_tails: dict[int, str] = {}
         self._recording_note_chunk_cursors: dict[int, tuple[int, float]] = {}
         self._note_streaming_recordings: set[int] = set()
+        # Step timings of dictations between key release and the paste.
+        self._recording_timings: dict[int, DictationTiming] = {}
         self._terminal_recordings: set[int] = set()
         self._terminal_recording_order: deque[int] = deque()
         self._active_recording_id: int | None = None
@@ -143,8 +158,6 @@ class Daemon:
         """Update hotwords without restarting daemon."""
         with self._engine_lock:
             self.engine.set_hotwords(hotwords)
-            if self.meeting_engine is not None:
-                self.meeting_engine.set_hotwords(hotwords)
 
 
     def set_push_to_talk_combo(self, combo: str) -> None:
@@ -154,7 +167,7 @@ class Daemon:
             self._hotkey_backend.set_combo(self.push_to_talk_combo)
         else:
             self._ensure_worker_started()
-            self._start_hotkey_backend()
+            self._start_hotkey_backend_when_ready()
         if self.recorder.is_recording:
             self._finalize_recording()
 
@@ -164,10 +177,6 @@ class Daemon:
             if self._note_recording_paused:
                 return self.resume_note_recording()
         return self._start_recording(mode="note")
-
-    def start_meeting_recording(self) -> bool:
-        """Start a meeting recording that requires speaker attribution."""
-        return self._start_recording(mode="meeting")
 
     def pause_note_recording(self, *, pause_reason: str = "manual") -> bool:
         """Pause an active note recording without finalizing the session."""
@@ -264,22 +273,9 @@ class Daemon:
         self._finalize_recording()
         return True
 
-    def stop_meeting_recording(self) -> bool:
-        """Stop an active meeting recording and queue it for transcription."""
-        with self._recording_lock:
-            recording_id = self._active_recording_id
-            if recording_id is None or self._recording_mode(recording_id) != "meeting":
-                return False
-        self._finalize_recording()
-        return True
-
     def cancel_note_recording(self) -> bool:
         """Discard an active or paused note recording without saving a note."""
         return self._cancel_long_recording("note")
-
-    def cancel_meeting_recording(self) -> bool:
-        """Discard an active or paused meeting recording without saving a note."""
-        return self._cancel_long_recording("meeting")
 
     def _cancel_long_recording(self, expected_mode: RecordingMode) -> bool:
         with self._recorder_control_lock:
@@ -381,7 +377,7 @@ class Daemon:
         recording_id = self._active_recording_id
         return bool(
             recording_id is not None
-            and self._recording_mode(recording_id) in {"note", "meeting"}
+            and self._recording_mode(recording_id) == "note"
             and not self._is_recording_failed(recording_id)
         )
 
@@ -391,7 +387,7 @@ class Daemon:
         if recording_id is None or self._is_recording_failed(recording_id):
             return None
         mode = self._recording_mode(recording_id)
-        return mode if mode in {"note", "meeting"} else None
+        return mode if mode == "note" else None
 
     @property
     def note_recording_paused(self) -> bool:
@@ -402,6 +398,101 @@ class Daemon:
         if not self._note_recording_paused:
             return None
         return self._note_pause_reason
+
+    @property
+    def model_ready(self) -> bool:
+        return self._model_phase == "ready"
+
+    @property
+    def model_status(self) -> dict[str, object]:
+        """Readiness of the speech model: ``{"ready", "phase", "error"}``."""
+        phase = self._model_phase
+        return {
+            "ready": phase == "ready",
+            "phase": phase,
+            "error": self._model_error if phase == "failed" else None,
+        }
+
+    def start_model_load(
+        self,
+        load: Callable[[SpeechToText], None] | None = None,
+    ) -> threading.Thread:
+        """Load the speech model on a background thread.
+
+        For a daemon built with ``model_loaded=False``. ``load`` does the
+        loading (default: touch ``stt.model``) and raises on failure. When it
+        succeeds, recording is allowed and a pending shortcut listener starts;
+        when it fails, recordings are refused with the load error.
+        """
+        if self._model_loaded.is_set():
+            raise RuntimeError("the speech model load has already finished")
+        with self._engine_lock:
+            stt = self.engine.stt
+        self._notify_model_status()
+        thread = threading.Thread(
+            target=self._run_model_load,
+            args=(stt, load),
+            name="dictate-model-load",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _run_model_load(
+        self,
+        stt: SpeechToText,
+        load: Callable[[SpeechToText], None] | None,
+    ) -> None:
+        try:
+            if load is not None:
+                load(stt)
+            else:
+                _ = stt.model
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc).strip() or exc.__class__.__name__
+            logger.error("Speech model failed to load: %s", message)
+            self._model_error = message
+            self._model_phase = "failed"
+            self._model_loaded.set()
+            self._notify_model_status()
+            self._surface_status(f"Speech model failed to load: {message}")
+            return
+        self._model_phase = "ready"
+        self._model_loaded.set()
+        self._start_pending_hotkey_backend()
+        self._notify_model_status()
+
+    def _start_pending_hotkey_backend(self) -> None:
+        with self._hotkey_lock:
+            pending = self._hotkey_start_pending
+            self._hotkey_start_pending = False
+        if not pending or self._stop.is_set():
+            return
+        try:
+            self._start_hotkey_backend()
+        except HotkeyBackendUnavailableError as exc:
+            self._surface_status(f"Shortcut unavailable: {exc}")
+
+    def _start_hotkey_backend_when_ready(self) -> None:
+        with self._hotkey_lock:
+            if not self._model_loaded.is_set():
+                self._hotkey_start_pending = True
+                return
+        if self._model_phase == "ready":
+            self._start_hotkey_backend()
+
+    def _wait_for_model_load(self) -> None:
+        while not self._model_loaded.wait(timeout=0.1):
+            if self._stop.is_set():
+                return
+
+    def _notify_model_status(self) -> None:
+        if self.model_status_callback is None:
+            return
+        try:
+            self.model_status_callback(self.model_status)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\r  Model status callback failed: {exc}", file=sys.stderr)
 
     def switch_speech_to_text(self, stt: SpeechToText, *, hotwords: str | None = None) -> None:
         """Swap STT backend/model at runtime."""
@@ -416,46 +507,10 @@ class Daemon:
             except Exception as exc:  # noqa: BLE001
                 print(f"Failed to release previous STT resources: {exc}", file=sys.stderr)
 
-    def set_meeting_speech_to_text(
-        self,
-        stt: SpeechToText,
-        *,
-        hotwords: str | None = None,
-    ) -> None:
-        """Set the dedicated Meeting backend without changing normal dictation."""
-        previous_stt: SpeechToText | None = None
-        with self._engine_lock:
-            if self.meeting_engine is None:
-                self.meeting_engine = DictationEngine(
-                    stt=stt,
-                    sample_rate=SAMPLE_RATE,
-                    hotwords=hotwords if hotwords is not None else self.engine.hotwords,
-                    lexicon_mode=self.engine.lexicon_mode,
-                    lexicon_replacements=self.engine.lexicon_replacements,
-                )
-            else:
-                previous_stt = self.meeting_engine.stt
-                self.meeting_engine.stt = stt
-                if hotwords is not None:
-                    self.meeting_engine.set_hotwords(hotwords)
-        if previous_stt is not None and previous_stt is not stt:
-            try:
-                previous_stt.release()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Failed to release previous meeting STT resources: {exc}", file=sys.stderr)
-
     def current_backend_model(self) -> tuple[str, str]:
         """Return active backend/model selection."""
         with self._engine_lock:
             return (self.engine.stt.backend_name, self.engine.stt.model_name)
-
-    def current_meeting_backend_model(self) -> tuple[str, str] | None:
-        """Return dedicated Meeting backend/model selection if configured."""
-        with self._engine_lock:
-            if self.meeting_engine is None:
-                return None
-            stt = self.meeting_engine.stt
-            return (stt.backend_name, getattr(stt, "model_name", "") or "")
 
     def runtime_compute_type(self) -> str:
         """Return the current STT compute type for new model instantiation."""
@@ -482,11 +537,6 @@ class Daemon:
                 self.engine.release()
             except Exception:  # noqa: BLE001
                 pass
-            if self.meeting_engine is not None:
-                try:
-                    self.meeting_engine.release()
-                except Exception:  # noqa: BLE001
-                    pass
 
         self._queue_stop_signal()
 
@@ -496,6 +546,12 @@ class Daemon:
                 if self.recorder.is_recording or not self.active:
                     return False
                 if self._note_recording_paused:
+                    return False
+                if self._model_phase == "loading":
+                    self._surface_status(MODEL_LOADING_MESSAGE)
+                    return False
+                if self._model_phase == "failed":
+                    self._surface_status(f"Speech model failed to load: {self._model_error}")
                     return False
 
                 self._note_pause_reason = None
@@ -507,8 +563,7 @@ class Daemon:
                     self._active_recording_id = self._recording_generation
                     recording_id = self._active_recording_id
                     with self._engine_lock:
-                        engine = self._engine_for_mode_locked(mode)
-                        stt = engine.stt
+                        stt = self.engine.stt
                         # Notes and dictation stream chunks only on a backend that can
                         # carry context across them; Parakeet decodes the whole clip.
                         chunk_capable = bool(stt.capabilities.supports_streaming_chunks)
@@ -534,14 +589,12 @@ class Daemon:
                             self._streaming_recordings.add(self._active_recording_id)
                         else:
                             self._streaming_recordings.discard(self._active_recording_id)
-                        if mode in {"note", "meeting"}:
+                        if mode == "note":
                             try:
                                 note_id = self.note_store.create_note(
                                     provider=note_provider,
                                     model=note_model,
                                     recording_id=self._active_recording_id,
-                                    speaker_labels=mode == "meeting",
-                                    mode=mode,
                                 )
                             except Exception as exc:  # noqa: BLE001
                                 note_start_error = exc
@@ -606,19 +659,18 @@ class Daemon:
                     self._surface_note_terminal(recording_id, "failed")
                     return False
 
-                if mode == "meeting":
-                    label = "Meeting recording"
-                elif mode == "note":
+                if mode == "note":
                     label = "Note recording"
                 else:
                     label = "Recording"
                 print(f"\r  \033[91m● {label}...\033[0m", end="", file=sys.stderr, flush=True)
                 self._notify_recording(True)
-                if mode in {"note", "meeting"}:
+                if mode == "note":
                     self._notify_note_recording(True, paused=False, mode=mode)
                 return True
 
     def _finalize_recording(self) -> None:
+        timing = DictationTiming()
         with self._recorder_control_lock:
             with self._recording_lock:
                 recording_id = self._active_recording_id
@@ -626,6 +678,10 @@ class Daemon:
                 failed = recording_id is not None and self._is_recording_failed(recording_id)
             if recording_id is None:
                 return
+            if mode == "dictation" and not failed:
+                with self._queue_lock:
+                    if self._recording_session_known_locked(recording_id):
+                        self._recording_timings[recording_id] = timing
             try:
                 audio = self.recorder.stop()
             except AudioCaptureError as exc:
@@ -638,9 +694,13 @@ class Daemon:
                 else:
                     print(f"\r  Microphone error: {exc}", file=sys.stderr)
                 self._notify_recording(False)
-                if mode in {"note", "meeting"}:
+                if mode == "note":
                     self._notify_note_recording(False, paused=False, mode=mode)
                 return
+            timing.mark_stopped()
+            processing_s = getattr(self.recorder, "last_processing_seconds", None)
+            if isinstance(processing_s, (int, float)):
+                timing.capture_processing_s = float(processing_s)
             if failed or self._is_recording_failed(recording_id):
                 with self._recording_lock:
                     if self._active_recording_id == recording_id:
@@ -648,7 +708,7 @@ class Daemon:
                     self._note_recording_paused = False
                     self._clear_recording_state(recording_id)
                 self._notify_recording(False)
-                if mode in {"note", "meeting"}:
+                if mode == "note":
                     self._notify_note_recording(False, paused=False, mode=mode)
                 return
 
@@ -660,7 +720,7 @@ class Daemon:
                         transcript_reason="truncated-audio",
                     )
                     self._notify_recording(False)
-                    if mode in {"note", "meeting"}:
+                    if mode == "note":
                         self._notify_note_recording(False, paused=False, mode=mode)
                     return
                 self._queue_final_chunk(AudioChunk(samples=audio, final=True, sequence=0, recording_id=recording_id))
@@ -672,7 +732,7 @@ class Daemon:
                 self._active_recording_id = None
                 self._note_recording_paused = False
             self._notify_recording(False)
-            if mode in {"note", "meeting"}:
+            if mode == "note":
                 self._notify_note_recording(False, paused=False, mode=mode)
 
     def _on_hotkey_press(self) -> None:
@@ -695,7 +755,7 @@ class Daemon:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Note store recovery failed: %s", exc)
         self._ensure_worker_started()
-        self._start_hotkey_backend()
+        self._start_hotkey_backend_when_ready()
 
     def _ensure_worker_started(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -738,7 +798,11 @@ class Daemon:
             self.shutdown()
 
     def _transcription_loop(self) -> None:
+        self._wait_for_model_load()
         while not self._stop.is_set():
+            # Cleared before the queues are checked, so a chunk queued after
+            # the check still wakes the wait below.
+            self._work_ready.clear()
             try:
                 chunk = self._partial_audio_queue.get_nowait()
             except queue.Empty:
@@ -746,11 +810,9 @@ class Daemon:
                 if final_chunk is None:
                     break
                 if final_chunk is _FINAL_CHUNK_EMPTY:
-                    try:
-                        chunk = self._partial_audio_queue.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
-                    self._handle_partial_chunk(chunk)
+                    # Woken as soon as either queue gets work; the clip queued
+                    # on key release used to wait for this poll (up to 100 ms).
+                    self._work_ready.wait(WORKER_IDLE_POLL_SECONDS)
                     continue
                 self._handle_final_chunk(final_chunk)
                 continue
@@ -768,6 +830,10 @@ class Daemon:
             if self._is_recording_failed(chunk.recording_id):
                 return
             if audio.size > 0:
+                with self._queue_lock:
+                    timing = self._recording_timings.get(chunk.recording_id)
+                if timing is not None:
+                    timing.audio_s = len(audio) / SAMPLE_RATE
                 min_duration_s = 0.0 if self._assembled_recording_text(chunk.recording_id) else None
                 result = self._transcribe_recording_audio(
                     chunk.recording_id,
@@ -1049,6 +1115,7 @@ class Daemon:
             return False
         try:
             self._partial_audio_queue.put_nowait(chunk)
+            self._work_ready.set()
             return True
         except queue.Full:
             if self._is_note_streaming(chunk.recording_id):
@@ -1064,6 +1131,7 @@ class Daemon:
                 pass
             try:
                 self._partial_audio_queue.put_nowait(chunk)
+                self._work_ready.set()
                 return True
             except queue.Full:
                 return False
@@ -1082,6 +1150,7 @@ class Daemon:
             return False
         try:
             self._audio_queue.put_nowait(chunk)
+            self._work_ready.set()
             return True
         except queue.Full:
             self._fail_recording_session(chunk.recording_id, "Transcription busy; final audio dropped")
@@ -1104,6 +1173,7 @@ class Daemon:
         except queue.Full:
             self._drain_final_audio_queue()
             self._audio_queue.put_nowait(None)
+        self._work_ready.set()
 
     def _drain_partial_audio_queue(self) -> int:
         dropped = 0
@@ -1260,7 +1330,7 @@ class Daemon:
     def _persist_transcript_segments(self, recording_id: int, result: TranscriptionResult) -> bool:
         if recording_id == 0 or self._is_note_streaming(recording_id):
             return True
-        if self._recording_mode(recording_id) not in {"note", "meeting"}:
+        if self._recording_mode(recording_id) != "note":
             return True
         with self._queue_lock:
             note_id = self._recording_note_ids.get(recording_id)
@@ -1289,8 +1359,6 @@ class Daemon:
                         provider=provider,
                         model=model,
                         text=text,
-                        speaker_id=segment.speaker_id,
-                        speaker_label=segment.speaker_label,
                     ),
                 )
         except Exception as exc:  # noqa: BLE001
@@ -1328,7 +1396,7 @@ class Daemon:
             final_result = final_result or self._last_recording_audio_status(recording_id)
             self._clear_recording_state(recording_id)
             self._surface_empty_final_status(final_result)
-            if mode in {"note", "meeting"}:
+            if mode == "note":
                 if note_id:
                     try:
                         self.note_store.mark_failed(note_id, error="empty")
@@ -1340,23 +1408,32 @@ class Daemon:
 
         mode = self._recording_mode(recording_id)
         self._mark_recording_completed(recording_id)
-        if mode in {"note", "meeting"}:
+        if mode == "note":
             self._finalize_note_session(recording_id, assembled_text)
             self._clear_recording_state(recording_id)
             return
+        with self._queue_lock:
+            timing = self._recording_timings.pop(recording_id, None)
         self._clear_recording_state(recording_id)
+        step_started = time.perf_counter()
         try:
             self.history_store.append(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  History save failed: {exc}", file=sys.stderr)
         else:
             self._notify_history_changed()
+        if timing is not None:
+            timing.history_s = time.perf_counter() - step_started
 
+        step_started = time.perf_counter()
         try:
-            self.output.send(assembled_text)
+            clipboard = self.output.send(assembled_text)
         except Exception as exc:  # noqa: BLE001
             print(f"\r  Output backend failed ({self.output.name}): {exc}", file=sys.stderr)
             return
+        if timing is not None:
+            timing.paste_s = time.perf_counter() - step_started
+            timing.mark_typed()
 
         self._surface_transcript(
             phase="final",
@@ -1366,6 +1443,23 @@ class Daemon:
             stale=False,
         )
         echo_dictated_text("Typed", assembled_text)
+        if timing is not None:
+            self._log_dictation_timing(timing, clipboard)
+
+    def _log_dictation_timing(self, timing: DictationTiming, clipboard: object) -> None:
+        """Log the step timings once the clipboard is back, or now without a keeper."""
+        if not isinstance(clipboard, Future):
+            log_timing_line(timing.format_line())
+            return
+
+        def _done(future: Future) -> None:
+            try:
+                outcome = future.result()
+            except Exception:  # noqa: BLE001
+                outcome = None
+            log_timing_line(timing.format_line(outcome))
+
+        clipboard.add_done_callback(_done)
 
     def _finalize_note_session(self, recording_id: int, raw_text: str) -> None:
         note_id: str | None = None
@@ -1435,7 +1529,7 @@ class Daemon:
         with self._recording_lock:
             active_capture = self._active_recording_id == recording_id
             recorder_running = self.recorder.is_recording
-            if active_capture and mode in {"note", "meeting"}:
+            if active_capture and mode == "note":
                 self._note_recording_paused = False
                 self._note_pause_reason = None
         with self._queue_lock:
@@ -1447,6 +1541,7 @@ class Daemon:
             self._recording_last_audio_status.pop(recording_id, None)
             self._recording_prompt_tails.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
+            self._recording_timings.pop(recording_id, None)
         if note_id:
             try:
                 self.note_store.mark_failed(note_id, error=reason)
@@ -1464,14 +1559,14 @@ class Daemon:
             reason=transcript_reason,
         )
         should_stop_capture = active_capture and (
-            mode in {"note", "meeting"} or transcript_reason in {"capture-error", "truncated-audio"}
+            mode == "note" or transcript_reason in {"capture-error", "truncated-audio"}
         )
         if should_stop_capture:
             self._notify_recording(False)
-        if mode in {"note", "meeting"}:
+        if mode == "note":
             # Publish a terminal note signal so the webview can leave "Transcribing…".
             self._surface_note_terminal(recording_id, "failed")
-        if should_stop_capture and mode in {"note", "meeting"}:
+        if should_stop_capture and mode == "note":
             self._notify_note_recording(False, paused=False, mode=mode)
         if should_stop_capture and recorder_running:
             threading.Thread(
@@ -1501,6 +1596,7 @@ class Daemon:
             self._recording_prompt_tails.pop(recording_id, None)
             self._recording_note_chunk_cursors.pop(recording_id, None)
             self._note_streaming_recordings.discard(recording_id)
+            self._recording_timings.pop(recording_id, None)
 
     def _cleanup_failed_recording_session(self, recording_id: int) -> None:
         with self._recorder_control_lock:
@@ -1577,8 +1673,7 @@ class Daemon:
 
     def _stt_labels(self, recording_id: int | None = None) -> tuple[str, str]:
         with self._engine_lock:
-            mode = self._recording_mode(recording_id) if recording_id is not None else "dictation"
-            stt = self._engine_for_mode_locked(mode).stt
+            stt = self.engine.stt
             provider = stt.backend_name
             model = getattr(stt, "model_name", "") or ""
         return provider, model
@@ -1651,9 +1746,27 @@ class Daemon:
         *,
         min_duration_s: float | None = None,
     ) -> TranscriptionResult | None:
+        with self._queue_lock:
+            timing = self._recording_timings.get(recording_id)
+        if timing is not None:
+            timing.mark_decode_started()
+        result = self._decode_recording_audio(recording_id, audio, min_duration_s=min_duration_s)
+        if timing is not None and result is not None:
+            timing.add_decode(getattr(result, "stt_s", None), getattr(result, "fixes_s", None))
+        return result
+
+    def _decode_recording_audio(
+        self,
+        recording_id: int,
+        audio: np.ndarray,
+        *,
+        min_duration_s: float | None = None,
+    ) -> TranscriptionResult | None:
         duration = len(audio) / SAMPLE_RATE
+        # The audio length, not how long the decode takes; that is in the
+        # "Dictation timing" line once the text is pasted.
         print(
-            f"\r  Transcribing {duration:.1f}s...   ",
+            f"\r  Transcribing {duration:.1f} s of audio...   ",
             end="",
             file=sys.stderr,
             flush=True,
@@ -1665,7 +1778,7 @@ class Daemon:
             if recording_id != 0 and (terminal or expected_stt_id is None):
                 return None
             mode = self._recording_mode(recording_id)
-            engine = self._engine_for_mode_locked(mode)
+            engine = self.engine
             if expected_stt_id is not None and id(engine.stt) != expected_stt_id:
                 return None
 
@@ -1696,20 +1809,14 @@ class Daemon:
                     decode_profile=decode_profile,
                 )
 
-            # Note and meeting recordings use the lighter note decode profile.
-            decode_profile = "note" if mode in {"note", "meeting"} else "quality"
+            # Note recordings use the lighter note decode profile.
+            decode_profile = "note" if mode == "note" else "quality"
 
             # --- Local decode ---
-            # Meeting is the only mode that asks for speaker
-            # attribution; note recordings use the same plain ASR contract as
-            # push-to-talk dictation.
-            diarize = mode == "meeting"
             return engine.transcribe(
                 audio,
                 language=self.language,
                 min_duration_s=min_duration_s,
-                diarize=diarize,
-                require_speaker_attribution=mode == "meeting",
                 decode_profile=decode_profile,
             )
 
@@ -1761,11 +1868,6 @@ class Daemon:
                 and recording_id not in self._recording_final_chunks
             )
 
-    def _engine_for_mode_locked(self, mode: RecordingMode) -> DictationEngine:
-        if mode == "meeting" and self.meeting_engine is not None:
-            return self.meeting_engine
-        return self.engine
-
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -1781,8 +1883,4 @@ def _note_segment_payload(segment: NoteSegment) -> dict[str, object]:
         "model": segment.model,
         "text": segment.text,
     }
-    if segment.speaker_id:
-        payload["speaker_id"] = segment.speaker_id
-    if segment.speaker_label:
-        payload["speaker_label"] = segment.speaker_label
     return payload

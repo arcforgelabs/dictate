@@ -40,7 +40,7 @@ class TrayHelperTests(unittest.TestCase):
 
         self.assertEqual(tray._compute_type_for_backend("parakeet", "float32"), "float32")
         self.assertEqual(tray._compute_type_for_backend("parakeet", "float16"), "int8")
-        self.assertEqual(tray._compute_type_for_backend("parakeet-pyannote", "float32"), "int8")
+        self.assertEqual(tray._compute_type_for_backend("not-a-backend", "float32"), "int8")
 
     def test_tray_has_no_device_profiles(self) -> None:
         tray = _import_tray_with_fake_gi()

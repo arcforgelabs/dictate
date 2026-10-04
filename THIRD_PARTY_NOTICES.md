@@ -11,13 +11,12 @@ Source for Dictate, and the build scripts that produce every release
 
 ## Models
 
-Both models run on the device and are redistributed unmodified. Each model
-directory in the app carries an `ATTRIBUTION.md`.
+The model runs on the device and is redistributed unmodified. Its directory in
+the app carries an `ATTRIBUTION.md`.
 
 | Model | By | Licence |
 | --- | --- | --- |
 | Parakeet TDT 0.6B v2, ONNX int8 conversion `istupakov/parakeet-tdt-0.6b-v2-onnx` of `nvidia/parakeet-tdt-0.6b-v2` | NVIDIA (conversion: istupakov) | CC BY 4.0 |
-| `pyannote/speaker-diarization-community-1` (Meeting mode, beta) | pyannoteAI and pyannote.audio contributors | CC BY 4.0 |
 
 CC BY 4.0: <https://creativecommons.org/licenses/by/4.0/>
 
@@ -42,27 +41,7 @@ from the upstream projects linked.
 | onnx-asr | MIT | <https://github.com/istupakov/onnx-asr> |
 | ONNX Runtime | MIT | <https://github.com/microsoft/onnxruntime> |
 | huggingface_hub, hf-xet | Apache-2.0 | <https://github.com/huggingface/huggingface_hub> |
-
-## Meeting mode (beta)
-
-| Component | Licence | Project |
-| --- | --- | --- |
-| pyannote.audio, pyannote.core, pyannote.database, pyannote.metrics, pyannote.pipeline | MIT | <https://github.com/pyannote> |
-| PyTorch (CPU build) | BSD-3-Clause | <https://github.com/pytorch/pytorch> |
-| torchaudio | BSD-2-Clause | <https://github.com/pytorch/audio> |
-| Lightning, torchmetrics | Apache-2.0 | <https://github.com/Lightning-AI> |
-| asteroid-filterbanks | MIT | <https://github.com/asteroid-team/asteroid-filterbanks> |
-| OpenTelemetry Python (imported by pyannote.audio; Dictate disables its export) | Apache-2.0 | <https://github.com/open-telemetry/opentelemetry-python> |
-| SciPy | BSD-3-Clause | <https://scipy.org> |
-| scikit-learn | BSD-3-Clause | <https://scikit-learn.org> |
-| pandas | BSD-3-Clause | <https://pandas.pydata.org> |
-| safetensors | Apache-2.0 | <https://github.com/huggingface/safetensors> |
-| einops | MIT | <https://github.com/arogozhnikov/einops> |
-| SQLAlchemy | MIT | <https://www.sqlalchemy.org> |
-| aiohttp | Apache-2.0 AND MIT | <https://github.com/aio-libs/aiohttp> |
-| grpcio | Apache-2.0 | <https://github.com/grpc/grpc> |
-| protobuf | BSD-3-Clause | <https://github.com/protocolbuffers/protobuf> |
-| Pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
+| protobuf (ONNX Runtime) | BSD-3-Clause | <https://github.com/protocolbuffers/protobuf> |
 
 ## Core
 
@@ -75,7 +54,6 @@ from the upstream projects linked.
 | sounddevice | MIT | <https://github.com/spatialaudio/python-sounddevice> |
 | webrtc-noise-gain (Linux) | Apache-2.0 | <https://github.com/rhasspy/webrtc-noise-gain> |
 | evdev (Linux) | BSD-3-Clause | <https://github.com/gvalkov/python-evdev> |
-| python-dateutil | Apache-2.0 OR BSD-3-Clause | <https://github.com/dateutil/dateutil> |
 | charset-normalizer | MIT | <https://github.com/jawah/charset_normalizer> |
 | requests, urllib3, idna | Apache-2.0, MIT, BSD-3-Clause | <https://github.com/psf/requests> |
 | pyperclip (Windows) | BSD-3-Clause | <https://github.com/asweigart/pyperclip> |

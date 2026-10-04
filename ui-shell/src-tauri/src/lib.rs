@@ -181,19 +181,6 @@ fn bundled_engine<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     None
 }
 
-fn bundled_pyannote_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
-    for base in engine_resource_dirs(app) {
-        let candidate = base
-            .join("engine")
-            .join("models")
-            .join("pyannote-speaker-diarization-community-1");
-        if candidate.join("config.yaml").exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 fn bundled_parakeet_model<R: Runtime, M: Manager<R>>(app: &M) -> Option<PathBuf> {
     for base in engine_resource_dirs(app) {
         let candidate = base
@@ -233,8 +220,7 @@ fn engine_binary_names() -> &'static [&'static str] {
 /// Opt-outs for third-party library telemetry, set on every engine the shell
 /// starts. The engine sets these itself on import; this covers any engine,
 /// including an older or custom one, before its first import runs.
-const ENGINE_PRIVACY_ENV: [(&str, &str); 3] = [
-    ("PYANNOTE_METRICS_ENABLED", "0"),
+const ENGINE_PRIVACY_ENV: [(&str, &str); 2] = [
     ("HF_HUB_DISABLE_TELEMETRY", "1"),
     ("ORT_DISABLE_TELEMETRY", "1"),
 ];
@@ -267,9 +253,6 @@ fn spawn_engine<R: Runtime, M: Manager<R>>(app: &M) {
         cmd.env("DICTATE_SHELL_VERSION", shell_version);
         if let Some(model_path) = bundled_parakeet_model(app) {
             cmd.env("DICTATE_PARAKEET_MODEL_PATH", model_path);
-        }
-        if let Some(model_path) = bundled_pyannote_model(app) {
-            cmd.env("DICTATE_PYANNOTE_MODEL_PATH", model_path);
         }
         if let Some(path) = shell_path.as_ref() {
             cmd.env("DICTATE_SHELL_PATH", path);
@@ -440,12 +423,19 @@ fn json_str(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+// Async so the up-to-8s handshake wait in ensure_engine runs off the main
+// thread; a sync command would freeze the window while the UI keeps retrying
+// for an engine that is still starting.
 #[tauri::command]
-fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
+async fn refresh_bridge(app: tauri::AppHandle) -> Option<BridgePayload> {
     let platform = detect_platform();
-    ensure_engine(&app).map(|h| BridgePayload {
-        base_url: h.url,
-        token: h.token,
+    let handshake = tauri::async_runtime::spawn_blocking(move || ensure_engine(&app))
+        .await
+        .ok()
+        .flatten()?;
+    Some(BridgePayload {
+        base_url: handshake.url,
+        token: handshake.token,
         platform,
     })
 }
