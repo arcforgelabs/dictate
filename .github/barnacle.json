@@ -4,6 +4,7 @@
     {
       "label": "r: not-in-vision",
       "close": true,
+      "stateReason": "not_planned",
       "message": "Closing this because it doesn't fit Dictate's current vision: https://github.com/arcforgelabs/dictate/blob/master/VISION.md (see \"Local only\", \"Order of work\" and \"What we will not merge\"). This includes work started before the vision changed.\n\nIf you think it does fit, or the vision should change, comment with the line you think it serves and we'll take another look."
     }
   ]

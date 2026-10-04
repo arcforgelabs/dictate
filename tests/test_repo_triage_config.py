@@ -47,13 +47,15 @@ class BarnacleOverrideTests(unittest.TestCase):
         # Any other top-level key would replace the org value instead of merging.
         self.assertEqual(set(config) - {"$comment"}, {"rules"})
         for rule in config["rules"]:
-            self.assertEqual(set(rule) - {"close", "message", "lock", "enabled"}, {"label"})
+            self.assertEqual(set(rule) - {"close", "stateReason", "message", "lock", "enabled"}, {"label"})
             self.assertIsInstance(rule["label"], str)
 
     def test_not_in_vision_closes_with_a_link_to_the_vision(self) -> None:
         rules = json.loads(BARNACLE.read_text(encoding="utf-8"))["rules"]
         rule = next(item for item in rules if item["label"] == "r: not-in-vision")
         self.assertIs(rule["close"], True)
+        # A vision rejection is "not planned", not "completed".
+        self.assertEqual(rule["stateReason"], "not_planned")
         self.assertNotIn("enabled", rule)
         self.assertIn("https://github.com/arcforgelabs/dictate/blob/master/VISION.md", rule["message"])
 
