@@ -2,7 +2,14 @@
 
 > The target release policy (stable, beta and dev channels; `YYYY.M.PATCH`
 > versions) is [RELEASING.md](RELEASING.md). This page describes the current
-> procedure until that lands.
+> procedure until that lands
+> ([#145](https://github.com/arcforgelabs/dictate/issues/145)).
+>
+> One part has already changed: since 2026.10.1 the third number is a release
+> counter within the month, not the day. Pass the version explicitly, for
+> example `python scripts/sync_release_version.py 2026.10.3`, instead of
+> `--date`. The rest of this page still says "date" until #145 updates the
+> scripts.
 
 Dictate uses calendar versioning for public releases:
 
