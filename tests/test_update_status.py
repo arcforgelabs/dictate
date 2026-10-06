@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 from dictate.config import Config
@@ -1307,7 +1308,7 @@ class ReleaseAssetLookupTests(unittest.TestCase):
 
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             seen.append(request.full_url)
-            if "api.github.com" in request.full_url:
+            if urllib.parse.urlsplit(request.full_url).hostname == "api.github.com":
                 raise _rate_limited(request.full_url)
             return _TextResponse(f"{self.DIGEST}  Dictate_2026.10.2_amd64.deb\n")
 
@@ -1326,7 +1327,7 @@ class ReleaseAssetLookupTests(unittest.TestCase):
 
     def test_fallback_without_sidecar_has_no_trusted_digest(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
-            if "api.github.com" in request.full_url:
+            if urllib.parse.urlsplit(request.full_url).hostname == "api.github.com":
                 raise _rate_limited(request.full_url)
             raise urllib.error.HTTPError(request.full_url, 404, "Not Found", None, None)
 
