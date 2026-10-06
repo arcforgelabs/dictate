@@ -317,6 +317,11 @@ jobs:
             echo "No desktop artifacts were produced." >&2
             exit 1
           fi
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          for artifact in "${ARTIFACTS[@]}"; do
+            (cd "$(dirname "$artifact")" && sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256")
+            ARTIFACTS+=("${artifact}.sha256")
+          done
           printf '%s\n' "${ARTIFACTS[@]}"
           gh release upload "${{ needs.validate-release-ref.outputs.tag }}" "${ARTIFACTS[@]}" --clobber
 
@@ -375,6 +380,13 @@ jobs:
           if (-not $artifacts) {
             throw "No Windows desktop artifacts were produced."
           }
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          $artifacts = @($artifacts) + @($artifacts | ForEach-Object {
+            $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()
+            $sidecar = "$_.sha256"
+            [IO.File]::WriteAllText($sidecar, "$hash  $(Split-Path $_ -Leaf)`n")
+            $sidecar
+          })
           $artifacts | ForEach-Object { Write-Host $_ }
           gh release upload "${{ needs.validate-release-ref.outputs.tag }}" $artifacts --clobber
 
