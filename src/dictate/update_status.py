@@ -25,6 +25,7 @@ from dictate.version import RELEASE_VERSION
 LATEST_RELEASE_URL = "https://api.github.com/repos/arcforgelabs/dictate/releases/latest"
 LATEST_TAGS_URL = "https://api.github.com/repos/arcforgelabs/dictate/tags?per_page=1"
 NPM_PACKAGE_URL = "https://registry.npmjs.org/@arcforgelabs%2fdictate"
+RELEASE_DOWNLOAD_URL = "https://github.com/arcforgelabs/dictate/releases/download"
 # The repository is private, so its releases page 404s for users. Point the
 # in-app "open release" action at the public download page instead.
 RELEASES_URL = "https://arcforge.au/download/dictate"
@@ -559,7 +560,11 @@ def _run_linux_package_update(context: dict[str, object]) -> UpdateFlow:
         _linux_package_set_failed("lookup_failed", detail)
         return _update_failed(context, "lookup_failed", detail)
     try:
-        asset = _find_release_asset(DEB_ASSET_SUFFIX, release_tag=f"v{latest}")
+        asset = _find_release_asset(
+            DEB_ASSET_SUFFIX,
+            release_tag=f"v{latest}",
+            fallback_name=f"Dictate_{latest}{DEB_ASSET_SUFFIX}",
+        )
     except Exception as exc:  # noqa: BLE001
         detail = f"Could not find a .deb for this update channel: {exc}"
         _linux_package_set_failed("no_asset", detail)
@@ -628,6 +633,7 @@ def _run_windows_direct_update(context: dict[str, object]) -> UpdateFlow:
         asset = _find_release_asset(
             WINDOWS_INSTALLER_SUFFIX,
             release_tag=f"v{latest}",
+            fallback_name=f"Dictate_{latest}_x64{WINDOWS_INSTALLER_SUFFIX}",
         )
         installer = _download_file(asset.url, asset.name)
         subprocess.Popen([str(installer), "/S", "/UPDATE"])  # noqa: S603
@@ -656,13 +662,25 @@ def _open_windows_store_updates(context: dict[str, object]) -> UpdateFlow:
 
 
 def _find_release_asset(
-    suffix: str, *, timeout: float = 10.0, release_tag: str | None = None
+    suffix: str,
+    *,
+    timeout: float = 10.0,
+    release_tag: str | None = None,
+    fallback_name: str | None = None,
 ) -> ReleaseAsset:
     url = (
         f"https://api.github.com/repos/arcforgelabs/dictate/releases/tags/{release_tag}"
         if release_tag else LATEST_RELEASE_URL
     )
-    payload = _fetch_json(url, timeout=timeout)
+    try:
+        payload = _fetch_json(url, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        # api.github.com allows 60 unauthenticated calls an hour per public IP,
+        # shared by every machine and tool behind it. The release download host
+        # has no such limit, so a known asset name can skip the API entirely.
+        if exc.code not in (403, 429) or not (release_tag and fallback_name):
+            raise
+        return _direct_release_asset(release_tag, fallback_name, timeout=timeout)
     assets = payload.get("assets") if isinstance(payload, dict) else None
     if not isinstance(assets, list):
         raise RuntimeError("release has no downloadable assets")
@@ -679,6 +697,30 @@ def _find_release_asset(
                 sha256=_parse_github_asset_digest(asset),
             )
     raise RuntimeError(f"no asset ending in {suffix}")
+
+
+def _direct_release_asset(release_tag: str, name: str, *, timeout: float) -> ReleaseAsset:
+    url = f"{RELEASE_DOWNLOAD_URL}/{release_tag}/{name}"
+    return ReleaseAsset(
+        url=url,
+        name=name,
+        size=None,
+        sha256=_fetch_sha256_sidecar(f"{url}.sha256", timeout=timeout),
+    )
+
+
+def _fetch_sha256_sidecar(url: str, *, timeout: float) -> str | None:
+    """Read the `<asset>.sha256` file the release workflow publishes beside an asset."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Dictate updater"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            text = response.read(4096).decode("ascii", "replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    match = re.match(r"\s*([0-9a-fA-F]{64})(\s|$)", text)
+    return match.group(1).lower() if match else None
 
 
 def _parse_github_asset_digest(asset: dict[str, object]) -> str | None:
