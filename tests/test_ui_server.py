@@ -531,9 +531,9 @@ class UiBackendHotwordsHistoryTests(unittest.TestCase):
     def test_add_and_remove_hotwords(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             backend = _backend(d)
-            res = backend.add_hotwords(["AcmeWidget", "OpenClaw, Stalwart"])
+            res = backend.add_hotwords(["AcmeWidget", "OpenClaw, Tailscale"])
             self.assertIn("AcmeWidget", res["hotwords"])
-            self.assertIn("Stalwart", res["hotwords"])  # comma-split parsed
+            self.assertIn("Tailscale", res["hotwords"])  # comma-split parsed
             res = backend.remove_hotword("AcmeWidget")
             self.assertNotIn("AcmeWidget", res["hotwords"])
 
