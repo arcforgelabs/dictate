@@ -41,8 +41,8 @@ jobs:
             exit 1
           fi
 
-          if [[ ! "$RELEASE_TAG" =~ ^v20[0-9][0-9]\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9]+)?$ ]]; then
-            echo "Release tag must match vYYYY.M.D or vYYYY.M.D-N and start with v20." >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v20[0-9][0-9]\.([1-9]|1[0-2])\.[1-9][0-9]*(-[1-9][0-9]*)?$ ]]; then
+            echo "Release tag must match vYYYY.M.N (N is the release count in the month, no leading zeros) or a legacy correction vYYYY.M.N-K." >&2
             exit 1
           fi
 

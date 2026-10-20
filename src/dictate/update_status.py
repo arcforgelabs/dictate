@@ -107,7 +107,7 @@ _linux_package_operation_guard = threading.RLock()
 def parse_calver(value: str | None) -> tuple[int, int, int, int] | None:
     if not value:
         return None
-    match = re.fullmatch(r"v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?", value.strip())
+    match = re.fullmatch(r"v?(\d{4})\.(\d{1,2})\.([1-9]\d*)(?:-(\d+))?", value.strip())
     if not match:
         return None
     year, month, day, sequence = match.groups()
@@ -119,7 +119,7 @@ def _parse_app_version(value: str | None) -> tuple[tuple[int, int, int, int], tu
         return None
     text = value.strip()
     match = re.fullmatch(
-        r"v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(?:(\d+)|([0-9A-Za-z][0-9A-Za-z.-]*)))?",
+        r"v?(\d{4})\.(\d{1,2})\.([1-9]\d*)(?:-(?:(\d+)|([0-9A-Za-z][0-9A-Za-z.-]*)))?",
         text,
     )
     if not match:

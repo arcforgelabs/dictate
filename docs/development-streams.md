@@ -35,7 +35,7 @@ Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:install
 - `master`: release-ready integration branch for both streams.
 - `linux/*`: Linux-specific work.
 - `windows/*`: Windows-specific work.
-- `release/YYYY.M.D`: release stabilization branch when a release needs final fixes.
+- `release/YYYY.M.N`: release stabilization branch when a release needs final fixes.
 
 Keep shared STT, audio, config, history, and CLI behavior on `master` unless the change is explicitly platform-specific.
 

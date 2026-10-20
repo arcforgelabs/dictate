@@ -44,8 +44,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if ("${{ inputs.release_tag }}" -notmatch '^v20\d{2}\.\d{1,2}\.\d{1,2}(-\d+)?$') {
-            throw "release_tag must be a CalVer tag like v2026.7.4 or v2026.7.4-1."
+          if ("${{ inputs.release_tag }}" -notmatch '^v20\d{2}\.([1-9]|1[0-2])\.[1-9]\d*(-[1-9]\d*)?$') {
+            throw "release_tag must be a CalVer tag vYYYY.M.N like v2026.10.32, or a legacy correction like v2026.9.25-1."
           }
           gh release view "${{ inputs.release_tag }}"
 
