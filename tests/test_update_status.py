@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 from dictate.config import Config
@@ -21,6 +22,7 @@ from dictate.update_status import (
     _clear_linux_package_operation,
     _download_release_asset_partial,
     _finalize_verified_download,
+    _find_release_asset,
 )
 from dictate.version import RELEASE_VERSION
 
@@ -541,7 +543,11 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(installed.mode, "working")
         self.assertEqual(installed.phase, "installing")
         self.assertEqual(installed.install_kind, "linux-package")
-        find.assert_called_once_with("_amd64.deb", release_tag="v2026.7.4-unstable.2.1")
+        find.assert_called_once_with(
+            "_amd64.deb",
+            release_tag="v2026.7.4-unstable.2.1",
+            fallback_name="Dictate_2026.7.4-unstable.2.1_amd64.deb",
+        )
         dl.assert_called_once()
         finalize.assert_called_once()
         install.assert_called_once()
@@ -647,7 +653,11 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertTrue(flow.started)
         self.assertEqual(flow.platform, "windows")
         self.assertEqual(flow.install_kind, "windows-direct")
-        find.assert_called_once_with("-setup.exe", release_tag="v2026.7.4-unstable.2.1")
+        find.assert_called_once_with(
+            "-setup.exe",
+            release_tag="v2026.7.4-unstable.2.1",
+            fallback_name="Dictate_2026.7.4-unstable.2.1_x64-setup.exe",
+        )
         popen.assert_called_once_with([str(Path("C:/Temp/Dictate-setup.exe")), "/S", "/UPDATE"])
 
     def test_download_progress_uses_content_length(self) -> None:
@@ -1278,3 +1288,66 @@ class FrozenSourceRootTests(unittest.TestCase):
         with patch.object(update_status.sys, "frozen", True, create=True):
             self.assertEqual(update_status._candidate_source_roots(), [])
             self.assertIsNone(update_status._find_source_root())
+
+
+class _TextResponse(_FakeResponse):
+    def read(self, size: int = -1) -> bytes:  # noqa: ARG002
+        return self.payload.encode("ascii")
+
+
+def _rate_limited(url: str) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(url, 403, "rate limit exceeded", None, None)
+
+
+class ReleaseAssetLookupTests(unittest.TestCase):
+    DIGEST = "fef64affb682434e03c9e8714da04bc74d7c8e0db5b1f4dbd72c4105064007ac"
+    BASE = "https://github.com/arcforgelabs/dictate/releases/download/v2026.10.2"
+
+    def test_rate_limited_api_falls_back_to_direct_download_and_sidecar(self) -> None:
+        seen: list[str] = []
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            seen.append(request.full_url)
+            if urllib.parse.urlsplit(request.full_url).hostname == "api.github.com":
+                raise _rate_limited(request.full_url)
+            return _TextResponse(f"{self.DIGEST}  Dictate_2026.10.2_amd64.deb\n")
+
+        with patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen):
+            asset = _find_release_asset(
+                "_amd64.deb",
+                release_tag="v2026.10.2",
+                fallback_name="Dictate_2026.10.2_amd64.deb",
+            )
+
+        self.assertEqual(asset.url, f"{self.BASE}/Dictate_2026.10.2_amd64.deb")
+        self.assertEqual(asset.name, "Dictate_2026.10.2_amd64.deb")
+        self.assertIsNone(asset.size)
+        self.assertEqual(asset.sha256, self.DIGEST)
+        self.assertEqual(seen[-1], f"{self.BASE}/Dictate_2026.10.2_amd64.deb.sha256")
+
+    def test_fallback_without_sidecar_has_no_trusted_digest(self) -> None:
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            if urllib.parse.urlsplit(request.full_url).hostname == "api.github.com":
+                raise _rate_limited(request.full_url)
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", None, None)
+
+        with patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen):
+            asset = _find_release_asset(
+                "_amd64.deb",
+                release_tag="v2026.10.2",
+                fallback_name="Dictate_2026.10.2_amd64.deb",
+            )
+
+        self.assertIsNone(asset.sha256)
+
+    def test_api_errors_other_than_rate_limits_still_raise(self) -> None:
+        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", None, None)
+
+        with patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(urllib.error.HTTPError):
+                _find_release_asset(
+                    "_amd64.deb",
+                    release_tag="v2026.10.2",
+                    fallback_name="Dictate_2026.10.2_amd64.deb",
+                )
