@@ -65,7 +65,7 @@ releases and get no file.
    ...`) counts as its title and `(#N)`, as a squash would.
 
 3. Read the manifest, then edit the prose, not the record:
-   - Highlights: 5 to 8 bullets for a stable release, 0 to 8 for a beta.
+   - Highlights: 1 to 8 bullets for a stable release, 0 to 8 for a beta.
      One user story per bullet, in one sentence, with every pull request
      that tells it: `- Text. (#N, #M) Thanks @a.` Leave out tests, CI,
      refactors and docs unless the outcome is a material install, update or
@@ -135,6 +135,10 @@ OpenClaw's post-release docs route, with Dictate's names:
 
 ## Differences from OpenClaw
 
+- A stable release has 1 to 8 highlights, not OpenClaw's 5 to 8. Reason:
+  Arc Forge's stable releases are often small, and a highlight must be a
+  real user-facing change; the maintainer chose this on 20 Oct 2026 rather
+  than pad highlights with internal work.
 - Release train: not copied yet, planned in
   [#145](https://github.com/arcforgelabs/dictate/issues/145). Dictate's
   build is Python and desktop installers (`docs/release-versioning.md`), so
