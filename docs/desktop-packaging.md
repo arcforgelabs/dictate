@@ -266,8 +266,9 @@ an optional package format must not sink the primary GitHub release.
 ### Version bump is scripted
 Use `python scripts/sync_release_version.py X` to update package metadata,
 hosted installer pins, Tauri versions, and the MSI-safe WiX version from one
-CalVer value. Use `--date YYYY-MM-DD --sequence N` to generate the version from
-the release date instead of passing `X` directly. **Do not** touch the
+CalVer value `YYYY.M.N`, where `N` is the release count in the month, not the
+day. Leave out `X` to use the next version; the script refuses an `X` that is
+not the next release this month. **Do not** touch the
 parse/compare fixtures in `tests/test_update_status.py` (they use old versions as
 generic logic examples). `python scripts/sync_release_version.py X --check` and
 `python scripts/release_check.py --tag vX` must both pass.

@@ -47,8 +47,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:TAG -notmatch '^v20\d{2}\.\d{1,2}\.\d{1,2}(-\d+)?$') {
-            throw "Tag must look like vYYYY.M.D or vYYYY.M.D-N: $env:TAG"
+          if ($env:TAG -notmatch '^v20\d{2}\.([1-9]|1[0-2])\.[1-9]\d*(-[1-9]\d*)?$') {
+            throw "Tag must look like vYYYY.M.N or vYYYY.M.N-K: $env:TAG"
           }
           $version = $env:TAG.Substring(1)
           $name = "Dictate_${version}_x64-setup.exe"

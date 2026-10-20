@@ -72,7 +72,8 @@ cannot schedule onto it. The workflow holds no secrets beyond `GITHUB_TOKEN`.
 
 ## Release Rules
 
-1. Only release CalVer tags matching `vYYYY.M.D` or `vYYYY.M.D-N`.
+1. Only release CalVer tags matching `vYYYY.M.N` or a legacy correction
+   `vYYYY.M.N-K`, where `N` is the release count in the month.
 2. The release tag must resolve to a commit reachable from the default branch.
 3. The release workflow must be dispatched from the default branch.
 4. Release jobs must pass tests before any publish step.

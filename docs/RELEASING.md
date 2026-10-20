@@ -81,7 +81,10 @@ Gateway servers. Dictate has no equivalent need and does not offer it.
 | Regular correction | `2026.10.1-1`       |
 
 Versions use `year.month.patch`, without zero-padding. The patch is a release
-number within the month, starting at 1, not a day of the month. 2026.10.1
+number within the month, starting at 1, not a day of the month: the highest
+stable patch already tagged in that month (UTC) plus 1, so it can be more than
+31 (after `2026.10.31` comes `2026.10.32`). `python scripts/calver.py next`
+prints it. 2026.10.1
 (released 3 October 2026) was the first version numbered this way. Git tags add
 `v`, as in `v2026.10.1`. Release tags are annotated and signed, and the
 publication workflow refuses lightweight, unsigned or unverified tags.
@@ -202,7 +205,7 @@ Each row is tracked in [#145](https://github.com/arcforgelabs/dictate/issues/145
 
 | Today | Target |
 | ----- | ------ |
-| Releases since 2026.10.1 are numbered `YYYY.M.PATCH` by hand. `scripts/calver.py` still generates the day as the third number, and `scripts/sync_release_version.py`, `scripts/release_check.py`, the tag check in `release.yml` and `release-versioning.md` still call it the day. They accept any one- or two-digit third number with an optional `-N`, and reject `-beta.N` | The tooling and docs generate and check `YYYY.M.PATCH`, corrections `-N` and betas `-beta.N` |
+| `scripts/calver.py` and `scripts/sync_release_version.py` pick and check the next `YYYY.M.PATCH` count, and the tag checks accept any patch from 1 with an optional `-N`. They reject `-beta.N` | The tooling and docs generate and check `YYYY.M.PATCH`, corrections `-N` and betas `-beta.N` |
 | The update check ranks a same-base prerelease above the final (`_compare_prerelease` in `src/dictate/update_status.py`), so `2026.10.1-beta.2` would count as newer than `2026.10.1` | PEP 440 [version order](#version-order): betas below the final, corrections above it |
 | Prerelease channel named `unstable`: npm `unstable`, tags `vYYYY.M.D-unstable.<run>.<attempt>` | npm `beta`, tags `vYYYY.M.P-beta.N` |
 | The channel is fixed by the build (`release_channel()` in `src/dictate/version.py` reads the version string); the UI refuses to change it; `dictate config set-update-channel stable\|unstable` saves a choice; there is no `dictate update` command | The channel is a saved setting on any direct install; `dictate update --channel`, `--tag`, `--dry-run` and `update status`; a saved `unstable` becomes `beta` on upgrade |
