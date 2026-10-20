@@ -232,6 +232,13 @@ jobs:
             Where-Object { $_.Extension -in ".msi", ".exe" } |
             Select-Object -ExpandProperty FullName
           if (-not $artifacts) { throw "No Windows installers were produced." }
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          $artifacts = @($artifacts) + @($artifacts | ForEach-Object {
+            $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()
+            $sidecar = "$_.sha256"
+            [IO.File]::WriteAllText($sidecar, "$hash  $(Split-Path $_ -Leaf)`n")
+            $sidecar
+          })
           if (gh release view $tag 2>$null) {
             gh release upload $tag $artifacts --clobber
           } else {
@@ -306,6 +313,11 @@ jobs:
               echo "  Linux packaging must exclude nvidia/triton and other GPU runtimes." >&2
               exit 1
             fi
+          done
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          for artifact in "${ARTIFACTS[@]}"; do
+            (cd "$(dirname "$artifact")" && sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256")
+            ARTIFACTS+=("${artifact}.sha256")
           done
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${ARTIFACTS[@]}" --clobber
