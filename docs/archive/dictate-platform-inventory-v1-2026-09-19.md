@@ -9,7 +9,7 @@ Shared backend source evidence is pinned to
 revision is **UNKNOWN**. Source presence is not a deployment claim.
 
 **Authority:** [the cross-system goal](../goal.md) and the single canonical
-operations map in the machine-readable [Dictate Platform Contract v1](../contracts/dictate-platform-v1.json).
+operations map in the machine-readable [Dictate Platform Contract v1](dictate-platform-v1-2026-09-19.json).
 
 ## Disposition vocabulary
 
