@@ -39,10 +39,10 @@ remain Wave 1–4 verification tasks and do not block independent implementation
 
 Primary artifacts:
 
-- [Platform contract](contracts/dictate-platform-v1.json)
+- [Platform contract](dictate-platform-v1-2026-09-19.json)
 - [Platform inventory](platform/dictate-platform-inventory-v1.md)
 - [Backend handoff](platform/arc-forge-backend-handoff-v1.md)
-- [Contract tests](../tests/test_dictate_platform_contract.py)
+- Contract tests: `tests/test_dictate_platform_contract.py` (removed with the cloud code)
 
 ## Wave 1 Slice 1 — durable desktop auth foundation
 
