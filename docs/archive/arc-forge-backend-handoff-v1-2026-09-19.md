@@ -5,7 +5,7 @@
 **Wave 0 gate:** **PASSED — planning authority lock only.** This handoff is the smallest
 Dictate-side request to the external active `arc-forge-deck` owner. It does not
 claim that source implementation or live routes conform to the
-[Dictate Platform Contract v1](../contracts/dictate-platform-v1.json).
+[Dictate Platform Contract v1](dictate-platform-v1-2026-09-19.json).
 External owner response, deployment SHA, and live behavior remain later
 verification tasks and do not leave an implementation decision unresolved for
 independent Wave 1 work.
