@@ -35,7 +35,7 @@ Security-relevant surfaces in this repository include:
 - the local UI server (`src/dictate/ui_server.py`): its `127.0.0.1` binding, the per-run token, and the handshake file `ui-server.json`,
 - local dictation history, hotwords and configuration under the user's `dictate` config and data directories,
 - the speech model download from Hugging Face,
-- update checks (npm dist-tag first, GitHub Releases as fallback) and update downloads in `src/dictate/update_status.py`: the Linux package updater verifies the release asset SHA-256 and refuses assets without one; the Windows direct updater does not yet verify the digest before running the installer,
+- update checks (npm dist-tag first, GitHub Releases as fallback) and update downloads in `src/dictate/update_status.py`: the Linux package updater and the Windows direct updater verify the release asset SHA-256 before they install it, and refuse an asset that has no digest or does not match it,
 - installers, updaters and uninstallers: the MSI, MSIX, `.deb`, the `install*.ps1` / `install*.sh` scripts, and the npm bootstrap served through jsDelivr,
 - GitHub Actions, the self-hosted Windows release-gate runner, npm publishing, and Microsoft Store submission (see `docs/deployment-security.md`).
 

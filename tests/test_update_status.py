@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -630,24 +631,34 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(calls[0][0][-1], str(root / "update-windows.ps1"))
         self.assertEqual(calls[0][1], str(root))
 
-    def test_windows_direct_update_downloads_selected_channel_installer(self) -> None:
-        asset = ReleaseAsset(
-            url="https://example.test/Dictate-setup.exe",
-            name="Dictate-setup.exe",
-            size=None,
-            sha256=None,
-        )
-        with (
+    def _windows_direct_patches(self, asset: ReleaseAsset):
+        return (
             patch("dictate.update_status.sys.platform", "win32"),
             patch("dictate.update_status._candidate_source_roots", return_value=[]),
             patch("dictate.update_status._windows_distribution", return_value="direct"),
             patch("dictate.update_status.load_config", return_value=Config(update_channel="unstable", installed_package_version="2026.7.4-unstable.1.1")),
             patch("dictate.update_status._fetch_latest_version", return_value=("2026.7.4-unstable.2.1", "https://example.test")),
-            patch("dictate.update_status._find_release_asset", return_value=asset) as find,
-            patch("dictate.update_status._download_file", return_value=Path("C:/Temp/Dictate-setup.exe")),
-            patch("dictate.update_status.subprocess.Popen") as popen,
-        ):
-            flow = start_update_flow()
+            patch("dictate.update_status._find_release_asset", return_value=asset),
+        )
+
+    def test_windows_direct_update_downloads_selected_channel_installer(self) -> None:
+        payload = b"signed installer bytes"
+        asset = ReleaseAsset(
+            url="https://example.test/Dictate-setup.exe",
+            name="Dictate-setup.exe",
+            size=None,
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            partial = Path(d) / "Dictate-setup.exe.partial"
+            partial.write_bytes(payload)
+            platform, roots, dist, config, latest, find_patch = self._windows_direct_patches(asset)
+            with (
+                platform, roots, dist, config, latest, find_patch as find,
+                patch("dictate.update_status._download_release_asset_partial", return_value=partial) as dl,
+                patch("dictate.update_status.subprocess.Popen") as popen,
+            ):
+                flow = start_update_flow()
 
         self.assertEqual(flow.mode, "installer")
         self.assertTrue(flow.started)
@@ -658,7 +669,52 @@ class UpdateStatusTests(unittest.TestCase):
             release_tag="v2026.7.4-unstable.2.1",
             fallback_name="Dictate_2026.7.4-unstable.2.1_x64-setup.exe",
         )
-        popen.assert_called_once_with([str(Path("C:/Temp/Dictate-setup.exe")), "/S", "/UPDATE"])
+        dl.assert_called_once_with(asset.url, asset.name, expected_size=None)
+        popen.assert_called_once_with([str(Path(d) / "Dictate-setup.exe"), "/S", "/UPDATE"])
+
+    def test_windows_direct_update_refuses_installer_with_wrong_digest(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/Dictate-setup.exe",
+            name="Dictate-setup.exe",
+            size=None,
+            sha256=hashlib.sha256(b"expected").hexdigest(),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            partial = Path(d) / "Dictate-setup.exe.partial"
+            partial.write_bytes(b"tampered")
+            platform, roots, dist, config, latest, find_patch = self._windows_direct_patches(asset)
+            with (
+                platform, roots, dist, config, latest, find_patch,
+                patch("dictate.update_status._download_release_asset_partial", return_value=partial),
+                patch("dictate.update_status.subprocess.Popen") as popen,
+            ):
+                flow = start_update_flow()
+            self.assertFalse(partial.exists())
+            self.assertFalse((Path(d) / "Dictate-setup.exe").exists())
+
+        self.assertEqual(flow.mode, "error")
+        self.assertEqual(flow.error_code, "checksum_mismatch")
+        popen.assert_not_called()
+
+    def test_windows_direct_update_refuses_asset_without_digest(self) -> None:
+        asset = ReleaseAsset(
+            url="https://example.test/Dictate-setup.exe",
+            name="Dictate-setup.exe",
+            size=None,
+            sha256=None,
+        )
+        platform, roots, dist, config, latest, find_patch = self._windows_direct_patches(asset)
+        with (
+            platform, roots, dist, config, latest, find_patch,
+            patch("dictate.update_status._download_release_asset_partial") as dl,
+            patch("dictate.update_status.subprocess.Popen") as popen,
+        ):
+            flow = start_update_flow()
+
+        self.assertEqual(flow.mode, "error")
+        self.assertEqual(flow.error_code, "no_checksum")
+        dl.assert_not_called()
+        popen.assert_not_called()
 
     def test_download_progress_uses_content_length(self) -> None:
         payload = b"abcd"

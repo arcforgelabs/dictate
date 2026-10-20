@@ -635,7 +635,19 @@ def _run_windows_direct_update(context: dict[str, object]) -> UpdateFlow:
             release_tag=f"v{latest}",
             fallback_name=f"Dictate_{latest}_x64{WINDOWS_INSTALLER_SUFFIX}",
         )
-        installer = _download_file(asset.url, asset.name)
+    except Exception as exc:  # noqa: BLE001
+        return _update_failed(context, "windows_update_failed", str(exc))
+    if not asset.sha256:
+        return _update_failed(context, "no_checksum", "Release asset has no trusted SHA-256 digest")
+    try:
+        partial = _download_release_asset_partial(asset.url, asset.name, expected_size=asset.size)
+        installer = _finalize_verified_download(partial, asset.name, expected_sha256=asset.sha256)
+    except Exception as exc:  # noqa: BLE001
+        _cleanup_download_artifacts(asset.name)
+        message = str(exc)
+        code = "checksum_mismatch" if "checksum" in message.casefold() else "windows_update_failed"
+        return _update_failed(context, code, message)
+    try:
         subprocess.Popen([str(installer), "/S", "/UPDATE"])  # noqa: S603
     except Exception as exc:  # noqa: BLE001
         return _update_failed(context, "windows_update_failed", str(exc))
@@ -731,16 +743,6 @@ def _parse_github_asset_digest(asset: dict[str, object]) -> str | None:
     if re.fullmatch(r"[0-9a-f]{64}", hex_digest):
         return hex_digest
     return None
-
-
-def _download_file(url: str, name: str, *, timeout: float = _DOWNLOAD_TIMEOUT) -> Path:
-    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / name
-    request = urllib.request.Request(url, headers={"User-Agent": "Dictate updater"})
-    with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as fh:
-        shutil.copyfileobj(response, fh)
-    return dest
 
 
 def _download_release_asset_partial(
