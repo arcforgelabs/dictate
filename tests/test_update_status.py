@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -23,6 +25,7 @@ from dictate.update_status import (
     _download_release_asset_partial,
     _finalize_verified_download,
     _find_release_asset,
+    _private_download_dir,
 )
 from dictate.version import RELEASE_VERSION
 
@@ -528,6 +531,8 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")) as finalize,
             patch("dictate.update_status._install_deb", return_value=ok) as install,
             patch("dictate.update_status._cleanup_download_artifacts"),
+            patch("dictate.update_status._private_download_dir", return_value=Path("/tmp/dictate-update-test")),
+            patch("dictate.update_status._verify_download_digest"),
             patch("dictate.update_status.Path.unlink"),
             patch("dictate.config.set_installed_package_version") as stamp,
             patch("dictate.update_status.threading.Thread", _ImmediateThread),
@@ -584,6 +589,8 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")),
             patch("dictate.update_status._install_deb", return_value=cancelled),
             patch("dictate.update_status._cleanup_download_artifacts"),
+            patch("dictate.update_status._private_download_dir", return_value=Path("/tmp/dictate-update-test")),
+            patch("dictate.update_status._verify_download_digest"),
             patch("dictate.update_status.Path.unlink"),
             patch("dictate.update_status.threading.Thread", _ImmediateThread),
         ):
@@ -680,12 +687,12 @@ class UpdateStatusTests(unittest.TestCase):
                 return None
 
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.update_status.tempfile.gettempdir", return_value=d):
-                with patch("dictate.update_status.urllib.request.urlopen", return_value=_Body()):
-                    partial = _download_release_asset_partial(
-                        "https://example.test/pkg.deb",
-                        "pkg.deb",
-                        expected_size=len(payload),
+            with patch("dictate.update_status.urllib.request.urlopen", return_value=_Body()):
+                partial = _download_release_asset_partial(
+                    "https://example.test/pkg.deb",
+                    "pkg.deb",
+                    dest_dir=Path(d),
+                    expected_size=len(payload),
                         progress_callback=seen.append,
                     )
             self.assertTrue(partial.is_file())
@@ -708,16 +715,120 @@ class UpdateStatusTests(unittest.TestCase):
                 return None
 
         with tempfile.TemporaryDirectory() as d:
-            with patch("dictate.update_status.tempfile.gettempdir", return_value=d):
-                with patch("dictate.update_status.urllib.request.urlopen", return_value=_ShortBody()):
-                    with self.assertRaisesRegex(RuntimeError, "Download incomplete"):
-                        _download_release_asset_partial(
-                            "https://example.test/pkg.deb",
-                            "pkg.deb",
-                            expected_size=10,
-                        )
-            partial = Path(d) / "dictate-update" / "pkg.deb.partial"
+            with patch("dictate.update_status.urllib.request.urlopen", return_value=_ShortBody()):
+                with self.assertRaisesRegex(RuntimeError, "Download incomplete"):
+                    _download_release_asset_partial(
+                        "https://example.test/pkg.deb",
+                        "pkg.deb",
+                        dest_dir=Path(d),
+                        expected_size=10,
+                    )
+            partial = Path(d) / "pkg.deb.partial"
             self.assertFalse(partial.exists())
+
+    @unittest.skipIf(os.name != "posix", "POSIX permissions")
+    def test_private_download_dir_is_new_and_owner_only(self) -> None:
+        first = _private_download_dir()
+        second = _private_download_dir()
+        try:
+            self.assertNotEqual(first, second)
+            self.assertEqual(first.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(first.stat().st_uid, os.getuid())
+        finally:
+            first.rmdir()
+            second.rmdir()
+
+    @unittest.skipIf(os.name != "posix", "symlinks")
+    def test_download_does_not_follow_a_planted_partial_file(self) -> None:
+        class _Body:
+            headers = {}
+
+            def read(self, size=-1):  # noqa: ANN001
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+                return None
+
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "target"
+            target.write_bytes(b"keep")
+            (Path(d) / "pkg.deb.partial").symlink_to(target)
+            with patch("dictate.update_status.urllib.request.urlopen", return_value=_Body()):
+                with self.assertRaises(FileExistsError):
+                    _download_release_asset_partial(
+                        "https://example.test/pkg.deb",
+                        "pkg.deb",
+                        dest_dir=Path(d),
+                        expected_size=None,
+                    )
+            self.assertEqual(target.read_bytes(), b"keep")
+
+    def _ready_package(self, payload: bytes) -> tuple[Path, Path, str]:
+        import dictate.update_status as update_status_mod
+
+        download_dir = _private_download_dir()
+        deb = download_dir / "x_amd64.deb"
+        deb.write_bytes(payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        update_status_mod._linux_package_operation = update_status_mod._LinuxPackageOperation(
+            phase="ready",
+            step="install",
+            progress=100,
+            install_started_at=None,
+            error_code=None,
+            error_detail=None,
+            target_version="2026.7.5",
+            thread=None,
+            deb_path=deb,
+            deb_sha256=digest,
+            download_dir=download_dir,
+        )
+        return download_dir, deb, digest
+
+    def test_linux_package_install_rechecks_digest_before_root_install(self) -> None:
+        import dictate.update_status as update_status_mod
+
+        download_dir, deb, _ = self._ready_package(b"good package")
+        # Simulate a swap after the download was verified.
+        deb.write_bytes(b"evil package")
+        with patch("dictate.update_status._install_deb") as install:
+            update_status_mod._linux_package_install_worker(
+                "2026.7.5",
+                deb,
+                update_status_mod._linux_package_operation.deb_sha256,
+                download_dir,
+            )
+            snapshot = get_linux_package_update_snapshot()
+
+        install.assert_not_called()
+        self.assertEqual(snapshot["phase"], "failed")
+        self.assertEqual(snapshot["error_code"], "checksum_mismatch")
+        self.assertFalse(download_dir.exists())
+
+    def test_linux_package_install_runs_verified_package_and_removes_folder(self) -> None:
+        import dictate.update_status as update_status_mod
+
+        download_dir, deb, digest = self._ready_package(b"good package")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        installed: list[bytes] = []
+
+        def fake_install(path):  # noqa: ANN001
+            installed.append(Path(path).read_bytes())
+            return ok
+
+        with (
+            patch("dictate.update_status._install_deb", side_effect=fake_install),
+            patch("dictate.config.set_installed_package_version"),
+        ):
+            update_status_mod._linux_package_install_worker("2026.7.5", deb, digest, download_dir)
+            snapshot = get_linux_package_update_snapshot()
+
+        self.assertEqual(installed, [b"good package"])
+        self.assertEqual(snapshot["phase"], "installed")
+        self.assertFalse(download_dir.exists())
 
     def test_checksum_mismatch_blocks_installation(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -762,6 +873,8 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status._finalize_verified_download", return_value=Path("/tmp/x.deb")),
             patch("dictate.update_status._install_deb", return_value=ok),
             patch("dictate.update_status._cleanup_download_artifacts"),
+            patch("dictate.update_status._private_download_dir", return_value=Path("/tmp/dictate-update-test")),
+            patch("dictate.update_status._verify_download_digest"),
             patch("dictate.update_status.Path.unlink"),
             patch("dictate.config.set_installed_package_version"),
             patch("dictate.update_status._linux_package_set_phase", side_effect=record_phase),
@@ -1112,6 +1225,7 @@ class UpdateStatusTests(unittest.TestCase):
                 side_effect=RuntimeError("network lost"),
             ),
             patch("dictate.update_status._cleanup_download_artifacts", side_effect=cleanup),
+            patch("dictate.update_status._private_download_dir", return_value=Path("/tmp/dictate-update-test")),
             patch("dictate.update_status._linux_package_set_failed", side_effect=publish_failed),
         ):
             started = start_update_flow()
