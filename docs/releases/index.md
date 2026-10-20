@@ -5,13 +5,17 @@ summary: "What changed in each Dictate release."
 
 # Release notes
 
-Each release has a page here: `docs/releases/<version>.md`, where the
-version is `YYYY.M.N`. The site shows the highest stable version as the
-latest release.
+Each stable release has a page here: `docs/releases/<version>.md`, where
+the version is `YYYY.M.N` (a correction is `YYYY.M.N-C`). The release cut
+writes it from the release's changelog file. The site shows the highest
+stable version as the latest release.
 
-The full changelog for every release is in
-[CHANGELOG.md](../../CHANGELOG.md) and on
-[GitHub Releases](https://github.com/arcforgelabs/dictate/releases).
+Every release, betas included, is also on
+[GitHub Releases](https://github.com/arcforgelabs/dictate/releases), and its
+complete Markdown changelog is in the
+[changelog index](https://github.com/arcforgelabs/dictate/blob/master/CHANGELOG.md),
+with the audited
+[contribution records](https://github.com/arcforgelabs/dictate/tree/master/CHANGELOG/records).
 
 ## Releases
 

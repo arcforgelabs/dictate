@@ -200,6 +200,13 @@ jobs:
       - name: Validate npm package contents
         run: npm pack --dry-run
 
+      # The split changelog (CONTRIBUTING.md, Changelog): its format rules,
+      # and the tests of scripts/release/changelog.mjs.
+      - name: Check the changelog
+        run: |
+          npm run --silent changelog:check
+          npm run --silent test:changelog
+
   ui:
     name: Quiet Console UI (build, test, server smoke)
     runs-on: ubuntu-latest
