@@ -6,14 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from datetime import date
 from pathlib import Path
 
-from calver import release_version
+import calver
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CALVER_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}(?:-\d+)?$")
+CALVER_RE = calver.VERSION_RE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,10 +20,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "version",
         nargs="?",
-        help="CalVer release version, e.g. 2026.6.4 or 2026.6.4-1",
+        help="CalVer release version YYYY.M.N, e.g. 2026.10.3 (default: the next release)",
     )
-    parser.add_argument("--date", type=_parse_date, default=None, help="release date")
-    parser.add_argument("--sequence", type=int, default=0, help="same-day patch sequence")
+    parser.add_argument(
+        "--today",
+        type=calver.parse_today,
+        default=None,
+        help="UTC release date, YYYY-MM-DD (default: today). Only the month is used.",
+    )
     parser.add_argument(
         "--check",
         action="store_true",
@@ -35,8 +38,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    version = args.version or release_version(args.date or date.today(), args.sequence)
-    _require_calver(version)
+    version = args.version
+    if version:
+        _require_calver(version)
+    if not args.check:
+        # Writing starts a release, so the version must be the next count this month.
+        try:
+            tags = calver.git_tags()
+            version = version or calver.next_version(tags, args.today)
+            calver.require_next(version, tags, args.today)
+        except calver.ReleaseVersionError as exc:
+            raise SystemExit(f"{exc} Run `git fetch --tags` if tags are missing.") from exc
+    elif not version:
+        raise SystemExit("--check needs a VERSION")
 
     changes = _planned_changes(version)
     if args.check:
@@ -146,22 +160,15 @@ def _set_package_lock_versions(data: dict, version: str) -> None:
 
 
 def _msi_safe_version(public_version: str) -> str:
-    date_part, separator, sequence = public_version.partition("-")
-    year, month, day = [int(part) for part in date_part.split(".")]
+    base, separator, sequence = public_version.partition("-")
+    year, month, count = [int(part) for part in base.split(".")]
     patch_sequence = int(sequence) if separator else 0
-    return f"{year - 2000}.{month}.{day}.{patch_sequence}"
-
-
-def _parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("expected YYYY-MM-DD") from exc
+    return f"{year - 2000}.{month}.{count}.{patch_sequence}"
 
 
 def _require_calver(version: str) -> None:
     if not CALVER_RE.fullmatch(version):
-        raise SystemExit(f"expected CalVer YYYY.M.D or YYYY.M.D-N, got: {version}")
+        raise SystemExit(f"expected CalVer YYYY.M.N or legacy correction YYYY.M.N-K, got: {version}")
 
 
 if __name__ == "__main__":

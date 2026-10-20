@@ -22,7 +22,7 @@ usage() {
 Usage: scripts/windows-vm-release-gate.sh [options]
 
 Options:
-  --tag <vYYYY.M.D[-N]>  Release to test. Default: the latest GitHub release.
+  --tag <vYYYY.M.N[-K]>  Release to test. Default: the latest GitHub release.
   --installer <path>     Test a local *_x64-setup.exe instead of downloading.
                          Requires --tag so the expected version is known.
   --host <ssh-host>      Windows VM SSH host. Default: $HOST
@@ -78,8 +78,8 @@ else
     TAG="$(gh release view -R "$REPO" --json tagName -q .tagName)"
   fi
 fi
-[[ "$TAG" =~ ^v20[0-9]{2}\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9]+)?$ ]] \
-  || die "tag must look like vYYYY.M.D or vYYYY.M.D-N: $TAG"
+[[ "$TAG" =~ ^v20[0-9]{2}\.([1-9]|1[0-2])\.[1-9][0-9]*(-[1-9][0-9]*)?$ ]] \
+  || die "tag must look like vYYYY.M.N or vYYYY.M.N-K: $TAG"
 VERSION="${TAG#v}"
 
 TMP_DIR="$(mktemp -d)"

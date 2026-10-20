@@ -146,7 +146,7 @@ Dictate:
 
 1. Use the API smoke/status workflow to confirm credentials and product access.
 2. Run the Windows release gate against the GitHub release you are about to
-   ship: `scripts/windows-vm-release-gate.sh --tag vYYYY.M.D-N`. It installs
+   ship: `scripts/windows-vm-release-gate.sh --tag vYYYY.M.N`. It installs
    the published `setup.exe` on the `win11-gpu` VM, launches it in the
    signed-in session, checks the engine's `/api/health` version, and
    uninstalls. Do not draft if it fails. See

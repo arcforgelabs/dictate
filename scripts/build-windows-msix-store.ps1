@@ -147,15 +147,17 @@ function New-ResourcesPri {
 
 function Convert-ToMsixVersion {
     param([Parameter(Mandatory = $true)][string]$Version)
-    # The Store reserves the fourth part, so it must stay 0. A same-day
-    # release YYYY.M.D-N goes into the third part as D*100+N, which keeps
-    # 2026.9.25 < 2026.9.25-1 < 2026.9.26 in Store ordering.
+    # The Store reserves the fourth part, so it must stay 0. A release
+    # YYYY.M.N-K (N is the release count in the month, K a legacy
+    # correction) goes into the third part as N*100+K, which keeps
+    # 2026.9.25 < 2026.9.25-1 < 2026.9.26 in Store ordering. N stays below
+    # 656, so the part stays below 65536.
     if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-(\d+))?$') {
-        throw "Store MSIX needs a stable YYYY.M.D or YYYY.M.D-N version: $Version"
+        throw "Store MSIX needs a stable YYYY.M.N or YYYY.M.N-K version: $Version"
     }
     $sameDay = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
     if ($sameDay -gt 99) {
-        throw "Same-day release number must be 99 or less for MSIX: $Version"
+        throw "Correction number must be 99 or less for MSIX: $Version"
     }
     $parts = @([int]$Matches[1], [int]$Matches[2], ([int]$Matches[3] * 100 + $sameDay), 0)
     foreach ($part in $parts) {

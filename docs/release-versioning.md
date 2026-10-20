@@ -1,40 +1,33 @@
 # Release Versioning
 
-> The target release policy (stable, beta and dev channels; `YYYY.M.PATCH`
-> versions) is [RELEASING.md](RELEASING.md). This page describes the current
+> The target release policy (stable, beta and dev channels; corrections and
+> betas) is [RELEASING.md](RELEASING.md). This page describes the current
 > procedure until that lands
 > ([#145](https://github.com/arcforgelabs/dictate/issues/145)).
->
-> One part has already changed: since 2026.10.1 the third number is a release
-> counter within the month, not the day. Pass the version explicitly, for
-> example `python scripts/sync_release_version.py 2026.10.3`, instead of
-> `--date`. The rest of this page still says "date" until #145 updates the
-> scripts.
 
 Dictate uses calendar versioning for public releases:
 
 ```text
-YYYY.M.D
+YYYY.M.N
 ```
 
-The release version is the calendar date of the release without zero-padding month or day. A release on May 18, 2026 is:
+- `YYYY.M` is the month the release is cut in (UTC), without zero-padding.
+- `N` is the release count in that month. It is not the day.
+- `N` is the highest stable `N` already tagged in that month, plus 1. The
+  first release of a month is `1`. `N` can be more than 31.
+- Releases before 2026.10.1 used the day as `N`. Do not change those tags.
+  The count continues from the highest one in the month.
 
-```text
-2026.5.18
-```
+For example, after `2026.10.20` comes `2026.10.21`, after `2026.10.31` comes
+`2026.10.32`, and the first release of November is `2026.11.1`. Sort versions
+as numbers, part by part, never as text: as text, `2026.10.9` comes after
+`2026.10.32`. In shell, `sort -V` and `git tag --sort=-v:refname` are correct.
 
-Python package metadata uses the same PEP 440-compatible version:
+Python package metadata uses the same PEP 440-compatible version.
 
-```text
-2026.5.18
-```
-
-If a same-day replacement package is needed because an immutable package
-registry already has `YYYY.M.D`, append a small patch sequence:
-
-```text
-2026.5.18-1
-```
+Older releases sometimes added a correction `-K` (for example `2026.9.25-1`)
+when an immutable package registry already had the version. The tooling still
+accepts these tags. For new code, use the next `N`.
 
 The app reports the public release version through:
 
@@ -42,37 +35,43 @@ The app reports the public release version through:
 dictate --version
 ```
 
-Generate versions with:
+Print the next version, or check one, with (fetch the tags first):
 
 ```bash
-python scripts/calver.py --date 2026-05-18
-python scripts/calver.py --date 2026-05-18 --sequence 1
-python scripts/calver.py --date 2026-05-18 --format pep440
+git fetch --tags
+python scripts/calver.py next
+python scripts/calver.py next --today 2026-10-20
+python scripts/calver.py check 2026.10.3
 ```
 
 Synchronize release metadata before tagging with:
 
 ```bash
-python scripts/sync_release_version.py --date 2026-05-18
-python scripts/sync_release_version.py --date 2026-05-18 --sequence 1
-python scripts/sync_release_version.py 2026.5.18 --check
+python scripts/sync_release_version.py            # the next version
+python scripts/sync_release_version.py 2026.10.3  # must be the next version
+python scripts/sync_release_version.py 2026.10.3 --check
 ```
+
+When it writes, `sync_release_version.py` refuses a version that is not the
+next release this month (`--today` sets the date for a test). `--check` only
+compares the files with the version, so it works for any released version.
 
 Release tags and GitHub milestones should use the public version with a leading `v`, for example:
 
 ```text
-v2026.5.18
-v2026.5.18-1
+v2026.10.3
+v2026.10.32
 ```
 
 Windows MSI installers cannot use the public CalVer string directly because
 WiX/MSI requires numeric `major.minor.patch[.build]`, with major and minor at
-most 255. Keep `tauri.conf.json`'s public app `version` as `YYYY.M.D[-N]`, but
-map `bundle.windows.wix.version` to `YY.M.D.N` for MSI packaging:
+most 255. Keep `tauri.conf.json`'s public app `version` as `YYYY.M.N[-K]`, but
+map `bundle.windows.wix.version` to `YY.M.N.K` for MSI packaging:
 
 ```text
-2026.6.4   -> 26.6.4.0
-2026.6.4-1 -> 26.6.4.1
+2026.10.3   -> 26.10.3.0
+2026.10.32  -> 26.10.32.0
+2026.9.25-1 -> 26.9.25.1
 ```
 
 After creating a `v20*` CalVer tag on a commit that has reached the default

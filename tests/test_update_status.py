@@ -67,6 +67,11 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertEqual(parse_calver("v2026.5.18-1"), (2026, 5, 18, 1))
         self.assertIsNone(parse_calver("latest"))
 
+    def test_parse_calver_accepts_a_release_count_above_31(self) -> None:
+        self.assertEqual(parse_calver("v2026.10.32"), (2026, 10, 32, 0))
+        self.assertTrue(is_newer_version("2026.10.32", "2026.10.9"))
+        self.assertFalse(is_newer_version("2026.10.9", "2026.10.32"))
+
     def test_is_newer_version_compares_calver(self) -> None:
         self.assertTrue(is_newer_version("2026.5.19", "2026.5.18"))
         self.assertTrue(is_newer_version("2026.5.18-1", "2026.5.18"))
