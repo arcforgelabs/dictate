@@ -97,6 +97,8 @@ class _LinuxPackageOperation:
     target_version: str
     thread: threading.Thread | None
     deb_path: Path | None = None
+    deb_sha256: str | None = None
+    download_dir: Path | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -743,23 +745,26 @@ def _download_file(url: str, name: str, *, timeout: float = _DOWNLOAD_TIMEOUT) -
     return dest
 
 
+def _private_download_dir() -> Path:
+    """Make a new download folder that only this user can open (mode 0700).
+
+    The .deb is later installed as root, so it must not sit in a fixed, shared
+    /tmp path: another local user could create that folder first and swap the
+    package after the digest check.
+    """
+    return Path(tempfile.mkdtemp(prefix="dictate-update-"))
+
+
 def _download_release_asset_partial(
     url: str,
     name: str,
     *,
+    dest_dir: Path,
     expected_size: int | None,
     progress_callback: Callable[[int | None], None] | None = None,
     timeout: float = _DOWNLOAD_TIMEOUT,
 ) -> Path:
-    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
-    dest_dir.mkdir(parents=True, exist_ok=True)
     partial = dest_dir / f"{name}.partial"
-    final = dest_dir / name
-    for path in (partial, final):
-        try:
-            path.unlink()
-        except OSError:
-            pass
     request = urllib.request.Request(url, headers={"User-Agent": "Dictate updater"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         header_length = response.headers.get("Content-Length")
@@ -777,7 +782,10 @@ def _download_release_asset_partial(
                 if total is None:
                     total = header_total
         received = 0
-        with open(partial, "wb") as fh:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(partial, flags, 0o600)
+        with os.fdopen(fd, "wb") as fh:
             while True:
                 chunk = response.read(1024 * 256)
                 if not chunk:
@@ -797,20 +805,26 @@ def _download_release_asset_partial(
     return partial
 
 
+def _verify_download_digest(path: Path, expected_sha256: str) -> None:
+    hasher = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 256), b""):
+            hasher.update(chunk)
+    if hasher.hexdigest().lower() != expected_sha256.lower():
+        raise RuntimeError("Download checksum mismatch")
+
+
 def _finalize_verified_download(
     partial: Path,
     name: str,
     *,
     expected_sha256: str,
 ) -> Path:
-    hasher = hashlib.sha256()
-    with open(partial, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 256), b""):
-            hasher.update(chunk)
-    digest_hex = hasher.hexdigest().lower()
-    if digest_hex != expected_sha256.lower():
+    try:
+        _verify_download_digest(partial, expected_sha256)
+    except RuntimeError:
         partial.unlink(missing_ok=True)
-        raise RuntimeError("Download checksum mismatch")
+        raise
     final = partial.with_name(name)
     try:
         final.unlink()
@@ -820,13 +834,10 @@ def _finalize_verified_download(
     return final
 
 
-def _cleanup_download_artifacts(name: str) -> None:
-    dest_dir = Path(tempfile.gettempdir()) / "dictate-update"
-    for path in (dest_dir / name, dest_dir / f"{name}.partial"):
-        try:
-            path.unlink()
-        except OSError:
-            pass
+def _cleanup_download_artifacts(download_dir: Path | None) -> None:
+    if download_dir is None:
+        return
+    shutil.rmtree(download_dir, ignore_errors=True)
 
 
 def _linux_package_update_worker(
@@ -835,11 +846,13 @@ def _linux_package_update_worker(
     asset: ReleaseAsset,
 ) -> None:
     deb_path: Path | None = None
+    download_dir: Path | None = None
     failure: tuple[str, str] | None = None
     try:
         if not asset.sha256:
             raise RuntimeError("Release asset has no trusted SHA-256 digest")
         _linux_package_set_phase("downloading", "download", progress=0)
+        download_dir = _private_download_dir()
 
         def on_progress(progress: int | None) -> None:
             _linux_package_set_phase("downloading", "download", progress=progress)
@@ -847,6 +860,7 @@ def _linux_package_update_worker(
         partial = _download_release_asset_partial(
             asset.url,
             asset.name,
+            dest_dir=download_dir,
             expected_size=asset.size,
             progress_callback=on_progress,
         )
@@ -856,7 +870,7 @@ def _linux_package_update_worker(
             asset.name,
             expected_sha256=asset.sha256,
         )
-        _linux_package_mark_ready(deb_path, latest)
+        _linux_package_mark_ready(deb_path, latest, asset.sha256, download_dir)
         deb_path = None
     except Exception as exc:  # noqa: BLE001
         code = "download_failed"
@@ -876,7 +890,7 @@ def _linux_package_update_worker(
                     deb_path.unlink()
                 except OSError:
                     pass
-            _cleanup_download_artifacts(asset.name)
+            _cleanup_download_artifacts(download_dir)
             _linux_package_set_failed(*failure)
 
 
@@ -937,7 +951,12 @@ def _linux_package_operation_snapshot(
             }
 
 
-def _linux_package_mark_ready(deb_path: Path, version: str) -> None:
+def _linux_package_mark_ready(
+    deb_path: Path,
+    version: str,
+    sha256: str,
+    download_dir: Path | None,
+) -> None:
     with _linux_package_operation_guard:
         op = _linux_package_operation
         if op is None:
@@ -947,6 +966,8 @@ def _linux_package_mark_ready(deb_path: Path, version: str) -> None:
             op.step = "install"
             op.progress = 100
             op.deb_path = deb_path
+            op.deb_sha256 = sha256
+            op.download_dir = download_dir
             op.target_version = version
             op.error_code = None
             op.error_detail = None
@@ -976,7 +997,12 @@ def _begin_linux_package_install(
             )
         worker = threading.Thread(
             target=_linux_package_install_worker,
-            args=(str(operation.target_version), operation.deb_path),
+            args=(
+                str(operation.target_version),
+                operation.deb_path,
+                operation.deb_sha256,
+                operation.download_dir,
+            ),
             name="dictate-linux-package-install",
             daemon=True,
         )
@@ -1002,11 +1028,24 @@ def _begin_linux_package_install(
     )
 
 
-def _linux_package_install_worker(latest: str, deb_path: Path | None) -> None:
-    if deb_path is None:
+def _linux_package_install_worker(
+    latest: str,
+    deb_path: Path | None,
+    expected_sha256: str | None,
+    download_dir: Path | None,
+) -> None:
+    if deb_path is None or not expected_sha256:
         _linux_package_set_failed("install_failed", "The downloaded package is missing.")
+        _cleanup_download_artifacts(download_dir)
         return
     try:
+        # The user may wait a long time between "ready" and "install". Check
+        # the file again just before root installs it.
+        try:
+            _verify_download_digest(deb_path, expected_sha256)
+        except (OSError, RuntimeError) as exc:
+            _linux_package_set_failed("checksum_mismatch", f"Package changed before install: {exc}")
+            return
         result = _install_deb(deb_path)
         if result.returncode != 0:
             detail = (result.stderr or "").strip() or f"installer exited {result.returncode}"
@@ -1033,6 +1072,7 @@ def _linux_package_install_worker(latest: str, deb_path: Path | None) -> None:
             deb_path.unlink()
         except OSError:
             pass
+        _cleanup_download_artifacts(download_dir)
 
 
 def _operation_actions(phase: str) -> list[str]:
