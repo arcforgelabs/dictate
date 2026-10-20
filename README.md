@@ -281,6 +281,11 @@ to try the latest code, not as the everyday install.
 
 ## Docs
 
+`docs/` is published as the docs site at
+https://arcforgelabs.github.io/docs/dictate/ by
+[arcforgelabs/docs](https://github.com/arcforgelabs/docs). `docs/docs.json`
+is its navigation, and `docs/releases/` holds one page per release.
+
 - [Windows 11 support](docs/windows-11.md)
 - [Transcription deployment plan](docs/TRANSCRIPTION_PLAN.md)
 - [Release policy: channels, versions, validation](docs/RELEASING.md)

@@ -1,0 +1,52 @@
+{
+  "name": "Dictate",
+  "description": "Local-only desktop dictation that types into the focused app.",
+  "redirects": [],
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          { "group": "Get started", "pages": ["index", "windows-11", "goals"] },
+          { "group": "Transcription", "pages": ["transcription-plan", "local-only-audit"] },
+          { "group": "Policies", "pages": ["dictate-privacy-policy", "dictate-terms", "deployment-security"] }
+        ]
+      },
+      {
+        "tab": "Project",
+        "groups": [
+          { "group": "Contributing", "pages": ["development-streams", "releasing", "release-versioning", "desktop-packaging"] },
+          {
+            "group": "Microsoft Store",
+            "pages": ["msstore-automation", "msstore-listing", "msstore/assets/logos/readme", "msstore/assets/screenshots/readme"]
+          },
+          { "group": "Releases", "pages": ["releases"] },
+          {
+            "group": "Archive",
+            "pages": [
+              "archive/readme",
+              "archive/goals-2026-07-05",
+              "archive/dictate-pro-subscription-architecture-2026-07-05",
+              "archive/frontend-wiring-2026-07-05",
+              "archive/meeting-transcription-research-2026-07-05",
+              "archive/recent-dictation-history-spec-2026-07-05",
+              "archive/xai-diarization-cost-model-2026-07-05",
+              "archive/forge-handover-2026-07-12",
+              "archive/forge-wave4-release-readiness-2026-07-12",
+              "archive/goal-2026-09-19",
+              "archive/arc-forge-backend-handoff-v1-2026-09-19",
+              "archive/deck-sections-and-dictate-space-spec-2026-09-19",
+              "archive/desktop-browser-signin-architecture-2026-09-19",
+              "archive/dictate-platform-inventory-v1-2026-09-19",
+              "archive/dictate-pro-cloud-sync-plan-2026-09-19",
+              "archive/dictate-pro-subscription-architecture-2026-09-19",
+              "archive/dictate-pro-terms-2026-09-19",
+              "archive/msstore-in-app-subscriptions-2026-09-19",
+              "archive/record-categories-spec-2026-10-03"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
