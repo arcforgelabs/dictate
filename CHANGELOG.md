@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026.10.3 (unreleased, in beta)
+
+### Security
+
+- The Windows updater checks the installer's SHA-256 before it runs it. A
+  download with no trusted digest, or with a digest that does not match, is
+  deleted and the update stops. (#173)
+- The Linux updater keeps the downloaded `.deb` in a new private folder for
+  each update, checks its SHA-256 again just before the install, and removes
+  the folder afterwards. Before, another local user could swap the package in
+  the shared `/tmp/dictate-update` folder. (#174)
+- Dependency updates for security advisories: urllib3 2.8.0 (#106), fsspec
+  2026.6.0 (#169), cairosvg and source-map-js (#176).
+
+### Fixed
+
+- Updates keep working when GitHub rate-limits the release lookup. The
+  updater downloads the package directly and checks it against the
+  `<asset>.sha256` file published beside it. (#167)
+
+### Changed
+
+- The third version number is the count of releases in the month, not the
+  day. After `2026.10.2` comes `2026.10.3`. (#175)
+
 ## 2026.10.2 (2026-10-04)
 
 ### Fixed
