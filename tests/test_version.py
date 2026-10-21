@@ -233,7 +233,7 @@ class BetaVersionTests(unittest.TestCase):
     def test_sync_release_version_stamps_a_beta_on_every_version_file(self) -> None:
         sync_release_version = _load_script("sync_release_version")
         changes = sync_release_version._planned_changes("2026.10.3-beta.2")
-        changed = {str(path.relative_to(ROOT)) for path, before, after in changes if before != after}
+        changed = {path.relative_to(ROOT).as_posix() for path, before, after in changes if before != after}
         self.assertIn("package.json", changed)
         self.assertIn("src/dictate/version.py", changed)
         tauri = next(after for path, _, after in changes if path.name == "tauri.conf.json")
