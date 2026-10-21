@@ -269,7 +269,10 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      # A release run (inputs.ref set) neither reads nor writes the cargo
+      # cache, so it cannot poison what master reads (as flow's CI does).
       - name: Cache cargo
+        if: ${{ !inputs.ref }}
         uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
         with:
           path: |
