@@ -213,6 +213,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         stt_compute_type = None
     if not isinstance(update_channel, str):
         update_channel = None
+    elif update_channel.strip().lower() == "unstable":
+        # The old prerelease lane is the beta channel now (docs/RELEASING.md).
+        update_channel = "beta"
     if not isinstance(installed_package_version, str):
         installed_package_version = None
 
@@ -325,8 +328,11 @@ def set_update_channel(channel: str, path: Path = CONFIG_PATH) -> str:
     normalized = channel.strip().lower()
     if normalized == "latest":
         normalized = "stable"
-    if normalized not in {"stable", "unstable"}:
-        raise ValueError("update channel must be stable or unstable")
+    if normalized == "unstable":
+        # The old prerelease lane is the beta channel now (docs/RELEASING.md).
+        normalized = "beta"
+    if normalized not in {"stable", "beta"}:
+        raise ValueError("update channel must be stable or beta")
     data = _load_raw(path)
     data["update_channel"] = normalized
     _save_raw(data, path)

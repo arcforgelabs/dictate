@@ -24,6 +24,12 @@
 
 - The third version number is the count of releases in the month, not the
   day. After `2026.10.2` comes `2026.10.3`. (#175)
+- The Beta channel reads npm `beta`, and reads `unstable` while npm has no
+  `beta` tag. The update check orders versions as PEP 440 does: a beta is
+  older than its final, and a correction is newer. Before, a beta counted as
+  newer than its final, so a beta user was not offered the final. A saved
+  `update_channel: unstable` reads as `beta`. A beta `.deb` carries the
+  package version `YYYY.M.N~beta.B`, so apt installs the final over it. (#145)
 
 ## 2026.10.2 (2026-10-04)
 

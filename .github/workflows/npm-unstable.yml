@@ -1,3 +1,4 @@
+# Replaced by the dictate-* release workflows (dictate-release-prepare.yml and the files it starts; docs/RELEASING.md). Kept until the 2026.10.3 beta has shipped through it.
 name: npm unstable publish
 
 on:

@@ -449,12 +449,14 @@ class UiBackend:
 
     def _set_update_channel(self, channel: Any) -> None:
         if not isinstance(channel, str):
-            raise ApiError(400, "updateChannel must be stable or unstable")
+            raise ApiError(400, "updateChannel must be stable or beta")
         normalized = channel.strip().lower()
         if normalized == "latest":
             normalized = "stable"
-        if normalized not in {"stable", "unstable"}:
-            raise ApiError(400, "updateChannel must be stable or unstable")
+        if normalized == "unstable":
+            normalized = "beta"
+        if normalized not in {"stable", "beta"}:
+            raise ApiError(400, "updateChannel must be stable or beta")
         config_mod.set_update_channel(normalized, path=self.config_path)
 
     def add_hotwords(self, words: list[str]) -> dict[str, Any]:

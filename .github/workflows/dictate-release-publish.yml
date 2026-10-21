@@ -1,0 +1,300 @@
+name: Dictate Release Publish
+run-name: dictate ${{ inputs.tag }}
+
+# Publishes one release tag (docs/RELEASING.md). Dictate Release Prepare
+# starts it after it creates the tag; it can also be started by hand for an
+# existing tag, which runs the checks again and updates what is already
+# there.
+#
+#   checks          dictate-release-checks.yml: the tag, every CI lane, and
+#                   the packages built once (Python, npm, .deb, MSI, NSIS)
+#   approve         the one approval of a stable release or correction:
+#                   environment release (Samuel), alongside the checks. A
+#                   beta uses release-beta, which has no reviewer.
+#   github-release  GitHub Release "Dictate <version>" as a draft, with the
+#                   installers, a <asset>.sha256 file beside every asset, and
+#                   release-manifest.json. Dictate NPM Release makes it public
+#                   once npm serves the version, so an install that follows
+#                   GitHub's latest release never sees a version npm lacks.
+#   npm             starts Dictate NPM Release (dictate-npm-release.yml) for
+#                   the tarball this run proved; it publishes on this run's
+#                   approval, without a second one
+#
+# A beta (vYYYY.M.N-beta.B) goes to npm `beta` and a GitHub pre-release. A
+# stable release (vYYYY.M.N) and a correction (vYYYY.M.N-C) go to npm
+# `latest` and GitHub's latest release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.3-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dictate-release-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PACKAGE: "@arcforgelabs/dictate"
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      channel: ${{ steps.tag.outputs.channel }}
+    steps:
+      - name: Require the workflow from master
+        if: github.ref != 'refs/heads/master'
+        run: |
+          echo "::error::Run Dictate Release Publish from master, not ${GITHUB_REF}." >&2
+          exit 1
+
+      # Only a release tag: vYYYY.M.N or vYYYY.M.N-C (stable) or
+      # vYYYY.M.N-beta.B (beta). Dictate Release Checks also requires it to be
+      # annotated, on master and to match the version files.
+      - name: Read the channel from the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^v20[0-9]{2}\.([1-9]|1[0-2])\.[1-9][0-9]*-beta\.[1-9][0-9]*$ ]]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" =~ ^v20[0-9]{2}\.([1-9]|1[0-2])\.[1-9][0-9]*(-[1-9][0-9]*)?$ ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::${TAG} is not a release tag (vYYYY.M.N, vYYYY.M.N-beta.B or vYYYY.M.N-C)." >&2
+            exit 1
+          fi
+
+  # The one human gate of a stable release or correction: Samuel approves
+  # environment release here, while the checks run. Dictate NPM Release
+  # accepts this approval and does not ask again. A beta runs in
+  # release-beta, which has no reviewer, so nothing waits.
+  approve:
+    name: Approve ${{ inputs.tag }}
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: ${{ needs.guard.outputs.channel == 'stable' && 'release' || 'release-beta' }}
+    permissions: {}
+    steps:
+      - name: Record the approval
+        env:
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ needs.guard.outputs.channel }}
+        run: echo "Approved dictate ${TAG} (${CHANNEL})"
+
+  checks:
+    name: checks
+    needs: guard
+    uses: ./.github/workflows/dictate-release-checks.yml
+    with:
+      tag: ${{ inputs.tag }}
+
+  github-release:
+    name: github-release
+    needs: [checks, approve]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # The tag, not a commit passed between jobs (as in dictate-release-checks).
+      - name: Check out the release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Require the commit the checks proved
+        env:
+          RESOLVED: ${{ needs.checks.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on master. Run the release again." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      # The install scripts attached to the release name the release's own
+      # version, so a beta's scripts fetch the beta.
+      - name: Stamp the release version
+        env:
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/sync_release_version.py "$VERSION" --stamp
+          python scripts/release_check.py --tag "v${VERSION}"
+
+      - name: Fetch the packages the checks built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: "{python-dist,npm-package,linux-desktop,windows-desktop}"
+          path: ${{ runner.temp }}/artifacts
+
+      # Every asset gets a <asset>.sha256 file. The installers already have
+      # theirs, written by the build jobs as release.yml wrote them.
+      - name: Collect the release assets
+        env:
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          TARBALL_SHA256: ${{ needs.checks.outputs.tarball_sha256 }}
+        run: |
+          set -euo pipefail
+          artifacts="$RUNNER_TEMP/artifacts"
+          echo "${TARBALL_SHA256}  ${artifacts}/npm-package/${TARBALL}" | sha256sum -c -
+          assets="$RUNNER_TEMP/assets"
+          mkdir -p "$assets"
+          cp "$artifacts"/python-dist/* "$assets/"
+          cp "$artifacts/npm-package/${TARBALL}" "$assets/"
+          cp "$artifacts"/linux-desktop/* "$artifacts"/windows-desktop/* "$assets/"
+          cp install.ps1 install-windows.ps1 install-windows-wizard.ps1 \
+            update.ps1 update-windows.ps1 uninstall-windows.ps1 \
+            install.sh update.sh uninstall.sh "$assets/"
+          cd "$assets"
+          for sidecar in *.sha256; do
+            sha256sum -c "$sidecar"
+          done
+          for file in *; do
+            [[ "$file" == *.sha256 || -f "$file.sha256" ]] && continue
+            sha256sum "$file" > "$file.sha256"
+          done
+          ls -l
+
+      # npm's integrity and shasum are the tarball's SHA-512 and SHA-1, so the
+      # manifest records them before npm publishes; Dictate NPM Release
+      # requires npm to serve exactly these.
+      - name: Write release-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          COMMIT: ${{ needs.checks.outputs.commit }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          BASE: ${{ needs.checks.outputs.base }}
+          CHANNEL: ${{ needs.checks.outputs.channel }}
+          DIST_TAG: ${{ needs.checks.outputs.npm_dist_tag }}
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          TARBALL_SHA256: ${{ needs.checks.outputs.tarball_sha256 }}
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/assets"
+          integrity="sha512-$(openssl dgst -sha512 -binary "${assets}/${TARBALL}" | base64 -w0)"
+          shasum="$(sha1sum "${assets}/${TARBALL}" | cut -d' ' -f1)"
+          # Each lane of dictate-release-checks, by name, with its conclusion.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | select(.name | startswith("checks / ")) | {(.name | sub("^checks / (ci / )?"; "")): .conclusion}' \
+            | jq -s 'add // {}' > "$RUNNER_TEMP/checks.json"
+          (cd "$assets" && for file in *; do
+            [[ "$file" == *.sha256 ]] && continue
+            jq -n --arg name "$file" --argjson size "$(stat -c%s "$file")" --arg sha256 "$(cut -d' ' -f1 "$file.sha256")" \
+              '{name: $name, size: $size, sha256: $sha256}'
+          done) | jq -s 'sort_by(.name)' > "$RUNNER_TEMP/files.json"
+          jq -n \
+            --arg tag "$TAG" --arg version "$VERSION" --arg base "$BASE" --arg channel "$CHANNEL" \
+            --arg commit "$COMMIT" --arg repository "$GITHUB_REPOSITORY" \
+            --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile checks "$RUNNER_TEMP/checks.json" \
+            --slurpfile files "$RUNNER_TEMP/files.json" \
+            --arg package "$PACKAGE" --arg distTag "$DIST_TAG" --arg integrity "$integrity" --arg shasum "$shasum" \
+            --arg tarball "$TARBALL" --arg tarballSha256 "$TARBALL_SHA256" \
+            '{tag: $tag, version: $version, base: $base, channel: $channel, commit: $commit,
+              repository: $repository, workflowRun: $run, createdAt: $created,
+              checks: $checks[0],
+              npm: {package: $package, version: $version, distTag: $distTag, integrity: $integrity, shasum: $shasum,
+                    tarball: $tarball, tarballSha256: $tarballSha256},
+              files: $files[0]}' > "$assets/release-manifest.json"
+          (cd "$assets" && sha256sum release-manifest.json > release-manifest.json.sha256)
+          jq . "$assets/release-manifest.json"
+
+      # Dictate NPM Release reads the manifest from this run: the GitHub
+      # Release is a draft until npm is verified, and a draft is hidden from
+      # its read-only token.
+      - name: Keep the release manifest for Dictate NPM Release
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/manifest"
+          cp "$RUNNER_TEMP/assets/release-manifest.json" "$RUNNER_TEMP/assets/release-manifest.json.sha256" "$RUNNER_TEMP/manifest/"
+
+      - name: Upload the release manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifest
+          path: ${{ runner.temp }}/manifest
+          retention-days: 30
+          if-no-files-found: error
+
+      # Idempotent: a second run for the same tag updates the draft's assets
+      # instead of failing on a duplicate.
+      - name: Create the GitHub Release as a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          BASE: ${{ needs.checks.outputs.base }}
+          CHANNEL: ${{ needs.checks.outputs.channel }}
+        run: |
+          set -euo pipefail
+          # The notes are the base version's section of CHANGELOG.md, or
+          # GitHub's generated notes when it has none.
+          awk -v heading="## ${BASE}" '
+            index($0, heading) == 1 && (length($0) == length(heading) || substr($0, length(heading) + 1, 1) == " ") { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          notes=(--generate-notes)
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          fi
+          flags=(--verify-tag --draft --title "Dictate ${VERSION}" "${notes[@]}")
+          if [[ "$CHANNEL" == "beta" ]]; then
+            flags+=(--prerelease --latest=false)
+          else
+            flags+=(--latest)
+          fi
+          cd "$RUNNER_TEMP/assets"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber ./*
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" ./*
+          fi
+          echo "Drafted ${TAG}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+  # npm trusted publishing names one workflow file, and checks the top-level
+  # workflow of a run, so the npm publish is its own workflow
+  # (dictate-npm-release.yml) rather than a job here. This starts it for the
+  # tarball this run proved.
+  npm:
+    name: npm
+    needs: [checks, approve, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start Dictate NPM Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run dictate-npm-release.yml --repo "$GITHUB_REPOSITORY" --ref master \
+            -f tag="$TAG" -f release_publish_run_id="$GITHUB_RUN_ID"
+          {
+            echo "Started Dictate NPM Release for ${TAG}:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/dictate-npm-release.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

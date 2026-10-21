@@ -1,3 +1,4 @@
+# Replaced by the dictate-* release workflows (dictate-release-prepare.yml and the files it starts; docs/RELEASING.md). Kept for now; use the dictate-* workflows for new releases.
 name: Release
 
 on:

@@ -81,14 +81,46 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertFalse(is_newer_version("2026.5.18", "2026.5.18"))
         self.assertFalse(is_newer_version("2026.5.17", "2026.5.18"))
 
-    def test_is_newer_version_treats_unstable_same_base_as_update(self) -> None:
-        self.assertTrue(is_newer_version("2026.7.4-unstable.48.1", "2026.7.4"))
+    def test_is_newer_version_uses_pep440_order(self) -> None:
+        # docs/RELEASING.md, "Version order": a beta is older than its final,
+        # and a correction is newer.
+        order = [
+            "2026.10.1-beta.1",
+            "2026.10.1-beta.2",
+            "2026.10.1",
+            "2026.10.1-1",
+            "2026.10.2-beta.1",
+        ]
+        for older, newer in zip(order, order[1:]):
+            with self.subTest(older=older, newer=newer):
+                self.assertTrue(is_newer_version(newer, older))
+                self.assertFalse(is_newer_version(older, newer))
+        self.assertTrue(is_newer_version("2026.10.1-beta.10", "2026.10.1-beta.9"))
+        self.assertFalse(is_newer_version("2026.10.1-beta.2", "2026.10.1-beta.2"))
+
+    def test_is_newer_version_ranks_unstable_builds_below_beta_and_final(self) -> None:
+        # The old unstable lane is a pre-release lane: its builds come before
+        # the betas and the final of the same base.
+        self.assertFalse(is_newer_version("2026.7.4-unstable.48.1", "2026.7.4"))
+        self.assertTrue(is_newer_version("2026.7.4", "2026.7.4-unstable.48.1"))
+        self.assertTrue(is_newer_version("2026.10.3-beta.1", "2026.10.3-unstable.71.1"))
+        self.assertTrue(is_newer_version("2026.7.5-unstable.1.1", "2026.7.4"))
         self.assertTrue(
             is_newer_version("2026.7.4-unstable.49.1", "2026.7.4-unstable.48.1")
         )
         self.assertFalse(
             is_newer_version("2026.7.4-unstable.48.1", "2026.7.4-unstable.49.1")
         )
+
+    def test_newest_version_follows_pep440_not_npm_semver(self) -> None:
+        from dictate.update_status import newest_version
+
+        # npm's semver ranks 2026.10.1-1 below 2026.10.1-beta.2; PEP 440 does not.
+        self.assertEqual(newest_version("2026.10.1-beta.2", "2026.10.1-1"), "2026.10.1-1")
+        self.assertEqual(newest_version("2026.10.1", "2026.10.1-beta.2"), "2026.10.1")
+        self.assertEqual(newest_version("2026.10.1", "2026.10.2-beta.1"), "2026.10.2-beta.1")
+        self.assertEqual(newest_version(None, "latest", "2026.10.1"), "2026.10.1")
+        self.assertIsNone(newest_version(None, "latest"))
 
     def test_check_update_status_uses_latest_release(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
@@ -158,10 +190,10 @@ class UpdateStatusTests(unittest.TestCase):
         self.assertNotIn("github.com/arcforgelabs/dictate", RELEASES_URL)
         self.assertTrue(RELEASES_URL.startswith("https://"), RELEASES_URL)
 
-    def test_check_update_status_uses_npm_unstable_dist_tag(self) -> None:
+    def _beta_status(self, dist_tags, *, build, installed):  # noqa: ANN001
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
             self.assertEqual(str(request.full_url), "https://registry.npmjs.org/@arcforgelabs%2fdictate")
-            return _FakeResponse({"dist-tags": {"latest": "2026.7.4", "unstable": "2026.7.4-unstable.48.1"}})
+            return _FakeResponse({"dist-tags": dist_tags})
 
         with (
             patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
@@ -170,63 +202,100 @@ class UpdateStatusTests(unittest.TestCase):
             patch("dictate.update_status.sys.platform", "linux"),
             patch(
                 "dictate.update_status.load_config",
-                return_value=Config(
-                    update_channel="stable",
-                    installed_package_version="2026.7.4",
-                ),
+                return_value=Config(update_channel="stable", installed_package_version=installed),
             ),
-            patch("dictate.version.RELEASE_VERSION", "2026.7.4-unstable.1.1"),
+            patch("dictate.version.RELEASE_VERSION", build),
         ):
-            status = check_update_status()
+            return check_update_status()
+
+    def test_beta_build_reads_the_npm_beta_dist_tag(self) -> None:
+        status = self._beta_status(
+            {"latest": "2026.10.2", "beta": "2026.10.3-beta.2", "unstable": "2026.10.3-unstable.71.1"},
+            build="2026.10.3-beta.1",
+            installed="2026.10.3-beta.1",
+        )
 
         self.assertTrue(status.checked)
-        self.assertEqual(status.current_version, "2026.7.4")
-        self.assertEqual(status.latest_version, "2026.7.4-unstable.48.1")
+        self.assertEqual(status.current_version, "2026.10.3-beta.1")
+        self.assertEqual(status.latest_version, "2026.10.3-beta.2")
         self.assertTrue(status.update_available)
         self.assertEqual(status.install_kind, "linux-user")
         self.assertIn("update", status.actions or [])
 
-    def test_unstable_channel_offers_stable_when_the_unstable_pointer_is_behind(self) -> None:
-        # Unstable is upstream of stable: a stable release cut without a newer
-        # unstable build is the newest thing on the Beta channel as well.
-        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
-            return _FakeResponse({"dist-tags": {"latest": "2026.9.20", "unstable": "2026.7.4-unstable.68.1"}})
+    def test_beta_channel_offers_the_final_over_its_own_betas(self) -> None:
+        # 2026.10.3 is newer than 2026.10.3-beta.2 in PEP 440 order.
+        status = self._beta_status(
+            {"latest": "2026.10.3", "beta": "2026.10.3-beta.2"},
+            build="2026.10.3-beta.2",
+            installed="2026.10.3-beta.2",
+        )
 
-        with (
-            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
-            patch("dictate.update_status._find_source_root", return_value=None),
-            patch("dictate.update_status._is_linux_user_install", return_value=True),
-            patch("dictate.update_status.sys.platform", "linux"),
-            patch(
-                "dictate.update_status.load_config",
-                return_value=Config(update_channel="stable", installed_package_version="2026.7.4"),
-            ),
-            patch("dictate.version.RELEASE_VERSION", "2026.7.4-unstable.1.1"),
-        ):
-            status = check_update_status()
+        self.assertEqual(status.latest_version, "2026.10.3")
+        self.assertTrue(status.update_available)
+
+    def test_beta_channel_offers_a_correction_over_a_beta_npm_ranks_higher(self) -> None:
+        status = self._beta_status(
+            {"latest": "2026.10.3-1", "beta": "2026.10.3-beta.2"},
+            build="2026.10.3-beta.2",
+            installed="2026.10.3",
+        )
+
+        self.assertEqual(status.latest_version, "2026.10.3-1")
+        self.assertTrue(status.update_available)
+
+    def test_beta_channel_prefers_a_newer_beta_over_stable(self) -> None:
+        status = self._beta_status(
+            {"latest": "2026.10.3", "beta": "2026.10.4-beta.1"},
+            build="2026.10.3-beta.2",
+            installed="2026.10.3",
+        )
+
+        self.assertEqual(status.latest_version, "2026.10.4-beta.1")
+        self.assertTrue(status.update_available)
+
+    def test_unstable_build_falls_back_to_the_unstable_dist_tag_before_any_beta(self) -> None:
+        # Installs from the old unstable lane are on the beta channel. Until
+        # npm has a beta tag, the unstable tag stands in for it.
+        status = self._beta_status(
+            {"latest": "2026.10.2", "unstable": "2026.10.3-unstable.72.1"},
+            build="2026.10.3-unstable.71.1",
+            installed="2026.10.3-unstable.71.1",
+        )
+
+        self.assertEqual(status.latest_version, "2026.10.3-unstable.72.1")
+        self.assertTrue(status.update_available)
+
+    def test_unstable_build_moves_to_the_first_beta(self) -> None:
+        status = self._beta_status(
+            {"latest": "2026.10.2", "beta": "2026.10.3-beta.1", "unstable": "2026.10.3-unstable.72.1"},
+            build="2026.10.3-unstable.71.1",
+            installed="2026.10.3-unstable.71.1",
+        )
+
+        self.assertEqual(status.latest_version, "2026.10.3-beta.1")
+        self.assertTrue(status.update_available)
+
+    def test_unstable_channel_offers_stable_when_the_unstable_pointer_is_behind(self) -> None:
+        # A stable release newer than the beta pointer is the newest thing on
+        # the Beta channel as well.
+        status = self._beta_status(
+            {"latest": "2026.9.20", "unstable": "2026.7.4-unstable.68.1"},
+            build="2026.7.4-unstable.1.1",
+            installed="2026.7.4",
+        )
 
         self.assertEqual(status.latest_version, "2026.9.20")
         self.assertTrue(status.update_available)
 
-    def test_unstable_channel_prefers_a_newer_unstable_build_over_stable(self) -> None:
-        def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
-            return _FakeResponse({"dist-tags": {"latest": "2026.9.20", "unstable": "2026.9.20-unstable.1.1"}})
+    def test_beta_channel_does_not_offer_a_prerelease_of_the_installed_final(self) -> None:
+        status = self._beta_status(
+            {"latest": "2026.9.20", "unstable": "2026.9.20-unstable.1.1"},
+            build="2026.9.20-unstable.1.1",
+            installed="2026.9.20",
+        )
 
-        with (
-            patch("dictate.update_status.urllib.request.urlopen", side_effect=fake_urlopen),
-            patch("dictate.update_status._find_source_root", return_value=None),
-            patch("dictate.update_status._is_linux_user_install", return_value=True),
-            patch("dictate.update_status.sys.platform", "linux"),
-            patch(
-                "dictate.update_status.load_config",
-                return_value=Config(update_channel="stable", installed_package_version="2026.9.20"),
-            ),
-            patch("dictate.version.RELEASE_VERSION", "2026.9.20-unstable.1.1"),
-        ):
-            status = check_update_status()
-
-        self.assertEqual(status.latest_version, "2026.9.20-unstable.1.1")
-        self.assertTrue(status.update_available)
+        self.assertEqual(status.latest_version, "2026.9.20")
+        self.assertFalse(status.update_available)
 
     def test_unstable_channel_falls_back_to_stable_when_no_unstable_tag_exists(self) -> None:
         def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
@@ -246,6 +315,32 @@ class UpdateStatusTests(unittest.TestCase):
 
         self.assertEqual(status.latest_version, "2026.9.20")
         self.assertTrue(status.update_available)
+
+    def test_saved_and_environment_unstable_channel_means_beta(self) -> None:
+        from dictate.update_status import _normalize_update_channel, _resolve_update_channel
+
+        self.assertEqual(_normalize_update_channel("unstable"), "beta")
+        self.assertEqual(_normalize_update_channel(" Beta "), "beta")
+        self.assertEqual(_normalize_update_channel("latest"), "stable")
+        self.assertIsNone(_normalize_update_channel("nightly"))
+        with patch.dict("dictate.update_status.os.environ", {"DICTATE_UPDATE_CHANNEL": "unstable"}, clear=False):
+            self.assertEqual(_resolve_update_channel(None), "beta")
+        with patch.dict("dictate.update_status.os.environ", {"DICTATE_UPDATE_CHANNEL": "../bad"}, clear=False):
+            self.assertEqual(_resolve_update_channel(None), "stable")
+
+    def test_npm_dist_tag_follows_the_build(self) -> None:
+        from dictate.update_status import npm_dist_tag
+        from dictate.version import release_channel
+
+        for build, channel, tag in (
+            ("2026.10.3", "stable", "latest"),
+            ("2026.10.3-1", "stable", "latest"),
+            ("2026.10.3-beta.1", "beta", "beta"),
+            ("2026.10.3-unstable.71.1", "beta", "unstable"),
+        ):
+            with self.subTest(build=build), patch("dictate.version.RELEASE_VERSION", build):
+                self.assertEqual(release_channel(), channel)
+                self.assertEqual(npm_dist_tag(), tag)
 
     def test_source_checkout_defaults_to_unstable_update_channel(self) -> None:
         root = Path("/tmp/dictate-source")

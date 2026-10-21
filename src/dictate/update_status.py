@@ -135,39 +135,42 @@ def _parse_app_version(value: str | None) -> tuple[tuple[int, int, int, int], tu
     return base, tuple(parts)
 
 
-def _compare_prerelease(left: tuple[int | str, ...], right: tuple[int | str, ...]) -> int:
-    if left == right:
-        return 0
-    # Dictate's opt-in unstable lane intentionally treats same-base prerelease
-    # builds as newer than the stable base package, because users have selected
-    # the moving test channel.
-    if left and not right:
-        return 1
-    if right and not left:
-        return -1
-    for l_part, r_part in zip(left, right):
-        if l_part == r_part:
-            continue
-        if isinstance(l_part, int) and isinstance(r_part, int):
-            return 1 if l_part > r_part else -1
-        if isinstance(l_part, int):
-            return -1
-        if isinstance(r_part, int):
-            return 1
-        return 1 if l_part > r_part else -1
-    return 1 if len(left) > len(right) else -1
+def _version_order_key(
+    value: str | None,
+) -> tuple[tuple[int, int, int], int, tuple[int, ...]] | None:
+    """Sort key for an app version in PEP 440 order (docs/RELEASING.md).
+
+    For one base YYYY.M.N: an old unstable build (-unstable.R.A) < a beta
+    (-beta.B) < the final < a correction (-C). An unstable build counts as a
+    pre-release below the betas, so a beta or the final replaces it.
+    """
+    parsed = _parse_app_version(value)
+    if parsed is None:
+        return None
+    (year, month, count, correction), prerelease = parsed
+    base = (year, month, count)
+    if not prerelease:
+        return base, 2, (correction,)
+    numbers = tuple(part for part in prerelease if isinstance(part, int))
+    if prerelease[0] == "beta":
+        return base, 1, numbers
+    return base, 0, numbers
 
 
 def is_newer_version(latest: str | None, current: str | None = RELEASE_VERSION) -> bool:
-    latest_tuple = _parse_app_version(latest)
-    current_tuple = _parse_app_version(current)
-    if latest_tuple is None or current_tuple is None:
+    latest_key = _version_order_key(latest)
+    current_key = _version_order_key(current)
+    if latest_key is None or current_key is None:
         return False
-    latest_base, latest_prerelease = latest_tuple
-    current_base, current_prerelease = current_tuple
-    if latest_base != current_base:
-        return latest_base > current_base
-    return _compare_prerelease(latest_prerelease, current_prerelease) > 0
+    return latest_key > current_key
+
+
+def newest_version(*versions: str | None) -> str | None:
+    """The newest of VERSIONS in PEP 440 order; text that is not a version is skipped."""
+    keyed = [(key, value) for value in versions if value and (key := _version_order_key(value))]
+    if not keyed:
+        return None
+    return max(keyed, key=lambda item: item[0])[1]
 
 
 def _current_linux_package_status(
@@ -1292,7 +1295,17 @@ def _linux_installed_package_version() -> str | None:
     if completed.returncode != 0:
         return None
     version = completed.stdout.strip()
-    return version or None
+    return public_version_from_deb(version) if version else None
+
+
+def public_version_from_deb(version: str) -> str:
+    """The release version of a .deb package version.
+
+    A beta .deb carries YYYY.M.N~beta.B, so dpkg and apt sort it before the
+    final YYYY.M.N (scripts/set-deb-version.sh). The app compares and shows
+    the release version, YYYY.M.N-beta.B.
+    """
+    return re.sub(r"~beta\.(?=[1-9]\d*$)", "-beta.", version.strip())
 
 
 def _install_kind(platform: str, source_root: Path | None) -> str:
@@ -1383,11 +1396,8 @@ def _resolve_update_channel(configured: str | None) -> str:
     channel = _normalize_update_channel(configured)
     if channel:
         return channel
-    channel = os.environ.get("DICTATE_UPDATE_CHANNEL", "stable").strip() or "stable"
-    channel = "stable" if channel == "latest" else channel
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,63}", channel):
-        return "stable"
-    return channel
+    channel = _normalize_update_channel(os.environ.get("DICTATE_UPDATE_CHANNEL", "stable"))
+    return channel or "stable"
 
 
 def _npm_package_spec() -> str:
@@ -1395,77 +1405,89 @@ def _npm_package_spec() -> str:
 
 
 def npm_dist_tag() -> str:
-    """Return the npm dist-tag for the configured app update channel."""
+    """Return the npm dist-tag for the configured app update channel.
+
+    A beta build follows `beta`. A build from the old unstable lane keeps
+    following `unstable`, which npm-unstable.yml still publishes.
+    """
     channel = _npm_update_channel()
-    return "latest" if channel == "stable" else channel
+    if channel == "stable":
+        return "latest"
+    from dictate.version import RELEASE_VERSION as build_version
+
+    return "unstable" if "-unstable." in str(build_version) else "beta"
 
 
 def _normalize_update_channel(value: str | None) -> str | None:
+    """stable or beta. The old names latest and unstable mean the same channels."""
     if not isinstance(value, str):
         return None
     channel = value.strip().lower()
-    if channel == "latest":
+    if channel in {"stable", "latest"}:
         return "stable"
-    if channel in {"stable", "unstable"}:
-        return channel
+    if channel in {"beta", "unstable"}:
+        return "beta"
     return None
 
 
 def _fetch_latest_version(configured_channel: str | None, *, timeout: float) -> tuple[str, str | None]:
     channel = _resolve_update_channel(configured_channel)
-    if channel == "unstable":
-        return _fetch_latest_unstable(timeout=timeout)
+    if channel == "beta":
+        return _fetch_latest_beta(timeout=timeout)
     return _fetch_latest_release(timeout=timeout)
 
 
-def _fetch_latest_unstable(*, timeout: float) -> tuple[str, str | None]:
+_FETCH_ERRORS = (
+    urllib.error.HTTPError,
+    urllib.error.URLError,
+    TimeoutError,
+    json.JSONDecodeError,
+    RuntimeError,
+)
+
+
+def _fetch_latest_beta(*, timeout: float) -> tuple[str, str | None]:
     """The newest build a Beta user should see.
 
-    The unstable lane is upstream of stable: everything on stable went through
-    unstable first, or a newer build is on unstable. If the unstable pointer
-    has fallen behind a stable release (a stable release cut without a
-    matching unstable build), the stable release is the newest thing on the
-    Beta channel too. Never offer a Beta user something older than stable.
+    Beta installs the newest of npm `beta` and `latest` in PEP 440 order
+    (docs/RELEASING.md, "Version order"), so an older beta never replaces a
+    newer stable release. When npm has no `beta` tag yet, the old `unstable`
+    tag stands in for it, so installs from the unstable lane still find
+    their updates.
     """
     stable: tuple[str, str | None] | None
     try:
         stable = _fetch_latest_release(timeout=timeout)
-    except (
-        urllib.error.HTTPError,
-        urllib.error.URLError,
-        TimeoutError,
-        json.JSONDecodeError,
-        RuntimeError,
-    ):
+    except _FETCH_ERRORS:
         stable = None
     try:
-        unstable = _fetch_npm_dist_tag("unstable", timeout=timeout)
-    except (
-        urllib.error.HTTPError,
-        urllib.error.URLError,
-        TimeoutError,
-        json.JSONDecodeError,
-        RuntimeError,
-    ):
+        beta = _fetch_npm_dist_tag(("beta", "unstable"), timeout=timeout)
+    except _FETCH_ERRORS:
         if stable is None:
             raise
         return stable
-    if stable is not None and is_newer_version(stable[0], unstable[0]):
+    if stable is not None and is_newer_version(stable[0], beta[0]):
         return stable
-    return unstable
+    return beta
 
 
-def _fetch_npm_dist_tag(tag: str, *, timeout: float) -> tuple[str, str | None]:
+def _fetch_npm_dist_tag(tags: str | tuple[str, ...], *, timeout: float) -> tuple[str, str | None]:
+    """The version of the first of TAGS that npm has, from one registry read."""
+    names = (tags,) if isinstance(tags, str) else tags
     payload = _fetch_json(NPM_PACKAGE_URL, timeout=timeout)
     if not isinstance(payload, dict):
         raise RuntimeError("npm registry returned an invalid package payload")
     dist_tags = payload.get("dist-tags")
     if not isinstance(dist_tags, dict):
         raise RuntimeError("npm registry returned no dist-tags")
-    version = dist_tags.get(tag)
-    if not isinstance(version, str) or not _parse_app_version(version):
-        raise RuntimeError(f"npm dist-tag {tag!r} is not a Dictate app version")
-    return version, f"https://www.npmjs.com/package/{NPM_PACKAGE_NAME}/v/{version}"
+    for tag in names:
+        version = dist_tags.get(tag)
+        if version is None:
+            continue
+        if not isinstance(version, str) or not _parse_app_version(version):
+            raise RuntimeError(f"npm dist-tag {tag!r} is not a Dictate app version")
+        return version, f"https://www.npmjs.com/package/{NPM_PACKAGE_NAME}/v/{version}"
+    raise RuntimeError(f"npm has no dist-tag {' or '.join(repr(tag) for tag in names)}")
 
 
 def _windows_update_command(source_root: Path) -> list[str]:

@@ -85,6 +85,20 @@ fi
 if [ -n "$RELIABLE" ]; then
   echo "▶ building native packages ($RELIABLE)"
   ( cd ui-shell && npm run tauri -- build --bundles "$RELIABLE" )
+  # dpkg must sort a beta before its final (docs/release-versioning.md), so a
+  # beta .deb carries YYYY.M.N~beta.B inside. The file name is unchanged.
+  if printf '%s' "$RELIABLE" | grep -q deb && [ -f ui-shell/src-tauri/tauri.conf.json ]; then
+    APP_VERSION="$(node -p "require('./ui-shell/src-tauri/tauri.conf.json').version")"
+    case "$APP_VERSION" in
+      *-beta.*) DEB_VERSION="$("${PYTHON:-python3}" scripts/calver.py debian-version "$APP_VERSION")" ;;
+      *) DEB_VERSION="$APP_VERSION" ;;
+    esac
+    if [ "$DEB_VERSION" != "$APP_VERSION" ]; then
+      while IFS= read -r deb; do
+        ./scripts/set-deb-version.sh "$deb" "$DEB_VERSION"
+      done < <(find ui-shell/src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name "*_${APP_VERSION}_*.deb")
+    fi
+  fi
 fi
 APPIMAGE_FAILED=0
 if printf '%s' "$BUNDLES" | grep -q appimage; then
