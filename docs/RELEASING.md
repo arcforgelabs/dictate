@@ -128,13 +128,14 @@ still find their updates. `is_newer_version` in
 `src/dictate/update_status.py` and `scripts/calver.py newest` hold this
 order.
 
-Package formats map the public version as follows. The Python and MSI strings
-sort in the order above; the npm strings are only names (see above).
+Package formats map the public version as follows. The Python, Debian and MSI
+strings sort in the order above; the npm strings are only names (see above).
 
 | Format                  | Final `2026.10.1` | Beta `2026.10.1-beta.2` | Correction `2026.10.1-1` |
 | ----------------------- | ----------------- | ----------------------- | ------------------------ |
 | Python (PEP 440)        | `2026.10.1`       | `2026.10.1b2`           | `2026.10.1.post1`        |
 | npm (named by dist-tag) | `2026.10.1`       | `2026.10.1-beta.2`      | `2026.10.1-1`            |
+| Debian (`.deb`)         | `2026.10.1`       | `2026.10.1~beta.2`      | `2026.10.1-1`            |
 | MSI (WiX), target       | `26.10.1100.0`    | `26.10.1002.0`          | `26.10.1101.0`           |
 | MSI (WiX), today        | `26.10.1.0`       | `26.10.1.0`             | `26.10.1.1`              |
 

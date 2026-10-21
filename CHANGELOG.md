@@ -28,7 +28,8 @@
   `beta` tag. The update check orders versions as PEP 440 does: a beta is
   older than its final, and a correction is newer. Before, a beta counted as
   newer than its final, so a beta user was not offered the final. A saved
-  `update_channel: unstable` reads as `beta`. (#145)
+  `update_channel: unstable` reads as `beta`. A beta `.deb` carries the
+  package version `YYYY.M.N~beta.B`, so apt installs the final over it. (#145)
 
 ## 2026.10.2 (2026-10-04)
 

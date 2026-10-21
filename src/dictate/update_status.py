@@ -1295,7 +1295,17 @@ def _linux_installed_package_version() -> str | None:
     if completed.returncode != 0:
         return None
     version = completed.stdout.strip()
-    return version or None
+    return public_version_from_deb(version) if version else None
+
+
+def public_version_from_deb(version: str) -> str:
+    """The release version of a .deb package version.
+
+    A beta .deb carries YYYY.M.N~beta.B, so dpkg and apt sort it before the
+    final YYYY.M.N (scripts/set-deb-version.sh). The app compares and shows
+    the release version, YYYY.M.N-beta.B.
+    """
+    return re.sub(r"~beta\.(?=[1-9]\d*$)", "-beta.", version.strip())
 
 
 def _install_kind(platform: str, source_root: Path | None) -> str:

@@ -115,6 +115,27 @@ first three fields, so a correction compares equal to its final too. The
 in-app updater on Windows runs the NSIS installer, not the MSI.
 [RELEASING.md](RELEASING.md#version-order) describes the target mapping.
 
+## Linux .deb version
+
+dpkg sorts `2026.10.3-beta.1` after `2026.10.3`, so apt would refuse the
+stable release over a beta as a downgrade. A beta `.deb` therefore carries
+`2026.10.3~beta.1` inside: dpkg sorts `~` before anything, so it comes
+before `2026.10.3`. A correction `2026.10.3-1` stays as it is: dpkg reads it
+as revision 1 of `2026.10.3`, which comes after it.
+
+```text
+2026.10.3-beta.1  -> 2026.10.3~beta.1
+2026.10.3         -> 2026.10.3
+2026.10.3-1       -> 2026.10.3-1
+```
+
+`scripts/build-linux-desktop.sh` sets it after Tauri builds the `.deb`
+(`scripts/calver.py debian-version` and `scripts/set-deb-version.sh`). The
+file name keeps the public version, `Dictate_2026.10.3-beta.1_amd64.deb`,
+because the in-app updater looks for that name. The updater reads the
+installed version from dpkg and turns `~beta.` back into `-beta.` before it
+compares versions.
+
 ## Publishing a release
 
 Use the `dictate-*` workflows ([RELEASING.md](RELEASING.md#the-workflows)).

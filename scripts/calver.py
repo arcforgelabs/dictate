@@ -85,6 +85,18 @@ class Release(NamedTuple):
             return f"{self.base}.post{self.correction}"
         return self.base
 
+    @property
+    def debian(self) -> str:
+        """The .deb package version, which dpkg sorts in the same order.
+
+        dpkg sorts `~` before anything, even the end of the string, so
+        X~beta.B comes before X. It reads X-C as upstream X with revision C,
+        which comes after X.
+        """
+        if self.beta:
+            return f"{self.base}~beta.{self.beta}"
+        return self.version
+
     def order_key(self) -> tuple[int, int, int, int, int]:
         """PEP 440 order: beta B < final < correction C, for one base."""
         if self.beta:
@@ -100,6 +112,7 @@ class Release(NamedTuple):
             "npmDistTag": self.npm_dist_tag,
             "prerelease": bool(self.beta),
             "pep440": self.pep440,
+            "debian": self.debian,
         }
 
 
@@ -281,6 +294,10 @@ def build_parser() -> argparse.ArgumentParser:
     describe_parser.add_argument("tag")
     newest_parser = commands.add_parser("newest", help="print the newest version in PEP 440 order")
     newest_parser.add_argument("versions", nargs="+")
+    debian_parser = commands.add_parser(
+        "debian-version", help="print the .deb package version of a release version"
+    )
+    debian_parser.add_argument("version")
     for sub in (next_parser, check_parser, plan_parser):
         sub.add_argument(
             "--today",
@@ -298,6 +315,12 @@ def main() -> int:
         if release is None or not args.tag.startswith("v"):
             raise SystemExit(f"{args.tag} is not a release tag (vYYYY.M.N, vYYYY.M.N-beta.B or vYYYY.M.N-C)")
         print(json.dumps(release.describe(), indent=2))
+        return 0
+    if args.command == "debian-version":
+        release = parse_release(args.version)
+        if release is None:
+            raise SystemExit(f"{args.version} is not a release version")
+        print(release.debian)
         return 0
     if args.command == "newest":
         found = newest(args.versions)
