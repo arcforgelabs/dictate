@@ -112,14 +112,15 @@ jobs:
             echo "::error::${TAG} changed after it was checked: expected ${SIGNED}, found ${commit}." >&2
             exit 1
           fi
-          python scripts/calver.py describe "$TAG" > "$RUNNER_TEMP/release.json"
-          base="$(jq -r .base "$RUNNER_TEMP/release.json")"
-          python scripts/release_check.py --tag "v${base}"
+          # Run no script from the tag before it is known to be on master.
           if ! git fetch --no-tags origin "+refs/heads/master:refs/remotes/origin/master" \
             || ! git merge-base --is-ancestor "$commit" refs/remotes/origin/master; then
             echo "::error::${TAG} (${commit}) is not on master. Only reviewed master commits are released." >&2
             exit 1
           fi
+          python scripts/calver.py describe "$TAG" > "$RUNNER_TEMP/release.json"
+          base="$(jq -r .base "$RUNNER_TEMP/release.json")"
+          python scripts/release_check.py --tag "v${base}"
           {
             echo "commit=${commit}"
             echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
