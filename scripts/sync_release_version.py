@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Synchronize Dictate release metadata from one CalVer version."""
+"""Synchronize Dictate release metadata from one CalVer version.
+
+The version is a stable YYYY.M.N, a beta YYYY.M.N-beta.B or a correction
+YYYY.M.N-C (docs/RELEASING.md). Without --check or --stamp, it must be the
+next release of its kind (scripts/calver.py).
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,6 @@ import calver
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CALVER_RE = calver.VERSION_RE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,7 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "version",
         nargs="?",
-        help="CalVer release version YYYY.M.N, e.g. 2026.10.3 (default: the next release)",
+        help=(
+            "CalVer release version YYYY.M.N, YYYY.M.N-beta.B or YYYY.M.N-C, "
+            "e.g. 2026.10.3 (default: the next stable release)"
+        ),
     )
     parser.add_argument(
         "--today",
@@ -33,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fail if files are not already synchronized; do not write changes",
     )
+    parser.add_argument(
+        "--stamp",
+        action="store_true",
+        help=(
+            "write VERSION without the next-release check. The release builds use it "
+            "to stamp a beta or correction version onto the tagged commit in the job only."
+        ),
+    )
     return parser
 
 
@@ -41,7 +56,12 @@ def main() -> int:
     version = args.version
     if version:
         _require_calver(version)
-    if not args.check:
+    if args.check and args.stamp:
+        raise SystemExit("use --check or --stamp, not both")
+    if args.stamp:
+        if not version:
+            raise SystemExit("--stamp needs a VERSION")
+    elif not args.check:
         # Writing starts a release, so the version must be the next count this month.
         try:
             tags = calver.git_tags()
@@ -160,15 +180,21 @@ def _set_package_lock_versions(data: dict, version: str) -> None:
 
 
 def _msi_safe_version(public_version: str) -> str:
-    base, separator, sequence = public_version.partition("-")
-    year, month, count = [int(part) for part in base.split(".")]
-    patch_sequence = int(sequence) if separator else 0
-    return f"{year - 2000}.{month}.{count}.{patch_sequence}"
+    """Map the public version to WiX's numeric YY.M.N.K.
+
+    A correction -C goes in the fourth field. A beta has 0 there, so its MSI
+    version equals its final's. Windows Installer compares only the first
+    three fields (docs/release-versioning.md).
+    """
+    release = calver.parse_release(public_version)
+    if release is None:
+        raise SystemExit(f"expected CalVer YYYY.M.N, YYYY.M.N-beta.B or YYYY.M.N-C, got: {public_version}")
+    return f"{release.year - 2000}.{release.month}.{release.count}.{release.correction}"
 
 
 def _require_calver(version: str) -> None:
-    if not CALVER_RE.fullmatch(version):
-        raise SystemExit(f"expected CalVer YYYY.M.N or legacy correction YYYY.M.N-K, got: {version}")
+    if calver.parse_release(version) is None:
+        raise SystemExit(f"expected CalVer YYYY.M.N, YYYY.M.N-beta.B or YYYY.M.N-C, got: {version}")
 
 
 if __name__ == "__main__":

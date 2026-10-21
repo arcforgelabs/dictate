@@ -282,11 +282,24 @@ class ConfigSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
 
-            saved = set_update_channel("unstable", path=config_path)
+            saved = set_update_channel("beta", path=config_path)
 
             config = load_config(path=config_path)
-            self.assertEqual(saved, "unstable")
-            self.assertEqual(config.update_channel, "unstable")
+            self.assertEqual(saved, "beta")
+            self.assertEqual(config.update_channel, "beta")
+
+    def test_unstable_update_channel_is_the_beta_channel(self) -> None:
+        # The old prerelease lane was called unstable. A saved value keeps
+        # working and reads back as beta (docs/RELEASING.md).
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text("update_channel: unstable\n", encoding="utf-8")
+            self.assertEqual(load_config(path=config_path).update_channel, "beta")
+
+            saved = set_update_channel("unstable", path=config_path)
+
+            self.assertEqual(saved, "beta")
+            self.assertEqual(load_config(path=config_path).update_channel, "beta")
 
     def test_set_update_channel_accepts_latest_alias_for_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

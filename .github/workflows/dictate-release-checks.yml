@@ -1,0 +1,398 @@
+name: Dictate Release Checks
+
+# Proves a release tag before anything is published (docs/RELEASING.md):
+# the tag is annotated, and signed when RELEASE_REQUIRE_SIGNED_TAGS is true;
+# it is a calendar version whose base matches the version files; it sits on
+# master; every CI lane passes on its exact commit (.github/workflows/ci.yml);
+# and it builds the packages once: the Python distributions, the npm
+# tarball, the Linux .deb, and the Windows MSI and NSIS installers. A beta or
+# a correction takes its own version only in these build jobs
+# (scripts/sync_release_version.py --stamp). Dictate Release Publish calls
+# this first; run it on its own to rehearse a release. It never publishes.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.3-beta.1
+        required: true
+        type: string
+    outputs:
+      commit:
+        value: ${{ jobs.resolve.outputs.commit }}
+      version:
+        value: ${{ jobs.resolve.outputs.version }}
+      base:
+        value: ${{ jobs.resolve.outputs.base }}
+      channel:
+        value: ${{ jobs.resolve.outputs.channel }}
+      npm_dist_tag:
+        value: ${{ jobs.resolve.outputs.npm_dist_tag }}
+      tarball:
+        value: ${{ jobs.package.outputs.tarball }}
+      tarball_sha256:
+        value: ${{ jobs.package.outputs.tarball_sha256 }}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.3-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      version: ${{ steps.tag.outputs.version }}
+      base: ${{ steps.tag.outputs.base }}
+      channel: ${{ steps.tag.outputs.channel }}
+      npm_dist_tag: ${{ steps.tag.outputs.npm_dist_tag }}
+    steps:
+      # The tag is checked before anything is checked out: an annotated tag,
+      # with a signature GitHub verifies when RELEASE_REQUIRE_SIGNED_TAGS is
+      # true (docs/RELEASING.md, One-time setup). A lightweight tag is never
+      # published.
+      - name: Require an annotated release tag
+        id: signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRE_SIGNED: ${{ vars.RELEASE_REQUIRE_SIGNED_TAGS }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}")"
+          if [[ "$(jq -r .object.type <<< "$ref")" != "tag" ]]; then
+            echo "::error::${TAG} must be an annotated tag; a lightweight tag cannot be published." >&2
+            exit 1
+          fi
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$(jq -r .object.sha <<< "$ref")")"
+          verified="$(jq -r '.verification.verified // false' <<< "$object")"
+          if [[ "$verified" != "true" && "$REQUIRE_SIGNED" == "true" ]]; then
+            echo "::error::${TAG} must have a signature GitHub verifies (reason: $(jq -r '.verification.reason // "missing"' <<< "$object"))." >&2
+            exit 1
+          fi
+          if [[ "$(jq -r .object.type <<< "$object")" != "commit" ]]; then
+            echo "::error::${TAG} does not name a commit." >&2
+            exit 1
+          fi
+          echo "commit=$(jq -r .object.sha <<< "$object")" >> "$GITHUB_OUTPUT"
+          echo "${TAG}: annotated by $(jq -r .tagger.name <<< "$object"); signature verified by GitHub: ${verified}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out the tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      # Dictate tags master commits (docs/RELEASING.md). The version files hold
+      # the base YYYY.M.N; a beta adds -beta.B and a correction -C.
+      - name: Require master and a matching version
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+          SIGNED: ${{ steps.signed.outputs.commit }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ "$commit" != "$SIGNED" ]]; then
+            echo "::error::${TAG} changed after it was checked: expected ${SIGNED}, found ${commit}." >&2
+            exit 1
+          fi
+          python scripts/calver.py describe "$TAG" > "$RUNNER_TEMP/release.json"
+          base="$(jq -r .base "$RUNNER_TEMP/release.json")"
+          python scripts/release_check.py --tag "v${base}"
+          if ! git fetch --no-tags origin "+refs/heads/master:refs/remotes/origin/master" \
+            || ! git merge-base --is-ancestor "$commit" refs/remotes/origin/master; then
+            echo "::error::${TAG} (${commit}) is not on master. Only reviewed master commits are released." >&2
+            exit 1
+          fi
+          {
+            echo "commit=${commit}"
+            echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
+            echo "base=${base}"
+            echo "channel=$(jq -r .channel "$RUNNER_TEMP/release.json")"
+            echo "npm_dist_tag=$(jq -r .npmDistTag "$RUNNER_TEMP/release.json")"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+  # The Linux and Windows test matrix, the Windows user install smoke, the
+  # UI, the desktop shell and the npm and Python package checks.
+  ci:
+    name: ci
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
+
+  package:
+    name: package
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      tarball_sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      # The tag, not a commit passed between jobs: the build runs only what
+      # resolve proved is on master. A tag moved since then fails here.
+      - name: Check out the release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Require the commit resolve proved
+        env:
+          RESOLVED: ${{ needs.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on master. Run the release again." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+
+      - name: Stamp the release version
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/sync_release_version.py "$VERSION" --stamp
+          python scripts/release_check.py --tag "v${VERSION}"
+
+      - name: Build the Python distributions
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build --outdir "$RUNNER_TEMP/python-dist"
+          python -m twine check "$RUNNER_TEMP"/python-dist/*
+
+      # npm only accepts provenance from public repositories; the package
+      # keeps it off (docs/release-versioning.md).
+      - name: Pack the npm tarball
+        id: pack
+        run: |
+          set -euo pipefail
+          npm pkg set publishConfig.provenance=false --json
+          mkdir -p "$RUNNER_TEMP/package"
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP/package" --json | jq -r '.[0].filename')"
+          (cd "$RUNNER_TEMP/package" && sha256sum "$tarball" > "$tarball.sha256")
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/package/$tarball.sha256")" >> "$GITHUB_OUTPUT"
+          echo "Packed ${tarball}: $(cat "$RUNNER_TEMP/package/$tarball.sha256")" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the Python distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-dist
+          path: ${{ runner.temp }}/python-dist
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Keep the tarball for publishing
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/package
+          retention-days: 30
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Linux desktop bundle (.deb)
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Require the commit resolve proved
+        env:
+          RESOLVED: ${{ needs.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on master. Run the release again." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Stamp the release version
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: python scripts/sync_release_version.py "$VERSION" --stamp
+
+      - name: Free runner disk space
+        # The .deb stages the offline Parakeet model beside the frozen engine,
+        # and tar/gzip needs a second copy; the stock image runs out mid-bundle.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h / | tail -1
+
+      - name: Install Tauri + engine build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev build-essential curl wget file libssl-dev libxdo-dev \
+            python3-dev portaudio19-dev
+
+      - name: Install Rust toolchain
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build the desktop bundle (freezes engine + builds .deb)
+        env:
+          DICTATE_BUNDLES: "deb"
+          NO_STRIP: "true"
+          ARCH: "x86_64"
+        run: ./scripts/build-linux-desktop.sh
+
+      - name: Collect the .deb and its SHA-256 file
+        run: |
+          set -euo pipefail
+          mapfile -t ARTIFACTS < <(find ui-shell/src-tauri/target/release/bundle -type f -name '*.deb')
+          if [ "${#ARTIFACTS[@]}" -eq 0 ]; then
+            echo "No Linux .deb was produced." >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/linux-desktop"
+          for artifact in "${ARTIFACTS[@]}"; do
+            size="$(stat -c%s "$artifact")"
+            echo "$artifact ($size bytes)"
+            # GitHub release assets must be < 2 GiB.
+            if [ "$size" -ge 2147483648 ]; then
+              echo "::error::$artifact is ${size} bytes (>= 2 GiB). Linux packaging must exclude GPU runtimes." >&2
+              exit 1
+            fi
+            cp "$artifact" "$RUNNER_TEMP/linux-desktop/"
+          done
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          cd "$RUNNER_TEMP/linux-desktop"
+          for artifact in *.deb; do
+            sha256sum "$artifact" > "$artifact.sha256"
+          done
+          ls -l
+
+      - name: Keep the .deb for publishing
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-desktop
+          path: ${{ runner.temp }}/linux-desktop
+          retention-days: 7
+          if-no-files-found: error
+
+  windows-desktop:
+    name: Windows desktop bundle (.msi + installer .exe)
+    needs: resolve
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Require the commit resolve proved
+        shell: bash
+        env:
+          RESOLVED: ${{ needs.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on master. Run the release again." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Stamp the release version
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: python scripts\sync_release_version.py $env:VERSION --stamp
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Install Windows bundling dependencies
+        shell: pwsh
+        run: choco install wixtoolset nsis -y --no-progress
+
+      # Unsigned, as the direct-download installers are today
+      # (docs/release-versioning.md). The marker carries the exact version.
+      - name: Build the Windows desktop bundle
+        shell: pwsh
+        env:
+          DICTATE_BUNDLES: "msi,nsis"
+          DICTATE_PACKAGE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: .\scripts\build-windows-desktop.ps1
+
+      - name: Collect the installers and their SHA-256 files
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "windows-desktop"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $artifacts = Get-ChildItem "ui-shell\src-tauri\target\release\bundle" -Recurse -File |
+            Where-Object { $_.Extension -in ".msi", ".exe" }
+          if (-not $artifacts) {
+            throw "No Windows desktop artifacts were produced."
+          }
+          # The in-app updater reads <asset>.sha256 when the GitHub API rate-limits it.
+          foreach ($artifact in $artifacts) {
+            $target = Join-Path $out $artifact.Name
+            Copy-Item $artifact.FullName $target
+            $hash = (Get-FileHash $target -Algorithm SHA256).Hash.ToLower()
+            [IO.File]::WriteAllText("$target.sha256", "$hash  $($artifact.Name)`n")
+          }
+          Get-ChildItem $out | ForEach-Object { Write-Host $_.Name }
+
+      - name: Keep the installers for publishing
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-desktop
+          path: ${{ runner.temp }}/windows-desktop
+          retention-days: 7
+          if-no-files-found: error

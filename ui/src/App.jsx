@@ -260,7 +260,8 @@ function AboutButton() {
    no account, no plan and no cloud here, so this dialog is the whole story. */
 function AboutDialog() {
   const s = useStore();
-  const betaBuild = s.updateChannel === "unstable";
+  // "unstable" is the old name of the beta channel.
+  const betaBuild = s.updateChannel === "beta" || s.updateChannel === "unstable";
   const storeInstall = s.updateStatus?.installKind === "windows-store";
   const updateBusy = !!(
     s.updateStatus?.checking

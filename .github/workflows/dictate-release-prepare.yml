@@ -1,0 +1,177 @@
+name: Dictate Release Prepare
+run-name: Prepare a ${{ inputs.channel }} release
+
+# Starts a release (docs/RELEASING.md). It takes a master commit whose CI
+# passed, tags it with the next version for the channel, and starts Dictate
+# Release Publish (dictate-release-publish.yml) for that tag. It publishes
+# nothing itself.
+#
+# The commit's version files hold the base YYYY.M.N
+# (scripts/sync_release_version.py). A beta tags vYYYY.M.N-beta.B with the
+# next B for that base; a stable release tags vYYYY.M.N, which must be the
+# next release this month; a correction tags vYYYY.M.N-C of the latest
+# stable release, from a commit that still holds its version (normally the
+# release's own commit). scripts/calver.py plan holds the rules.
+#
+# The tag is annotated, and signed with the release tag key when the secret
+# RELEASE_TAG_SIGNING_KEY is set (docs/RELEASING.md, One-time setup).
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: beta (vYYYY.M.N-beta.B), stable (vYYYY.M.N) or correction (vYYYY.M.N-C, a repackage of the latest stable release)
+        required: true
+        type: choice
+        default: beta
+        options: [beta, stable, correction]
+      commit:
+        description: Commit on master to release (default the head of master)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dictate-release-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+      checks: read
+    steps:
+      - name: Require the workflow from master
+        if: github.ref != 'refs/heads/master'
+        run: |
+          echo "::error::Run Dictate Release Prepare from master, not ${GITHUB_REF}." >&2
+          exit 1
+
+      # master's release tooling plans the tag, whichever commit is released.
+      - name: Check out master with its tags
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: master
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the commit
+        id: commit
+        env:
+          REQUESTED: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --verify "${REQUESTED:-HEAD}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" HEAD; then
+            echo "::error::${commit} is not on master. Only reviewed master commits are released." >&2
+            exit 1
+          fi
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+      # CI (ci.yml) ran on the commit when it reached master, and every check
+      # run on it passed. Dictate Release Checks runs every lane again on
+      # the tag.
+      - name: Require passing CI on the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${COMMIT}/check-runs?per_page=100" --jq '.check_runs[]' \
+            | jq -s '.' > "$RUNNER_TEMP/check-runs.json"
+          if ! jq -e 'any(.[]; .name == "Package artifact check" and .conclusion == "success")' "$RUNNER_TEMP/check-runs.json" >/dev/null; then
+            echo "::error::CI's Package artifact check has not passed on ${COMMIT}. Wait for CI, or rerun it." >&2
+            exit 1
+          fi
+          # A run still in progress (this one, for example) is not a failure.
+          failed="$(jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("success", "skipped", "neutral") | not)) | "\(.name): \(.conclusion)"] | join("\n")' "$RUNNER_TEMP/check-runs.json")"
+          if [[ -n "$failed" ]]; then
+            echo "::error::Checks on ${COMMIT} are not all green:" >&2
+            echo "$failed" >&2
+            exit 1
+          fi
+
+      - name: Plan the tag
+        id: plan
+        env:
+          COMMIT: ${{ steps.commit.outputs.commit }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          base="$(git show "${COMMIT}:package.json" | jq -r .version)"
+          python scripts/calver.py plan --channel "$CHANNEL" --base "$base" > "$RUNNER_TEMP/plan.json"
+          jq . "$RUNNER_TEMP/plan.json"
+          echo "tag=$(jq -r .tag "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+
+      # Signing is off until the maintainer turns it on (docs/RELEASING.md,
+      # One-time setup): with no key the tag is annotated and unsigned, so a
+      # release never stops on it. RELEASE_REQUIRE_SIGNED_TAGS=true makes a
+      # missing key stop the release.
+      - name: Create the release tag
+        id: tag
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_TAG_SIGNING_KEY }}
+          REQUIRE_SIGNED: ${{ vars.RELEASE_REQUIRE_SIGNED_TAGS }}
+          TAGGER: ${{ vars.RELEASE_TAGGER }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_KEY" && "$REQUIRE_SIGNED" == "true" ]]; then
+            echo "::error::RELEASE_REQUIRE_SIGNED_TAGS is true, and the secret RELEASE_TAG_SIGNING_KEY is not set (docs/RELEASING.md, One-time setup)." >&2
+            exit 1
+          fi
+          tagger="${TAGGER:-IAMSamuelRodda <7961255+IAMSamuelRodda@users.noreply.github.com>}"
+          name="${tagger% <*}"
+          email="${tagger##*<}"
+          email="${email%>}"
+          git config user.name "$name"
+          git config user.email "$email"
+          if [[ -z "$SIGNING_KEY" ]]; then
+            git tag --annotate "$TAG" --message "Dictate ${VERSION}" "$COMMIT"
+            git push origin "refs/tags/${TAG}"
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/release-tag-key"
+          trap 'rm -f "$key" "$key.pub"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          ssh-keygen -y -f "$key" > "$key.pub"
+          printf '%s namespaces="git" %s\n' "$email" "$(cat "$key.pub")" > "$RUNNER_TEMP/allowed-signers"
+          git config gpg.format ssh
+          git config user.signingkey "$key"
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed-signers"
+          git tag --sign "$TAG" --message "Dictate ${VERSION}" "$COMMIT"
+          git tag --verify "$TAG"
+          git push origin "refs/tags/${TAG}"
+          echo "signed=yes" >> "$GITHUB_OUTPUT"
+
+      # A tag pushed with GITHUB_TOKEN starts no workflow, so start the
+      # publish run explicitly.
+      - name: Start Dictate Release Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+          SIGNED: ${{ steps.tag.outputs.signed }}
+        run: |
+          set -euo pipefail
+          gh workflow run dictate-release-publish.yml --repo "$GITHUB_REPOSITORY" --ref master -f tag="$TAG"
+          {
+            echo "## ${TAG}"
+            echo
+            echo "Tagged ${COMMIT} (signed: ${SIGNED}) and started Dictate Release Publish:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/dictate-release-publish.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

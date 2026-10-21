@@ -829,6 +829,15 @@ describe("Quiet Console app (mock mode)", () => {
     expect(screen.queryByRole("button", { name: "Normal" })).not.toBeInTheDocument();
   });
 
+  it("shows a beta build, and an old unstable build, as Beta in About", () => {
+    for (const channel of ["beta", "unstable"]) {
+      const { unmount } = renderApp(channel);
+      fireEvent.click(screen.getByLabelText("About Dictate"));
+      expect(screen.getByText("Beta")).toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("notebook toggle returns to the capture home from the dictations view", () => {
     render(<App />);
     fireEvent.click(screen.getByLabelText("Dictations"));

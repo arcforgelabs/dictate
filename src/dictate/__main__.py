@@ -888,9 +888,9 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
     sbe.add_argument("name", choices=["tray", "overlay", "sound"])
     sbe.add_argument("mode", choices=["on", "off"])
 
-    # set-update-channel stable|unstable
-    suc = sub.add_parser("set-update-channel", help="Opt into stable or unstable app updates")
-    suc.add_argument("channel", choices=["stable", "unstable"])
+    # set-update-channel stable|beta (unstable is the old name of beta)
+    suc = sub.add_parser("set-update-channel", help="Opt into stable or beta app updates")
+    suc.add_argument("channel", choices=["stable", "beta", "unstable"])
 
     sipv = sub.add_parser("set-installed-package-version", help=argparse.SUPPRESS)
     sipv.add_argument("version")
@@ -1008,7 +1008,7 @@ def _handle_config_commands(argv: list[str]) -> int:  # noqa: C901
         print(f"tray-only: {'on' if prefs.get('trayOnly') else 'off'}")
         print(f"overlay: {'on' if prefs.get('overlay') else 'off'}")
         print(f"sound: {'on' if prefs.get('sound') else 'off'}")
-        update_channel = cfg.update_channel if cfg.update_channel in {"stable", "unstable"} else "stable"
+        update_channel = cfg.update_channel if cfg.update_channel in {"stable", "beta"} else "stable"
         print(f"update_channel: {update_channel}")
         if cfg.installed_package_version:
             print(f"installed_package_version: {cfg.installed_package_version}")
