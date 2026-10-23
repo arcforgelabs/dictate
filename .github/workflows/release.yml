@@ -153,7 +153,7 @@ jobs:
           python-version: "3.11"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "24"
+          node-version: "24.22.1"
 
       - name: Validate release metadata
         run: python scripts/release_check.py --tag "${{ needs.validate-release-ref.outputs.tag }}"
@@ -206,7 +206,7 @@ jobs:
           ref: ${{ needs.validate-release-ref.outputs.tag_sha }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           registry-url: "https://registry.npmjs.org"
 
       - name: Publish npm package
@@ -273,7 +273,7 @@ jobs:
           ref: ${{ needs.validate-release-ref.outputs.tag_sha }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
@@ -342,7 +342,7 @@ jobs:
           ref: ${{ needs.validate-release-ref.outputs.tag_sha }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"

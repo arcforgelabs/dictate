@@ -2,7 +2,7 @@
 
 The Replit preview runs the existing React UI in standalone browser demo mode. Its dictation, history, and controls are simulated in memory; it does **not** capture or transcribe real audio or type into other applications.
 
-The **Start application** workflow runs `cd ui && DICTATE_BROWSER_PREVIEW=1 npm run dev` on port 5000. To run it manually, use the same command. If dependencies are missing, run `cd ui && npm ci` first. The UI uses Node.js 22.
+The **Start application** workflow runs `cd ui && DICTATE_BROWSER_PREVIEW=1 npm run dev` on port 5000. To run it manually, use the same command. If dependencies are missing, run `cd ui && npm ci` first. The UI uses the Replit `nodejs-24` module. Replit modules name a major line and cannot pin a patch, so this is Node.js 24 rather than 24.22.1.
 
 `DICTATE_BROWSER_PREVIEW=1` prevents the local engine handshake (including its bearer token) from being injected into the publicly reachable preview. Without that flag, the local live-development bridge runs on Vite's default localhost:5173.
 
