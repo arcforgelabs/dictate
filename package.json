@@ -47,7 +47,9 @@
     "provenance": false
   },
   "scripts": {
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "changelog:check": "node scripts/release/changelog.mjs check",
+    "test:changelog": "node --test scripts/release/changelog.test.js"
   },
   "engines": {
     "node": ">=18"

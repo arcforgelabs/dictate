@@ -30,6 +30,47 @@ rules. Clone with `git clone -c core.symlinks=true`, or fix an existing clone
 with `git config core.symlinks true`, then delete `CLAUDE.md` and run
 `git checkout -- CLAUDE.md`.
 
+## Changelog
+
+`CHANGELOG.md` is an index of one file per release in `CHANGELOG/`, with
+each release's contribution record again in `CHANGELOG/records/`. The
+layout, formats and rules are openclaw/openclaw's split changelog. The
+release owns these files:
+
+- A normal pull request never edits `CHANGELOG.md`, `CHANGELOG/` or a
+  release page in `docs/releases/`. Put the release-note text in the pull
+  request: its title and its User Impact section.
+- The release cut writes `CHANGELOG/<version>.md` from the pull requests
+  in the release's range, edits the prose, and commits it with the version.
+  Until Dictate's release train lands
+  ([#145](https://github.com/arcforgelabs/dictate/issues/145)), the cut is
+  the release's preparation pull request to `master`, the one pull request
+  that writes these files (`docs/release-versioning.md`). The procedure is
+  `.agents/skills/dictate-changelog-update/SKILL.md`.
+- Nothing refuses a release without its file yet, and the GitHub Release
+  does not take its notes from the file yet; both come with the release
+  train (#145).
+- A stable release covers everything since the previous stable release. A
+  correction (`<version>-<n>`) covers the same range plus its fix. A beta
+  covers everything since the release npm's `beta` tag selects before the
+  beta publishes, in its own file. The old `unstable` npm shim tags are not
+  releases and get no file.
+- A release file has Highlights, Changes and Fixes, then a complete
+  contribution record that lists every pull request in the range once:
+  `- **PR #N** Related #I. Thanks @a and @b.` A prose bullet names its pull
+  requests as `(#N, #M)` and keeps every thanks from their rows. `feat`,
+  `improve` and `fix` pull requests go in the prose; `docs`, `chore`,
+  `refactor`, `test`, `ci`, `build` and `style` go only in the record,
+  unless the title marks a breaking change with `!`.
+- A stable release has 5 to 8 highlights; a beta has 0 to 8.
+- Thanks go to the pull request's author, its co-authors and the people who
+  reported the issues it closes (`Closes #N`, `Fixes #N`, `Resolves #N`).
+  Never to bots, to Claude or Codex, to the organization or to the
+  maintainer.
+- CI runs `npm run changelog:check` (`scripts/release/changelog.mjs
+  check`), which holds the format rules; `verify` holds the rules that need
+  git and GitHub. `CHANGELOG/Unreleased.md` stays empty.
+
 <!-- arc-forge-org-consistency:start -->
 ## Pull request body
 
