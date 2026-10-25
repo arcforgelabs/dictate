@@ -42,3 +42,13 @@ Evidence names the command, the commit, the result, and what was not run. A scre
 
 The org default procedure is `.github/org-consistency/skill/SKILL.md`. A stricter rule already in this file wins.
 <!-- arc-forge-org-consistency:end -->
+
+## Cursor Cloud specific instructions
+
+Cloud Agents get Python 3.12, the Quiet Console, and the Linux desktop-shell toolchain. `uv` is on `/usr/local/bin`. Rust stable is the toolchain Tauri 2.12 needs (the base image's 1.83 is too old).
+
+- Engine and tests: `uv run python -m unittest discover -s tests`, `uv run dictate --version`, `uv run dictate doctor --quick`. Linux install uses `uv sync --frozen --extra x11`.
+- UI: `npm test --prefix ui` and `npm run build --prefix ui`. On boot the dev server listens at `http://127.0.0.1:5173` (`npm run dev --prefix ui -- --host 0.0.0.0 --port 5173`). With no `ui-server` handshake this is the in-browser mock: Start recording, pause, Finish note. Do not start a second Vite server on that port.
+- Control-server smoke, isolated from the user config: `./scripts/ui-server-smoke.sh .venv/bin/python`.
+- Clipboard tests against X: `xvfb-run -a uv run python -m unittest -v tests.test_clipboard_linux`.
+- Desktop shell: `cargo test --manifest-path ui-shell/src-tauri/Cargo.toml`. Install creates `ui-shell/src-tauri/engine/dictate-engine` when that placeholder is missing, which is what the bundle resource glob expects. There is no microphone in this environment; `dictate doctor --quick` warns about that and still reports healthy.
