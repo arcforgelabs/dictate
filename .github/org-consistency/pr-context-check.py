@@ -26,18 +26,24 @@ PLACEHOLDER = re.compile(
     r"could not test|couldn't test|-|(?:-{3,}|\*{3,}|_{3,})|\[[^\]]*\])\.?$",
     re.IGNORECASE,
 )
-HEADING = re.compile(r"^#{2,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+HEADING = re.compile(r"^(#{2,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# A `Closes #12` or empty `Related: #` line links an issue; it is not section text.
+ISSUE_LINK = re.compile(
+    r"^[ \t]*(?:closes|fixes|resolves|related):?[ \t]*(?:[\w.-]+/[\w.-]+)?#\d*[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def section_text(body: str) -> dict[str, str]:
-    text = COMMENT.sub("", body or "")
+    text = ISSUE_LINK.sub("", COMMENT.sub("", body or ""))
     matches = list(HEADING.finditer(text))
     found: dict[str, str] = {}
     for index, match in enumerate(matches):
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        found[match.group(1).strip()] = text[start:end].strip()
+        level = len(match.group(1))
+        # A section runs to the next heading of the same or a higher level, so `###` subsections stay inside it.
+        end = next((m.start() for m in matches[index + 1 :] if len(m.group(1)) <= level), len(text))
+        found[match.group(2).strip()] = text[match.end() : end].strip()
     return found
 
 
