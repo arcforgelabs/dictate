@@ -573,6 +573,10 @@ class EvdevHotkeyBackend(HotkeyBackend):
 
 def detect_hotkey_backend() -> str:
     session = detect_session_type()
+    # X11 delivers keys from every keyboard without /dev/input access. A
+    # readable evdev device may only be a security key, not the user's keyboard.
+    if session == "x11" and pynput_available():
+        return "pynput"
     if evdev_available():
         return "evdev"
     if session == "wayland" and portal_global_shortcuts_available():
