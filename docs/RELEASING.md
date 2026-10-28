@@ -207,7 +207,7 @@ Each row is tracked in [#145](https://github.com/arcforgelabs/dictate/issues/145
 | ----- | ------ |
 | `scripts/calver.py` and `scripts/sync_release_version.py` pick and check the next `YYYY.M.PATCH` count, and the tag checks accept any patch from 1 with an optional `-N`. They reject `-beta.N` | The tooling and docs generate and check `YYYY.M.PATCH`, corrections `-N` and betas `-beta.N` |
 | The update check ranks a same-base prerelease above the final (`_compare_prerelease` in `src/dictate/update_status.py`), so `2026.10.1-beta.2` would count as newer than `2026.10.1` | PEP 440 [version order](#version-order): betas below the final, corrections above it |
-| Prerelease channel named `unstable`: npm `unstable`, tags `vYYYY.M.D-unstable.<run>.<attempt>` | npm `beta`, tags `vYYYY.M.P-beta.N` |
+| Prerelease channel named `unstable`: npm `unstable`, tags `vYYYY.M.N-unstable.<run>.<attempt>` | npm `beta`, tags `vYYYY.M.N-beta.B` |
 | The channel is fixed by the build (`release_channel()` in `src/dictate/version.py` reads the version string); the UI refuses to change it; `dictate config set-update-channel stable\|unstable` saves a choice; there is no `dictate update` command | The channel is a saved setting on any direct install; `dictate update --channel`, `--tag`, `--dry-run` and `update status`; a saved `unstable` becomes `beta` on upgrade |
 | A separate side-by-side beta app was planned (#131) | One app; no separate beta app |
 | Releases tagged from `master` | `release/YYYY.M.P` branches with pinned tooling |
