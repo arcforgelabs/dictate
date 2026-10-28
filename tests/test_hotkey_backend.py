@@ -27,7 +27,9 @@ class HotkeyBackendSelectionTests(unittest.TestCase):
 
     def test_x11_uses_pynput_backend(self) -> None:
         with patch("dictate.hotkey_backend.detect_session_type", return_value="x11"):
-            with patch("dictate.hotkey_backend.evdev_available", return_value=False):
+            # A readable security key can expose a keyboard device even when
+            # the user's physical keyboards are inaccessible through evdev.
+            with patch("dictate.hotkey_backend.evdev_available", return_value=True):
                 with patch("dictate.hotkey_backend.portal_global_shortcuts_available", return_value=True):
                     with patch("dictate.hotkey_backend.pynput_available", return_value=True):
                         self.assertEqual(detect_hotkey_backend(), "pynput")
