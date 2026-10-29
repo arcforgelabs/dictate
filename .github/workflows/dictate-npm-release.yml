@@ -364,7 +364,17 @@ jobs:
           if [[ "$CHANNEL" == "beta" ]]; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
           else
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+            # A rerun for an older stable tag must not move GitHub's latest
+            # release backwards: the app reads it first. Only Dictate Release
+            # Promote rolls a channel back on purpose.
+            current="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sed '/^$/d' | sort -V | tail -n 1)"
+            if [[ -z "$current" || "$newest" == "${TAG#v}" ]]; then
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+            else
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+              echo "::warning::${TAG} is older than GitHub's latest release ${current}; the latest release is not moved." >&2
+            fi
           fi
           echo "${TAG} is public: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 

@@ -8,7 +8,11 @@ job output is code the workflow cannot show was reviewed.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -275,6 +279,34 @@ class PublishFlowTests(unittest.TestCase):
         jobs = _jobs("dictate-npm-release.yml")
         evidence = jobs["evidence"]
         self.assertIn("publish", evidence["needs"])
+
+    @unittest.skipUnless(shutil.which("bash") and os.name != "nt", "needs bash")
+    def test_a_rerun_for_an_older_stable_never_moves_githubs_latest_back(self) -> None:
+        steps = _jobs("dictate-npm-release.yml")["evidence"]["steps"]
+        script = next(step["run"] for step in steps if step.get("name") == "Make the GitHub Release public")
+        cases = [
+            ("v2026.10.4", "v2026.10.3", "--latest=false"),
+            ("v2026.10.3", "v2026.10.4", "--latest"),
+            ("v2026.10.9", "v2026.10.10", "--latest"),
+            ("v2026.10.3-1", "v2026.10.3", "--latest=false"),
+            ("", "v2026.10.3", "--latest"),
+        ]
+        for current, tag, expected in cases:
+            with self.subTest(current=current, tag=tag), tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp, "gh.log")
+                fake = Path(tmp, "gh")
+                fake.write_text(
+                    "#!/usr/bin/env bash\n"
+                    'if [[ "$1" == api ]]; then [[ -n "$CURRENT" ]] && echo "$CURRENT" && exit 0; exit 1; fi\n'
+                    'echo "$*" >> "$LOG"\n'
+                )
+                fake.chmod(0o755)
+                env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", LOG=str(log), CURRENT=current,
+                           TAG=tag, CHANNEL="stable", GITHUB_REPOSITORY="arcforgelabs/dictate",
+                           GITHUB_SERVER_URL="https://github.com", GITHUB_STEP_SUMMARY=str(Path(tmp, "summary")))
+                subprocess.run(["bash", "-c", script], env=env, check=True, capture_output=True)
+                edit = log.read_text().split()
+                self.assertIn(expected, edit)
 
     def test_every_asset_has_a_sha256_file_written_as_release_yml_writes_them(self) -> None:
         checks = _text("dictate-release-checks.yml")
