@@ -367,7 +367,23 @@ jobs:
             # A rerun for an older stable tag must not move GitHub's latest
             # release backwards: the app reads it first. Only Dictate Release
             # Promote rolls a channel back on purpose.
-            current="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            # Only a 404 means there is no latest release. Any other failed
+            # read is retried, then stops the run before the pointer moves.
+            current=""
+            for attempt in 1 2 3; do
+              if current="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err")"; then
+                break
+              fi
+              current=""
+              if grep -q "HTTP 404" "$RUNNER_TEMP/latest.err"; then
+                break
+              fi
+              if (( attempt == 3 )); then
+                echo "::error::Cannot read GitHub's latest release: $(cat "$RUNNER_TEMP/latest.err"). The release stays a draft; run this workflow again." >&2
+                exit 1
+              fi
+              sleep $(( attempt * 10 ))
+            done
             newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sed '/^$/d' | sort -V | tail -n 1)"
             if [[ -z "$current" || "$newest" == "${TAG#v}" ]]; then
               gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

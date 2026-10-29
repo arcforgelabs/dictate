@@ -289,7 +289,7 @@ class PublishFlowTests(unittest.TestCase):
             ("v2026.10.3", "v2026.10.4", "--latest"),
             ("v2026.10.9", "v2026.10.10", "--latest"),
             ("v2026.10.3-1", "v2026.10.3", "--latest=false"),
-            ("", "v2026.10.3", "--latest"),
+            ("404", "v2026.10.3", "--latest"),
         ]
         for current, tag, expected in cases:
             with self.subTest(current=current, tag=tag), tempfile.TemporaryDirectory() as tmp:
@@ -297,16 +297,44 @@ class PublishFlowTests(unittest.TestCase):
                 fake = Path(tmp, "gh")
                 fake.write_text(
                     "#!/usr/bin/env bash\n"
-                    'if [[ "$1" == api ]]; then [[ -n "$CURRENT" ]] && echo "$CURRENT" && exit 0; exit 1; fi\n'
+                    'if [[ "$1" == api ]]; then\n'
+                    '  case "$CURRENT" in 404|503) echo "gh: Not Found (HTTP $CURRENT)" >&2; exit 1;; esac\n'
+                    '  echo "$CURRENT"; exit 0\n'
+                    'fi\n'
                     'echo "$*" >> "$LOG"\n'
                 )
                 fake.chmod(0o755)
                 env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", LOG=str(log), CURRENT=current,
                            TAG=tag, CHANNEL="stable", GITHUB_REPOSITORY="arcforgelabs/dictate",
-                           GITHUB_SERVER_URL="https://github.com", GITHUB_STEP_SUMMARY=str(Path(tmp, "summary")))
+                           GITHUB_SERVER_URL="https://github.com", GITHUB_STEP_SUMMARY=str(Path(tmp, "summary")),
+                           RUNNER_TEMP=tmp)
                 subprocess.run(["bash", "-c", script], env=env, check=True, capture_output=True)
                 edit = log.read_text().split()
                 self.assertIn(expected, edit)
+
+    @unittest.skipUnless(shutil.which("bash") and os.name != "nt", "needs bash")
+    def test_a_failed_latest_release_read_stops_before_the_pointer_moves(self) -> None:
+        steps = _jobs("dictate-npm-release.yml")["evidence"]["steps"]
+        script = next(step["run"] for step in steps if step.get("name") == "Make the GitHub Release public")
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp, "gh.log")
+            fake = Path(tmp, "gh")
+            fake.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [[ "$1" == api ]]; then echo "gh: Service Unavailable (HTTP 503)" >&2; exit 1; fi\n'
+                'echo "$*" >> "$LOG"\n'
+            )
+            fake.chmod(0o755)
+            Path(tmp, "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
+            Path(tmp, "sleep").chmod(0o755)
+            env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", LOG=str(log), TAG="v2026.10.3",
+                       CHANNEL="stable", GITHUB_REPOSITORY="arcforgelabs/dictate",
+                       GITHUB_SERVER_URL="https://github.com", GITHUB_STEP_SUMMARY=str(Path(tmp, "summary")),
+                       RUNNER_TEMP=tmp)
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Cannot read GitHub's latest release", result.stderr)
+            self.assertFalse(log.exists(), "no release edit may run after a failed read")
 
     def test_every_asset_has_a_sha256_file_written_as_release_yml_writes_them(self) -> None:
         checks = _text("dictate-release-checks.yml")
