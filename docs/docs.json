@@ -15,7 +15,7 @@
       {
         "tab": "Project",
         "groups": [
-          { "group": "Contributing", "pages": ["development-streams", "releasing", "release-versioning", "desktop-packaging"] },
+          { "group": "Contributing", "pages": ["development-streams", "releasing", "release-versioning", "desktop-packaging", "personal-ownership-transfer"] },
           {
             "group": "Microsoft Store",
             "pages": ["msstore-automation", "msstore-listing", "msstore/assets/logos/readme", "msstore/assets/screenshots/readme"]
