@@ -31,10 +31,11 @@ sandbox does not have:
 
 ### Download (no build needed)
 
-Tagged releases ship a **self-contained** `.deb` and `.AppImage` built by CI.
+There is no current official deployment or automated release publisher.
+Historical tagged releases contain a **self-contained** `.deb` and `.AppImage` built by CI.
 They **bundle the frozen Python engine** (a PyInstaller `dictate-engine` sidecar
 under the app's resources), so there is no separate Python/pip install — download,
-install, launch. Speech models download on first use.
+install, launch. The maintained local package builder stages its Parakeet model before bundling.
 
 ```bash
 sudo apt install ./dictate_*_amd64.deb        # Debian/Ubuntu

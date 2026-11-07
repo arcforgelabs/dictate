@@ -1,5 +1,11 @@
 # Microsoft Store Automation
 
+> Historical reference only. Dictate is now Linux-only, with no official
+> deployment or Windows/Store publishing pipeline. The procedures below are
+> retired, not current operating instructions. Existing binaries, Store product
+> and signing identities are preserved; no Store API change is authorized here.
+
+
 This runbook covers the non-secret automation pieces for publishing Dictate
 through the Microsoft Store for the existing Partner Center product. Deployment
 credential boundaries and approval requirements are tracked in

@@ -1,5 +1,11 @@
 # Microsoft Store Listing Draft
 
+> Historical reference only. Dictate is now Linux-only, with no official
+> deployment or Windows/Store publishing pipeline. The procedures below are
+> retired, not current operating instructions. Existing binaries, Store product
+> and signing identities are preserved; no Store API change is authorized here.
+
+
 This draft captures public Microsoft Store listing copy and certification notes
 for Dictate. Keep claims conservative and aligned with the current app behavior.
 

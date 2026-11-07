@@ -1,218 +1,29 @@
-# Release Versioning
+# Versioning and historical releases
 
-> The target release policy (stable, beta and dev channels; corrections and
-> betas) is [RELEASING.md](RELEASING.md). This page describes the current
-> procedure until that lands
-> ([#145](https://github.com/arcforgelabs/dictate/issues/145)).
+Dictate retains its existing CalVer versions and package identity. There is no
+automated publishing pipeline or official deployment; current development is
+Linux-only source work. See [source/release policy](RELEASING.md).
 
-Dictate uses calendar versioning for public releases:
+## Source metadata
 
-```text
-YYYY.M.N
-```
+Keep pyproject.toml, package.json and src/dictate/version.py consistent. Run
+`python scripts/release_check.py` and `npm run changelog:check`.
+Versions use YYYY.M.N, where N is the release count in the month; existing
+correction suffixes remain readable. Do not bump a version just to merge a
+pipeline cleanup.
 
-- `YYYY.M` is the month the release is cut in (UTC), without zero-padding.
-- `N` is the release count in that month. It is not the day.
-- `N` is the highest stable `N` already tagged in that month, plus 1. The
-  first release of a month is `1`. `N` can be more than 31.
-- Releases before 2026.10.1 used the day as `N`. Do not change those tags.
-  The count continues from the highest one in the month.
+## Historical distribution compatibility
 
-For example, after `2026.10.20` comes `2026.10.21`, after `2026.10.31` comes
-`2026.10.32`, and the first release of November is `2026.11.1`. Sort versions
-as numbers, part by part, never as text: as text, `2026.10.9` comes after
-`2026.10.32`. In shell, `sort -V` and `git tag --sort=-v:refname` are correct.
+Existing npm `@arcforgelabs/dictate` versions and latest/unstable dist-tags,
+jsDelivr bootstraps, GitHub releases/tags/assets and updater behavior remain
+unchanged. New source is not automatically published to any of those channels.
+The old unstable shim tags are not full releases.
 
-Python package metadata uses the same PEP 440-compatible version.
+Split changelog tooling remains useful for historical records and an explicitly
+authorized future release. CONTRIBUTING.md owns the format. Release-note and
+contribution-record history is not rewritten by platform-support changes.
 
-Older releases sometimes added a correction `-K` (for example `2026.9.25-1`)
-when an immutable package registry already had the version. The tooling still
-accepts these tags. For new code, use the next `N`.
-
-The app reports the public release version through:
-
-```bash
-dictate --version
-```
-
-Print the next version, or check one, with (fetch the tags first):
-
-```bash
-git fetch --tags
-python scripts/calver.py next
-python scripts/calver.py next --today 2026-10-20
-python scripts/calver.py check 2026.10.3
-```
-
-Synchronize release metadata before tagging with:
-
-```bash
-python scripts/sync_release_version.py            # the next version
-python scripts/sync_release_version.py 2026.10.3  # must be the next version
-python scripts/sync_release_version.py 2026.10.3 --check
-```
-
-When it writes, `sync_release_version.py` refuses a version that is not the
-next release this month (`--today` sets the date for a test). `--check` only
-compares the files with the version, so it works for any released version.
-
-Release tags and GitHub milestones should use the public version with a leading `v`, for example:
-
-```text
-v2026.10.3
-v2026.10.32
-```
-
-Windows MSI installers cannot use the public CalVer string directly because
-WiX/MSI requires numeric `major.minor.patch[.build]`, with major and minor at
-most 255. Keep `tauri.conf.json`'s public app `version` as `YYYY.M.N[-K]`, but
-map `bundle.windows.wix.version` to `YY.M.N.K` for MSI packaging:
-
-```text
-2026.10.3   -> 26.10.3.0
-2026.10.32  -> 26.10.32.0
-2026.9.25-1 -> 26.9.25.1
-```
-
-After creating a `v20*` CalVer tag on a commit that has reached the default
-branch, start `.github/workflows/release.yml` manually with the `release_tag`
-input. The release workflow first verifies that the requested tag resolves to a
-commit reachable from the default branch, then runs the Linux/Windows test
-matrix, the hosted Windows user install smoke test, release metadata validation,
-Python artifact checks, and npm package validation before publishing.
-
-The `release`, `npm-publish` and `windows-signing` environments need maintainer
-approval, so each publishing job waits in the run until approved. After the
-Windows installer is uploaded, the release dispatches
-`windows-release-gate.yml`, which installs that exact `setup.exe` on the
-`win11-gpu` VM, launches it, checks the running engine's version, and
-uninstalls. See [windows-11.md](windows-11.md#release-gate).
-
-GitHub release publication and Microsoft Store publication are separate lanes.
-Publishing a GitHub release updates the downloadable source and unsigned direct-install artifacts;
-it does not make an update available through the Microsoft Store. Store updates
-require the Store MSIX workflow in draft mode, Partner Center review, and an
-explicit publish/certification step. The draft refuses to build without a
-passing Windows release gate for the same version; `skip_windows_gate` is the
-override.
-
-The npm package is published as `@arcforgelabs/dictate` and powers the hosted CDN
-install/update scripts. Publishing uses GitHub OIDC trusted publishing on the
-`npm-publish` environment. Do not dispatch a release until both publishers exist
-on the package, each with direct `npm publish` allowed:
-
-| Workflow file | Environment |
-| --- | --- |
-| `release.yml` | `npm-publish` |
-| `npm-unstable.yml` | `npm-publish` |
-
-Repository owner is `arcforgelabs`. Repository name is `dictate`. A long-lived
-`NPM_TOKEN` is not used. The June 2026 granular token expired, so `latest`
-stayed on `2026.7.4` while the GitHub release moved to `2026.9.25`.
-
-Provenance is off. npm only accepts provenance statements from public source
-repositories, and the repository was private when trusted publishing was set up.
-Both publish steps force `publishConfig.provenance` to `false`, so tags cut
-before that change still publish. The repository is public now, so provenance
-can be turned back on by removing that override and setting
-`publishConfig.provenance` to `true`.
-
-The previous personal-scope package, `@iamsamuelrodda/dictate`, is deprecated on npm with a migration notice pointing users to `@arcforgelabs/dictate`. Keep it published as a compatibility landing point for old scripts; do not unpublish it unless there is a specific security or legal reason.
-
-The current developer/bootstrap install path is:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
-```
-
-## Npm Channels
-
-Use npm dist-tags as update channels for the hosted developer/source bootstrap:
-
-| npm dist-tag | Meaning | Publisher |
-| --- | --- | --- |
-| `latest` | Stable developer bootstrap that points at a reviewed CalVer GitHub release tag. | `.github/workflows/release.yml` |
-| `unstable` | Test bootstrap for a selected branch/SHA before it is considered stable. | `.github/workflows/npm-unstable.yml` |
-
-The stable release workflow publishes `@arcforgelabs/dictate@latest` only from a
-validated `v20*` release tag reachable from the default branch. Do not publish
-feature work to `latest`.
-
-The unstable workflow is manually dispatched. It creates a unique prerelease npm
-version such as `2026.7.4-unstable.123.1`, patches the hosted `install.ps1` and
-`update.ps1` scripts in the npm package so they download the exact selected
-commit archive, and publishes that shim under the requested dist-tag
-(`unstable` by default). It does not move GitHub releases, Microsoft Store
-drafts, or the stable npm `latest` tag. The app version reported by
-`dictate --version` still comes from the selected source commit, so branch builds
-without a version bump can report the base CalVer while being delivered through
-the unstable channel.
-
-Every unstable publish produces a durable GitHub prerelease containing the matching
-unsigned Windows MSI/NSIS installers **and** the Linux `.deb`, because installed
-direct builds cannot update from short-lived Actions artifacts. With `run_tests=true`,
-the unstable publish waits for the Linux/Windows Python
-matrix, the Windows user install/update/uninstall smoke, the Linux user
-encrypted-sync install smoke, UI build/server smoke, desktop shell compile/Rust
-tests, Linux/Windows desktop bundles, and npm package dry-run. Store upload/publish
-remains a separate guarded
-workflow. Paid Authenticode signing for direct-download Windows installers is a
-future-only lane, not a current release blocker.
-
-### Unstable is upstream of stable
-
-The channels are ordered: everything on `latest` went through `unstable`
-first, or a newer build is on `unstable`. A Beta (unstable) user must never
-be offered something older than the current stable release. Two mechanisms
-keep that true:
-
-1. `release.yml` moves the npm `unstable` dist-tag forward to the stable
-   version it just published whenever the unstable pointer is behind it
-   (same-base prereleases and newer-base unstable builds are left alone).
-2. The app's update check resolves the Beta channel to the newer of the
-   `unstable` and `latest` dist-tags, so installed copies get the same
-   answer even if the pointer was not moved.
-
-To publish an unstable bootstrap:
-
-```bash
-gh workflow run npm-unstable.yml \
-  -f source_ref=feature/my-branch \
-  -f npm_tag=unstable \
-  -f run_tests=true
-```
-
-To install or update from the unstable bootstrap:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/update.ps1 | iex"
-```
-
-For Linux user installs that update through the in-app/npm path, set:
-
-```bash
-dictate config set-update-channel unstable
-dictate config set-update-channel stable
-```
-
-`stable` is the user-facing name for npm's `latest` dist-tag. `unstable` maps to
-the `unstable` dist-tag. `DICTATE_UPDATE_CHANNEL=unstable` remains available for
-temporary process-level overrides, but the CLI setting is the supported user
-opt-in mechanism.
-
-Promotion rule: once a feature set is locked, tested, and accepted, merge it to
-the release branch/default branch, create the normal CalVer tag, run
-`.github/workflows/release.yml`, then advance official channels such as
-Microsoft Store through their own guarded workflows. Never promote by retagging
-an unstable npm package as stable.
-
-Windows has two supported ecosystems. Direct installs may select stable or unstable
-and update from the corresponding GitHub release/prerelease installer; these builds
-are unsigned and Windows will show the expected untrusted-publisher warning. Microsoft
-Store installs are stable-only and update through the Store. Do not revisit paid
-Windows signing until there is an explicit revenue-backed decision.
-
-Each Windows payload contains `engine/dictate-distribution.json`. Direct bundles mark
-themselves `direct` and include their exact channel package version; Store MSIX bundles
-mark themselves `store`. The app uses this marker rather than guessing from Windows.
+A future publisher must independently validate its custody, trusted-publisher
+permissions, source provenance, Linux installation/update behavior and release
+notes. The old Windows gate and Store submission are not release prerequisites
+for the current Linux-only project.

@@ -13,6 +13,15 @@ Install and usage: [`README.md`](README.md). How to contribute:
 [`CONTRIBUTING.md`](CONTRIBUTING.md). Reporting a security problem:
 [`SECURITY.md`](SECURITY.md).
 
+## Supported system and delivery
+
+Dictate is a Linux-only open-source personal app. There is no official
+deployment, hosted service, Windows support, Microsoft Store pipeline, or
+automated release/npm publishing. Build and run it locally using the maintained
+Linux scripts. Existing releases and the npm package are historical snapshots;
+their assets and identities remain intact. Retained Windows source is legacy,
+not an active support commitment.
+
 ## Local only
 
 Transcription runs on the user's machine. There is no account, no subscription,
@@ -41,7 +50,7 @@ rare.
 ## Order of work
 
 1. **A stable app and better dictation.** Make dictation fast, accurate and
-   dependable on Linux and Windows 11 desktops, and make the app pleasant to
+   dependable on Linux desktops, and make the app pleasant to
    install, update and remove. This is the current work and the focus of every
    release.
 2. **Meetings and local speaker labelling (P3).** Not ready, and not a focus
@@ -53,8 +62,8 @@ rare.
    item 1, by pull request, meeting the same bar: one install, local, CPU, no
    setup beyond pressing record.
 
-Releases move through beta to stable. Beta is where the next stable release
-is tested; it is not a place to park unfinished features. Work that makes
+If a future release is explicitly authorized, beta is where it is tested before
+stable; it is not a place to park unfinished features. Work that makes
 dictation slower, heavier or harder to install for the sake of meetings is the
 wrong trade.
 

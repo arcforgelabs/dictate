@@ -4,206 +4,53 @@
 
 # Dictate
 
-Desktop dictation that types into the focused app.
+Linux desktop dictation that types into the focused app. Press your configured
+push-to-talk shortcut, speak, and release. You can also record a longer note
+and recover or export it from local history.
 
-`dictate` runs as a small tray app. Press your configured push-to-talk shortcut,
-speak, and it transcribes into whatever app you are already using.
+**Local only.** No account, subscription, API key or hosted transcription.
+Audio and transcripts stay on your machine. Dictate runs Parakeet on the CPU,
+not a GPU. See [VISION.md](VISION.md) for product scope.
 
-**Local only.** Transcription runs on your machine. No account, no
-subscription, no API key, no hosted model. Nothing you say leaves the device.
+Dictate is a **Linux-only open-source personal app**, developed when there is
+time. There is no official deployment or automated release publishing.
+Windows code, previously published binaries and Store identifiers are retained
+as historical material, not supported installation channels.
 
-Current status: not a commercial product. Dictate was retired as one on
-2026-08-25 and is now worked on when there is time. Linux installs, Windows 11
-source installs, tray controls, startup integration, local dictation history,
-update, and uninstall paths are implemented.
+## Install on Linux
 
-The account, subscription, cloud sync and hosted-transcription code was
-removed on 2026-09-19 — 27,064 lines across 107 files. See
-`docs/local-only-audit.md` for what went and why, and `VISION.md` for the
-direction. The current transcription/model plan is
-`docs/TRANSCRIPTION_PLAN.md`.
-
-## Install
-
-Windows 11 — Microsoft Store remains the intended public channel, with direct
-download from GitHub Releases available meanwhile.
-
-The Store listing is overdue for an update and will get one once the first
-stable local-only build is done. Store packaging, submission automation and the
-listing copy all stay; only the in-app subscription part goes, since there is
-nothing to subscribe to. See `docs/msstore-automation.md`.
-
-Windows direct download:
-
-1. Open the latest GitHub release.
-2. Download `Dictate_*_x64_en-US.msi` when a staging MSI is attached.
-3. Run the MSI and open **Dictate** from the Start Menu. Windows may warn that
-   the installer is from an untrusted publisher; that is expected for staging
-   builds.
-
-If a release does not yet have an MSI attached, use the developer/source
-bootstrap below or wait for the Microsoft Store package.
-
-Windows developer/source install from the hosted bootstrap:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/install.ps1 | iex"
-```
-
-Unstable developer/source bootstrap for pre-stable feature testing:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/install.ps1 | iex"
-```
-
-Open **Dictate** from the Start Menu after install.
-
-Linux (Ubuntu) — install the release `.deb`. It is built once in CI with the
-engine, model and desktop shell inside, so every install of a version is the
-same:
-
-1. Download `Dictate_<version>_amd64.deb` from the latest GitHub release.
-2. Install it with apt, giving the path to the file:
-
-   ```bash
-   sudo apt install ~/Downloads/Dictate_<version>_amd64.deb
-   ```
-
-3. Open **Dictate** from the app launcher. It starts on sign-in.
-
-Dictate does not publish an apt repository, so `apt upgrade` does not see new
-versions. Update from the app, or install the next release's `.deb` the same
-way.
-
-Linux latest code (per-user, builds on your machine, no sudo). This installs
-from source into `~/.local/share/dictate` and compiles the desktop shell
-locally, so it needs `cargo`, `npm` and `webkit2gtk-4.1-dev`:
+From a trusted checkout:
 
 ```bash
-npx @arcforgelabs/dictate install
+git clone https://github.com/arcforgelabs/dictate.git
+cd dictate
+./install-ubuntu.sh
 ```
 
-Or from a checkout: `./install-ubuntu.sh`, or `./install.sh` on other
-distributions.
+On other distributions use `./install.sh` after installing the audio and
+desktop prerequisites for your distribution. The per-user installer uses
+`~/.local/share/dictate`, creates a launcher and prepares the local model.
+The optional desktop shell build needs Rust/Cargo, npm and WebKitGTK
+development libraries. See [desktop packaging](docs/desktop-packaging.md).
 
-Windows developer/source install, from the repo/source directory:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-windows-wizard.ps1
-```
-
-The local `.ps1` installer scripts must be run from a checkout or extracted
-source directory. They will not work from `C:\Windows\System32`.
-
-Node/npm users can also run the developer bootstrap:
-
-```powershell
-npx @arcforgelabs/dictate install
-```
-
-## Workflow
-
-```text
-Open Dictate
-Use the mic button or configured push-to-talk shortcut
-Hold shortcut, speak, release
-Review Dictations when needed
-```
-
-By default, Dictate installs a normal app launcher entry and starts on sign-in.
-Advanced configuration is available through the `dictate config` CLI.
-
-## Update And Uninstall
-
-Windows developer/bootstrap install:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/update.ps1 | iex"
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@latest/uninstall.ps1 | iex"
-```
-
-To test updates before they are promoted to stable:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://cdn.jsdelivr.net/npm/@arcforgelabs/dictate@unstable/update.ps1 | iex"
-```
-
-Users on the app's npm-backed update path can opt into or out of unstable
-updates from the CLI:
+To build a Linux package locally:
 
 ```bash
-dictate config set-update-channel unstable
-dictate config set-update-channel stable
+DICTATE_BUNDLES=deb ./scripts/build-linux-desktop.sh
+sudo apt install ./ui-shell/src-tauri/target/release/bundle/deb/*.deb
 ```
 
-Windows from source:
+This is a local build, not an official deployment. Previously published GitHub
+release packages and `@arcforgelabs/dictate` remain available as historical
+snapshots. Existing npm/jsDelivr URLs and updater compatibility are preserved;
+there is no npm rename or new publish. Those snapshots do not necessarily
+contain the current source.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\update-windows.ps1
-powershell -ExecutionPolicy Bypass -File .\uninstall-windows.ps1
-```
+## Use
 
-Linux `.deb` install: update from the app, or install the newer `.deb` with
-`sudo apt install`. Remove it with:
-
-```bash
-sudo apt purge dictate
-```
-
-Linux latest-code (per-user) install:
-
-```bash
-npx @arcforgelabs/dictate update --user
-npx @arcforgelabs/dictate uninstall
-```
-
-From a checkout, `./update.sh` and `./uninstall.sh` do the same.
-
-Use `-RemoveUserData` on Windows or `--remove-user-data` on Linux only when you
-also want to remove config, logs, history, and downloaded model data.
-
-## What It Does Today
-
-- Starts from the Windows Start Menu or Linux app launcher
-- Runs as a tray app
-- Types dictated text into the focused app. A terminal, including the Grok
-  CLI, receives that text with Shift+Insert so it is not filed as an attachment.
-- Leaves your clipboard as it was: the text is pasted through the clipboard,
-  then what you had copied is put back. On Windows the dictated text carries
-  the markers Windows defines to leave content out of clipboard history (Win+V)
-  and cloud clipboard. On Linux the most useful single format comes back (an
-  image, else text).
-- Supports configurable push-to-talk
-- Presents a simple capture-first desktop UI
-- Supports launch on startup
-- Keeps a small local dictations history for copy/paste recovery
-- Provides installer, updater, uninstaller, and doctor paths
-
-## Models
-
-Dictation runs NVIDIA Parakeet TDT 0.6B through ONNX Runtime: v2 for English
-(the default, bundled with the desktop app) or v3 for 25 European languages.
-Every supported model runs on your machine. The Whisper-family backends
-(faster-whisper, WhisperX, whisper.cpp) were removed on 2026-09-30; a saved
-config that still names one falls back to Parakeet. The desktop UI keeps engine names out of the primary workflow;
-advanced users and tests can still select an explicit local engine through CLI
-options and `dictate config`.
-
-Dictate runs on the CPU. GPU support (NVIDIA CUDA, AMD) was dropped on
-2026-10-01 to focus on CPU latency. The installers no longer install a GPU
-runtime; their old GPU flags are accepted and ignored so existing update
-commands keep working. The engine has no device choice: a saved GPU device in
-`config.yaml` moves to CPU on upgrade, and `--device` is still accepted so the
-installers and old scripts run, and is ignored.
-
-Meetings (speaker-labelled transcripts) are not part of Dictate for now: they
-were removed from every build on 2026-10-03 and are shelved as P3 (#140). On
-upgrade a saved Meeting model is removed from `config.yaml` with a one-line
-notice, and meeting transcripts you already saved stay in your notes with their
-speaker labels. The installers' old `--meeting` / `-Meeting` flags are accepted
-and ignored.
-
-## Commands
+Open Dictate from the Linux launcher, hold your configured shortcut, speak and
+release. Dictation is pasted into the focused app, then the clipboard is
+restored. The tray and desktop window also provide capture controls and history.
 
 ```bash
 dictate
@@ -215,88 +62,69 @@ dictate doctor --quick --fix
 dictate doctor --check-model-load
 ```
 
-Advanced configuration remains available for automation and testing:
+Advanced configuration remains available through the CLI:
 
 ```bash
-dictate --stt-backend parakeet --model parakeet-tdt-0.6b-v3
 dictate config show
+dictate --stt-backend parakeet --model parakeet-tdt-0.6b-v3
 dictate --add-hotword AcmeWidget
 dictate --list-hotwords
 ```
 
-## State
+The default is Parakeet TDT 0.6B v2 for English; v3 supports 25 European
+languages. Source installs prepare model files locally. Transcription itself
+does not use the network. Meetings and speaker labelling are shelved (#140).
+Old meeting settings migrate away while saved transcripts remain in history.
 
-User state is local:
+## Update and uninstall
 
-```text
-Linux:
-  ~/.config/dictate/config.yaml
-  ~/.local/share/dictate/
-
-Windows:
-  %APPDATA%\dictate\config.yaml
-  %LOCALAPPDATA%\dictate\
-```
-
-Repo defaults intentionally ship with `hotwords: []`. Hotwords are user-specific
-and should not be packaged into the public repo default config.
-
-## Safety
-
-- Audio and transcripts stay on the device. There is no hosted transcription
-  path and no account.
-- Dictation text can be sensitive; check logs and issue reports before sharing.
-- Important transcriptions should be verified before relying on them.
-- Support and maintenance are best-effort.
-
-## Desktop UI — the Quiet Console (preview)
-
-A quiet desktop window sits alongside the tray — a capture home (the mic is the
-record button), the notes list, and the ⌘K palette; no settings menu (config via
-the `dictate config` CLI).
-
-- [`ui/`](ui/README.md) — React/Vite front-end. For UI work, **`cd ui && npm run
-  dev`** opens the whole app at `http://localhost:5173` against a built-in mock
-  (no engine, no Tauri, no STT) — the fast UI loop in a browser. Details, and
-  when to use the Tauri shell instead, are in that README's *Develop* section.
-- [`ui-shell/`](ui-shell/README.md) — Tauri 2 shell that hosts it on Linux.
-- `src/dictate/ui_server.py` — the loopback control server the UI talks to; the
-  tray can launch the shell for the desktop capture surface.
-- See [`design/PLAN.md`](design/PLAN.md) for the cross-platform plan.
-
-**Install it like a normal app:** on Linux that is the release **`.deb`**. It
-bundles the frozen Python engine (PyInstaller sidecar) and the prebuilt desktop
-shell, so there is no Python, pip or compiler step:
+To update a checkout installation, pull the intended revision, then run:
 
 ```bash
-sudo apt install ./Dictate_*_amd64.deb
+./update.sh
 ```
 
-The app lives in the tray and desktop shell and does push-to-talk straight away.
-Build the package yourself in one step with
-[`scripts/build-linux-desktop.sh`](scripts/build-linux-desktop.sh) — see
-[`ui-shell/README.md`](ui-shell/README.md). The per-user `npm`/`install.sh`
-route installs under `~/.local/share/dictate` and builds on your machine; use it
-to try the latest code, not as the everyday install.
+To uninstall instead:
 
-## Docs
+```bash
+./uninstall.sh
+```
 
-`docs/` is published as the docs site at
-https://arcforgelabs.github.io/docs/dictate/ by
-[arcforgelabs/docs](https://github.com/arcforgelabs/docs). `docs/docs.json`
-is its navigation, and `docs/releases/` holds one page per release.
+Use `--remove-user-data` only when you also want to remove config, logs,
+history and downloaded models. A locally built Debian package can be removed
+with `sudo apt purge dictate`; that leaves user data intact.
 
-- [Windows 11 support](docs/windows-11.md)
-- [Transcription deployment plan](docs/TRANSCRIPTION_PLAN.md)
-- [Release policy: channels, versions, validation](docs/RELEASING.md)
-- [Release/versioning (current procedure)](docs/release-versioning.md)
-- [Desktop packaging & CI runbook](docs/desktop-packaging.md)
-- [Microsoft Store automation](docs/msstore-automation.md)
-- [Microsoft Store listing draft](docs/msstore-listing.md)
-- [Deployment security](docs/deployment-security.md)
-- [Development streams](docs/development-streams.md)
-- [Archived docs index](docs/archive/README.md)
-- [Security policy](SECURITY.md)
+The app's existing updater still discovers historical npm/GitHub release
+channels. No new version is published automatically from this source. Existing
+installed versions and release assets are not rewritten by the pipeline cleanup.
+
+## Local state and safety
+
+- Configuration: `~/.config/dictate/config.yaml`.
+- History, notes and models: `~/.local/share/dictate/`.
+- Repository defaults contain no personal hotwords.
+- Dictation can be sensitive; check logs and reports before sharing them.
+- Check important transcriptions before relying on them.
+- Support and maintenance are best-effort.
+
+The account, subscription, cloud-sync and hosted-transcription code was removed
+on 2026-09-19. See [the local-only audit](docs/local-only-audit.md).
+
+## Develop and build
+
+- [Contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md).
+- [React/Vite UI](ui/README.md): `cd ui && npm run dev` runs the local mock UI.
+- [Tauri Linux shell](ui-shell/README.md).
+- [Desktop packaging and CI](docs/desktop-packaging.md).
+- [Source/release policy](docs/RELEASING.md).
+- [Local transcription plan](docs/TRANSCRIPTION_PLAN.md).
+- [Personal ownership transfer](docs/personal-ownership-transfer.md).
+- [Security policy](SECURITY.md).
+
+Documentation is maintained in this repository's `docs/` folder. The former
+business docs mirror is not updated by this repository. `docs/docs.json` is
+the documentation index; [archive](docs/archive/README.md) and release pages
+retain earlier decisions without defining current support.
 
 ## License
 

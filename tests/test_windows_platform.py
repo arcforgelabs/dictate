@@ -264,13 +264,6 @@ class WindowsPlatformTests(unittest.TestCase):
         tauri = json.loads(
             (root / "ui-shell" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
         )
-        bundle_workflow = (
-            root / ".github" / "workflows" / "windows-desktop-bundle.yml"
-        ).read_text(encoding="utf-8")
-        msix_workflow = (
-            root / ".github" / "workflows" / "windows-msix-store-bundle.yml"
-        ).read_text(encoding="utf-8")
-
         # A onefile engine unpacks itself on every launch (#131).
         self.assertNotIn('$env:DICTATE_ONEFILE = "1"', script)
         self.assertIn("Remove-Item Env:DICTATE_ONEFILE", script)
@@ -281,9 +274,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("engine/**/*", tauri["bundle"]["resources"])
         self.assertIn('if os.name == "nt":', spec)
         self.assertIn('".lib"', spec)
-        for workflow in (bundle_workflow, msix_workflow):
-            self.assertIn("scripts\\windows-engine-smoke.ps1", workflow)
-
     def test_windows_engine_smoke_starts_the_engine_like_the_shell(self) -> None:
         root = Path(__file__).resolve().parents[1]
         smoke = (root / "scripts" / "windows-engine-smoke.ps1").read_text(encoding="utf-8")
@@ -578,16 +568,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn("-ForceStartup", script)
         self.assertIn("Invoke-DictateUpdate $updateArgs", script)
 
-    def test_release_uploads_lifecycle_scripts(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("install-windows-wizard.ps1", workflow)
-        self.assertIn("update-windows.ps1", workflow)
-        self.assertIn("uninstall-windows.ps1", workflow)
-        self.assertIn("update.sh", workflow)
-        self.assertIn("uninstall.sh", workflow)
 
     def test_windows_control_restart_stops_tray_processes(self) -> None:
         source = (
@@ -794,16 +774,6 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(modified_states, [True])
 
-    def test_ci_includes_windows_user_smoke_gate(self) -> None:
-        workflow = (
-            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("Windows user install smoke", workflow)
-        self.assertIn(r".\scripts\windows-user-smoke.ps1", workflow)
-        # The package job gates on the core suites plus platform install smokes.
-        self.assertIn("needs: [tests, windows-user-smoke, npm, ui]", workflow)
-        self.assertIn("windows-user-smoke", workflow)
 
     def test_npm_package_exposes_public_installer_shim(self) -> None:
         package_json = (Path(__file__).resolve().parents[1] / "package.json").read_text(
@@ -816,52 +786,12 @@ class WindowsPlatformTests(unittest.TestCase):
         self.assertIn('"access": "public"', package_json)
         self.assertIn('"provenance": false', package_json)
 
-    def test_unstable_npm_publish_workflow_uses_separate_dist_tag(self) -> None:
-        workflow = (
-            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "npm-unstable.yml"
-        ).read_text(encoding="utf-8")
 
-        self.assertIn("npm_tag", workflow)
-        self.assertIn('default: "unstable"', workflow)
-        self.assertIn("UNSTABLE_VERSION", workflow)
-        self.assertIn("Windows user install smoke", workflow)
-        self.assertIn("scripts\\windows-user-smoke.ps1", workflow)
-        self.assertIn(
-            "needs: [tests, windows-user-smoke, ui, desktop-shell, windows-desktop-bundle, linux-desktop-bundle]",
-            workflow,
-        )
-        self.assertIn("needs.linux-desktop-bundle.result == 'success'", workflow)
-        self.assertIn("windows-latest", workflow)
-        self.assertIn("Publish durable unstable Windows installers", workflow)
-        self.assertIn("Publish durable unstable Linux .deb", workflow)
-        self.assertIn("gh release create $tag $artifacts", workflow)
-        self.assertIn('gh release create "$TAG"', workflow)
-        self.assertIn("desktop-shell", workflow)
-        self.assertIn("needs.tests.result == 'success'", workflow)
-        self.assertIn("npm publish --access public --tag", workflow)
-        self.assertIn("npm dist-tag add", workflow)
-        self.assertIn("archive/${GITHUB_SHA}.zip", workflow)
-        self.assertIn("install.ps1", workflow)
-        self.assertIn("update.ps1", workflow)
-        self.assertNotIn("--tag latest", workflow)
-
-    def test_release_workflow_gates_on_linux_sync_smoke(self) -> None:
-        workflow = (
-            Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn(
-            "needs: [validate-release-ref, tests, windows-user-smoke]",
-            workflow,
-        )
 
     def test_bundle_workflows_need_no_huggingface_token(self) -> None:
         # The token was only for staging the gated pyannote model, which went
         # with Meeting (#140). Parakeet v2 int8 is public.
         root = Path(__file__).resolve().parents[1]
-        release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        self.assertIn("Build the desktop bundle (freezes engine + builds .deb)", release)
-        self.assertIn("Build the Windows desktop bundle", release)
         for workflow in sorted((root / ".github" / "workflows").glob("*.yml")):
             self.assertNotIn("DICTATE_HF_TOKEN", workflow.read_text(encoding="utf-8"), workflow.name)
 
