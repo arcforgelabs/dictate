@@ -20,6 +20,7 @@ machine: no account, no subscription and no hosted model.
 - [Release policy](RELEASING.md) and [release versioning](release-versioning.md).
 - [Desktop packaging and CI](desktop-packaging.md).
 - [Microsoft Store automation](msstore-automation.md).
+- [Personal ownership transfer](personal-ownership-transfer.md): prerequisites and preservation checks.
 
 ## Releases
 
