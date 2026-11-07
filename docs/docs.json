@@ -7,7 +7,7 @@
       {
         "tab": "Guides",
         "groups": [
-          { "group": "Get started", "pages": ["index", "windows-11", "goals"] },
+          { "group": "Get started", "pages": ["index", "goals"] },
           { "group": "Transcription", "pages": ["transcription-plan", "local-only-audit"] },
           { "group": "Policies", "pages": ["dictate-privacy-policy", "dictate-terms", "deployment-security"] }
         ]
@@ -17,8 +17,8 @@
         "groups": [
           { "group": "Contributing", "pages": ["development-streams", "releasing", "release-versioning", "desktop-packaging", "personal-ownership-transfer"] },
           {
-            "group": "Microsoft Store",
-            "pages": ["msstore-automation", "msstore-listing", "msstore/assets/logos/readme", "msstore/assets/screenshots/readme"]
+            "group": "Historical Windows / Store (unsupported)",
+            "pages": ["windows-11", "msstore-automation", "msstore-listing", "msstore/assets/logos/readme", "msstore/assets/screenshots/readme"]
           },
           { "group": "Releases", "pages": ["releases"] },
           {

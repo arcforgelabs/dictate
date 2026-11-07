@@ -23,13 +23,6 @@ fixtures.
 `AGENTS.md` holds the rules for coding agents. `CLAUDE.md` is a git symlink to
 it so Claude Code reads the same file; edit `AGENTS.md`, never `CLAUDE.md`.
 
-On Windows, Git only creates the link when `core.symlinks` is on, which needs
-Developer Mode or an elevated shell. Without it, `CLAUDE.md` is checked out as a
-plain file holding the text `AGENTS.md`, and Claude Code does not see the
-rules. Clone with `git clone -c core.symlinks=true`, or fix an existing clone
-with `git config core.symlinks true`, then delete `CLAUDE.md` and run
-`git checkout -- CLAUDE.md`.
-
 ## Changelog
 
 `CHANGELOG.md` is an index of one file per release in `CHANGELOG/`, with
@@ -42,14 +35,9 @@ release owns these files:
   request: its title and its User Impact section.
 - The release cut writes `CHANGELOG/<version>.md` from the pull requests
   in the release's range, edits the prose, and commits it with the version.
-  Until Dictate's release train lands
-  ([#145](https://github.com/arcforgelabs/dictate/issues/145)), the cut is
-  the release's preparation pull request to `master`, the one pull request
-  that writes these files (`docs/release-versioning.md`). The procedure is
-  `.agents/skills/dictate-changelog-update/SKILL.md`.
-- Nothing refuses a release without its file yet, and the GitHub Release
-  does not take its notes from the file yet; both come with the release
-  train (#145).
+  Any future release cut requires explicit maintainer authorization; there is
+  no active publisher or release train. Historical tooling and formats remain
+  available for that separately reviewed work.
 - A stable release covers everything since the previous stable release. A
   correction (`<version>-<n>`) covers the same range plus its fix. A beta
   covers everything since the release npm's `beta` tag selects before the

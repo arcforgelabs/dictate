@@ -1,57 +1,17 @@
-# Development Streams
+# Development
 
-Dictate has two active platform streams.
+Dictate has one supported platform: Linux. Work focuses on local dictation,
+notes/history recovery, tray/desktop controls, X11/Wayland shortcuts and typing,
+and dependable local installation/update/removal.
 
-## Linux Stream
+Use focused branches from current master and submit PRs against master.
+Preserve other workers' branches and local changes. Shared speech, audio,
+configuration, history and CLI code stays in src/dictate.
 
-Linux desktop stream:
+There is no official deployment, release train, Windows development stream,
+Store submission or business docs mirror. Retained Windows code, tests and
+packaging metadata are historical compatibility material, not active support.
+Existing release/npm/Store identities remain unchanged.
 
-- GTK/Ayatana tray.
-- X11 typing through `xdotool`.
-- Wayland typing through `wtype` or `ydotool`.
-- Wayland global shortcuts through desktop portals where available.
-- Linux install scripts, desktop entry, icon, and autostart integration.
-
-Use GitHub labels such as `platform:linux`, `area:tray`, `area:hotkeys`, and `area:packaging`.
-
-## Windows 11 Stream
-
-Windows 11 desktop stream:
-
-- Tray and headless push-to-talk through `pynput`.
-- Clipboard output through `pyperclip`.
-- Windows app-data paths for config, history, and logs.
-- Windows Settings/About UI.
-- Windows CI smoke tests for install, update, app registration, startup, and uninstall.
-- Hosted and repo-local PowerShell install paths for developer/source installs.
-- Tauri `.msi`/NSIS installer build path for internal validation.
-- Microsoft Store distribution as the target public Windows channel.
-- Future signing and Store submission automation.
-
-Use GitHub labels such as `platform:windows`, `area:windows-tray`, `area:installer`, and `area:packaging`.
-
-## Branching
-
-- `master`: release-ready integration branch for both streams.
-- `linux/*`: Linux-specific work.
-- `windows/*`: Windows-specific work.
-- `release/YYYY.M.N`: release stabilization branch when a release needs final fixes.
-
-Keep shared STT, audio, config, history, and CLI behavior on `master` unless the change is explicitly platform-specific.
-
-Windows installation is intentionally implemented as a packaging edge around the shared app. The PowerShell installer should stay thin: create the environment, install `.[windows]`, seed config, write launchers, create shortcuts, and run diagnostics. Shared behavior should stay in `src/dictate`.
-
-The public Windows release target and Store API automation wiring are tracked in
-[msstore-automation.md](msstore-automation.md). The current transcription/model
-deployment target is tracked in [TRANSCRIPTION_PLAN.md](TRANSCRIPTION_PLAN.md).
-
-## GitHub Project Organization
-
-Recommended project views:
-
-- `Current Release`: issues and PRs assigned to the next CalVer release.
-- `Linux Stream`: filter `platform:linux`.
-- `Windows 11 Stream`: filter `platform:windows`.
-- `Packaging`: filter `area:packaging` or `area:installer`.
-
-Milestone names should use the public release version, for example `2026.5.18`.
+See [VISION.md](../VISION.md), [Linux packaging](desktop-packaging.md) and
+[source checks/release policy](RELEASING.md).

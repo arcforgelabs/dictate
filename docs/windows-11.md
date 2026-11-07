@@ -1,6 +1,12 @@
-# Windows 11 Support
+# Historical Windows 11 Support
 
-Windows 11 is a supported desktop target for Dictate. The normal path is the
+> Historical reference only. Dictate is now Linux-only, with no official
+> deployment or Windows/Store publishing pipeline. The procedures below are
+> retired, not current operating instructions. Existing binaries, Store product
+> and signing identities are preserved; no Store API change is authorized here.
+
+
+Windows 11 was a supported desktop target before the Linux-only decision. The normal path is the
 installed `Dictate` app entry, which starts the desktop capture app and tray
 process. The primary workflow is simple dictation and local dictation recovery;
 advanced configuration (model, shortcut, hotwords, update

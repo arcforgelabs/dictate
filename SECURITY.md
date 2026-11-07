@@ -1,5 +1,11 @@
 # Security Policy
 
+Current support is Linux-only source/local builds, with no official deployment.
+Retained Windows/Store code and old distribution identities are historical;
+there is no current Windows signing, Store submission or self-hosted runner
+pipeline. Existing update consumers remain security-relevant.
+
+
 If you believe you found a security issue in Dictate, report it privately first.
 
 Do not open a public issue or pull request that discloses an unpatched vulnerability, exploit path, secret, or security-sensitive proof of concept.
@@ -37,7 +43,7 @@ Security-relevant surfaces in this repository include:
 - the speech model download from Hugging Face,
 - update checks (npm dist-tag first, GitHub Releases as fallback) and update downloads in `src/dictate/update_status.py`: the Linux package updater and the Windows direct updater verify the release asset SHA-256 before they install it, and refuse an asset that has no digest or does not match it,
 - installers, updaters and uninstallers: the MSI, MSIX, `.deb`, the `install*.ps1` / `install*.sh` scripts, and the npm bootstrap served through jsDelivr,
-- GitHub Actions, the self-hosted Windows release-gate runner, npm publishing, and Microsoft Store submission (see `docs/deployment-security.md`).
+- GitHub Actions and the manual Linux artifact builder (see `docs/deployment-security.md`).
 
 ## Out of Scope
 
