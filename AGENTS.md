@@ -1,11 +1,8 @@
-# Dictate
+# AGENTS.md
 
-Read `VISION.md` before changing product behaviour, and before reviewing an
-issue or pull request. It owns product scope: what Dictate is, the order of
-work, and the "What we will not merge" list. `README.md` indexes the rest of
-the docs.
+Read `VISION.md` before starting work. `README.md` indexes the rest. This file owns all agent rules for this repo; it has no Tools pointer.
 
-The shared rules are in Shared safeguards; this repo's own rules are in Dictate safeguards, at the end.
+`VISION.md` owns product scope: what Dictate is, the order of work, and the "What we will not merge" list. Read it before you review an issue or pull request.
 
 ## Shared safeguards
 
@@ -40,3 +37,17 @@ Product rejection stays a maintainer decision; reviewers recommend it.
 GitHub issues and pull requests are the work record. Any remaining pointer to
 Confluence, Jira (`OPS`, `DEL`) or the Assets registry is stale; strip it when
 you touch the file.
+
+## Project skills
+
+`.agents/skills` holds this repo's own skills. Claude Code finds them through `.claude/skills`, a link to `.agents/skills`.
+
+- `dictate-changelog-update`: changelog sections for a release.
+- `arcforge-pr-maintainer` is a copy stamped from the retired Tools repo. It stays until a `<repo>-pr-maintainer` skill replaces it, as [platform-pr-maintainer](https://github.com/arcforgelabs/platform/blob/main/.agents/skills/platform-pr-maintainer/SKILL.md) did in Platform.
+
+## Read when relevant
+
+- **Releases:** [releasing](docs/RELEASING.md).
+- **Known problems and past mistakes:** [known issues](KNOWN_ISSUES.md), [lessons](LESSONS.md).
+- **Contributing:** [contributing](CONTRIBUTING.md).
+- **Security:** [security policy](SECURITY.md).
