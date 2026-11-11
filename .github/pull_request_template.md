@@ -1,4 +1,3 @@
-<!-- arc-forge-org-consistency: managed by arc-forge-tools components/org-consistency -->
 <!--
 Optional linked context:
 Add a visible `Closes #<issue-number>` or `Related: #<issue-number>` line
