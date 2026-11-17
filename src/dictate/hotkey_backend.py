@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,8 @@ PORTAL_SESSION_INTERFACE = "org.freedesktop.portal.Session"
 PORTAL_REGISTRY_INTERFACE = "org.freedesktop.host.portal.Registry"
 PUSH_TO_TALK_SHORTCUT_ID = "push-to-talk"
 APP_ID = "dictate"
+
+logger = logging.getLogger(__name__)
 
 
 class HotkeyBackendUnavailableError(RuntimeError):
@@ -51,6 +55,13 @@ class _HotkeyCallbacks:
 
 
 class PynputHotkeyBackend(HotkeyBackend):
+    # The pynput listener thread exits when its display connection drops
+    # (X11 BrokenPipe/ConnectionClosedError). A supervisor restarts it with
+    # capped backoff so push-to-talk recovers without restarting the engine.
+    _POLL_INTERVAL = 1.0
+    _RESTART_DELAY_MIN = 1.0
+    _RESTART_DELAY_MAX = 30.0
+
     def __init__(
         self,
         *,
@@ -65,6 +76,9 @@ class PynputHotkeyBackend(HotkeyBackend):
         self._keyboard = keyboard
         self._callbacks = callbacks
         self._listener: keyboard.Listener | None = None
+        self._supervisor: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._stopping = threading.Event()
         self._pressed_key_names: set[str] = set()
         self._push_to_talk_pressed = False
         self._combo = normalize_push_to_talk_combo(combo)
@@ -74,21 +88,72 @@ class PynputHotkeyBackend(HotkeyBackend):
         return "pynput"
 
     def start(self) -> None:
-        if self._listener is not None:
-            return
-        self._listener = self._keyboard.Listener(
+        with self._lock:
+            if self._listener is not None:
+                return
+            self._stopping.clear()
+            self._start_listener_locked()
+            self._supervisor = threading.Thread(
+                target=self._supervise,
+                name="pynput-hotkey-supervisor",
+                daemon=True,
+            )
+            self._supervisor.start()
+
+    def stop(self) -> None:
+        self._stopping.set()
+        with self._lock:
+            listener = self._listener
+            self._listener = None
+            supervisor = self._supervisor
+            self._supervisor = None
+            self._pressed_key_names.clear()
+            self._push_to_talk_pressed = False
+        if listener is not None:
+            listener.stop()
+        if supervisor is not None and supervisor is not threading.current_thread():
+            supervisor.join(timeout=5.0)
+
+    def _start_listener_locked(self) -> None:
+        listener = self._keyboard.Listener(
             on_press=self._on_press,
             on_release=self._on_release,
         )
-        self._listener.start()
+        listener.start()
+        self._listener = listener
 
-    def stop(self) -> None:
-        listener = self._listener
-        self._listener = None
-        self._pressed_key_names.clear()
-        self._push_to_talk_pressed = False
-        if listener is not None:
-            listener.stop()
+    def _supervise(self) -> None:
+        delay = self._RESTART_DELAY_MIN
+        started_at = time.monotonic()
+        while not self._stopping.wait(self._POLL_INTERVAL):
+            listener = self._listener
+            if listener is None or listener.is_alive():
+                continue
+            # A listener that ran for a while died from a new fault: start the
+            # backoff again. One that died at once keeps the growing delay.
+            if time.monotonic() - started_at >= self._RESTART_DELAY_MAX:
+                delay = self._RESTART_DELAY_MIN
+            logger.warning(
+                "Push-to-talk listener stopped unexpectedly; restarting in %.0fs", delay
+            )
+            # The key release died with the listener; finish any recording
+            # it started so it does not run on forever.
+            was_pressed = self._push_to_talk_pressed
+            self._pressed_key_names.clear()
+            self._push_to_talk_pressed = False
+            if was_pressed:
+                self._callbacks.on_release()
+            if self._stopping.wait(delay):
+                return
+            delay = min(delay * 2, self._RESTART_DELAY_MAX)
+            with self._lock:
+                if self._stopping.is_set() or self._listener is not listener:
+                    continue
+                try:
+                    self._start_listener_locked()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Push-to-talk listener restart failed: %s", exc)
+                started_at = time.monotonic()
 
     def set_combo(self, combo: str) -> None:
         self._combo = normalize_push_to_talk_combo(combo)
