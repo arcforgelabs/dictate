@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -23,6 +24,13 @@ PORTAL_SESSION_INTERFACE = "org.freedesktop.portal.Session"
 PORTAL_REGISTRY_INTERFACE = "org.freedesktop.host.portal.Registry"
 PUSH_TO_TALK_SHORTCUT_ID = "push-to-talk"
 APP_ID = "dictate"
+# Wait between attempts to re-attach a lost key listener. A display server
+# that restarts after a desktop crash takes some seconds to accept clients.
+RESTART_BACKOFF_SECONDS = (1.0, 2.0, 5.0, 10.0)
+DEVICE_RESCAN_SECONDS = 2.0
+LISTENER_POLL_SECONDS = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 class HotkeyBackendUnavailableError(RuntimeError):
@@ -51,6 +59,13 @@ class _HotkeyCallbacks:
 
 
 class PynputHotkeyBackend(HotkeyBackend):
+    """X11 listener that re-attaches when its display connection is lost.
+
+    A desktop crash (for example GNOME Shell on X11) restarts the X server.
+    The pynput listener thread then dies with ``ConnectionClosedError``. A
+    supervisor thread starts a new listener, which connects to the new server.
+    """
+
     def __init__(
         self,
         *,
@@ -65,6 +80,8 @@ class PynputHotkeyBackend(HotkeyBackend):
         self._keyboard = keyboard
         self._callbacks = callbacks
         self._listener: keyboard.Listener | None = None
+        self._supervisor: threading.Thread | None = None
+        self._stop = threading.Event()
         self._pressed_key_names: set[str] = set()
         self._push_to_talk_pressed = False
         self._combo = normalize_push_to_talk_combo(combo)
@@ -74,26 +91,78 @@ class PynputHotkeyBackend(HotkeyBackend):
         return "pynput"
 
     def start(self) -> None:
-        if self._listener is not None:
+        if self._supervisor is not None:
             return
-        self._listener = self._keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release,
-        )
+        self._stop.clear()
+        self._listener = self._new_listener()
         self._listener.start()
+        self._supervisor = threading.Thread(target=self._supervise, daemon=True)
+        self._supervisor.start()
 
     def stop(self) -> None:
+        self._stop.set()
         listener = self._listener
+        supervisor = self._supervisor
         self._listener = None
+        self._supervisor = None
         self._pressed_key_names.clear()
         self._push_to_talk_pressed = False
         if listener is not None:
-            listener.stop()
+            try:
+                listener.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        if supervisor is not None and supervisor is not threading.current_thread():
+            supervisor.join(timeout=1.0)
 
     def set_combo(self, combo: str) -> None:
         self._combo = normalize_push_to_talk_combo(combo)
         self._pressed_key_names.clear()
         self._push_to_talk_pressed = False
+
+    def _new_listener(self):  # noqa: ANN202
+        return self._keyboard.Listener(
+            on_press=self._on_press,
+            on_release=self._on_release,
+        )
+
+    def _supervise(self) -> None:
+        # Poll is_alive() instead of pynput's join() and wait(): when the
+        # display connection fails, pynput never marks the listener ready and
+        # never fills its exception queue, so both of those block forever.
+        attempt = 0
+        while not self._stop.is_set():
+            listener = self._listener
+            while listener is not None and listener.is_alive():
+                if self._stop.wait(LISTENER_POLL_SECONDS):
+                    return
+            if self._stop.is_set():
+                return
+            if attempt == 0:
+                logger.warning("Key listener stopped; re-attaching to the display")
+            self._release_held_key()
+            delay = RESTART_BACKOFF_SECONDS[min(attempt, len(RESTART_BACKOFF_SECONDS) - 1)]
+            if self._stop.wait(delay):
+                return
+            attempt += 1
+            try:
+                listener = self._new_listener()
+                listener.start()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Key listener restart failed: %s", exc)
+                self._listener = None
+                continue
+            self._listener = listener
+            if not self._stop.wait(LISTENER_POLL_SECONDS) and listener.is_alive():
+                logger.warning("Key listener re-attached")
+                attempt = 0
+
+    def _release_held_key(self) -> None:
+        was_pressed = self._push_to_talk_pressed
+        self._pressed_key_names.clear()
+        self._push_to_talk_pressed = False
+        if was_pressed:
+            self._callbacks.on_release()
 
     def _on_press(self, key) -> None:  # noqa: ANN001
         self._pressed_key_names.update(key_event_names(key))
@@ -472,6 +541,12 @@ class PortalHotkeyBackend(HotkeyBackend):
 
 
 class EvdevHotkeyBackend(HotkeyBackend):
+    """Reads keyboards directly and re-opens them when they reappear.
+
+    A keyboard that resets or is plugged in again gets a new event node. A
+    monitor thread scans for keyboards and starts a reader for each new one.
+    """
+
     def __init__(
         self,
         *,
@@ -487,8 +562,9 @@ class EvdevHotkeyBackend(HotkeyBackend):
         self._ecodes = ecodes
         self._callbacks = callbacks
         self._combo = normalize_push_to_talk_combo(combo)
-        self._devices = []
+        self._devices: dict[str, object] = {}
         self._threads: list[threading.Thread] = []
+        self._monitor: threading.Thread | None = None
         self._stop = threading.Event()
         self._state_lock = threading.Lock()
         self._pressed_key_names: set[str] = set()
@@ -499,28 +575,31 @@ class EvdevHotkeyBackend(HotkeyBackend):
         return "evdev"
 
     def start(self) -> None:
-        if self._threads:
+        if self._monitor is not None:
             return
         device_paths = _keyboard_device_paths()
         if not device_paths:
             raise HotkeyBackendUnavailableError("no readable keyboard input devices were found")
         self._stop.clear()
-        self._devices = [self._InputDevice(path) for path in device_paths]
-        for device in self._devices:
-            thread = threading.Thread(target=self._read_device, args=(device,), daemon=True)
-            thread.start()
-            self._threads.append(thread)
+        for path in device_paths:
+            self._open_device(path)
+        self._monitor = threading.Thread(target=self._watch_devices, daemon=True)
+        self._monitor.start()
 
     def stop(self) -> None:
         self._stop.set()
-        for device in self._devices:
+        with self._state_lock:
+            devices = list(self._devices.values())
+            self._devices.clear()
+        for device in devices:
             try:
                 device.close()
             except Exception:  # noqa: BLE001
                 pass
-        for thread in self._threads:
+        threads = [*self._threads, *([self._monitor] if self._monitor else [])]
+        for thread in threads:
             thread.join(timeout=1.0)
-        self._devices = []
+        self._monitor = None
         self._threads = []
         with self._state_lock:
             self._pressed_key_names.clear()
@@ -532,7 +611,29 @@ class EvdevHotkeyBackend(HotkeyBackend):
             self._pressed_key_names.clear()
             self._push_to_talk_pressed = False
 
-    def _read_device(self, device) -> None:  # noqa: ANN001
+    def _open_device(self, path: str) -> None:
+        try:
+            device = self._InputDevice(path)
+        except OSError as exc:
+            logger.debug("Cannot open keyboard %s: %s", path, exc)
+            return
+        with self._state_lock:
+            self._devices[path] = device
+        thread = threading.Thread(target=self._read_device, args=(path, device), daemon=True)
+        self._threads = [t for t in self._threads if t.is_alive()]
+        self._threads.append(thread)
+        thread.start()
+
+    def _watch_devices(self) -> None:
+        while not self._stop.wait(DEVICE_RESCAN_SECONDS):
+            with self._state_lock:
+                known = set(self._devices)
+            for path in _keyboard_device_paths():
+                if path not in known and not self._stop.is_set():
+                    logger.warning("Keyboard %s appeared; listening to it", path)
+                    self._open_device(path)
+
+    def _read_device(self, path: str, device) -> None:  # noqa: ANN001
         try:
             for event in device.read_loop():
                 if self._stop.is_set():
@@ -544,7 +645,27 @@ class EvdevHotkeyBackend(HotkeyBackend):
                     continue
                 self._handle_key_event(token, event.value)
         except OSError:
-            return
+            pass
+        self._forget_device(path, device)
+
+    def _forget_device(self, path: str, device) -> None:  # noqa: ANN001
+        fire_release = False
+        with self._state_lock:
+            if self._devices.get(path) is device:
+                del self._devices[path]
+            if self._stop.is_set():
+                return
+            # Keys held on the lost keyboard never send a release event.
+            fire_release = self._push_to_talk_pressed
+            self._pressed_key_names.clear()
+            self._push_to_talk_pressed = False
+        try:
+            device.close()
+        except Exception:  # noqa: BLE001
+            pass
+        logger.warning("Keyboard %s was lost; waiting for it to return", path)
+        if fire_release:
+            self._callbacks.on_release()
 
     def _handle_key_event(self, token: str, value: int) -> None:
         fire_press = False
