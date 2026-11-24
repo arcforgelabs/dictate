@@ -86,6 +86,12 @@ class HotkeyBackendSelectionTests(unittest.TestCase):
                     with patch("dictate.hotkey_backend.pynput_available", return_value=True):
                         self.assertEqual(detect_hotkey_backend(), "pynput")
 
+    def test_x11_prefers_pynput_even_when_evdev_is_readable(self) -> None:
+        with patch("dictate.hotkey_backend.detect_session_type", return_value="x11"):
+            with patch("dictate.hotkey_backend.evdev_available", return_value=True):
+                with patch("dictate.hotkey_backend.pynput_available", return_value=True):
+                    self.assertEqual(detect_hotkey_backend(), "pynput")
+
     def test_wayland_without_portal_raises(self) -> None:
         with patch("dictate.hotkey_backend.detect_session_type", return_value="wayland"):
             with patch("dictate.hotkey_backend.evdev_available", return_value=False):

@@ -694,6 +694,11 @@ class EvdevHotkeyBackend(HotkeyBackend):
 
 def detect_hotkey_backend() -> str:
     session = detect_session_type()
+    # On X11, pynput sees every keyboard through the X server. evdev sees only
+    # the devices this user can open, which is often just a security key such
+    # as a YubiKey (systemd gives it a uaccess ACL), not the real keyboard.
+    if session == "x11" and pynput_available():
+        return "pynput"
     if evdev_available():
         return "evdev"
     if session == "wayland" and portal_global_shortcuts_available():
